@@ -1,4 +1,4 @@
-# Arc #954 — what is a kWh to the meter worth right now (steps 0-2)
+# #871 — a negative export price is a cost (steps 0-2 of arc #921)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -12,11 +12,13 @@
 
 ## Scope
 
-**In:** steps 0, 1 and 2 of arc #954.
+**In:** steps 0, 1 and 2 of **#871**, the meter dimension of arc **#921**.
+
+**Arc:** #921 — "where may the battery's energy GO". #871 is one of its three children (#879 the house, #892 the EV, #871 the meter). #921's whole point is that solving them one at a time produces three answers that disagree, so whatever is built here has to fit the shared model, not just this child.
 
 **Out:** step 3, curtailment. It needs a role in the #915 roster and per-brand write adapters (Huawei publishes four services, Deye a select), plus a hand-back obeying the #908/#936/#949 rule. That is its own plan and may never be needed — a house with a battery and a car absorbs nearly every negative hour without it.
 
-**Read first:** `gh issue view 954` (the design) and `gh issue view 871` (the head issue), **including the correction comments on both** — `export_rate` lives on `ArbitrageSignals`, *not* on `FleetContext`, and it is not unread.
+**Read first:** `gh issue view 921` (the arc and the shared model — the verified ground for this child is in its comments) and `gh issue view 871`, **including the correction comments** — `export_rate` lives on `ArbitrageSignals`, *not* on `FleetContext`, and it is not unread.
 
 ## Two facts that shape every task
 
@@ -44,12 +46,12 @@
 **Files:**
 - Modify: `coordinator/energy_calculator.py:642-653`
 - Modify: `coordinator/types.py:412-460` (`EnergyTotals`), `:1171` (`to_dict`)
-- Test: `tests/test_954_negative_export_exposure.py`
+- Test: `tests/test_871_negative_export_exposure.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-"""#954 step 0 — measure what a negative export price costs, before acting.
+"""#871 step 0 — measure what a negative export price costs, before acting.
 
 Nothing today records "export was negative for two hours and SEM pushed
 6 kWh into it". Without that number, the decision to build curtailment
@@ -91,7 +93,7 @@ The `calc_and_power` fixture must build a real `EnergyCalculator` plus a `PowerR
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py -q
+~/bin/semtest tests/test_871_negative_export_exposure.py -q
 ```
 
 Expected: `AttributeError: 'EnergyTotals' object has no attribute 'daily_grid_export_negative'`.
@@ -101,7 +103,7 @@ Expected: `AttributeError: 'EnergyTotals' object has no attribute 'daily_grid_ex
 In `coordinator/types.py`, beside `daily_grid_export` (`:438`):
 
 ```python
-    #: (#954) kWh exported while the export rate was NEGATIVE — energy the
+    #: (#871) kWh exported while the export rate was NEGATIVE — energy the
     #: meter charged for instead of paying for. Zero on every fixed-tariff
     #: install, which is all of them today; the counter exists so the cost
     #: of NOT acting is measurable before anything is built to act.
@@ -121,7 +123,7 @@ and in `to_dict` beside `:1171`:
 In `coordinator/energy_calculator.py`, inside the `if power.grid_export_power >= MIN_POWER_THRESHOLD:` block (`:643`), after the existing two `_accumulate*` calls:
 
 ```python
-            # (#954) The same kWh, counted again when the meter was hostile.
+            # (#871) The same kWh, counted again when the meter was hostile.
             # A separate key rather than a sign on the existing one: the
             # export counter is an ENERGY total a user reads as "what I sent
             # out", and folding a price signal into it would make a bad hour
@@ -146,7 +148,7 @@ and beside the existing `energy.daily_grid_export = …` reads (`:651`):
 - [ ] **Step 5: Run the test**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py -q
+~/bin/semtest tests/test_871_negative_export_exposure.py -q
 ```
 
 Expected: 3 passed.
@@ -154,8 +156,8 @@ Expected: 3 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add coordinator/energy_calculator.py coordinator/types.py tests/test_954_negative_export_exposure.py
-git commit -m "feat(#954): count what a negative export price actually costs
+git add coordinator/energy_calculator.py coordinator/types.py tests/test_871_negative_export_exposure.py
+git commit -m "feat(#871): count what a negative export price actually costs
 
 Step 0 of the arc, and deliberately first: nothing today records that
 export went negative and SEM kept pushing into it. Curtailment (step 3)
@@ -169,7 +171,7 @@ number rather than a guess. Zero on every fixed-tariff install."
 
 **Files:**
 - Modify: `sensor.py` (description list beside `daily_grid_export_energy` at `:478`)
-- Test: `tests/test_954_negative_export_exposure.py` (append)
+- Test: `tests/test_871_negative_export_exposure.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -188,7 +190,7 @@ If `SENSOR_TYPES` is not the list's name, find it: `grep -n "daily_grid_export_e
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py::TestTheExposureIsVisible -q
+~/bin/semtest tests/test_871_negative_export_exposure.py::TestTheExposureIsVisible -q
 ```
 
 Expected: `AssertionError`.
@@ -198,7 +200,7 @@ Expected: `AssertionError`.
 In `sensor.py`, immediately after the `daily_grid_export_energy` description (`:478-482`):
 
 ```python
-    # (#954) What a hostile meter cost today. Both stay at 0.0 on a fixed
+    # (#871) What a hostile meter cost today. Both stay at 0.0 on a fixed
     # feed-in tariff, which is every install until someone opts into spot.
     SensorEntityDescription(
         key="daily_grid_export_negative_kwh",
@@ -217,7 +219,7 @@ In `sensor.py`, immediately after the `daily_grid_export_energy` description (`:
 - [ ] **Step 4: Run the whole file, then the translation-parity guard**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py tests/test_674_translation_parity.py -q
+~/bin/semtest tests/test_871_negative_export_exposure.py tests/test_674_translation_parity.py -q
 ```
 
 Expected: all pass. If parity fails, add the two entity names to `strings.json` **and all 16** `translations/*.json` — that guard exists because a key added to one file only is the commonest regression in this repo.
@@ -225,8 +227,8 @@ Expected: all pass. If parity fails, add the two entity names to `strings.json` 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add sensor.py strings.json translations tests/test_954_negative_export_exposure.py
-git commit -m "feat(#954): publish the negative-export exposure as two diagnostics"
+git add sensor.py strings.json translations tests/test_871_negative_export_exposure.py
+git commit -m "feat(#871): publish the negative-export exposure as two diagnostics"
 ```
 
 ---
@@ -235,7 +237,7 @@ git commit -m "feat(#954): publish the negative-export exposure as two diagnosti
 
 **Files:**
 - Modify: `coordinator/day_ledger.py:111`
-- Test: `tests/test_954_negative_export_exposure.py` (append)
+- Test: `tests/test_871_negative_export_exposure.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -271,7 +273,7 @@ Fill `_slots` from an existing caller before writing the implementation — `gre
 - [ ] **Step 2: Run it and watch the first case fail**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py::TestTheLedgerPricesASurplusSlotHonestly -q
+~/bin/semtest tests/test_871_negative_export_exposure.py::TestTheLedgerPricesASurplusSlotHonestly -q
 ```
 
 Expected: `assert 0.0 == -0.05`.
@@ -281,7 +283,7 @@ Expected: `assert 0.0 == -0.05`.
 `coordinator/day_ledger.py:111`:
 
 ```python
-                # (#954) NOT max(0.0, …). The clamp made a negative export
+                # (#871) NOT max(0.0, …). The clamp made a negative export
                 # rate — one you PAY — look identical to a free kWh, and a
                 # planner cannot prefer another sink over a cost it cannot
                 # see. `or 0.0` still handles an absent rate, which is the
@@ -292,7 +294,7 @@ Expected: `assert 0.0 == -0.05`.
 - [ ] **Step 4: Run the surrounding suites, not just the new test**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py tests/test_755_learning_layer.py \
+~/bin/semtest tests/test_871_negative_export_exposure.py tests/test_755_learning_layer.py \
   tests/test_820_charge_pacing.py tests/test_820_pacing_reads_the_house_profile.py \
   tests/test_778_spendable.py -q -rf
 ```
@@ -302,8 +304,8 @@ Expected: all pass. Anything that fails here is a consumer that silently relied 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add coordinator/day_ledger.py tests/test_954_negative_export_exposure.py
-git commit -m "fix(#954): a negative export price is a cost, not a free kWh
+git add coordinator/day_ledger.py tests/test_871_negative_export_exposure.py
+git commit -m "fix(#871): a negative export price is a cost, not a free kWh
 
 day_ledger clamped the signed rate to zero, so the planner met a hostile
 meter and a generous one as the same number. #523 kept the sign on
@@ -317,7 +319,7 @@ purpose; this is the consumer that lost it again one layer down."
 **Files:**
 - Modify: `coordinator/charger_types.py:680+` (`FleetContext`)
 - Modify: `coordinator/build_view.py:186`, `coordinator/coordinator.py:7407`
-- Test: `tests/test_954_negative_export_exposure.py` (append)
+- Test: `tests/test_871_negative_export_exposure.py` (append)
 
 This task is **pure plumbing and changes no decision.** Keep it that way — a field arriving and a field being acted on are separate commits, so a bisect can tell them apart.
 
@@ -351,7 +353,7 @@ Use `tests/ast_contracts.py` (not `coordinator/`) — check the import path with
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py::TestTheFleetViewCarriesThePrice -q
+~/bin/semtest tests/test_871_negative_export_exposure.py::TestTheFleetViewCarriesThePrice -q
 ```
 
 Expected: `AttributeError: 'FleetContext' object has no attribute 'export_rate'`.
@@ -362,7 +364,7 @@ In `coordinator/charger_types.py`, inside `FleetContext`, beside `grid_export_w`
 
 ```python
     export_rate: float = 0.0
-    """(#954) The SIGNED current export price (/kWh) — negative means the
+    """(#871) The SIGNED current export price (/kWh) — negative means the
     meter charges you to export. Zero when unknown or on a fixed tariff.
 
     `ArbitrageSignals` carries the same quantity for the SELL decision; this
@@ -376,7 +378,7 @@ In `coordinator/charger_types.py`, inside `FleetContext`, beside `grid_export_w`
 `coordinator/build_view.py:186`, beside `tariff_level=fleet_state.tariff_level`:
 
 ```python
-        # (#954) the price rides the same one-place thread as the level.
+        # (#871) the price rides the same one-place thread as the level.
         export_rate=float(getattr(fleet_state, "export_rate", 0.0) or 0.0),
 ```
 
@@ -392,7 +394,7 @@ Confirm the coordinator's own accessor first — `grep -n "export_rate" coordina
 
 ```bash
 ~/bin/semtest tests/test_multi_charger_control.py tests/test_v14_integration.py \
-  tests/test_589_percharger_astguard.py tests/test_954_negative_export_exposure.py -q -rf
+  tests/test_589_percharger_astguard.py tests/test_871_negative_export_exposure.py -q -rf
 ```
 
 Expected: all pass, and no decision changes — this commit adds a number nobody reads yet.
@@ -400,8 +402,8 @@ Expected: all pass, and no decision changes — this commit adds a number nobody
 - [ ] **Step 6: Commit**
 
 ```bash
-git add coordinator/charger_types.py coordinator/build_view.py coordinator/coordinator.py tests/test_954_negative_export_exposure.py
-git commit -m "feat(#954): the fleet view carries the export price
+git add coordinator/charger_types.py coordinator/build_view.py coordinator/coordinator.py tests/test_871_negative_export_exposure.py
+git commit -m "feat(#871): the fleet view carries the export price
 
 Plumbing only, no decision changes. FleetContext is what every charger's
 decide() sees and it has never had a price -- only grid_export_w, a power.
@@ -416,7 +418,7 @@ the sell floor; this arc is about solar surplus.)"
 **Files:**
 - Modify: `coordinator/ev_control.py`, `coordinator/surplus_controller.py`
 - Modify: `switch.py`, `strings.json`, `translations/*.json` (16 files)
-- Test: `tests/test_954_negative_export_exposure.py` (append)
+- Test: `tests/test_871_negative_export_exposure.py` (append)
 
 **It ships default-off.** Gate 4 of the release train: finished work whose behaviour stays off may merge. No install can exercise this today (every one is on a fixed tariff), so it must not wake itself — and a switch is also how a spot-tariff user opts in once they have read what it does.
 
@@ -464,7 +466,7 @@ class TestTheSinksPreferAnythingToAHostileMeter:
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py::TestTheSinksPreferAnythingToAHostileMeter -q
+~/bin/semtest tests/test_871_negative_export_exposure.py::TestTheSinksPreferAnythingToAHostileMeter -q
 ```
 
 Expected: `ModuleNotFoundError: coordinator.export_posture`.
@@ -474,7 +476,7 @@ Expected: `ModuleNotFoundError: coordinator.export_posture`.
 Create `coordinator/export_posture.py`:
 
 ```python
-"""#954 — one answer to "is the meter worth feeding right now?".
+"""#871 — one answer to "is the meter worth feeding right now?".
 
 Three call sites answer versions of this question today with three rules:
 the arbitrage floor (`arbitrage_min_export_price`), forecast_sell's own
@@ -519,7 +521,7 @@ def export_posture(*, export_rate: Optional[float],
 - [ ] **Step 4: Run the test**
 
 ```bash
-~/bin/semtest tests/test_954_negative_export_exposure.py::TestTheSinksPreferAnythingToAHostileMeter -q
+~/bin/semtest tests/test_871_negative_export_exposure.py::TestTheSinksPreferAnythingToAHostileMeter -q
 ```
 
 Expected: 5 passed.
@@ -535,7 +537,7 @@ In `coordinator/ev_control.py` and `coordinator/surplus_controller.py`, read the
 - [ ] **Step 7: Full suite**
 
 ```bash
-~/bin/semtest tests/ -q -rf > /tmp/954-suite.txt 2>&1; echo "EXIT=$?"; grep -c FAILED /tmp/954-suite.txt
+~/bin/semtest tests/ -q -rf > /tmp/871-suite.txt 2>&1; echo "EXIT=$?"; grep -c FAILED /tmp/871-suite.txt
 ```
 
 Expected: `EXIT=0`, `0`.
@@ -543,8 +545,8 @@ Expected: `EXIT=0`, `0`.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add coordinator/export_posture.py coordinator/ev_control.py coordinator/surplus_controller.py switch.py persisted_flags.py strings.json translations tests/test_954_negative_export_exposure.py
-git commit -m "feat(#954): prefer any sink over a hostile meter -- asleep
+git add coordinator/export_posture.py coordinator/ev_control.py coordinator/surplus_controller.py switch.py persisted_flags.py strings.json translations tests/test_871_negative_export_exposure.py
+git commit -m "feat(#871): prefer any sink over a hostile meter -- asleep
 
 One verdict, in one pure place, consumed by the EV and the surplus loads:
 the mirror of the negative-IMPORT path SEM already runs. Default off. No
@@ -569,7 +571,7 @@ Under the tariff material, a short "When export pays nothing" section: what the 
 - [ ] **Step 2: CHANGELOG**
 
 ```markdown
-- ✨ **SEM can tell a hostile meter from a generous one** (#954, #871). On a
+- ✨ **SEM can tell a hostile meter from a generous one** (#871, #871). On a
   dynamic feed-in tariff the export price can go negative — you pay to
   export. SEM now measures that exposure (two new diagnostics, zero on a
   fixed tariff), prices it honestly in the planner instead of clamping it to
@@ -582,7 +584,7 @@ Under the tariff material, a short "When export pays nothing" section: what the 
 
 ```bash
 git add docs/USER_GUIDE.md CHANGELOG.md
-git commit -m "docs(#954): what a negative export price means and what SEM does"
+git commit -m "docs(#871): what a negative export price means and what SEM does"
 ```
 
 ---
@@ -591,7 +593,7 @@ git commit -m "docs(#954): what a negative export price means and what SEM does"
 
 - `~/bin/semtest tests/ -q -rf` green (expect ~10,300+).
 - `/tmp/venv-ci/bin/ruff check .` clean.
-- A **challenge record** at `~/claude-jobs/challenge-feature-954-meter-worth.md` — `sem-ready.sh` gate 2b refuses a feature branch without one. Ask a ruflo reviewer to REFUTE: *"no sink relaxation in this change can move energy in a way the user did not ask for, and no safety gate is weakened by AVOID_EXPORT."*
+- A **challenge record** at `~/claude-jobs/challenge-feature-871-negative-export.md` — `sem-ready.sh` gate 2b refuses a feature branch without one. Ask a ruflo reviewer to REFUTE: *"no sink relaxation in this change can move energy in a way the user did not ask for, and no safety gate is weakened by AVOID_EXPORT."*
 - **A live simulation on .175**, because the posture cannot be exercised by any real tariff: hold a negative export rate, confirm the posture flips, the sinks relax, and that flipping the switch off restores the previous behaviour exactly.
 - Merge on Guido's word with `SEM_FEAT_OK` — it is an enhancement.
 
