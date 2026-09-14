@@ -78,6 +78,7 @@ from .cycle_trace import (
     TraceCollector, LayerRecord, LayerStatus, CrossCheck,
     ev_layer_match, battery_layer_match, device_layer_match, battery_list_role,
     heat_pump_layer_match,
+    commanded_per_charger, ev_match_per_charger,   # (#961)
 )
 from .energy_reclaim import reclaimable_battery_w, held_grid_import
 from .forecast_reader import ForecastReader
@@ -2329,53 +2330,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             pre_debounced=True,
         )
 
-    def _trace_commanded_per_charger(self) -> dict:
-        """(#961) What SEM actually asked each charger for, in amps.
-
-        Reads each device's own ``_current_setpoint`` — the same authoritative
-        value ``sensor.sem_charger_<id>_commanded_current`` publishes (#291) —
-        so the trace and that sensor can never tell different stories. Empty
-        when no charger is registered, which the caller reads as "nothing to
-        say" and falls back to the fleet budget.
-        """
-        out: dict = {}
-        for cid, dev in (getattr(self, "_ev_devices", None) or {}).items():
-            try:
-                out[str(cid)] = int(float(getattr(dev, "_current_setpoint", 0) or 0))
-            except (TypeError, ValueError):
-                continue
-        return out
-
-    def _trace_ev_match_per_charger(self, power, connected) -> dict:
-        """(#961 review) Per-charger "is it actually drawing?", each against
-        its own phases, voltage and measured draw.
-
-        Returns ``{charger_id: True|False|None}`` — None where the question
-        cannot be asked (nothing commanded, or no per-charger power reading).
-        Empty when the install has no per-charger power slice at all, which
-        the caller reads as "fall back to the single-charger check".
-        """
-        devices = getattr(self, "_ev_devices", None) or {}
-        per_w = getattr(power, "ev_power_per_charger", None) or {}
-        if not devices or not per_w:
-            return {}
-        out: dict = {}
-        for cid, dev in devices.items():
-            key = str(cid)
-            if cid not in per_w and key not in per_w:
-                continue
-            watts = float(per_w.get(cid, per_w.get(key, 0.0)) or 0.0)
-            try:
-                amps = int(float(getattr(dev, "_current_setpoint", 0) or 0))
-                phases = int(getattr(dev, "phases", 0)
-                             or self.config.get("ev_phases", 3) or 3)
-                volts = int(getattr(dev, "voltage", 0)
-                            or self.config.get("ev_voltage", 230) or 230)
-            except (TypeError, ValueError):
-                continue
-            out[key] = ev_layer_match(amps, watts, phases, volts, connected)
-        return out
-
     def _trace_ev(self, trace, sem_data, power) -> None:
         st = trace.subsystem("ev")
         soc = round(float(getattr(power, "battery_soc", 0.0) or 0.0), 1)
@@ -2405,7 +2359,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         budget_amps = int(getattr(sem_data, "calculated_current", 0) or 0)
         reason = str(getattr(sem_data, "charging_strategy_reason", "") or "")
         budget = round(float(getattr(sem_data, "available_power", 0.0) or 0.0))
-        per_charger = self._trace_commanded_per_charger()
+        per_charger = commanded_per_charger(getattr(self, "_ev_devices", None))
         amps = sum(per_charger.values()) if per_charger else budget_amps
         # (#961 review) Observer mode zeroes every setpoint on purpose
         # (_zero_charger_setpoints), so ``commanded_amps`` is honestly 0 there
@@ -2457,7 +2411,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # this check exists to catch, so it is asked per charger, each against
         # its OWN topology and its OWN draw, and the fleet is degraded if any
         # charger is.
-        per_match = self._trace_ev_match_per_charger(power, connected)
+        per_match = ev_match_per_charger(
+            getattr(self, "_ev_devices", None),
+            getattr(power, "ev_power_per_charger", None),
+            connected,
+            int(self.config.get("ev_phases", 3) or 3),
+            int(self.config.get("ev_voltage", 230) or 230),
+        )
         if per_match:
             verdicts = [v for v in per_match.values() if v is not None]
             match = (None if not verdicts else all(verdicts))
