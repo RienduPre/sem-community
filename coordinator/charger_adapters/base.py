@@ -240,8 +240,29 @@ class ChargerAdapter(ABC):
                            why="ensure_enabled (#804 resume surface)")
         else:
             return
-        # Keep SEM's session view consistent with the contactor we just closed.
-        dev._session_active = True
+        # (#940) Claim the SESSION only when this write IS the session start.
+        #
+        # ``_session_active`` is not a contactor flag — it is the flag
+        # ``GenericAdapter.command_current`` reads to decide whether to call
+        # ``start_session`` at all. Setting it here unconditionally (#536)
+        # was a latch scoped wider than its evidence (bug class 83): on a
+        # charger whose start is a charge-mode select or a brand service,
+        # asserting the enable switch says nothing about that mechanism —
+        # and because the reconciler prepends this ENABLE on exactly the
+        # cycle where the switch is off (the transition out of a stop), the
+        # brand's start was suppressed on the ONE cycle that needed it. The
+        # box stayed on its stop mode, dropped the switch, and five
+        # re-asserts later SEM filed "enable switch will not stay on"
+        # against hardware that was doing what it was told (#939/#940,
+        # @alexmc1510).
+        #
+        # ``is not False``, not truthiness: only a device that positively
+        # answers "my start is somewhere else" withholds the claim. A stub
+        # device that cannot answer keeps the historical behaviour rather
+        # than acquiring a second start it never asked for.
+        starts_here = getattr(dev, "enable_entity_is_session_start", None)
+        if not callable(starts_here) or starts_here() is not False:
+            dev._session_active = True
 
     async def report_enable_blocked(self) -> None:
         """Surface an uncontrollable enable switch — once it has been one for
