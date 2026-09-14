@@ -240,6 +240,7 @@ _DOCS_ANCHORS = {
     "hot_water_temperature_sensor_unavailable":
         "hot-water-temperature-sensor-unavailable",
     "heat_pump_partial_sg_ready": "heat-pump-only-one-sg-ready-relay",
+    "heat_pump_contact_values_missing": "heat-pump-sg-ready-contact-values",
     "charger_control_entity_broken": "a-charger-control-entity-is-broken",
     # (#915) a battery control SEM wrote never reflected the value
     "battery_control_write_not_taken": "a-battery-control-write-is-not-taken",
@@ -1355,6 +1356,50 @@ def raise_heat_pump_partial_sg_ready(hass: HomeAssistant) -> None:
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug(
             "issue_registry.create heat_pump_partial_sg_ready failed: %s", e,
+        )
+
+
+def raise_heat_pump_contact_values_missing(hass: HomeAssistant, *, contact,
+                                           entity_id, missing) -> None:
+    """(#801) A SG-Ready contact points at a text/number/select entity but
+    one of the two values SEM must write is not set.
+
+    The config flow refuses this, but the dashboard Config card saves every
+    field through ``set_option`` one at a time — so the pairing rule cannot
+    live only in the form. A contact SEM cannot drive fails EVERY write, and
+    without this the only trace is a log line: the user sees a green "saved"
+    and a heat pump that never boosts again.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=f"heat_pump_contact_values_missing_{contact}",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="heat_pump_contact_values_missing",
+            learn_more_url=next_step_url(
+                "docs", "heat_pump_contact_values_missing", **_versions(hass)),
+            translation_placeholders={
+                "contact": str(contact),
+                "entity_id": str(entity_id or "—"),
+                "missing": str(missing),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug(
+            "issue_registry.create heat_pump_contact_values_missing failed: %s", e,
+        )
+
+
+def clear_heat_pump_contact_values_missing(hass: HomeAssistant, *, contact) -> None:
+    try:
+        ir.async_delete_issue(
+            hass, DOMAIN, f"heat_pump_contact_values_missing_{contact}")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug(
+            "issue_registry.delete heat_pump_contact_values_missing failed: %s", e,
         )
 
 

@@ -6175,6 +6175,27 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _ri.raise_heat_pump_partial_sg_ready(self.hass)
             else:
                 _ri.clear_heat_pump_partial_sg_ready(self.hass)
+            # (#801) A contact pointing at a text/number/select entity needs
+            # BOTH values SEM must write. The config flow refuses to save one
+            # of them empty, but the dashboard Config card writes each field
+            # through set_option on its own — so the rule is enforced HERE,
+            # against the live config, where both surfaces meet. Idempotent,
+            # same as its siblings above.
+            from ..consts.devices import CONTACT_VALUE_SERVICES as _CVS
+            for _slot, _eid in (("relay1", hp_relay1), ("relay2", hp_relay2)):
+                _missing = []
+                if _eid and str(_eid).split(".", 1)[0] in _CVS:
+                    for _kind in ("on", "off"):
+                        if not str(self.config.get(
+                                f"heat_pump_{_slot}_{_kind}_value") or "").strip():
+                            _missing.append(_kind.upper())
+                if _missing:
+                    _ri.raise_heat_pump_contact_values_missing(
+                        self.hass, contact=_slot, entity_id=_eid,
+                        missing=" and ".join(_missing))
+                else:
+                    _ri.clear_heat_pump_contact_values_missing(
+                        self.hass, contact=_slot)
         except Exception as e:  # noqa: BLE001 — never fail a cycle over a repair
             _LOGGER.debug("Heat-pump repair tracking failed: %s", e)
 

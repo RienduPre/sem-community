@@ -13,6 +13,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
+from .consts.devices import CONTACT_VALUE_SERVICES, SG_READY_CONTACT_DOMAINS
 from .const import (
     DOMAIN,
     DEFAULT_PHASE_GUARD_TOPOLOGY,
@@ -124,6 +125,25 @@ def _parse_service_data(raw) -> dict | None:
     except Exception:  # noqa: BLE001 — invalid JSON is the error case
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _contact_values_missing(get) -> bool:
+    """#801: a contact pointing at a VALUE entity (text/number/select) needs
+    BOTH an ON and an OFF value.
+
+    Without them SEM has nothing to write, so the contact would sit in the
+    config looking configured and never move the pump — the silent
+    half-configuration the #437 relay rule already refuses for relays.
+    """
+    for idx in (1, 2):
+        eid = str(get(f"heat_pump_relay{idx}_entity") or "").strip()
+        if not eid or eid.split(".", 1)[0] not in CONTACT_VALUE_SERVICES:
+            continue
+        on = str(get(f"heat_pump_relay{idx}_on_value") or "").strip()
+        off = str(get(f"heat_pump_relay{idx}_off_value") or "").strip()
+        if not on or not off:
+            return True
+    return False
 
 
 def _merge_form_input(flow: Any, target: dict, user_input: dict) -> None:
@@ -1352,6 +1372,10 @@ OPTIONS_FLOW_OWNED_KEYS = frozenset({
     "heat_pump_priority",
     "heat_pump_relay1_entity",
     "heat_pump_relay2_entity",
+    "heat_pump_relay1_on_value",
+    "heat_pump_relay1_off_value",
+    "heat_pump_relay2_on_value",
+    "heat_pump_relay2_off_value",
     "heat_pump_sg_ready_service",
     "heat_pump_sg_ready_service_data",
     "heat_pump_sg_ready_state_entity",
@@ -2962,6 +2986,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             svc_data_raw = (user_input.get("heat_pump_sg_ready_service_data") or "").strip()
             if has_one_relay and not has_climate and not service:
                 errors["base"] = "heat_pump_partial_relays"
+            elif _contact_values_missing(user_input.get):
+                errors["base"] = "heat_pump_contact_values_missing"
             elif service and "." not in service:
                 errors["base"] = "heat_pump_service_invalid"
             elif svc_data_raw and _parse_service_data(svc_data_raw) is None:
@@ -2984,18 +3010,38 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     "heat_pump_relay1_entity",
                     description={"suggested_value": _opt("heat_pump_relay1_entity")},
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["switch", "input_boolean"])
+                    selector.EntitySelectorConfig(domain=SG_READY_CONTACT_DOMAINS)
                 ),
                 vol.Optional(
                     "heat_pump_relay2_entity",
                     description={"suggested_value": _opt("heat_pump_relay2_entity")},
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["switch", "input_boolean"])
+                    selector.EntitySelectorConfig(domain=SG_READY_CONTACT_DOMAINS)
                 ),
                 vol.Optional(
                     "heat_pump_invert_sg_ready",
                     default=_c("heat_pump_invert_sg_ready", False),
                 ): selector.BooleanSelector(),
+                # (#801) A contact may be a text/number/select entity instead
+                # of a switch (EMS-ESP carries SG-Ready as bit-string text
+                # fields). These say what to WRITE for that contact's two
+                # states; leave empty for a switch contact.
+                vol.Optional(
+                    "heat_pump_relay1_on_value",
+                    description={"suggested_value": _opt("heat_pump_relay1_on_value")},
+                ): selector.TextSelector(),
+                vol.Optional(
+                    "heat_pump_relay1_off_value",
+                    description={"suggested_value": _opt("heat_pump_relay1_off_value")},
+                ): selector.TextSelector(),
+                vol.Optional(
+                    "heat_pump_relay2_on_value",
+                    description={"suggested_value": _opt("heat_pump_relay2_on_value")},
+                ): selector.TextSelector(),
+                vol.Optional(
+                    "heat_pump_relay2_off_value",
+                    description={"suggested_value": _opt("heat_pump_relay2_off_value")},
+                ): selector.TextSelector(),
                 vol.Optional(
                     "heat_pump_climate_entity",
                     description={"suggested_value": _opt("heat_pump_climate_entity")},
@@ -3125,6 +3171,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 errors["base"] = "heat_pump_no_control"
             elif bool(relay1) ^ bool(relay2) and not (climate or service):
                 errors["base"] = "heat_pump_partial_relays"
+            elif _contact_values_missing(user_input.get):
+                errors["base"] = "heat_pump_contact_values_missing"
             elif service and "." not in service:
                 errors["base"] = "heat_pump_service_invalid"
             elif svc_data_raw and _parse_service_data(svc_data_raw) is None:
@@ -3157,18 +3205,35 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     "heat_pump_relay1_entity",
                     description={"suggested_value": _row("heat_pump_relay1_entity")},
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["switch", "input_boolean"])
+                    selector.EntitySelectorConfig(domain=SG_READY_CONTACT_DOMAINS)
                 ),
                 vol.Optional(
                     "heat_pump_relay2_entity",
                     description={"suggested_value": _row("heat_pump_relay2_entity")},
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain=["switch", "input_boolean"])
+                    selector.EntitySelectorConfig(domain=SG_READY_CONTACT_DOMAINS)
                 ),
                 vol.Optional(
                     "heat_pump_invert_sg_ready",
                     default=bool(_row("heat_pump_invert_sg_ready", False)),
                 ): selector.BooleanSelector(),
+                # (#801) see the primary heat-pump step.
+                vol.Optional(
+                    "heat_pump_relay1_on_value",
+                    description={"suggested_value": _row("heat_pump_relay1_on_value")},
+                ): selector.TextSelector(),
+                vol.Optional(
+                    "heat_pump_relay1_off_value",
+                    description={"suggested_value": _row("heat_pump_relay1_off_value")},
+                ): selector.TextSelector(),
+                vol.Optional(
+                    "heat_pump_relay2_on_value",
+                    description={"suggested_value": _row("heat_pump_relay2_on_value")},
+                ): selector.TextSelector(),
+                vol.Optional(
+                    "heat_pump_relay2_off_value",
+                    description={"suggested_value": _row("heat_pump_relay2_off_value")},
+                ): selector.TextSelector(),
                 vol.Optional(
                     "heat_pump_climate_entity",
                     description={"suggested_value": _row("heat_pump_climate_entity")},

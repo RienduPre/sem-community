@@ -52,3 +52,33 @@ CONFIDENCE_EXCELLENT: Final = 90    # Complete system, same manufacturer
 CONFIDENCE_GOOD: Final = 70         # Most components found, mixed manufacturers
 CONFIDENCE_BASIC: Final = 50        # Minimum required components only
 CONFIDENCE_POOR: Final = 30         # Missing important components
+
+
+# (#801) SG-Ready contacts that are not switches.
+#
+# The SG-Ready standard's two contacts are a pair of booleans, but the HA
+# surface that carries them varies by hardware: a relay switch on most heat
+# pumps, and on a Buderus/Bosch behind EMS-ESP a pair of ``text`` entities
+# holding a bit string (``010000000000000``). Writing a contact's boolean is
+# the same operation either way — only the service and the payload differ.
+#
+# A domain ABSENT from this table is a TOGGLE domain, driven by
+# ``homeassistant.turn_on``/``turn_off`` exactly as SG-Ready always has been.
+# A domain PRESENT is a VALUE domain: the user gives the ON and the OFF value
+# for that contact and SEM writes it verbatim.
+CONTACT_VALUE_SERVICES: Final[dict] = {
+    # domain: (service domain, service, payload key)
+    "text":         ("text", "set_value", "value"),
+    "input_text":   ("input_text", "set_value", "value"),
+    "number":       ("number", "set_value", "value"),
+    "input_number": ("input_number", "set_value", "value"),
+    "select":       ("select", "select_option", "option"),
+    "input_select": ("input_select", "select_option", "option"),
+}
+
+# Every domain a SG-Ready contact may point at, in picker order: the two
+# toggle domains first (what every existing install uses), then the value
+# domains. Used by the config flow's EntitySelector for both contacts.
+SG_READY_CONTACT_DOMAINS: Final[list] = [
+    "switch", "input_boolean",
+] + list(CONTACT_VALUE_SERVICES)

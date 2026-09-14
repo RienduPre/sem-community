@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from homeassistant.core import HomeAssistant
 
 from .base import SetpointDevice, DeviceState
+from ..consts.devices import CONTACT_VALUE_SERVICES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +59,18 @@ SG_READY_RELAY_MAP = {
     SGReadyState.BOOST:    (False, True),   # 0:1
     SGReadyState.FORCE_ON: (True,  True),   # 1:1
 }
+
+
+def _norm_value(v) -> Optional[str]:
+    """A configured contact value, or None when the field was left empty.
+
+    ``0`` is a legitimate OFF value for a ``number`` contact, so emptiness
+    is decided on the STRING and never on truthiness.
+    """
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s or None
 
 
 @dataclass
@@ -105,6 +118,10 @@ class HeatPumpController(SetpointDevice):
         sg_ready_service: Optional[str] = None,
         sg_ready_service_data: Optional[Dict[str, Any]] = None,
         sg_ready_state_entity: Optional[str] = None,
+        relay1_on_value: Optional[str] = None,
+        relay1_off_value: Optional[str] = None,
+        relay2_on_value: Optional[str] = None,
+        relay2_off_value: Optional[str] = None,
     ):
         super().__init__(
             hass=hass,
@@ -124,6 +141,15 @@ class HeatPumpController(SetpointDevice):
         self.daily_min_runtime_sec = daily_min_runtime_sec
         self.relay1_entity_id = relay1_entity_id
         self.relay2_entity_id = relay2_entity_id
+        # (#801) Per-contact ON/OFF values for a VALUE-domain contact —
+        # a ``text``/``number``/``select`` entity instead of a switch. Kept
+        # per contact because they are not interchangeable: the reporter's
+        # EMS-ESP inputs carry bit strings of different widths (15 and 12).
+        # Empty for the switch case, which is what every existing install is.
+        self._contact_values = {
+            1: (_norm_value(relay1_on_value), _norm_value(relay1_off_value)),
+            2: (_norm_value(relay2_on_value), _norm_value(relay2_off_value)),
+        }
         # #523: opt-in for installs whose SG-Ready contacts are wired
         # normally-closed (NC) instead of normally-open — flips both relays
         # so the SG-Ready standard map drives the physical contacts the right
@@ -282,14 +308,32 @@ class HeatPumpController(SetpointDevice):
 
         Sets ``self._last_deactivation_path = "normal"`` (#421).
         ``+climate`` suffix when climate boost is also reverted.
+
+        (#801 review) The contact write's verdict is HONOURED here, the way
+        ``activate`` already honours it for #508 C3. It used to be discarded:
+        a failed write left the pump physically in BOOST while SEM recorded
+        IDLE / 0 W and handed that power to the next device — the mirror of
+        the rule C3 states for the activation direction. A pump SEM could not
+        stand down stays ACTIVE in its belief, so the next cycle tries again
+        and nobody spends its watts twice. The climate setpoint is still
+        reverted either way: the two surfaces fail independently.
         """
-        await self._set_sg_ready_state(SGReadyState.NORMAL)
-        self._last_deactivation_path = "normal"
+        relay_ok = await self._set_sg_ready_state(SGReadyState.NORMAL)
+        self._last_deactivation_path = "normal" if relay_ok else "relay_failed"
 
         # Restore normal temperature
         if self.climate_entity_id:
             await super().deactivate()
             self._last_deactivation_path += "+climate"
+
+        if not relay_ok:
+            _LOGGER.error(
+                "%s: could not return the SG-Ready contacts to NORMAL (%s) — "
+                "the pump may still be boosting, so SEM keeps it ACTIVE and "
+                "retries rather than giving its power away",
+                self.name, self._last_relay_path,
+            )
+            return
 
         self._status.state = DeviceState.IDLE
         self._status.current_consumption_w = 0.0
@@ -306,6 +350,90 @@ class HeatPumpController(SetpointDevice):
         if self.invert_sg_ready:
             return (not r1, not r2)
         return (r1, r2)
+
+    # ─── SG-Ready contacts (#801) ────────────────────────────
+
+    def _contact_service(self, idx: int, entity_id: str, on: bool):
+        """The service call that drives contact ``idx`` to ``on``.
+
+        Returns ``(domain, service, payload)``, or None when the contact is
+        a VALUE domain whose ON/OFF values were not configured — a write
+        SEM must refuse rather than guess at (writing "on" into a bit-string
+        field would be a silent no-op the pump never acts on).
+        """
+        domain = entity_id.split(".", 1)[0]
+        spec = CONTACT_VALUE_SERVICES.get(domain)
+        if spec is None:
+            # Toggle domain — unchanged since the first SG-Ready release.
+            return ("homeassistant", "turn_on" if on else "turn_off",
+                    {"entity_id": entity_id})
+        on_value, off_value = self._contact_values.get(idx, (None, None))
+        value = on_value if on else off_value
+        if value is None:
+            _LOGGER.error(
+                "SG-Ready contact %d (%s) is a %s entity but its %s value is "
+                "not configured — set both values for this contact (#801)",
+                idx, entity_id, domain, "ON" if on else "OFF",
+            )
+            return None
+        svc_domain, service, key = spec
+        if svc_domain in ("number", "input_number"):
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                _LOGGER.error(
+                    "SG-Ready contact %d (%s) needs a NUMBER value, got %r",
+                    idx, entity_id, value)
+                return None
+        return (svc_domain, service, {"entity_id": entity_id, key: value})
+
+    async def _write_contact(self, idx: int, entity_id: str, on: bool) -> None:
+        """Drive one SG-Ready contact. Raises on failure, so the callers'
+        existing per-relay error handling (and the I3 restore) is unchanged."""
+        call = self._contact_service(idx, entity_id, on)
+        if call is None:
+            raise ValueError(f"SG-Ready contact {idx} is not configured to be writable")
+        domain, service, payload = call
+        # OBSERVER-GATED: via layer 3 — this device is actuated only through
+        # reconcile_load, whose observer branch (_reconcile_load_observe)
+        # returns before any device method runs. Nothing IN this file checks
+        # observer_mode, so moving heat-pump control off the reconcile_load
+        # path loses the gate — do not call this from anywhere else.
+        await self.hass.services.async_call(domain, service, payload, blocking=True)
+
+    def _contact_is_on(self, idx: int, entity_id: str, raw: str) -> Optional[bool]:
+        """Read one contact's boolean back off its own state, or None when
+        the state matches neither the ON nor the OFF value (an unmapped
+        third value — SEM says "I cannot tell" rather than guessing)."""
+        domain = entity_id.split(".", 1)[0]
+        if domain not in CONTACT_VALUE_SERVICES:
+            return {"on": True, "off": False}.get(raw)
+        on_value, off_value = self._contact_values.get(idx, (None, None))
+        if on_value is None or off_value is None:
+            return None
+        if self._same_value(domain, raw, on_value):
+            return True
+        if self._same_value(domain, raw, off_value):
+            return False
+        return None
+
+    @staticmethod
+    def _same_value(domain: str, raw: str, configured: str) -> bool:
+        """Does a live state mean the same thing as a configured value?
+
+        (#801 review) A NUMBER entity reports what it holds, not what was
+        written: a contact configured ``1`` reads back ``"1.0"``. Comparing
+        the strings made every number contact unreadable, which silently
+        cost #914 its restart adoption — SEM would never re-own a boost it
+        left running. Numbers compare as numbers; everything else compares
+        as text, because a bit string's leading zeros are the meaning.
+        """
+        if domain in ("number", "input_number"):
+            try:
+                return float(raw) == float(configured)
+            except (TypeError, ValueError):
+                return False
+        return raw == configured.strip().lower()
 
     # ─── Restart adoption (#914) ─────────────────────────────
 
@@ -341,9 +469,13 @@ class HeatPumpController(SetpointDevice):
                 if values[0] in (str(int(s)), s.name.lower()):
                     return True, s
             return True, None
-        if any(v not in ("on", "off") for v in values):
+        # (#801) A contact's boolean comes off its own surface: "on"/"off"
+        # for a switch, the configured ON/OFF value for a text/number/select.
+        c1 = self._contact_is_on(1, self.relay1_entity_id, values[0])
+        c2 = self._contact_is_on(2, self.relay2_entity_id, values[1])
+        if c1 is None or c2 is None:
             return True, None
-        pair = (values[0] == "on", values[1] == "on")
+        pair = (c1, c2)
         for s in SGReadyState:
             if self._relays_for(s) == pair:
                 return True, s
@@ -467,16 +599,8 @@ class HeatPumpController(SetpointDevice):
         relay1_called = False
 
         if self.relay1_entity_id:
-            service = "turn_on" if relay1_on else "turn_off"
             try:
-                # OBSERVER-GATED: via layer 3 — see the note at the
-                # service-call path above; the gate is reconcile_load's
-                # observer branch, not this file.
-                await self.hass.services.async_call(
-                    "homeassistant", service,
-                    {"entity_id": self.relay1_entity_id},
-                    blocking=True,
-                )
+                await self._write_contact(1, self.relay1_entity_id, relay1_on)
                 relay1_called = True
             except Exception as e:
                 _LOGGER.error("Failed to set SG-Ready relay 1: %s", e)
@@ -484,16 +608,8 @@ class HeatPumpController(SetpointDevice):
                 return False
 
         if self.relay2_entity_id:
-            service = "turn_on" if relay2_on else "turn_off"
             try:
-                # OBSERVER-GATED: via layer 3 — see the note at the
-                # service-call path above; the gate is reconcile_load's
-                # observer branch, not this file.
-                await self.hass.services.async_call(
-                    "homeassistant", service,
-                    {"entity_id": self.relay2_entity_id},
-                    blocking=True,
-                )
+                await self._write_contact(2, self.relay2_entity_id, relay2_on)
                 if relay1_called:
                     self._last_relay_path = "both_relays"
                 else:
@@ -507,15 +623,8 @@ class HeatPumpController(SetpointDevice):
                 # leave a coherent prior state, not a curtail signal.
                 if relay1_called and relay1_on != prev_relay1_on:
                     try:
-                        restore = "turn_on" if prev_relay1_on else "turn_off"
-                        # OBSERVER-GATED: via layer 3 — see the note at the
-                        # service-call path above; the gate is reconcile_load's
-                        # observer branch, not this file.
-                        await self.hass.services.async_call(
-                            "homeassistant", restore,
-                            {"entity_id": self.relay1_entity_id},
-                            blocking=True,
-                        )
+                        await self._write_contact(
+                            1, self.relay1_entity_id, prev_relay1_on)
                     except Exception:  # noqa: BLE001 — best effort
                         pass
                 return False
