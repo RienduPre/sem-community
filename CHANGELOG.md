@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Tibber (10.7k) contributed no grid role at all. Both now declare a full
   import/export pair. No loose `power_consumption` rule was added — it would
   take a heat pump and a car as grid meters, which is this issue's own bug.
+- 🐛 **A Wh grid counter no longer disagrees with itself by a factor of 1000**
+  (#947 review). SEM summed energy counters raw while normalising power to
+  watts, so an install whose counters report Wh rather than kWh — real
+  hardware — would have failed every corroboration window forever and been
+  left reporting no grid power at all.
 - 🐛 **An export-only meter discovery says which silence it is** (#947). It
   used to fall through to "no grid power sensor found", which is a different
   fact. SEM still reads 0 — export-minus-zero would make a house that imports

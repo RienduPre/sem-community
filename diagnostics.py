@@ -359,7 +359,13 @@ async def async_get_config_entry_diagnostics(
             "export_sensor": disc.get("export"),
             "confidence": disc.get("confidence"),
             "grid_energy_device_resolved": grid_device_resolved,
-            "corroborated": proof.get("verdict"),
+            # (#947 review) A field named "corroborated" reporting None for a
+            # pick that is trusted WITHOUT corroboration is self-contradictory.
+            # Say which it is.
+            "corroborated": (
+                "not-required" if disc.get("confidence") in ("declared", "same-device")
+                else proof.get("verdict")),
+            "contradictions": (proof.get("contradictions") or 0),
             "corroboration_window": {
                 "import_kwh_seen": round(proof.get("import_wh") or 0.0, 4) / 1000.0,
                 "export_kwh_seen": round(proof.get("export_wh") or 0.0, 4) / 1000.0,

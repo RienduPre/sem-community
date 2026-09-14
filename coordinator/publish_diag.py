@@ -57,9 +57,16 @@ def build_diagnostics(coord) -> Dict[str, Any]:
             getattr(reader, "_manual_grid_mismatch", False)
         )
     elif _disc.get("import"):
-        out["diag_grid_mode"] = (
-            "split" if _disc.get("confidence") == "same-device" else "split-lowconf"
-        )
+        # (#947) Four tiers, not two. A DECLARED pick is the strongest — the
+        # integration's own vocabulary plus device affinity — and reporting it
+        # as "lowconf" beside an unproven name guess is exactly the collapse
+        # of three states into two this issue is about.
+        _conf = _disc.get("confidence")
+        out["diag_grid_mode"] = {
+            "declared": "split-declared",
+            "same-device": "split",
+            "declared-elsewhere": "split-declared-unverified",
+        }.get(_conf, "split-lowconf")
     else:
         out["diag_grid_mode"] = "combined"
     out["diag_grid_sign"] = "negated" if reader._grid_sign_inverted else "normal"

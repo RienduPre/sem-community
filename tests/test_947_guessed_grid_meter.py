@@ -312,12 +312,17 @@ class TestDeclaredBeatsGuessed:
             "sensor.grid_import_total": _state(100, "kWh"),
             "sensor.grid_export_total": _state(50, "kWh"),
         }
-        rig = _Rig(monkeypatch, states)
+        rig = _Rig(monkeypatch, states,
+                   device_of={"sensor.grid_import_total": "fronius_inverter",
+                              "sensor.fronius_import": "fronius_inverter",
+                              "sensor.fronius_export": "fronius_inverter"})
         reg = self._registry([
             self._entry("sensor.fronius_import", "fronius",
-                        translation_key="power_grid_import"),
+                        translation_key="power_grid_import",
+                        device_id="fronius_inverter"),
             self._entry("sensor.fronius_export", "fronius",
-                        translation_key="power_grid_export"),
+                        translation_key="power_grid_export",
+                        device_id="fronius_inverter"),
         ])
         with patch.object(sr_mod.er, "async_get", return_value=reg):
             power = rig.read()
@@ -340,9 +345,9 @@ class TestDeclaredBeatsGuessed:
                         translation_key="power_production_now"),
         ])
         with patch.object(sr_mod.er, "async_get", return_value=reg):
-            imp, exp = rig.reader._declared_split_grid_power(
+            imp, exp, affinity = rig.reader._declared_split_grid_power(
                 rig.reader._energy_dashboard_config)
-        assert (imp, exp) == (None, None)
+        assert (imp, exp, affinity) == (None, None, False)
 
     def test_the_lexicon_knows_the_brands_sems_own_patterns_were_written_for(self):
         """The runtime IMPORT/EXPORT patterns name Growatt, Senec, GivEnergy,
@@ -356,3 +361,122 @@ class TestDeclaredBeatsGuessed:
                  if "grid_import_power" in v and "grid_export_power" in v}
         assert {"growatt_modbus", "senec", "fronius", "tibber"} <= pairs, (
             f"declared split-grid pairs shrank: {sorted(pairs)}")
+
+
+# ── what the ruflo review refuted ─────────────────────────────────────
+
+class TestTheReviewFindings:
+    def _reg(self, entries):
+        reg = MagicMock()
+        reg.entities = {e.entity_id: e for e in entries}
+        return reg
+
+    def _entry(self, entity_id, platform, translation_key=None, device_id=None):
+        e = MagicMock()
+        e.entity_id = entity_id
+        e.platform = platform
+        e.translation_key = translation_key
+        e.unique_id = ""
+        e.device_id = device_id
+        return e
+
+    def test_a_declared_meter_on_another_device_still_has_to_prove_itself(self, monkeypatch):
+        """REFUTED (a): device affinity was a tie-break, not a requirement, so
+        a lone declared candidate was trusted wherever it lived. A Senec
+        battery retrofitted behind an existing DSMR meter declares both grid
+        halves and measures a DIFFERENT point from the Energy Dashboard's
+        counters — and was believed unconditionally."""
+        states = {
+            "sensor.senec_import": _state(900, device_class="power"),
+            "sensor.senec_export": _state(0, device_class="power"),
+            "sensor.grid_import_total": _state(100, "kWh"),
+            "sensor.grid_export_total": _state(50, "kWh"),
+        }
+        rig = _Rig(monkeypatch, states,
+                   device_of={"sensor.grid_import_total": "dsmr_meter",
+                              "sensor.senec_import": "senec_box",
+                              "sensor.senec_export": "senec_box"})
+        reg = self._reg([
+            self._entry("sensor.senec_import", "senec",
+                        translation_key="grid_imported_power", device_id="senec_box"),
+            self._entry("sensor.senec_export", "senec",
+                        translation_key="grid_exported_power", device_id="senec_box"),
+        ])
+        with patch.object(sr_mod.er, "async_get", return_value=reg):
+            power = rig.read()
+        assert rig.reader._split_grid_discovery["confidence"] == "declared-elsewhere"
+        assert power.grid_power == 0.0, "a declared pick off the grid device must prove itself"
+
+    def test_a_declared_meter_on_the_grid_device_needs_no_window(self, monkeypatch):
+        states = {
+            "sensor.senec_import": _state(900, device_class="power"),
+            "sensor.senec_export": _state(0, device_class="power"),
+            "sensor.grid_import_total": _state(100, "kWh"),
+            "sensor.grid_export_total": _state(50, "kWh"),
+        }
+        rig = _Rig(monkeypatch, states,
+                   device_of={"sensor.grid_import_total": "senec_box",
+                              "sensor.senec_import": "senec_box",
+                              "sensor.senec_export": "senec_box"})
+        reg = self._reg([
+            self._entry("sensor.senec_import", "senec",
+                        translation_key="grid_imported_power", device_id="senec_box"),
+            self._entry("sensor.senec_export", "senec",
+                        translation_key="grid_exported_power", device_id="senec_box"),
+        ])
+        with patch.object(sr_mod.er, "async_get", return_value=reg):
+            power = rig.read()
+        assert rig.reader._split_grid_discovery["confidence"] == "declared"
+        assert power.grid_power == -900.0
+
+    def test_a_sub_load_that_correlates_is_still_caught(self, monkeypatch):
+        """REFUTED (a): a heat pump drawing 2.0 kWh of a 2.3 kWh house import
+        passes ANY tolerance loose enough for a real meter's sampling error.
+        It is caught the first time it switches OFF while the house keeps
+        importing — a real meter cannot read nothing while its own counter
+        advances."""
+        rig = _Rig(monkeypatch, _guessed_states(import_w=2000.0))
+        rig.read()
+        kwh = 100.0
+        # 10 min of the heat pump running, tracking import closely
+        for _ in range(10):
+            rig.clock.advance(60)
+            kwh += 2000.0 / 1000.0 / 60.0
+            rig.set("sensor.grid_import_total", round(kwh, 6), unit="kWh")
+            rig.read()
+        # the pump stops; the house keeps importing at 1.8 kW
+        rig.set("sensor.heat_pump_power_consumption", 0.0, device_class="power")
+        for _ in range(6):
+            rig.clock.advance(60)
+            kwh += 1800.0 / 1000.0 / 60.0
+            rig.set("sensor.grid_import_total", round(kwh, 6), unit="kWh")
+            power = rig.read()
+        assert rig.reader._split_grid_proof["verdict"] is False
+        assert power.grid_power == 0.0
+
+    def test_a_wh_counter_is_not_a_thousandfold_disagreement(self, monkeypatch):
+        """REFUTED (b): the counters were summed RAW while the power side was
+        normalised to watts, so a Wh counter (real hardware, #551) put the two
+        sides 1000x apart and failed every window forever — on an install that
+        worked before this change."""
+        states = _guessed_states(import_w=2000.0)
+        states["sensor.grid_import_total"] = _state(100000.0, "Wh")
+        states["sensor.grid_export_total"] = _state(50000.0, "Wh")
+        rig = _Rig(monkeypatch, states)
+        rig.read()
+        wh = 100000.0
+        for _ in range(15):
+            rig.clock.advance(60)
+            wh += 2000.0 / 60.0                     # 2 kW for one minute, in Wh
+            rig.set("sensor.grid_import_total", round(wh, 4), unit="Wh")
+            power = rig.read()
+        assert rig.reader._split_grid_proof["verdict"] is True
+        assert power.grid_power == -2000.0
+
+    def test_declared_is_not_reported_as_low_confidence(self):
+        """REFUTED (c): publish_diag collapsed every non-same-device pick into
+        "split-lowconf", so the strongest tier read as the weakest."""
+        from custom_components.solar_energy_management.coordinator import publish_diag
+        import inspect
+        src = inspect.getsource(publish_diag)
+        assert "split-declared" in src
