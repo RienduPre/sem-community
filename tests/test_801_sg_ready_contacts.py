@@ -284,9 +284,6 @@ async def test_a_failed_stand_down_does_not_report_the_pump_idle():
     contact with no OFF value, which #801 turns from a freak service
     exception into an ordinary misconfiguration.
     """
-    from custom_components.solar_energy_management.devices.heat_pump_controller import (
-        SGReadyState,
-    )
     from custom_components.solar_energy_management.devices.base import DeviceState
     c, hass = _controller(
         relay1_entity_id="text.in1", relay2_entity_id="text.in4",

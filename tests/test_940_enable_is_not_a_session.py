@@ -47,9 +47,7 @@ from custom_components.solar_energy_management.coordinator.charger_adapters impo
     GenericAdapter,
 )
 from custom_components.solar_energy_management.coordinator.charger_reconciler import (
-    ActionKind,
     ChargerReconciler,
-    observe,
 )
 from custom_components.solar_energy_management.coordinator.charger_types import (
     ChargerDecision,

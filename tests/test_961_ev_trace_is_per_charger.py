@@ -17,8 +17,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _coord(devices=None, calculated_current=7, observer=False):
     from custom_components.solar_energy_management.coordinator.coordinator import (
