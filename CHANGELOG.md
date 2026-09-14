@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.22] — 14.09.2026
+
+- 🐛 **SEM no longer turns a charger's enable switch on without telling the
+  box to charge** (#940, by @alexmc1510). A charger started by a charge-mode
+  select or a brand service, with an enable switch beside it, got the switch
+  and nothing else on the first cycle of every charge: asserting the switch
+  was treated as opening the session, which is the flag that decides whether
+  the brand's start is sent at all. The box stayed on its own mode and let the
+  relay go again, SEM turned it back on five times and then reported "enable
+  switch will not stay on — cannot start charging" about hardware that was
+  doing exactly what it was told — with the contactor cycling once per
+  10-second cycle underneath the anti-cycle floor shipped in beta.12, which
+  counts SEM's own operations and never saw the box's. The charger's own start
+  is now sent on the transition, and the switch only claims the session when
+  the switch *is* the start.
+
 # [2.1.0-beta.21] — 13.09.2026
 
 - 🐛 **"Finish overnight from: Grid" no longer buys the whole day's target at
