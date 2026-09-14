@@ -3507,3 +3507,52 @@ forecast the other way buys grid in full sun). Deliberately not guessed at here.
 question:** for every control a user can
 see — list the backend flags it writes, then read its LABEL as a specification and ask of each flag
 *"does this one honour every word of it?"* Refs #953 #633 #938 #620 #559 #885.
+
+### 89. A read role bound among measurand siblings — the capability outranks the measurement — GUARDED
+**Symptom:** SEM reports an EV charger drawing its full nameplate power, continuously, with no car
+plugged in — and then infers a connected, charging vehicle from that power (`sensor_reader`:
+current cannot flow without a plug), so the EV budget, the charging determination and the house
+balance residual are all wrong while the charger sits idle. Nothing errors: the sensor is real,
+correctly united, plausible and monotonic-free. It is simply about a different thing.
+**Root shape:** an integration that names its entities after PROTOCOL MEASURANDS publishes a whole
+family under one `device_class`, and SEM's brand matchers bind the read roles
+(`ev_charging_power_sensor`, `ev_total_energy_sensor`, `ev_session_energy_sensor`) on that device
+class ALONE, keeping the first or the last entity the loop happened to see. The only thing that
+separates a measurement from a capability the box ADVERTISES, or from the opposite direction, or
+from a window delta, is a segment of the entity id that nothing reads — so registry ORDER decides.
+The read twin of class 56 (a mode-qualified fallback register bound as the live control surface):
+there a mis-bind actuates, here it poisons every decision downstream of the read, and unlike a
+mis-bound control it never announces itself by failing to write. Cousin of class 28 — a sensor
+trusted for the slot it sits in rather than for what it measures — except that here SEM chose the
+slot itself, so there is no user to have known better.
+**Live catch (#962, @bgthb, 2.0.0, Huawei SCharger 22-KT over lbbrhzn/ocpp):** one charge point
+publishes `Power.Active.Import`, `Power.Offered` and `Power.Active.Export` all as
+`device_class: power`, and four `Energy.Active.{Import,Export}.{Register,Interval}` counters as
+`device_class: energy`. `_discover_ocpp`'s last-wins bound `sensor.wallbox_power_offered` — the
+22 kW the box advertises it *could* give, reported whether or not a car is there — and its
+first-wins bound `sensor.wallbox_energy_active_export_interval`, wrong in both direction (V2G) and
+window (a delta, not a register).
+**Where it lives:** every read-role matcher in `hardware_detection.py` — the hand-written brand
+functions (KEBA, Easee, go-e, Wallbox, Zaptec, OCPP, Ohme, Peblar, V2C, Alfen, OpenEVSE, Blue
+Current, OpenWB), the `_BRAND_HINTS` rows (ChargePoint, GARO, JuiceBox, Wattpilot, Heidelberg),
+`probe_charger_candidates`, `charger_from_near_miss`, and the glob matrix's
+`get_best_match` — all of which take `device_class == "power"` / `"energy"` as the whole question.
+**Closure:** one brand-agnostic guard, `_reject_capability_sensor`, inside the single
+`apply_charger_discovery_guards` choke point all four discovery paths now funnel through (the same
+shape #886 used for the control half): if a bound read role names a capability (`offered`, `limit`,
+`max`, `rated`, `nominal`, `capacity`, `available`, `setpoint`, `target`, `allowed`) or the wrong
+quantity (`export`, `reactive`), swap it for the sibling of the same device class that measures,
+chosen by a stable rank over the entity id — never by registry order — and DROP the role when the
+family has none. Fail-closed: a missing power reading is a charger SEM reports honestly, a
+nameplate read as a measurement is one it acts on. Every rule reads id SEGMENTS, not substrings
+(class 67: `rated` lives inside `solar_generated_power`). `_discover_ocpp` additionally asks for
+its measurands by name, because the OCPP vocabulary is fixed by the protocol and SEM can be exact.
+**Guard:** `tests/test_962_measurand_family.py` — the reporter's own family in his own order (with
+the pre-fix rule spelled out, so the pins cannot pass vacuously); an order-independence oracle over
+EVERY platform in `_EV_CHARGER_PLATFORMS`, forward and reversed; an invariant that no brand, hinted
+or hand-written, binds a capability-named entity to a read role, mirrored on the prober and the
+diagnostics report; the fail-closed drop; and the class-67 segment pin.
+**Sweep question:** for every entity a detector binds to a READ role, can the integration publish a
+second entity of the same domain and device_class that measures something adjacent — a capability,
+the other direction, another window — and does the matcher separate them, or pick by ordering?
+Refs #962 #886 #947 #814 #816.
