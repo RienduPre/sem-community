@@ -3513,6 +3513,21 @@ class SensorReader:
         if import_val is None or export_val is None:
             return proof["verdict"]          # a counter is unreadable this cycle
 
+        if self._sign_vote_warmup > 0:
+            # (#947 review, open item closed) While HA's recorder is still
+            # replaying, counter states arrive in bursts that are not elapsed
+            # time. The sign voter already sits those cycles out and keeps its
+            # baselines fresh; the corroborator compares MAGNITUDES, so a
+            # replayed jump against a real-time integral would convict a good
+            # meter. Same gate, same reason: keep the baseline current, score
+            # nothing.
+            proof["started"] = None
+            proof["import_base"] = import_val
+            proof["export_base"] = export_val
+            proof["step_import"] = None
+            proof["step_export"] = None
+            return proof["verdict"]
+
         if proof["started"] is None:
             proof["started"] = now
             proof["last_sample"] = now

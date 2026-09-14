@@ -480,3 +480,20 @@ class TestTheReviewFindings:
         import inspect
         src = inspect.getsource(publish_diag)
         assert "split-declared" in src
+
+
+def test_recorder_replay_cannot_convict_a_meter(monkeypatch):
+    """(#947 review, open item) While HA replays the recorder, counter states
+    arrive in bursts that are not elapsed time. The sign voter already sits
+    those cycles out; the corroborator compares MAGNITUDES, so a replayed jump
+    against a real-time integral would convict a good meter. Same gate."""
+    rig = _Rig(monkeypatch, _guessed_states(import_w=2000.0))
+    rig.reader._sign_vote_warmup = 12
+    kwh = 100.0
+    for _ in range(12):                       # the replay burst
+        rig.clock.advance(10)
+        kwh += 5.0                            # a whole afternoon per cycle
+        rig.set("sensor.grid_import_total", kwh, unit="kWh")
+        rig.read()          # read_power decrements the warm-up itself
+    assert rig.reader._split_grid_proof["verdict"] is None
+    assert rig.reader._split_grid_proof["contradictions"] == 0
