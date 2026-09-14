@@ -2329,6 +2329,23 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             pre_debounced=True,
         )
 
+    def _trace_commanded_per_charger(self) -> dict:
+        """(#961) What SEM actually asked each charger for, in amps.
+
+        Reads each device's own ``_current_setpoint`` — the same authoritative
+        value ``sensor.sem_charger_<id>_commanded_current`` publishes (#291) —
+        so the trace and that sensor can never tell different stories. Empty
+        when no charger is registered, which the caller reads as "nothing to
+        say" and falls back to the fleet budget.
+        """
+        out: dict = {}
+        for cid, dev in (getattr(self, "_ev_devices", None) or {}).items():
+            try:
+                out[str(cid)] = int(float(getattr(dev, "_current_setpoint", 0) or 0))
+            except (TypeError, ValueError):
+                continue
+        return out
+
     def _trace_ev(self, trace, sem_data, power) -> None:
         st = trace.subsystem("ev")
         soc = round(float(getattr(power, "battery_soc", 0.0) or 0.0), 1)
@@ -2346,13 +2363,34 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             mgmt["curtailment"] = dict(curtailment)
         st.management = LayerRecord(LayerStatus.OK, "policy inputs", mgmt)
 
-        amps = int(getattr(sem_data, "calculated_current", 0) or 0)
+        # (#961, from @RienduPre in #958) ``calculated_current`` is the FLEET canonical
+        # budget — one number for the house, computed from the primary
+        # charger's config — and it was published here under the name
+        # ``commanded_amps``, directly beside a per-charger mode reason. On a
+        # two-charger install those are about different things and nothing
+        # said so, which is how a budget following the sun came to be read as
+        # a control loop hunting. The budget keeps its own name; what SEM
+        # actually ASKED each charger for is each device's own setpoint, the
+        # same value ``sensor.sem_charger_<id>_commanded_current`` publishes.
+        budget_amps = int(getattr(sem_data, "calculated_current", 0) or 0)
         reason = str(getattr(sem_data, "charging_strategy_reason", "") or "")
         budget = round(float(getattr(sem_data, "available_power", 0.0) or 0.0))
+        per_charger = self._trace_commanded_per_charger()
+        amps = sum(per_charger.values()) if per_charger else budget_amps
         p_status = LayerStatus.OK if amps > 0 else LayerStatus.IDLE
-        st.process = LayerRecord(
-            p_status, reason, {"commanded_amps": amps, "budget_w": budget},
-        )
+        data = {
+            "commanded_amps": amps,
+            "budget_amps": budget_amps,
+            "budget_w": budget,
+        }
+        if len(getattr(self, "_ev_devices", None) or {}) > 1:
+            # Only a fleet needs the breakdown; a single charger's number is
+            # already the whole story and a dict would just be noise. Gated on
+            # the DEVICE count, not on how many parsed: a charger whose
+            # setpoint could not be read must be visible by its absence from
+            # the dict, not hidden by shrinking the fleet to one.
+            data["per_charger_amps"] = per_charger
+        st.process = LayerRecord(p_status, reason, data)
 
         observed = round(float(getattr(power, "ev_power", 0.0) or 0.0))
         # Observer mode (global): SEM decided but does NOT command anything, so

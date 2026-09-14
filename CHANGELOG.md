@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **The EV trace no longer calls the fleet budget a command** (#961, found
+  in @RienduPre's diagnostics in #958). `trace.ev.process.commanded_amps` was
+  the fleet canonical budget — one number for the house, from the primary
+  charger's config — published under the name of a command and printed beside
+  a *per-charger* mode reason. A budget following the sun is supposed to move;
+  under that label, next to `always_max mode — charge at hardware maximum`, it
+  reads as a control loop hunting, which is how it was reported. The budget
+  keeps its own name (`budget_amps`), `commanded_amps` is now what SEM actually
+  asked the chargers for — the same setpoints `sensor.sem_charger_<id>_commanded_current`
+  publishes — and a fleet gets `per_charger_amps` beside it.
+
 - ✨ **SG-Ready works on heat pumps whose contacts are not switches** (#801, by
   @HorizonKane). A Buderus/Bosch behind EMS-ESP carries its two SG-Ready
   inputs as `text` entities holding a bit string, so neither the switch
