@@ -276,12 +276,17 @@ EV_INTEGRATION_PATTERNS = {
             ],
             "ev_current": [
                 ("number.ocpp_*_maximum_current", "OCPP - Maximum Current", 10),
-                ("sensor.ocpp_*_current_offered", "OCPP - Current Offered", 9),
-                ("sensor.ocpp_*_current_import", "OCPP - Current Import", 8),
+                # (#962) Current.Import is what flows; Current.Offered is
+                # what the charge point advertises it COULD give.
+                ("sensor.ocpp_*_current_import", "OCPP - Current Import", 9),
+                ("sensor.ocpp_*_current_offered", "OCPP - Current Offered", 8),
             ],
             "ev_session_energy": [
-                ("sensor.ocpp_*_energy_active_import_register", "OCPP - Energy Register", 10),
-                ("sensor.ocpp_*_session_energy", "OCPP - Session Energy", 9),
+                # (#962) the session slot wants a per-session counter, not
+                # the cumulative register that never resets.
+                ("sensor.ocpp_*_session_energy", "OCPP - Session Energy", 10),
+                ("sensor.ocpp_*_energy_active_import_interval",
+                 "OCPP - Import Interval", 9),
             ],
             "ev_total_energy": [
                 ("sensor.ocpp_*_energy_active_import_register", "OCPP - Energy Register", 10),
@@ -608,14 +613,25 @@ class EVChargerDetector:
         Returns the highest priority valid entity.
         """
         detected = self.detect_ev_entities()
-        if sensor_type in detected and detected[sensor_type]:
-            for entity_id, description, exists, priority in detected[sensor_type]:
-                if exists:
-                    _LOGGER.info(
-                        f"Auto-detected {sensor_type}: {entity_id} ({description}) "
-                        f"[Priority: {priority}]"
-                    )
-                    return entity_id
+        candidates = detected.get(sensor_type) or []
+        # (#962, bug class 89) A glob cannot tell ``Power.Offered`` from
+        # ``Power.Active.Import`` — both are "a power sensor whose name
+        # matches". For the roles that must carry a MEASUREMENT, try the
+        # candidates that claim to measure first, and fall back to a
+        # capability-named match only when the install offers nothing else.
+        if sensor_type in ("ev_charging_power", "ev_session_energy",
+                           "ev_total_energy"):
+            candidates = (
+                [c for c in candidates if _measures_the_quantity(c[0])]
+                + [c for c in candidates if not _measures_the_quantity(c[0])]
+            )
+        for entity_id, description, exists, priority in candidates:
+            if exists:
+                _LOGGER.info(
+                    f"Auto-detected {sensor_type}: {entity_id} ({description}) "
+                    f"[Priority: {priority}]"
+                )
+                return entity_id
         return None
 
     def get_detected_ev_integrations(self) -> Dict[str, bool]:
@@ -726,6 +742,211 @@ def _online_current_control(offline_eid: str, entities) -> Optional[str]:
     return None
 
 
+#: (#962, bug class 89) Object-id SEGMENTS that make a sensor a CAPABILITY the
+#: charger ADVERTISES — a nameplate, an offer, a limit somebody set — rather
+#: than a measurement of what the car is drawing. OCPP's ``Power.Offered`` is
+#: the live case: it sits at the box's maximum the whole time nothing is
+#: plugged in. Matched as whole SEGMENTS, never substrings (class 67):
+#: "rated" also lives inside ``solar_generated_power``. English-only, which
+#: is a known gap, not a claim: a German ``nennleistung`` is one word and no
+#: segment rule can see it. That gap fails OPEN — see the no-swap rule below.
+_CAPABILITY_SEGMENTS = frozenset({
+    "offered", "offer", "limit", "limits", "max", "maximum", "maximal",
+    "maximale", "rated", "nominal", "capacity", "available", "setpoint",
+    "target", "allowed",
+})
+
+#: The wrong QUANTITY for a charger read role. A charger draws energy in —
+#: OCPP fixes that by spec (``Import``), and ``Export`` is the V2G direction
+#: flowing back out. ``reactive`` power is not charging power at all.
+_WRONG_QUANTITY_SEGMENTS = frozenset({"export", "exported", "reactive"})
+
+#: One LEG of a polyphase reading, never the charger's draw. Excluded from
+#: the replacement search outright: a third of the truth is not a fallback
+#: for the truth, and openWB, Alfen, Zaptec, go-e and KEBA all publish these
+#: beside the total.
+_PHASE_SEGMENTS = frozenset({"l1", "l2", "l3", "phase1", "phase2", "phase3"})
+
+#: Which accumulation window each energy role asks for. An OCPP
+#: ``…Interval`` is a metering-interval delta — neither a lifetime register
+#: nor a session total, so it contradicts both.
+_TOTAL_WINDOW = frozenset({"register", "total", "lifetime", "cumulative"})
+_SESSION_WINDOW = frozenset({"session"})
+_INTERVAL_WINDOW = frozenset({"interval"})
+
+#: The read roles that are picked out of a measurand FAMILY.
+_MEASURAND_ROLES = (
+    "ev_charging_power_sensor",
+    "ev_total_energy_sensor",
+    "ev_session_energy_sensor",
+)
+
+#: Units grouped by what they measure, so a replacement can be required to
+#: be COMMENSURABLE with what it replaces. An integration that omits
+#: ``device_class`` (Zaptec's custom builds do) still publishes a unit, and
+#: without this check the search happily swaps a power reading for a status
+#: string from the same device.
+_UNIT_FAMILY = {
+    "w": "power", "kw": "power", "mw": "power", "va": "power", "kva": "power",
+    "wh": "energy", "kwh": "energy", "mwh": "energy",
+    "a": "current", "ma": "current",
+    "v": "voltage",
+}
+
+
+def _id_segments(entity_id: str) -> frozenset:
+    """The object-id's underscore-separated segments, lowercased.
+
+    A rule written over SUBSTRINGS silently claims the brands that happen to
+    own the letters (class 67): ``rated`` is the tail of
+    ``solar_generated_power``, ``max`` the head of ``maximum``. Segments are
+    what an entity id is actually made of, so that is what the rules read.
+    """
+    obj = entity_id.split(".", 1)[1] if "." in entity_id else entity_id
+    return frozenset(str(obj).lower().split("_"))
+
+
+def _measures_the_quantity(entity_id: str) -> bool:
+    """(#962) Does this entity id claim to MEASURE, or only to advertise?
+
+    False for a capability the box publishes about itself and for the wrong
+    direction/quantity. Deliberately about the NAME only — the registry's
+    ``device_class`` cannot tell ``Power.Offered`` from ``Power.Active.Import``
+    (both are ``power``), which is exactly how the class survives.
+    """
+    segs = _id_segments(entity_id)
+    return not (segs & _CAPABILITY_SEGMENTS) and not (segs & _WRONG_QUANTITY_SEGMENTS)
+
+
+def _is_phase_leg(entity_id: str) -> bool:
+    """One leg of a polyphase reading (``…_power_l2``, ``…_phase_3_power``)."""
+    segs = _id_segments(entity_id)
+    if segs & _PHASE_SEGMENTS:
+        return True
+    return "phase" in segs and bool(segs & {"1", "2", "3"})
+
+
+def _unit_family(entry) -> Optional[str]:
+    """What a registry entry's unit MEASURES — ``power``, ``energy``, … —
+    or None when it publishes no unit SEM recognises."""
+    unit = (getattr(entry, "original_unit_of_measurement", None)
+            or getattr(entry, "unit_of_measurement", None))
+    if unit is None:
+        return None
+    return _UNIT_FAMILY.get(str(unit).strip().lower())
+
+
+def _rank_measurand(entity_id: str, role: str) -> tuple:
+    """A STABLE order over one measurand family — lower is better.
+
+    The whole bug is that registry ordering decided; every pick made here is
+    therefore a function of the entity id alone, so the same install answers
+    the same way whatever order its entities were created in. The WINDOW
+    terms outweigh the direction term: a lifetime register in the session
+    slot is a different mistake from the one this guard exists to fix, and
+    must not be traded for a nicer-looking direction.
+    """
+    segs = _id_segments(entity_id)
+    if role == "ev_total_energy_sensor":
+        want, against = _TOTAL_WINDOW, _SESSION_WINDOW | _INTERVAL_WINDOW
+    elif role == "ev_session_energy_sensor":
+        want, against = _SESSION_WINDOW, _TOTAL_WINDOW | _INTERVAL_WINDOW
+    else:
+        want, against = frozenset(), frozenset()
+    rank = 0
+    if want and not (segs & want):
+        rank += 4
+    if against and (segs & against):
+        rank += 4
+    if "import" not in segs:
+        rank += 1          # the direction a charger draws in, when named
+    return (rank, entity_id)
+
+
+def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
+                   taken=()) -> Optional[str]:
+    """The sibling of ``bound_eid`` that measures what ``role`` asks about.
+
+    Same device, same domain, same ``device_class`` AND the same unit
+    FAMILY — commensurable with what it replaces, so the search cannot hand
+    back a status string from a brand that omits device classes. Polyphase
+    legs and entities already holding another role are excluded outright,
+    and the winner is chosen by ``_rank_measurand`` rather than by whoever
+    the loop happened to see last.
+    """
+    want_dc = getattr(bound_entry, "original_device_class", None)
+    want_unit = _unit_family(bound_entry)
+    if want_dc is None and want_unit is None:
+        # Nothing identifies the family. A swap here would be a guess of its
+        # own — exactly the move that put us in #962.
+        return None
+    candidates = []
+    for e in entities:
+        eid = str(e.entity_id)
+        if eid == bound_eid or eid in taken or not eid.startswith("sensor."):
+            continue
+        if getattr(e, "original_device_class", None) != want_dc:
+            continue
+        if _unit_family(e) != want_unit:
+            continue
+        if not _measures_the_quantity(eid) or _is_phase_leg(eid):
+            continue
+        candidates.append(eid)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: _rank_measurand(c, role))
+
+
+def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
+    """(#962, bug class 89) Never read a charger's ADVERTISED capability as
+    its measurement.
+
+    An integration that names its sensors after protocol measurands publishes
+    a whole family under one ``device_class``: OCPP's single device carries
+    ``Power.Active.Import``, ``Power.Offered``, ``Power.Active.Export`` and
+    ``Power.Reactive.Import`` all as ``device_class: power``. Every brand
+    matcher binds the charging-power role on that device class alone and
+    takes the first/last one it sees, so registry ORDER decided — and on
+    @bgthb's Huawei SCharger 22-KT (#962) it decided ``power_offered``: the
+    box's 22 kW nameplate, reported continuously with no car plugged in. SEM
+    then infers a connection "from physics" (``sensor_reader``), so an empty
+    charger reads as a charging car forever.
+
+    SWAP ONLY, never drop. Removing the role looks like the fail-closed
+    move and is not one in this tree: a charger with no power entity is
+    still registered (``coordinator._retry_ev_device_setup`` gates on the
+    service, not the sensor), KEBA's adapter decides ``actual_charging``
+    from power alone so it would read "never charging", the 18-cycle
+    ``ev_power < 50`` rule would anchor its SoC at 100 %, and in a
+    multi-charger install the missing per-charger key falls back to the
+    FLEET sum (class 3). So when the family offers no measured sibling the
+    pre-#962 binding stands, and a name SEM merely finds suspicious can
+    never cost a user their charger.
+
+    Brand-agnostic on purpose: every read matcher, hand-written or hinted,
+    funnels through the discovery choke point, so the class cannot recur
+    unnoticed in the next brand.
+    """
+    by_id = {str(e.entity_id): e for e in entities}
+    for role in _MEASURAND_ROLES:
+        eid = result.get(role)
+        if not eid:
+            continue
+        eid = str(eid)
+        if _measures_the_quantity(eid):
+            continue
+        entry = by_id.get(eid)
+        if entry is None:
+            # Not a member of the family we were handed — nothing to reason
+            # about, and a blind swap would be a guess of its own.
+            continue
+        taken = {str(v) for k, v in result.items()
+                 if k in _MEASURAND_ROLES and k != role}
+        twin = _measured_twin(eid, entities, role, entry, taken=taken)
+        if twin:
+            result[role] = twin
+
+
 def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
     """(#886, bug class 56) An ``*_offline_*`` current limit is a
     disconnected-mode FALLBACK — the register the charger honours only when it
@@ -747,6 +968,22 @@ def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
         result["ev_current_control_entity"] = online
     else:
         result.pop("ev_current_control_entity", None)
+
+
+def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
+    """Every brand-agnostic correction a freshly discovered charger config
+    gets, at the one place all four REGISTRY discovery paths funnel through —
+    the config path, the diagnostics report, the generic prober and the
+    near-miss offer. A guard added here closes its class for every brand,
+    hinted or hand-written, and for the next one nobody has written yet.
+
+    The glob matrix (``EVChargerDetector.get_best_match``) is a fifth path
+    and deliberately does NOT funnel through here: it produces a config-flow
+    PREFILL the user confirms, not a binding SEM acts on, so it applies the
+    same ``_measures_the_quantity`` predicate as a demotion rather than a
+    correction."""
+    _reject_offline_current_control(result, entities)
+    _reject_capability_sensor(result, entities)
 
 
 def discover_all_ev_chargers_from_registry(
@@ -795,8 +1032,9 @@ def discover_all_ev_chargers_from_registry(
             result = discover_fn(device_entities)
             if result:
                 # (#886) never drive a charger through its offline fallback
-                # register — swap to the online twin or drop the binding.
-                _reject_offline_current_control(result, device_entities)
+                # register; (#962) never read its advertised capability as a
+                # measurement.
+                apply_charger_discovery_guards(result, device_entities)
                 # Preserve the registry's real domain for diagnostics/stable
                 # migration metadata (e.g. zaptec_custom), not just the
                 # canonical matcher name.
@@ -896,8 +1134,10 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
             elif dom == "sensor" and dc == "energy":
                 evidence.append(f"{eid}: sensor/energy → metered energy (not a charger mark)")
         # (#886) the prober is advisory, but must not suggest an offline
-        # fallback register as the control the config path will bind.
-        _reject_offline_current_control(roles, dev_entities)
+        # fallback register as the control the config path will bind — nor
+        # (#962) a ``Power.Offered``-shaped capability as the power reading
+        # its own charger shape is then judged on.
+        apply_charger_discovery_guards(roles, dev_entities)
         has_power = "ev_charging_power_sensor" in roles
         # Live on the rig: smart plugs (Shelly-class, kitchen toaster, carport
         # light) expose power + a binary with device_class=power — the same
@@ -1248,9 +1488,16 @@ def charger_from_near_miss(dev_entities, platform: str,
             out.setdefault("ev_charging_sensor", eid)
         elif eid.startswith("sensor.") and dc == "energy" and "session" in eid:
             out.setdefault("ev_session_energy_sensor", eid)
+    # (#886/#962) the offer must name the entities SEM would actually use —
+    # the same guards the config path applies, or the near miss proposes a
+    # charger whose power reading is the box's nameplate.
+    apply_charger_discovery_guards(out, dev_entities)
     # Without a power reading SEM cannot see what the car is drawing, and a
-    # charger it cannot measure is one it must not steer.
+    # charger it cannot measure is one it must not steer. Same for the
+    # control the offer is built around, if a guard just took it away.
     if "ev_charging_power_sensor" not in out:
+        return {}
+    if "ev_current_control_entity" not in out:
         return {}
     out["id"] = f"{platform}_{str(getattr(dev_entities[0], 'device_id', '') or 'device')}"[:48]
     out["name"] = (describe_domain(platform) or {}).get("name") or platform
@@ -1568,9 +1815,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             devices.setdefault(e.device_id, []).append(e)
         for device_id, dev_entities in devices.items():
             mapping = discover_fn(dev_entities) or {}
-            # (#886) mirror the config path's offline-fallback guard so the
-            # diagnostics report shows the entity SEM will actually drive.
-            _reject_offline_current_control(mapping, dev_entities)
+            # (#886/#962) mirror the config path's guards so the
+            # diagnostics report shows the entities SEM will actually use.
+            apply_charger_discovery_guards(mapping, dev_entities)
             # (#804 B4c) the report path re-runs discovery per DEVICE, so the
             # installation-sibling threshold scan from the config path never
             # fires here — attach the same suggestion so the diagnostics
@@ -2184,22 +2431,49 @@ def _discover_ocpp(entities) -> Dict[str, str]:
 
     OCPP chargers use sensor entities for status (not binary_sensor).
     Status values: Available, Preparing, Charging, SuspendedEV, Finishing, etc.
+
+    (#962) The integration names its sensors after the PROTOCOL's measurands,
+    so one charge point publishes a whole family under ``device_class: power``
+    and another under ``device_class: energy``. Only one member of each
+    answers SEM's question. ``Power.Offered`` is the capability the charge
+    point ADVERTISES — pinned at the box's maximum the whole time nothing is
+    plugged in (@bgthb's Huawei SCharger 22-KT reported 22 kW with no car);
+    ``…Export…`` is the V2G direction; ``…Interval`` is a window delta, not a
+    register. Binding on the device class alone let registry ORDER pick among
+    them, so the family is filtered and then ranked by name.
     """
     result: Dict[str, str] = {}
+    powers: list = []
+    energies: list = []
+    all_powers: list = []
+    all_energies: list = []
     for entry in entities:
-        eid = entry.entity_id
+        eid = str(entry.entity_id)
         dc = entry.original_device_class
         if eid.startswith("sensor.") and "status" in eid and "connector" in eid:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
-            result["ev_charging_power_sensor"] = eid
+            all_powers.append(eid)
+            if _measures_the_quantity(eid):
+                powers.append(eid)
         if eid.startswith("sensor.") and dc == "energy":
-            result.setdefault("ev_total_energy_sensor", eid)
+            all_energies.append(eid)
+            if _measures_the_quantity(eid):
+                energies.append(eid)
         if eid.startswith("number.") and ("current" in eid or "limit" in eid):
             result["ev_current_control_entity"] = eid
         if eid.startswith("switch.") and "charge" in eid:
             result["ev_start_stop_entity"] = eid
+    # Swap-only, like the choke-point guard: a charge point that publishes
+    # nothing but capabilities keeps the pre-#962 answer rather than losing
+    # the role, because a missing power entity is not a safe state here
+    # (see _reject_capability_sensor).
+    for role, family, whole in (("ev_charging_power_sensor", powers, all_powers),
+                                ("ev_total_energy_sensor", energies, all_energies)):
+        pick = family or whole
+        if pick:
+            result[role] = min(pick, key=lambda e: _rank_measurand(e, role))
     return result
 
 
