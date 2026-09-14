@@ -270,6 +270,11 @@ class TestStructuralKeysVisibility:
             # #593 hardware battery cycles sensor
             "battery_cycles_sensor",
             "heat_pump_relay1_entity", "heat_pump_relay2_entity",
+            # (#801) the ON/OFF values of a text/number/select contact — read
+            # at HeatPumpController construction, so a change must reload for
+            # the same reason the entity itself does
+            "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+            "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
             "heat_pump_climate_entity", "heat_pump_power_sensor",
             "heat_pump_temperature_sensor",
             # #600 load-device energy sensors + #602 rated power
