@@ -196,8 +196,21 @@ READ_ROLE_RULES: Final[Dict[str, Dict[str, Any]]] = {
     },
     "grid_power": {
         "platform": "sensor",
+        # (#947 audit) The spellings below were found by scanning every CACHED
+        # vocabulary for grid-meter-shaped keys the lexicon did not match — 98
+        # across 46 domains. Word order is the recurring miss: Fronius declares
+        # ``power_grid``, not ``grid_power``, and SEM ships support for it.
+        # Every addition is ANCHORED to a whole key. A loose ``power_consumption``
+        # was deliberately NOT added: it would take lambda_heat_pumps,
+        # idm_heatpump and kia_uvo as grid meters, which is #947's own bug class
+        # committed a second time.
         "any": (r"^grid_(active_)?power$", r"^power_meter_active_power$",
-                r"grid_exchange", r"^meter_active_power$", r"^grid_net_power$"),
+                r"grid_exchange", r"^meter_active_power$", r"^grid_net_power$",
+                r"^power_grid$",              # fronius
+                r"^grid_power_signed$",       # anker_solix
+                r"^site_grid_power$",         # enphase_ev
+                r"^input_grid_power$",        # silla_prism
+                r"^power_flow_grid$"),        # tibber
         "not": (r"today", r"daily", r"total", r"phase", r"l1", r"l2", r"l3",
                 r"import_energy", r"export_energy"),
     },
@@ -212,14 +225,27 @@ READ_ROLE_RULES: Final[Dict[str, Dict[str, Any]]] = {
         "platform": "sensor",
         "any": (r"^grid_import_power$", r"^import_from_grid", r"^import_power$",
                 r"^grid_imported_power$", r"^from_grid_power$",
-                r"^consumption_from_grid", r"^pac_to_user"),
+                r"^consumption_from_grid", r"^pac_to_user",
+                # (#947 audit) declared by real meters, previously unmatched
+                r"^current_power_usage$",     # dsmr_reader — the actual DSMR pair
+                r"^power_grid_import$",       # fronius
+                r"^power_from_grid$",         # mypv (AC-THOR)
+                r"^power_flow_from_grid$",    # tibber
+                r"^gridconsumedpower$"),      # senec
         "not": (r"energy", r"today", r"daily", r"total", r"month", r"year",
                 r"cumulative", r"phase", r"l1", r"l2", r"l3"),
     },
     "grid_export_power": {
         "platform": "sensor",
         "any": (r"^grid_export_power$", r"^export_to_grid", r"^export_power$",
-                r"^grid_exported_power$", r"^to_grid_power$", r"^pac_to_grid"),
+                r"^grid_exported_power$", r"^to_grid_power$", r"^pac_to_grid",
+                # (#947 audit) declared by real meters, previously unmatched
+                r"^current_power_return$",    # dsmr_reader — the actual DSMR pair
+                r"^power_grid_export$",       # fronius
+                r"^power_to_grid$",           # growatt_modbus
+                r"^power_flow_to_grid$",      # tibber
+                r"^feed_in_power$",           # huawei_solar
+                r"^feedinpower$"),            # solax_cloud_api
         "not": (r"energy", r"today", r"daily", r"total", r"month", r"year",
                 r"cumulative", r"phase", r"l1", r"l2", r"l3", r"limit"),
     },

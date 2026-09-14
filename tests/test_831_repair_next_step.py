@@ -30,6 +30,9 @@ TROUBLESHOOTING = Path(__file__).resolve().parent.parent / "docs" / "TROUBLESHOO
 
 DOCS_SIDE = {
     "split_grid_guessed",   # (#911) set the two grid power entities
+    # (#947) the guess was checked against the energy counters and failed —
+    # the next step is naming the real meters, which is the user's config
+    "split_grid_rejected",
     # (#935) files from an older SEM install were found and SEM's own were
     # cleaned. The next step is a CHOICE about the user's own history, and
     # the docs are where the two options and their consequences live.

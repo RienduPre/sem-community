@@ -1718,8 +1718,8 @@
       "description": "SEM's battery platform is set to **Generic / other**, but the {brand} integration is loaded. Earlier versions of the options wizard offered only Generic and Deye and defaulted to Generic, so walking through that page once demoted a {brand} install to the generic adapter — no forcible charge, no idempotent register writes. Open **Settings → Integrations → SEM → Configure → Battery scheduler** and set **Battery charge platform** to **Auto-detect**. If Generic is a deliberate choice (a battery with its own control entities), set that entity and this notice goes away."
     },
     "split_grid_guessed": {
-      "title": "SEM hat Ihre Netzleistungs-Zähler erraten",
-      "description": "Es ist keine Netzleistungs-Entität konfiguriert und das Energie-Dashboard liefert keine, daher hat SEM anhand von Entitätsnamen **{import_entity}** als Netzbezugs-Zähler und **{export_entity}** als Einspeise-Zähler übernommen — ohne Gerätenachweis. Sind das nicht Ihre Zähler, steuert jede Entscheidung auf einer falschen Zahl. Öffnen Sie **Einstellungen → Integrationen → SEM → Konfigurieren → Sensoren** und setzen Sie **Netzbezug Leistung** und **Einspeisung Leistung** explizit; der Hinweis verschwindet beim nächsten Lesen."
+      "title": "SEM is checking two guessed grid meters",
+      "description": "No grid power entity is configured and the Energy Dashboard gives none, so SEM matched entity names and found **{import_entity}** as a possible grid import meter and **{export_entity}** as a possible export meter — a name match, with no device evidence behind it. SEM will NOT steer on them until they agree with your grid energy counters, so grid power reads 0 for now. To skip the wait, open **Settings → Integrations → SEM → Configure → Sensors** and set **Grid import power** and **Grid export power** explicitly."
     },
     "battery_control_write_not_taken": {
       "title": "Eine Batterie-Steuerung übernimmt den geschriebenen Wert nicht: {entity_id}",
@@ -1732,6 +1732,10 @@
     "previous_install_leftovers": {
       "title": "Files from a previous SEM install were found",
       "description": "SEM removed {removed} leftover file(s) of its own from an earlier install — those were SEM's and are gone.\n\nWhat is left is yours, and SEM will not take it without being asked: the long-term statistics of the old install's sensors, and the dashboard it generated. If you want those cleared too, run the **Remove leftovers** action (Developer tools → Actions → *SEM: Remove leftovers*). If you would rather keep your history, ignore this — nothing else will be deleted."
+    },
+    "split_grid_rejected": {
+      "title": "SEM could not find your grid power meters",
+      "description": "No grid power entity is configured and the Energy Dashboard gives none. SEM matched **{import_entity}** and **{export_entity}** by entity name, then checked them against your grid energy counters — and they do not track them, so they are not your meters. SEM reports **no grid power** rather than a wrong one. Open **Settings → Integrations → SEM → Configure → Sensors** and set **Grid import power** and **Grid export power** explicitly; this notice clears once real meters are named or the guesses start agreeing."
     }
   },
   "selector": {

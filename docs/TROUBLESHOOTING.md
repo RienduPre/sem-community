@@ -276,13 +276,64 @@ matching entity *names* against known meter patterns (`power_consumption`,
 device as your grid energy counters, the pick is a guess — on a large install
 a heat pump's `power_consumption` or a forecast's `power_production` can win.
 Since #911 a guess is said out loud (this Repair and one WARNING) and
-forecast/estimate entities are never candidates.
+forecast/estimate entities are never candidates. Since **#947** a guess is
+not steered on at all until it is corroborated — see the next section. While
+SEM is still checking, grid power reads 0 rather than a number nobody stands
+behind.
 
 **Fix:** open *Settings → Integrations → SEM → Configure → Sensors* and set
 **Grid import power** and **Grid export power** to your real meter entities
 (both positive-only, in W). The Repair clears on the next read. If your
 inverter only exposes per-phase registers, a template sensor summing them
 works — see `grid_import_power_entity` in the setup guide.
+
+## SEM could not find your grid power meters
+
+**Symptom:** a Repair names two entities and says they are **not** your
+meters, and SEM reports no grid power at all.
+
+**Cause (#947):** the reporter's `sem_grid_import_power` was a clean square
+wave — ~852 W for one cycle, then 0 — while every real meter in the house
+read about zero. SEM had matched `sensor.power_production_now`, a **solar
+forecast** entity, as the grid export meter, because one of the export name
+patterns is `power_production` (the DSMR/P1 feed-in meter).
+
+Excluding forecasts fixed that one collision (#911), but a blacklist over
+every sensor in a house cannot be finished: the import patterns reach
+`power_consumption`, which names a heat pump, an appliance monitor or a UPS
+as readily as a meter. So a name match is no longer evidence on its own.
+
+SEM now answers the question in three tiers, weakest last:
+
+1. **Declared** — the entity's own integration says this key is the grid
+   import/export meter. SEM reads that from the integration roster, which is
+   built from each integration's own repository. Growatt, Senec, Fronius,
+   Tibber and Anker declare a full pair this way. A forecast integration
+   declares no grid role at all, so on this tier the #947 collision cannot
+   happen — structurally, not by a blacklist somebody has to keep complete.
+2. **Same-device** — a power sensor on the grid counter's own device.
+3. **Name match** — a guess, and the only tier that has to earn its place.
+
+For that last tier SEM integrates the candidate over a window and compares it
+against the grid energy counters it already has and did not guess at. A real
+meter tracks its own counter; a forecast or a sub-load does not. Three
+outcomes, and they are three, not two:
+
+| Verdict | What SEM does |
+|---|---|
+| agrees | adopts the pair and steers on it; both notices clear |
+| disagrees | reports **no** grid power and raises this Repair, naming the kWh each side claimed |
+| not enough has happened yet | reports no grid power and says it is still checking |
+
+A pick from tier 1 or tier 2 is not a guess and never enters the corroboration
+path.
+
+**Fix:** name the real meters. Open *Settings → Integrations → SEM →
+Configure → Sensors* and set **Grid import power** and **Grid export
+power**. If your inverter or cloud integration publishes no fast grid power
+at all — vendor cloud APIs such as FusionSolar's northbound API typically do
+not — then leaving both empty is the correct answer, and SEM saying it is
+blind on grid is the honest reading, not a fault to work around.
 
 ## The battery platform is pinned to generic
 

@@ -348,11 +348,23 @@ async def async_get_config_entry_diagnostics(
                 )
             except Exception:
                 grid_device_resolved = None
+        # (#947) A name-only pick does not steer until the energy counters
+        # corroborate it, so the PICK alone no longer answers "what is SEM
+        # reading". The verdict and the window behind it belong here too —
+        # the whole #947 triage was reconstructed from a log line because
+        # this block named the sensors and not whether they were believed.
+        proof = getattr(reader, "_split_grid_proof", None) or {}
         split_grid_info = {
             "import_sensor": disc.get("import"),
             "export_sensor": disc.get("export"),
             "confidence": disc.get("confidence"),
             "grid_energy_device_resolved": grid_device_resolved,
+            "corroborated": proof.get("verdict"),
+            "corroboration_window": {
+                "import_kwh_seen": round(proof.get("import_wh") or 0.0, 4) / 1000.0,
+                "export_kwh_seen": round(proof.get("export_wh") or 0.0, 4) / 1000.0,
+                "pair_under_test": list(proof.get("pair") or ()) or None,
+            },
         }
 
     # PV string discovery result (#379 triage support).

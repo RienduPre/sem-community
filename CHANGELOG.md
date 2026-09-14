@@ -13,6 +13,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A grid meter SEM guessed by name is no longer steered on until it is
+  proven** (#947, reported by @symon / @bgthb). `sem_grid_import_power` was a
+  clean square wave — ~852 W for one coordinator cycle, then 0 — while every
+  real meter in the house read about zero, and the phantom went straight into
+  the house-consumption balance. When the Energy Dashboard gives SEM grid
+  counters but no grid power entity, SEM matches meters by a substring of the
+  entity id; one of the export patterns is `power_production`, the DSMR/P1
+  feed-in meter, and it matched `sensor.power_production_now` — a **solar
+  forecast**. #911 excluded forecasts, but a blacklist over every sensor in a
+  house cannot be finished: the import patterns reach `power_consumption`,
+  which names a heat pump as readily as a meter. So a name match is no longer
+  evidence by itself. SEM integrates the candidate and compares it against the
+  grid energy counters it already has and did not guess at — a real meter
+  tracks its counter, a forecast or a sub-load does not. Disagreement rejects
+  the pair and SEM reports **no** grid power with a Repair naming the kWh each
+  side claimed; "not enough has happened yet" is its own third answer and not
+  folded into the negative. A pick with device evidence — Growatt, DSMR,
+  E3DC, GivEnergy, Senec — is not a guess and never waits.
+- ✨ **SEM asks the integrations what their grid meters are called before
+  guessing** (#947). The #915 roster reads each integration's own repository;
+  it just was not consulted by the meter discovery, which went straight to
+  matching substrings of entity ids. It is the first tier now — declared,
+  then device evidence, then a guess that must corroborate. Auditing the
+  lexicon behind it found **98 grid-meter-shaped declared keys across 46
+  domains** that it did not match, word order being the recurring miss:
+  Fronius declares `power_grid`, not `grid_power`, so Fronius (9.7k installs)
+  and Tibber (10.7k) contributed no grid role at all. Both now declare a full
+  import/export pair. No loose `power_consumption` rule was added — it would
+  take a heat pump and a car as grid meters, which is this issue's own bug.
+- 🐛 **An export-only meter discovery says which silence it is** (#947). It
+  used to fall through to "no grid power sensor found", which is a different
+  fact. SEM still reads 0 — export-minus-zero would make a house that imports
+  read as one that never does — but now it names the half it has.
+
 # [2.1.0-beta.21] — 13.09.2026
 
 - 🐛 **"Finish overnight from: Grid" no longer buys the whole day's target at

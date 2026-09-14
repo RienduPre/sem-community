@@ -230,6 +230,8 @@ _DOCS_ANCHORS = {
     "soc_zones_out_of_order": "your-battery-soc-zones-are-out-of-order",
     # (#911) the grid meters were guessed by name — set them explicitly
     "split_grid_guessed": "sem-guessed-your-grid-power-meters",
+    # (#947) the guess was checked against the counters and failed
+    "split_grid_rejected": "sem-could-not-find-your-grid-power-meters",
     # (#935) files from an install that came before this one
     "previous_install_leftovers": "files-from-a-previous-sem-install",
     "sensor_stale": "a-sensor-stopped-updating-stale",
@@ -358,7 +360,15 @@ def _versions(hass: HomeAssistant) -> dict:
 def raise_split_grid_guessed(hass: HomeAssistant, *, import_entity, export_entity) -> None:
     """(#911) The grid meters were adopted by entity-name pattern with no
     device evidence. One persistent Repair naming both picks; cleared by a
-    same-device pair, an explicit pair, or a rediscovery."""
+    same-device pair, an explicit pair, or a rediscovery.
+
+    (#947) This is now the SOFTER of two: SEM has candidates it is still
+    checking against the energy counters. Raising it retires the harder one,
+    because a pair cannot be both under test and already disproved."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, "split_grid_rejected")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete (split_grid_rejected) failed: %s", e)
     try:
         ir.async_create_issue(
             hass,
@@ -378,11 +388,45 @@ def raise_split_grid_guessed(hass: HomeAssistant, *, import_entity, export_entit
         _LOGGER.debug("issue_registry.create (split_grid_guessed) failed: %s", e)
 
 
-def clear_split_grid_guessed(hass: HomeAssistant) -> None:
+def raise_split_grid_rejected(hass: HomeAssistant, *, import_entity, export_entity) -> None:
+    """(#947) The counters have answered: these name-matched sensors do not
+    track the grid energy counters, so they are not the meters and SEM is
+    reporting NO grid power rather than a wrong one.
+
+    A separate issue id from its softer sibling, which it retires — same
+    entities, a different situation for the user, and one Repair must never
+    quietly change its own story under a reader.
+    """
     try:
         ir.async_delete_issue(hass, DOMAIN, "split_grid_guessed")
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.delete (split_grid_guessed) failed: %s", e)
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="split_grid_rejected",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="split_grid_rejected",
+            learn_more_url=next_step_url("docs", "split_grid_rejected", **_versions(hass)),
+            translation_placeholders={
+                "import_entity": str(import_entity or "—"),
+                "export_entity": str(export_entity or "—"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create (split_grid_rejected) failed: %s", e)
+
+
+def clear_split_grid_guessed(hass: HomeAssistant) -> None:
+    """Retire BOTH grid-guess notices — the question is settled."""
+    for issue_id in ("split_grid_guessed", "split_grid_rejected"):
+        try:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("issue_registry.delete (%s) failed: %s", issue_id, e)
 
 
 def raise_soc_zones_out_of_order(hass: HomeAssistant, *, priority, buffer,
