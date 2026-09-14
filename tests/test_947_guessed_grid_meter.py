@@ -473,13 +473,35 @@ class TestTheReviewFindings:
         assert rig.reader._split_grid_proof["verdict"] is True
         assert power.grid_power == -2000.0
 
-    def test_declared_is_not_reported_as_low_confidence(self):
+    @pytest.mark.parametrize("confidence,expected", [
+        ("declared", "split-declared"),
+        ("declared-elsewhere", "split-declared-unverified"),
+        ("same-device", "split"),
+        ("any-device", "split-lowconf"),
+    ])
+    def test_each_tier_reports_as_itself(self, confidence, expected):
         """REFUTED (c): publish_diag collapsed every non-same-device pick into
-        "split-lowconf", so the strongest tier read as the weakest."""
-        from custom_components.solar_energy_management.coordinator import publish_diag
-        import inspect
-        src = inspect.getsource(publish_diag)
-        assert "split-declared" in src
+        "split-lowconf", so the strongest tier read as the weakest.
+
+        Asserted on what the function RETURNS, not on how it is spelled — a
+        source-string check is coupled to the text and not the behaviour
+        (#925 / bug class 76), and the ledger of those only shrinks.
+        """
+        from custom_components.solar_energy_management.coordinator.publish_diag import (
+            build_diagnostics,
+        )
+        reader = MagicMock()
+        reader._split_grid_discovery = {"import": "sensor.i", "export": "sensor.e",
+                                        "confidence": confidence}
+        reader._grid_sign_inverted = False
+        reader._manual_grid_mismatch = False
+        reader._raw_config = {}
+        coord = MagicMock()
+        coord._sensor_reader = reader
+        # No manual override — that branch short-circuits before the tiers.
+        coord.config = {}
+        out = build_diagnostics(coord)
+        assert out["diag_grid_mode"] == expected
 
 
 def test_recorder_replay_cannot_convict_a_meter(monkeypatch):
@@ -497,3 +519,33 @@ def test_recorder_replay_cannot_convict_a_meter(monkeypatch):
         rig.read()          # read_power decrements the warm-up itself
     assert rig.reader._split_grid_proof["verdict"] is None
     assert rig.reader._split_grid_proof["contradictions"] == 0
+
+
+def test_a_repair_a_previous_lifetime_left_is_cleared_by_a_proven_read(monkeypatch):
+    """(#933) The clear must not depend on the corroborator RUNNING. A pick
+    that improves to `declared` across a restart — because the roster learned
+    the brand — never corroborates again, so a memo-gated clear would leave
+    the old Repair standing forever over a problem that is gone."""
+    states = {
+        "sensor.growatt_import_from_grid": _state(900, device_class="power"),
+        "sensor.growatt_export_to_grid": _state(0, device_class="power"),
+        "sensor.grid_import_total": _state(100, "kWh"),
+        "sensor.grid_export_total": _state(50, "kWh"),
+    }
+    rig = _Rig(monkeypatch, states,
+               device_of={"sensor.grid_import_total": "growatt",
+                          "sensor.growatt_import_from_grid": "growatt",
+                          "sensor.growatt_export_to_grid": "growatt"})
+    repairs = MagicMock()
+    with patch.object(sr_mod, "_ri", repairs):
+        rig.reader.read_power()
+    assert rig.reader._split_grid_discovery["confidence"] == "same-device"
+    assert repairs.clear_split_grid_guessed.called, (
+        "a proven read must retire a guess Repair a previous lifetime left")
+    assert rig.reader._split_proof_reconciled is True
+
+    # …and only once per lifetime.
+    repairs.reset_mock()
+    with patch.object(sr_mod, "_ri", repairs):
+        rig.reader.read_power()
+    assert not repairs.clear_split_grid_guessed.called

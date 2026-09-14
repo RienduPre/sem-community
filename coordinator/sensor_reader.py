@@ -618,6 +618,9 @@ class SensorReader:
         #: Last (import, export, state) said about an unproven pair — the
         #: warn-once guard for ``_report_unproven_grid``.
         self._split_grid_unproven_said: Optional[tuple] = None
+        #: (#933) once per reader lifetime: the first PROVEN grid read clears a
+        #: guess Repair a previous lifetime left, whatever tier proved it.
+        self._split_proof_reconciled: bool = False
         self._uses_split_grid: bool = False
         # Warn-once guard for the discovery-*exception* path (#259); distinct from the
         # dict "warned" key (which guards "no sensor found"). Reset on cache invalidate.
@@ -2241,6 +2244,16 @@ class SensorReader:
                     proven = self._corroborate_split_grid(
                         disc, ed, import_w, export_w)
                 if proven:
+                    # (#933) A fresh reader's FIRST healthy verdict clears what
+                    # a previous lifetime left, once. Without this the clear is
+                    # gated on a per-lifetime memo: a pick that IMPROVES across
+                    # a restart — a name guess that becomes `declared` because
+                    # the roster learned the brand — never runs the corroborator
+                    # at all, so the old Repair would outlive the problem
+                    # forever. The Repair is persistent; the memo is not.
+                    if not self._split_proof_reconciled:
+                        self._split_proof_reconciled = True
+                        _ri.clear_split_grid_guessed(self.hass)
                     # SEM convention: negative = import, positive = export
                     readings.grid_power = export_w - import_w
                     self._grid_sign_detected = True  # No sign correction needed
