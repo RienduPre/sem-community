@@ -2265,15 +2265,6 @@ class CurrentControlDevice(ControllableDevice):
     # then filed "enable switch will not stay on" against healthy hardware.
     # The answer lives HERE, once, so the chain and its readers cannot
     # drift — the same rule ``_discrete_contactor_surfaces`` follows.
-    #: Module-level constants, aliased here for readers. The bodies below
-    #: use the module names so the resolver keeps working on the bound-method
-    #: fakes the uninstall tests build out of a ``SimpleNamespace``.
-    SESSION_START_NONE = SESSION_START_NONE
-    SESSION_START_SERVICE = SESSION_START_SERVICE
-    SESSION_START_CHARGE_MODE = SESSION_START_CHARGE_MODE
-    SESSION_START_STOP_ENTITY = SESSION_START_STOP_ENTITY
-    SESSION_START_CHARGER_SERVICE = SESSION_START_CHARGER_SERVICE
-
     def session_start_mechanism(self) -> str:
         """(#940) Name the ONE branch ``start_session`` will dispatch.
 

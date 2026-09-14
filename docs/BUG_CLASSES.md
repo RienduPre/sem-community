@@ -3111,8 +3111,8 @@ with `devices/base.py::CurrentControlDevice._session_active`. Sibling assessed a
 notification manager's stop/resume flags release each other, keyed by charger id — harmless once the
 latch upstream is keyed; `notify_ev_nearly_full` sets and clears on one predicate, one key. Swept
 with #940: `release_to_user` (#935) re-derived the same start chain by hand and now reads the one
-resolver; `park_off`'s stop chain is deliberately ordered differently (service before switch) and
-says so; `ChargerReconciler._stamp_close` stamps SEM's OWN command history and is corrected by the
+resolver (a derived AST lint, not a list, holds every future dispatcher to it);
+`ChargerReconciler._stamp_close` stamps SEM's OWN command history and is corrected by the
 belief-follow, so its key is its evidence.
 **Closure:** the latch carries its key, and every reader and clearer is restricted to it. A fresh
 offer (setpoint 0 → > 0) clears the decline latch, the confirm count and the trend buffer — the new
@@ -3139,6 +3139,25 @@ once, so the chain and its three readers cannot drift.
 **Sweep question:** for every latch — what KEY was its evidence about (which offer, bound, device,
 window)? Is every site that reads or clears it restricted to that key, and can its set and clear
 conditions both be true on the same inputs?
+**Left for Guido (found in #940's review, all pre-existing, none a gate on it):**
+(1) `devices/base.py::park_off`'s stop chain is not merely ordered differently from `stop_session`'s
+— it is INCOMPLETE: it knows `<domain>.disable` and a `start_stop_entity` switch, and consults
+neither `stop_service` nor `charge_mode_stop`. An Easee or a go-e with no start/stop switch gets
+NOTHING on the car-left edge, `_parked_it` stays False, the park is never remembered, and the box is
+left enabled for the next plug-in to auto-start — the one thing park-on-disconnect exists to
+prevent. The start side now has a resolver; the stop side wants the same one, but it is a real
+behaviour change on two brands' disconnect path and needs its own issue.
+(2) `coordinator/charger_adapters/wallbox.py` — `_toggle_pause_switch` flips a real relay on every
+`command_current`/`command_idle`, while `contactor_surface` reads only the CONFIGURED dispatch list
+and answers False for a registry-discovered pause switch. #940's anti-cycle floor is therefore off
+on exactly the surface that is cycling — this class's #940 catch arriving through a door #940's own
+predicate cannot see. `_looks_like_wallbox` also never inspects `current_entity_id`, so the typical
+Wallbox config (a bare `number.wallbox_*_charging_current`) gets `GenericAdapter` and #357's fix is
+off; and `charger_current_entity`, read three times there, is assigned nowhere in production (class
+74). (3) `ensure_enabled`'s `button.` branch is unreachable from the reconciler — `enable_state()`
+answers `(None, True)` for a stateless surface, so ENABLE is never emitted for one and #804's press
+arrives via `start_session` instead. Not a regression, but #804's resume surface is not the live
+path its tests imply.
 **Left for Guido:** the stall-to-full path in `_update_ev_intelligence` ("0 W for 3 min under a
 ≥ 6 A command → SOC 100 %") reads an unanswered offer as a full pack — this class's inference with
 no latch in between. Its comment says legacy-only, but the code runs on every install and writes

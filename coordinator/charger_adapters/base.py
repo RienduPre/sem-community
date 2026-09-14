@@ -261,7 +261,13 @@ class ChargerAdapter(ABC):
         # device that cannot answer keeps the historical behaviour rather
         # than acquiring a second start it never asked for.
         starts_here = getattr(dev, "enable_entity_is_session_start", None)
-        if not callable(starts_here) or starts_here() is not False:
+        claims = True
+        if callable(starts_here):
+            try:
+                claims = starts_here() is not False
+            except Exception as e:  # noqa: BLE001 — a probe never costs a cycle
+                _LOGGER.debug("enable_entity_is_session_start() failed: %s", e)
+        if claims:
             dev._session_active = True
 
     async def report_enable_blocked(self) -> None:
