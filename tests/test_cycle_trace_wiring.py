@@ -24,6 +24,12 @@ class _Stub:
     """Minimal host for the unbound trace methods."""
     _collect_trace = SEMCoordinator._collect_trace
     _trace_ev = SEMCoordinator._trace_ev
+    # (#961) the per-charger helpers _trace_ev now leans on. Binding them here
+    # rather than stubbing them keeps this a test of the REAL wiring: a fleet
+    # install's trace is assembled by these two, and a stub that fakes them
+    # would pass while the thing it is named after was broken.
+    _trace_commanded_per_charger = SEMCoordinator._trace_commanded_per_charger
+    _trace_ev_match_per_charger = SEMCoordinator._trace_ev_match_per_charger
     _trace_battery = SEMCoordinator._trace_battery
     _trace_loads = SEMCoordinator._trace_loads
     _trace_heat_pump = SEMCoordinator._trace_heat_pump
@@ -35,6 +41,7 @@ class _Stub:
         self.time_manager = SimpleNamespace(is_night_mode=lambda: False)
         self.config = {}
         self._ev_device = None
+        self._ev_devices = {}            # (#961) no fleet — falls back to the budget
         self._observer_mode = False      # not in observer mode
 
 
