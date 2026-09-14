@@ -3091,11 +3091,29 @@ announcement — `_estimate_stop_active` was one bool for the Min/Max loop; Min'
 resume released it, Min set it again. An earlier member, before the class had a name: the #708
 recovery clear (`TestADeclineDoesNotOutliveTheRecovery`) — the same decline latch outliving the
 recovery that refuted it.
+**Live catch (#940, 14.09.2026, alexmc1510's charger — select start + enable switch):**
+`_session_active` — the flag `GenericAdapter.command_current` reads to decide whether to call
+`start_session` at all — was set by `ChargerAdapter.ensure_enabled` (#536) on the strength of a
+`switch.turn_on`. Its evidence is about the ENABLE surface; its readers are about the brand's
+SESSION START, and `start_session` is an elif chain in which exactly one of four mechanisms fires.
+Where the start is a charge-mode select or a brand service the two keys are different entities, so
+the claim was never earned — and because the reconciler prepends its ENABLE on exactly the cycle
+where the enable switch is off (the transition out of a stop, which SEM's own stop caused), the
+brand start was suppressed on the ONE cycle that needed it, on every charge, forever. The box stayed
+on its own mode, dropped the switch, and five re-asserts later SEM filed
+`charger_actuation_failed` ("enable switch will not stay on") against healthy hardware — while the
+relay cycled once per coordinator cycle from UNDERNEATH #940's anti-cycle floor, whose clocks arm
+only on SEM's own operations and so never saw the box's opens.
 **Where it lives:** `coordinator/ev_taper_detector.py` (`_declining_phase`, `_full_confirm_count`,
 `_estimate_stop_bound`), `coordinator/ev_soc_need.py::estimate_stop_step`,
-`coordinator.py::_announce_estimate_stop`. Sibling assessed and safe: the notification manager's
-stop/resume flags release each other, keyed by charger id — harmless once the latch upstream is
-keyed; `notify_ev_nearly_full` sets and clears on one predicate, one key.
+`coordinator.py::_announce_estimate_stop`, `coordinator/charger_adapters/base.py::ensure_enabled`
+with `devices/base.py::CurrentControlDevice._session_active`. Sibling assessed and safe: the
+notification manager's stop/resume flags release each other, keyed by charger id — harmless once the
+latch upstream is keyed; `notify_ev_nearly_full` sets and clears on one predicate, one key. Swept
+with #940: `release_to_user` (#935) re-derived the same start chain by hand and now reads the one
+resolver (a derived AST lint, not a list, holds every future dispatcher to it);
+`ChargerReconciler._stamp_close` stamps SEM's OWN command history and is corrected by the
+belief-follow, so its key is its evidence.
 **Closure:** the latch carries its key, and every reader and clearer is restricted to it. A fresh
 offer (setpoint 0 → > 0) clears the decline latch, the confirm count and the trend buffer — the new
 charge re-earns it from its own samples; absence of an offer (observer mode) never crosses the edge.
@@ -3112,10 +3130,34 @@ up is announced within two cycles (liveness); the vacuity twin runs the old bare
 the safety property and must fail on the live numbers. `tests/test_939_reoffer_is_not_a_taper.py` —
 the live evening (decline under a withdrawn offer, 6 A re-offer, 70 min of silence) on a simulated
 10-second clock must not anchor, with the latch pinned as set beforehand so it cannot pass on a
-detector that never latched.
+detector that never latched. `tests/test_940_enable_is_not_a_session.py` — the #940 half: over the
+cross-product of every session-start mechanism × every enable surface, a transition out of a stop
+driven through the REAL reconciler + adapter + device must dispatch that charger's OWN session start
+exactly once; the vacuity twin restores the #536 rule and must FAIL on precisely the shapes whose
+start is not the enable entity. `CurrentControlDevice.session_start_mechanism()` names the branch
+once, so the chain and its three readers cannot drift.
 **Sweep question:** for every latch — what KEY was its evidence about (which offer, bound, device,
 window)? Is every site that reads or clears it restricted to that key, and can its set and clear
 conditions both be true on the same inputs?
+**Left for Guido (found in #940's review, all pre-existing, none a gate on it):**
+(1) `devices/base.py::park_off`'s stop chain is not merely ordered differently from `stop_session`'s
+— it is INCOMPLETE: it knows `<domain>.disable` and a `start_stop_entity` switch, and consults
+neither `stop_service` nor `charge_mode_stop`. An Easee or a go-e with no start/stop switch gets
+NOTHING on the car-left edge, `_parked_it` stays False, the park is never remembered, and the box is
+left enabled for the next plug-in to auto-start — the one thing park-on-disconnect exists to
+prevent. The start side now has a resolver; the stop side wants the same one, but it is a real
+behaviour change on two brands' disconnect path and needs its own issue.
+(2) `coordinator/charger_adapters/wallbox.py` — `_toggle_pause_switch` flips a real relay on every
+`command_current`/`command_idle`, while `contactor_surface` reads only the CONFIGURED dispatch list
+and answers False for a registry-discovered pause switch. #940's anti-cycle floor is therefore off
+on exactly the surface that is cycling — this class's #940 catch arriving through a door #940's own
+predicate cannot see. `_looks_like_wallbox` also never inspects `current_entity_id`, so the typical
+Wallbox config (a bare `number.wallbox_*_charging_current`) gets `GenericAdapter` and #357's fix is
+off; and `charger_current_entity`, read three times there, is assigned nowhere in production (class
+74). (3) `ensure_enabled`'s `button.` branch is unreachable from the reconciler — `enable_state()`
+answers `(None, True)` for a stateless surface, so ENABLE is never emitted for one and #804's press
+arrives via `start_session` instead. Not a regression, but #804's resume surface is not the live
+path its tests imply.
 **Left for Guido:** the stall-to-full path in `_update_ev_intelligence` ("0 W for 3 min under a
 ≥ 6 A command → SOC 100 %") reads an unanswered offer as a full pack — this class's inference with
 no latch in between. Its comment says legacy-only, but the code runs on every install and writes
@@ -3126,7 +3168,7 @@ cost of its own: a car whose last taper was cut short by a withdrawal and that s
 re-offer is never taper-anchored. The primary charger has the stall path behind it; a non-primary
 kWh charger has nothing, which widens #756 N1's existing gap there (a car that arrives full is
 already never anchored on a non-primary).
-Refs #939 #708 #774 #756.
+Refs #939 #708 #774 #756 #940 #536 #935.
 
 ### 84. A memo that dies before the thing it reconciles — the first verdict of a lifetime is swallowed — GUARDED
 **Symptom:** a Repair outlives its own remedy. The user does exactly what it says, the log confirms

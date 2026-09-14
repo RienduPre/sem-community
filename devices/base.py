@@ -2067,6 +2067,16 @@ class ClimateDevice(ComfortBandMixin, ControllableDevice):
         return d
 
 
+# (#940) The four session-start mechanisms, named once. ``start_session``
+# is an elif CHAIN and exactly one of these fires; which one is a property
+# of the config, and three separate places used to re-derive it by hand.
+SESSION_START_NONE = ""
+SESSION_START_SERVICE = "start_service"
+SESSION_START_CHARGE_MODE = "charge_mode"
+SESSION_START_STOP_ENTITY = "start_stop_entity"
+SESSION_START_CHARGER_SERVICE = "charger_service"
+
+
 class CurrentControlDevice(ControllableDevice):
     """Variable-current device (EV chargers).
 
@@ -2237,6 +2247,51 @@ class CurrentControlDevice(ControllableDevice):
             except Exception:  # noqa: BLE001 — capability probe, never raise
                 pass
         return can_open, can_close
+
+    # ── #940 — which mechanism IS the session start? ────────────────────
+    #
+    # ``start_session`` is an elif CHAIN: exactly one of four mechanisms
+    # fires, and which one is a property of the config, not of the caller.
+    # ``ChargerAdapter.ensure_enabled`` writes the start/stop entity — and
+    # used to conclude from that write that the SESSION was open
+    # (``_session_active = True``, #536). On a charger whose start is a
+    # charge-mode select or a brand service, that conclusion is false, and
+    # it is the flag ``command_current`` reads to decide whether to call
+    # ``start_session`` at all. The brand's start was therefore NEVER sent
+    # on the transition cycle — because on that cycle the enable switch is
+    # off (SEM's own stop left it so), which is exactly when the reconciler
+    # prepends the ENABLE that sets the flag. The box stayed on its stop
+    # mode, dropped the switch again, and SEM re-asserted it five times and
+    # then filed "enable switch will not stay on" against healthy hardware.
+    # The answer lives HERE, once, so the chain and its readers cannot
+    # drift — the same rule ``_discrete_contactor_surfaces`` follows.
+    def session_start_mechanism(self) -> str:
+        """(#940) Name the ONE branch ``start_session`` will dispatch.
+
+        Returns one of the ``SESSION_START_*`` constants; ``""`` when the
+        charger has no session-start mechanism at all (a bare current
+        number — the start rides the amp write)."""
+        if self.start_service:
+            return SESSION_START_SERVICE
+        if self.charge_mode_entity and self.charge_mode_start:
+            return SESSION_START_CHARGE_MODE
+        if self.start_stop_entity:
+            return SESSION_START_STOP_ENTITY
+        if self.charger_service:
+            return SESSION_START_CHARGER_SERVICE
+        return SESSION_START_NONE
+
+    def enable_entity_is_session_start(self) -> bool:
+        """(#940) True when asserting the enable surface IS starting the
+        session — i.e. ``start_session`` would send the very same
+        ``turn_on`` / ``press`` to the very same entity.
+
+        Only then may ``ensure_enabled`` claim the session, and only then
+        is claiming it a service: for a ``button.`` surface a second press
+        is not idempotent, which is why #536/#804 latched in the first
+        place."""
+        return (self.session_start_mechanism()
+                == SESSION_START_STOP_ENTITY)
 
     @property
     def contactor_surface(self) -> bool:
@@ -2973,22 +3028,26 @@ class CurrentControlDevice(ControllableDevice):
         - Fallback: probe for domain.enable service (KEBA pattern)
         """
         try:
-            # 1. Profile-based start (preferred)
-            if self.start_service:
+            # 1. Profile-based start (preferred). (#940) The branch is
+            # NAMED by ``session_start_mechanism`` rather than re-derived
+            # here, so ``ensure_enabled`` asks the same question this
+            # answers and the two cannot drift apart.
+            mechanism = self.session_start_mechanism()
+            if mechanism == SESSION_START_SERVICE:
                 domain, service = self.start_service.split(".", 1)
                 data = dict(self.start_service_data or {})
                 if self.service_device_id:
                     data["device_id"] = self.service_device_id
                 await self.send(domain, service, data)
-            elif self.charge_mode_entity and self.charge_mode_start:
+            elif mechanism == SESSION_START_CHARGE_MODE:
                 await self.send("select", "select_option", {"entity_id": self.charge_mode_entity, "option": self.charge_mode_start})
-            elif self.start_stop_entity:
+            elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
                 if domain in ("switch", "input_boolean"):
                     await self.send(domain, "turn_on", {"entity_id": self.start_stop_entity})
                 elif domain == "button":
                     await self.send("button", "press", {"entity_id": self.start_stop_entity})
-            elif self.charger_service:
+            elif mechanism == SESSION_START_CHARGER_SERVICE:
                 # 2. KEBA-style fallback: probe for enable/disable services
                 domain = self.charger_service.split(".", 1)[0]
 
@@ -3177,26 +3236,30 @@ class CurrentControlDevice(ControllableDevice):
             return await asyncio.wait_for(coro, timeout=_RELEASE_TIMEOUT_S)
 
         try:
-            if self.start_service:
+            # (#940) The same ONE resolver ``start_session`` dispatches on —
+            # this chain used to be a second hand-written copy of it, and a
+            # brand added to one would have been missed by the other.
+            mechanism = self.session_start_mechanism()
+            if mechanism == SESSION_START_SERVICE:
                 domain, service = self.start_service.split(".", 1)
                 data = dict(self.start_service_data or {})
                 if self.service_device_id:
                     data["device_id"] = self.service_device_id
                 await _bounded(self.send(domain, service, data))
                 did.append(self.start_service)
-            elif self.charge_mode_entity and self.charge_mode_start:
+            elif mechanism == SESSION_START_CHARGE_MODE:
                 await _bounded(self.send("select", "select_option", {
                     "entity_id": self.charge_mode_entity,
                     "option": self.charge_mode_start}))
                 did.append(f"{self.charge_mode_entity}={self.charge_mode_start}")
-            elif self.start_stop_entity:
+            elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
                 if domain in ("switch", "input_boolean"):
                     await _bounded(self.send(
                         domain, "turn_on",
                         {"entity_id": self.start_stop_entity}))
                     did.append(f"{self.start_stop_entity} on")
-            elif self.charger_service:
+            elif mechanism == SESSION_START_CHARGER_SERVICE:
                 domain = self.charger_service.split(".", 1)[0]
                 if self.hass.services.has_service(domain, "enable"):
                     await _bounded(self.send(domain, "enable", {}))
