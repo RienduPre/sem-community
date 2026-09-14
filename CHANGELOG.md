@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.23] — 14.09.2026
+
 - 🐛 **The EV trace no longer calls the fleet budget a command** (#961, found
   in @RienduPre's diagnostics in #958). `trace.ev.process.commanded_amps` was
   the fleet canonical budget — one number for the house, from the primary
