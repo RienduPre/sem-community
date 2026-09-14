@@ -284,7 +284,6 @@ EV_INTEGRATION_PATTERNS = {
             "ev_session_energy": [
                 # (#962) the session slot wants a per-session counter, not
                 # the cumulative register that never resets.
-                ("sensor.ocpp_*_energy_session", "OCPP - Session Energy", 10),
                 ("sensor.ocpp_*_session_energy", "OCPP - Session Energy", 10),
                 ("sensor.ocpp_*_energy_active_import_interval",
                  "OCPP - Import Interval", 9),
@@ -748,7 +747,9 @@ def _online_current_control(offline_eid: str, entities) -> Optional[str]:
 #: than a measurement of what the car is drawing. OCPP's ``Power.Offered`` is
 #: the live case: it sits at the box's maximum the whole time nothing is
 #: plugged in. Matched as whole SEGMENTS, never substrings (class 67):
-#: "rated" also lives inside ``solar_generated_power``.
+#: "rated" also lives inside ``solar_generated_power``. English-only, which
+#: is a known gap, not a claim: a German ``nennleistung`` is one word and no
+#: segment rule can see it. That gap fails OPEN — see the no-swap rule below.
 _CAPABILITY_SEGMENTS = frozenset({
     "offered", "offer", "limit", "limits", "max", "maximum", "maximal",
     "maximale", "rated", "nominal", "capacity", "available", "setpoint",
@@ -760,18 +761,37 @@ _CAPABILITY_SEGMENTS = frozenset({
 #: flowing back out. ``reactive`` power is not charging power at all.
 _WRONG_QUANTITY_SEGMENTS = frozenset({"export", "exported", "reactive"})
 
-#: Which accumulation window each energy role asks for, when a family
-#: publishes both a cumulative register and a per-interval delta.
-_TOTAL_WINDOW = frozenset({"register", "total", "lifetime", "cumulative"})
-_SESSION_WINDOW = frozenset({"session", "interval"})
+#: One LEG of a polyphase reading, never the charger's draw. Excluded from
+#: the replacement search outright: a third of the truth is not a fallback
+#: for the truth, and openWB, Alfen, Zaptec, go-e and KEBA all publish these
+#: beside the total.
+_PHASE_SEGMENTS = frozenset({"l1", "l2", "l3", "phase1", "phase2", "phase3"})
 
-#: The read roles that are picked out of a measurand FAMILY, with the
-#: window each one wants.
+#: Which accumulation window each energy role asks for. An OCPP
+#: ``…Interval`` is a metering-interval delta — neither a lifetime register
+#: nor a session total, so it contradicts both.
+_TOTAL_WINDOW = frozenset({"register", "total", "lifetime", "cumulative"})
+_SESSION_WINDOW = frozenset({"session"})
+_INTERVAL_WINDOW = frozenset({"interval"})
+
+#: The read roles that are picked out of a measurand FAMILY.
 _MEASURAND_ROLES = (
     "ev_charging_power_sensor",
     "ev_total_energy_sensor",
     "ev_session_energy_sensor",
 )
+
+#: Units grouped by what they measure, so a replacement can be required to
+#: be COMMENSURABLE with what it replaces. An integration that omits
+#: ``device_class`` (Zaptec's custom builds do) still publishes a unit, and
+#: without this check the search happily swaps a power reading for a status
+#: string from the same device.
+_UNIT_FAMILY = {
+    "w": "power", "kw": "power", "mw": "power", "va": "power", "kva": "power",
+    "wh": "energy", "kwh": "energy", "mwh": "energy",
+    "a": "current", "ma": "current",
+    "v": "voltage",
+}
 
 
 def _id_segments(entity_id: str) -> frozenset:
@@ -798,46 +818,78 @@ def _measures_the_quantity(entity_id: str) -> bool:
     return not (segs & _CAPABILITY_SEGMENTS) and not (segs & _WRONG_QUANTITY_SEGMENTS)
 
 
+def _is_phase_leg(entity_id: str) -> bool:
+    """One leg of a polyphase reading (``…_power_l2``, ``…_phase_3_power``)."""
+    segs = _id_segments(entity_id)
+    if segs & _PHASE_SEGMENTS:
+        return True
+    return "phase" in segs and bool(segs & {"1", "2", "3"})
+
+
+def _unit_family(entry) -> Optional[str]:
+    """What a registry entry's unit MEASURES — ``power``, ``energy``, … —
+    or None when it publishes no unit SEM recognises."""
+    unit = (getattr(entry, "original_unit_of_measurement", None)
+            or getattr(entry, "unit_of_measurement", None))
+    if unit is None:
+        return None
+    return _UNIT_FAMILY.get(str(unit).strip().lower())
+
+
 def _rank_measurand(entity_id: str, role: str) -> tuple:
     """A STABLE order over one measurand family — lower is better.
 
     The whole bug is that registry ordering decided; every pick made here is
     therefore a function of the entity id alone, so the same install answers
-    the same way whatever order its entities were created in.
+    the same way whatever order its entities were created in. The WINDOW
+    terms outweigh the direction term: a lifetime register in the session
+    slot is a different mistake from the one this guard exists to fix, and
+    must not be traded for a nicer-looking direction.
     """
     segs = _id_segments(entity_id)
-    want = _TOTAL_WINDOW if role == "ev_total_energy_sensor" else (
-        _SESSION_WINDOW if role == "ev_session_energy_sensor" else frozenset())
-    other = _SESSION_WINDOW if role == "ev_total_energy_sensor" else (
-        _TOTAL_WINDOW if role == "ev_session_energy_sensor" else frozenset())
+    if role == "ev_total_energy_sensor":
+        want, against = _TOTAL_WINDOW, _SESSION_WINDOW | _INTERVAL_WINDOW
+    elif role == "ev_session_energy_sensor":
+        want, against = _SESSION_WINDOW, _TOTAL_WINDOW | _INTERVAL_WINDOW
+    else:
+        want, against = frozenset(), frozenset()
     rank = 0
-    if "import" not in segs:
-        rank += 2          # the direction a charger draws in, when named
     if want and not (segs & want):
-        rank += 1
-    if other and (segs & other):
-        rank += 1
+        rank += 4
+    if against and (segs & against):
+        rank += 4
+    if "import" not in segs:
+        rank += 1          # the direction a charger draws in, when named
     return (rank, entity_id)
 
 
-def _measured_twin(bound_eid: str, entities, role: str,
-                   bound_entry) -> Optional[str]:
+def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
+                   taken=()) -> Optional[str]:
     """The sibling of ``bound_eid`` that measures what ``role`` asks about.
 
-    Same device, same domain, same ``device_class`` — the measurand family
-    the integration publishes — minus every member naming a capability or the
-    wrong direction, and chosen by ``_rank_measurand`` rather than by whoever
+    Same device, same domain, same ``device_class`` AND the same unit
+    FAMILY — commensurable with what it replaces, so the search cannot hand
+    back a status string from a brand that omits device classes. Polyphase
+    legs and entities already holding another role are excluded outright,
+    and the winner is chosen by ``_rank_measurand`` rather than by whoever
     the loop happened to see last.
     """
     want_dc = getattr(bound_entry, "original_device_class", None)
+    want_unit = _unit_family(bound_entry)
+    if want_dc is None and want_unit is None:
+        # Nothing identifies the family. A swap here would be a guess of its
+        # own — exactly the move that put us in #962.
+        return None
     candidates = []
     for e in entities:
         eid = str(e.entity_id)
-        if eid == bound_eid or not eid.startswith("sensor."):
+        if eid == bound_eid or eid in taken or not eid.startswith("sensor."):
             continue
         if getattr(e, "original_device_class", None) != want_dc:
             continue
-        if not _measures_the_quantity(eid):
+        if _unit_family(e) != want_unit:
+            continue
+        if not _measures_the_quantity(eid) or _is_phase_leg(eid):
             continue
         candidates.append(eid)
     if not candidates:
@@ -860,10 +912,16 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
     then infers a connection "from physics" (``sensor_reader``), so an empty
     charger reads as a charging car forever.
 
-    Swap to the measured sibling; DROP the binding when the family has none.
-    A missing power reading is a degraded charger SEM reports honestly; a
-    capability read as a measurement poisons the EV budget, the charging
-    determination and the house balance residual every cycle.
+    SWAP ONLY, never drop. Removing the role looks like the fail-closed
+    move and is not one in this tree: a charger with no power entity is
+    still registered (``coordinator._retry_ev_device_setup`` gates on the
+    service, not the sensor), KEBA's adapter decides ``actual_charging``
+    from power alone so it would read "never charging", the 18-cycle
+    ``ev_power < 50`` rule would anchor its SoC at 100 %, and in a
+    multi-charger install the missing per-charger key falls back to the
+    FLEET sum (class 3). So when the family offers no measured sibling the
+    pre-#962 binding stands, and a name SEM merely finds suspicious can
+    never cost a user their charger.
 
     Brand-agnostic on purpose: every read matcher, hand-written or hinted,
     funnels through the discovery choke point, so the class cannot recur
@@ -880,13 +938,13 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
         entry = by_id.get(eid)
         if entry is None:
             # Not a member of the family we were handed — nothing to reason
-            # about, and a blind drop would be a guess of its own.
+            # about, and a blind swap would be a guess of its own.
             continue
-        twin = _measured_twin(eid, entities, role, entry)
+        taken = {str(v) for k, v in result.items()
+                 if k in _MEASURAND_ROLES and k != role}
+        twin = _measured_twin(eid, entities, role, entry, taken=taken)
         if twin:
             result[role] = twin
-        else:
-            result.pop(role, None)
 
 
 def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
@@ -914,10 +972,16 @@ def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
 
 def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     """Every brand-agnostic correction a freshly discovered charger config
-    gets, at the one place all four discovery paths funnel through — the
-    config path, the diagnostics report, the generic prober and the near-miss
-    offer. A guard added here closes its class for every brand, hinted or
-    hand-written, and for the next one nobody has written yet."""
+    gets, at the one place all four REGISTRY discovery paths funnel through —
+    the config path, the diagnostics report, the generic prober and the
+    near-miss offer. A guard added here closes its class for every brand,
+    hinted or hand-written, and for the next one nobody has written yet.
+
+    The glob matrix (``EVChargerDetector.get_best_match``) is a fifth path
+    and deliberately does NOT funnel through here: it produces a config-flow
+    PREFILL the user confirms, not a binding SEM acts on, so it applies the
+    same ``_measures_the_quantity`` predicate as a demotion rather than a
+    correction."""
     _reject_offline_current_control(result, entities)
     _reject_capability_sensor(result, entities)
 
@@ -2381,26 +2445,35 @@ def _discover_ocpp(entities) -> Dict[str, str]:
     result: Dict[str, str] = {}
     powers: list = []
     energies: list = []
+    all_powers: list = []
+    all_energies: list = []
     for entry in entities:
         eid = str(entry.entity_id)
         dc = entry.original_device_class
         if eid.startswith("sensor.") and "status" in eid and "connector" in eid:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
-        if eid.startswith("sensor.") and dc == "power" and _measures_the_quantity(eid):
-            powers.append(eid)
-        if eid.startswith("sensor.") and dc == "energy" and _measures_the_quantity(eid):
-            energies.append(eid)
+        if eid.startswith("sensor.") and dc == "power":
+            all_powers.append(eid)
+            if _measures_the_quantity(eid):
+                powers.append(eid)
+        if eid.startswith("sensor.") and dc == "energy":
+            all_energies.append(eid)
+            if _measures_the_quantity(eid):
+                energies.append(eid)
         if eid.startswith("number.") and ("current" in eid or "limit" in eid):
             result["ev_current_control_entity"] = eid
         if eid.startswith("switch.") and "charge" in eid:
             result["ev_start_stop_entity"] = eid
-    if powers:
-        result["ev_charging_power_sensor"] = min(
-            powers, key=lambda e: _rank_measurand(e, "ev_charging_power_sensor"))
-    if energies:
-        result["ev_total_energy_sensor"] = min(
-            energies, key=lambda e: _rank_measurand(e, "ev_total_energy_sensor"))
+    # Swap-only, like the choke-point guard: a charge point that publishes
+    # nothing but capabilities keeps the pre-#962 answer rather than losing
+    # the role, because a missing power entity is not a safe state here
+    # (see _reject_capability_sensor).
+    for role, family, whole in (("ev_charging_power_sensor", powers, all_powers),
+                                ("ev_total_energy_sensor", energies, all_energies)):
+        pick = family or whole
+        if pick:
+            result[role] = min(pick, key=lambda e: _rank_measurand(e, role))
     return result
 
 

@@ -3538,21 +3538,41 @@ Current, OpenWB), the `_BRAND_HINTS` rows (ChargePoint, GARO, JuiceBox, Wattpilo
 `probe_charger_candidates`, `charger_from_near_miss`, and the glob matrix's
 `get_best_match` — all of which take `device_class == "power"` / `"energy"` as the whole question.
 **Closure:** one brand-agnostic guard, `_reject_capability_sensor`, inside the single
-`apply_charger_discovery_guards` choke point all four discovery paths now funnel through (the same
-shape #886 used for the control half): if a bound read role names a capability (`offered`, `limit`,
-`max`, `rated`, `nominal`, `capacity`, `available`, `setpoint`, `target`, `allowed`) or the wrong
-quantity (`export`, `reactive`), swap it for the sibling of the same device class that measures,
-chosen by a stable rank over the entity id — never by registry order — and DROP the role when the
-family has none. Fail-closed: a missing power reading is a charger SEM reports honestly, a
-nameplate read as a measurement is one it acts on. Every rule reads id SEGMENTS, not substrings
-(class 67: `rated` lives inside `solar_generated_power`). `_discover_ocpp` additionally asks for
-its measurands by name, because the OCPP vocabulary is fixed by the protocol and SEM can be exact.
+`apply_charger_discovery_guards` choke point all four REGISTRY discovery paths now funnel through
+(the same shape #886 used for the control half): when a bound read role names a capability
+(`offered`, `limit`, `max`, `rated`, `nominal`, `capacity`, `available`, `setpoint`, `target`,
+`allowed`) or the wrong quantity (`export`, `reactive`), swap it for the sibling that measures —
+chosen by a stable rank over the entity id, never by registry order. Every rule reads id SEGMENTS,
+not substrings (class 67: `rated` lives inside `solar_generated_power`). The replacement must be
+COMMENSURABLE — same device class *and* same unit family — because a brand that omits
+`device_class` (Zaptec's custom builds) otherwise makes the family "every sensor without one", and
+the search hands back a status string; polyphase legs are excluded outright (a third of the truth
+is not a fallback for the truth) and so is an entity already holding another role (#698: the total
+and session counters must not collapse onto one). **SWAP ONLY, never drop** — and that is the
+non-obvious half. Removing the role *looks* like the fail-closed move and is not one in this tree:
+the charger is still registered (`_retry_ev_device_setup` gates on the service, not the sensor),
+KEBA's adapter decides `actual_charging` from power alone so it reads "never charging", the
+18-cycle `ev_power < 50` rule anchors its SoC at 100 %, and in a multi-charger install the missing
+per-charger key falls back to the FLEET sum (class 3) — while the only notice is a DEBUG line and a
+Repair that `unmanaged_charger_repair` suppresses. So a name SEM merely finds suspicious can never
+cost a user their charger; a capability-only family keeps the pre-#962 binding. The segment
+vocabulary being English-only is a coverage gap of the same fail-open kind (a German
+`nennleistung` is one word), not a claim. `_discover_ocpp` additionally asks for its measurands by
+name, because the OCPP vocabulary is fixed by the protocol and SEM can be exact. The glob matrix
+(`get_best_match`) is a FIFTH path and deliberately does not funnel through the choke point: it
+produces a config-flow prefill the user confirms, so it applies the same predicate as a demotion.
 **Guard:** `tests/test_962_measurand_family.py` — the reporter's own family in his own order (with
 the pre-fix rule spelled out, so the pins cannot pass vacuously); an order-independence oracle over
 EVERY platform in `_EV_CHARGER_PLATFORMS`, forward and reversed; an invariant that no brand, hinted
 or hand-written, binds a capability-named entity to a read role, mirrored on the prober and the
-diagnostics report; the fail-closed drop; and the class-67 segment pin.
+diagnostics report; the swap-only rule through a KEBA on a device its owner named **Max**; the
+commensurability, phase-leg, collapse and window pins; and a LITERAL list of capability names, so
+shrinking the segment set fails the test rather than shrinking it too. Ten mutants — including
+dropping the entity-id tie-break, flattening the window weights and reverting each of the five call
+sites — are killed by these pins.
 **Sweep question:** for every entity a detector binds to a READ role, can the integration publish a
 second entity of the same domain and device_class that measures something adjacent — a capability,
-the other direction, another window — and does the matcher separate them, or pick by ordering?
+the other direction, another window, one phase — and does the matcher separate them, or pick by
+ordering? And before making a guard fail-closed: *trace what the missing value actually does
+downstream*, because "drop it" is only safe where absence is handled.
 Refs #962 #886 #947 #814 #816.

@@ -38,19 +38,23 @@ from unittest.mock import MagicMock, patch
 from custom_components.solar_energy_management.hardware_detection import (
     _EV_CHARGER_PLATFORMS,
     _MEASURAND_ROLES,
+    EV_INTEGRATION_PATTERNS,
+    EVChargerDetector,
     _measures_the_quantity,
     _reject_capability_sensor,
     apply_charger_discovery_guards,
     build_detection_report,
+    charger_from_near_miss,
     discover_all_ev_chargers_from_registry,
     probe_charger_candidates,
 )
 
 
-def _entry(entity_id, platform, device_id, device_class=None):
+def _entry(entity_id, platform, device_id, device_class=None, unit=None):
     return SimpleNamespace(
         entity_id=entity_id, platform=platform, device_id=device_id,
         original_device_class=device_class, disabled_by=None,
+        original_unit_of_measurement=unit, unit_of_measurement=unit,
         unique_id=entity_id.split(".", 1)[1],
     )
 
@@ -209,32 +213,235 @@ class TestNoBrandBindsACapability:
             "sensor.wallbox_energy_active_import_register"
 
 
-class TestFailClosedAndNoRegression:
-    def test_a_capability_only_family_drops_the_role(self):
-        """Monitor-less beats monitoring the nameplate."""
+class TestSwapOnlyNeverDrop:
+    """Removing the role LOOKS like the fail-closed move and is not one in
+    this tree: a charger with no power entity is still registered (the retry
+    path gates on the service, not the sensor), KEBA's adapter decides
+    ``actual_charging`` from power alone, the 18-cycle ``ev_power < 50`` rule
+    would anchor its SoC at 100 %, and in a multi-charger install the missing
+    per-charger key falls back to the FLEET sum (class 3). So a name SEM
+    merely finds suspicious must never cost a user their charger."""
+
+    def test_a_capability_only_family_keeps_what_it_had(self):
         entities = [
-            _entry("sensor.box_power_offered", "ocpp", "d1", "power"),
+            _entry("sensor.box_power_offered", "ocpp", "d1", "power", "W"),
             _entry("sensor.box_status_connector", "ocpp", "d1"),
         ]
         result = {"ev_charging_power_sensor": "sensor.box_power_offered"}
         _reject_capability_sensor(result, entities)
-        assert "ev_charging_power_sensor" not in result
+        assert result["ev_charging_power_sensor"] == "sensor.box_power_offered"
 
-    def test_a_plain_single_power_sensor_is_untouched(self):
-        entities = [_entry("sensor.keba_p30_power", "keba", "d1", "power")]
-        result = {"ev_charging_power_sensor": "sensor.keba_p30_power"}
-        apply_charger_discovery_guards(result, entities)
-        assert result["ev_charging_power_sensor"] == "sensor.keba_p30_power"
+    def test_a_charger_on_a_device_named_max_keeps_all_three_roles(self):
+        """HA builds object ids from the DEVICE NAME, which the owner picks.
+        A KEBA on a box called "Max" carries the segment in every id."""
+        entities = [
+            _entry("binary_sensor.max_plug_connected", "keba", "d1", "plug"),
+            _entry("sensor.max_charging_power", "keba", "d1", "power", "W"),
+            _entry("sensor.max_total_energy", "keba", "d1", "energy", "kWh"),
+            _entry("sensor.max_session_energy", "keba", "d1", "energy", "kWh"),
+        ]
+        charger = _discover(entities)[0]
+        assert charger["ev_charging_power_sensor"] == "sensor.max_charging_power"
+        assert charger["ev_total_energy_sensor"] == "sensor.max_total_energy"
+        assert charger["ev_session_energy_sensor"] == "sensor.max_session_energy"
+
+    def test_an_ocpp_box_that_only_offers_still_reports_a_power_entity(self):
+        """The brand function filters its family; an empty filter must fall
+        back, not unbind."""
+        entities = [
+            _entry("sensor.cp_status_connector", "ocpp", "d1"),
+            _entry("sensor.cp_power_offered", "ocpp", "d1", "power", "W"),
+            _entry("number.cp_maximum_current", "ocpp", "d1", "current", "A"),
+        ]
+        charger = _discover(entities)[0]
+        assert charger["ev_charging_power_sensor"] == "sensor.cp_power_offered"
+
+
+class TestTheReplacementIsCommensurable:
+    def test_a_status_string_is_never_the_replacement(self):
+        """Zaptec's custom builds omit ``device_class``; without a unit check
+        the family becomes "every sensor with no device class"."""
+        entities = [
+            _entry("sensor.zaptec_go_max_charge_power", "zaptec", "d1",
+                   None, "W"),
+            _entry("sensor.zaptec_go_charger_operation_mode", "zaptec", "d1"),
+            _entry("sensor.zaptec_go_humidity", "zaptec", "d1", None, "%"),
+        ]
+        result = {"ev_charging_power_sensor": "sensor.zaptec_go_max_charge_power"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_charging_power_sensor"] == \
+            "sensor.zaptec_go_max_charge_power"
+
+    def test_a_phase_leg_is_not_a_replacement(self):
+        """A third of the truth is not a fallback for the truth."""
+        entities = [
+            _entry("sensor.wb_max_power", "wallbox", "d1", "power", "W"),
+            _entry("sensor.wb_power_l1", "wallbox", "d1", "power", "W"),
+            _entry("sensor.wb_power_l2", "wallbox", "d1", "power", "W"),
+            _entry("sensor.wb_power_phase_3", "wallbox", "d1", "power", "W"),
+        ]
+        result = {"ev_charging_power_sensor": "sensor.wb_max_power"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_charging_power_sensor"] == "sensor.wb_max_power"
+
+    def test_the_total_and_session_roles_never_collapse(self):
+        """#698: ha_energy_reader de-duplicates the pair — detection must not
+        re-introduce it."""
+        entities = [
+            _entry("sensor.box_energy_target", "ocpp", "d1", "energy", "kWh"),
+            _entry("sensor.box_session_energy", "ocpp", "d1", "energy", "kWh"),
+        ]
+        result = {"ev_total_energy_sensor": "sensor.box_energy_target",
+                  "ev_session_energy_sensor": "sensor.box_session_energy"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_total_energy_sensor"] != result["ev_session_energy_sensor"]
+        assert result["ev_session_energy_sensor"] == "sensor.box_session_energy"
+
+    def test_a_session_counter_beats_a_metering_interval_delta(self):
+        """``Energy.Active.Import.Interval`` is the delta over the last
+        METERING interval, not the session — the glob table says so too."""
+        entities = [
+            _entry("sensor.cp_energy_export_register", "ocpp", "d1",
+                   "energy", "kWh"),
+            _entry("sensor.cp_energy_active_import_interval", "ocpp", "d1",
+                   "energy", "kWh"),
+            _entry("sensor.cp_session_energy", "ocpp", "d1", "energy", "kWh"),
+        ]
+        result = {"ev_session_energy_sensor": "sensor.cp_energy_export_register"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_session_energy_sensor"] == "sensor.cp_session_energy"
+
+
+class TestTheChoiceIsAFunctionOfTheName:
+    """The bug was that ordering decided. These pin the two terms that make
+    the choice total — remove either and the registry decides again."""
+
+    def _pick(self, candidates, bound="sensor.box_power_offered"):
+        entities = [_entry(bound, "ocpp", "d1", "power", "W")] + [
+            _entry(c, "ocpp", "d1", "power", "W") for c in candidates]
+        result = {"ev_charging_power_sensor": bound}
+        _reject_capability_sensor(result, entities)
+        return result["ev_charging_power_sensor"]
+
+    def test_the_entity_id_breaks_a_tie_not_the_order(self):
+        both = ["sensor.box_power_zulu", "sensor.box_power_alpha"]
+        assert self._pick(both) == "sensor.box_power_alpha"
+        assert self._pick(list(reversed(both))) == "sensor.box_power_alpha"
+
+    def test_the_window_outranks_the_direction(self):
+        """A lifetime register in the session slot is a different mistake
+        from the one this guard exists to fix: the window a role asks for
+        must not be traded away for a nicer-looking direction."""
+        entities = [
+            _entry("sensor.box_energy_export_register", "ocpp", "d1",
+                   "energy", "kWh"),
+            _entry("sensor.box_energy_active_import", "ocpp", "d1",
+                   "energy", "kWh"),
+            _entry("sensor.box_energy_total", "ocpp", "d1", "energy", "kWh"),
+        ]
+        result = {"ev_total_energy_sensor": "sensor.box_energy_export_register"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_total_energy_sensor"] == "sensor.box_energy_total"
+
+    def test_the_import_direction_outranks_alphabetical_order(self):
+        both = ["sensor.box_power_a", "sensor.box_power_active_import"]
+        assert self._pick(both) == "sensor.box_power_active_import"
+        assert self._pick(list(reversed(both))) == "sensor.box_power_active_import"
+
+
+class TestWhatCountsAsACapability:
+    """A literal list, not a loop over the constant: shrinking the segment
+    set must fail here rather than quietly shrink the test with it."""
+
+    REJECTED = (
+        "sensor.box_power_offered", "sensor.box_offer_power",
+        "sensor.box_power_limit", "sensor.box_power_limits",
+        "sensor.box_max_power", "sensor.box_maximum_power",
+        "sensor.box_maximal_power", "sensor.box_maximale_leistung_power",
+        "sensor.box_rated_power", "sensor.box_nominal_power",
+        "sensor.box_capacity_power", "sensor.box_available_power",
+        "sensor.box_setpoint_power", "sensor.box_target_power",
+        "sensor.box_allowed_power",
+        "sensor.box_power_active_export", "sensor.box_energy_exported",
+        "sensor.box_power_reactive_import",
+    )
+
+    def test_each_of_these_names_is_a_capability_or_the_wrong_quantity(self):
+        for eid in self.REJECTED:
+            assert not _measures_the_quantity(eid), eid
 
     def test_a_substring_is_not_a_word(self):
         """Class 67: 'rated' lives inside 'generated', 'max' inside
         'maximum' — the rules read segments."""
         assert _measures_the_quantity("sensor.senec_solar_generated_power")
-        assert not _measures_the_quantity("sensor.box_maximum_power")
+        assert _measures_the_quantity("sensor.keba_p30_charging_power")
+        assert _measures_the_quantity("sensor.wallbox_power_active_import")
 
-    def test_an_unknown_entity_is_not_dropped_blind(self):
+
+class TestTheOtherTwoPaths:
+    def test_the_glob_prefill_demotes_a_capability(self):
+        """``get_best_match`` is the config-flow prefill, not a binding — so
+        it demotes rather than corrects, and must still not offer the
+        nameplate when a measurement is there."""
+        hass = MagicMock()
+        hass.states.async_entity_ids.return_value = [
+            "sensor.ev_charger_power_offered",
+            "sensor.ev_charger_power_active_import",
+        ]
+        state = MagicMock()
+        state.state = "1234"
+        hass.states.get.return_value = state
+        with patch(
+            "custom_components.solar_energy_management.hardware_detection."
+            "entity_registry.async_get", return_value=MagicMock()
+        ):
+            best = EVChargerDetector(hass).get_best_match("ev_charging_power")
+        assert best == "sensor.ev_charger_power_active_import"
+
+    def test_the_ocpp_glob_rows_rank_the_measurand_above_the_offer(self):
+        rows = EV_INTEGRATION_PATTERNS["ocpp"]["patterns"]
+        prio = {pat: p for pat, _d, p in rows["ev_current"]}
+        assert prio["sensor.ocpp_*_current_import"] > \
+            prio["sensor.ocpp_*_current_offered"]
+        session = {pat: p for pat, _d, p in rows["ev_session_energy"]}
+        assert session["sensor.ocpp_*_session_energy"] > \
+            session["sensor.ocpp_*_energy_active_import_interval"]
+        assert "sensor.ocpp_*_energy_active_import_register" not in session
+
+    def test_the_near_miss_offer_falls_away_with_its_control(self):
+        """The offer is built AROUND a control; if a guard takes it, the
+        honest answer is "please report", not a charger with no throttle."""
+        dev = [
+            _entry("number.jb_max_current_offline_wanted", "mqtt", "d1",
+                   "current", "A"),
+            _entry("sensor.jb_power", "mqtt", "d1", "power", "W"),
+            _entry("binary_sensor.jb_plug", "mqtt", "d1", "plug"),
+        ]
+        proposed = {"ev_current_control": {
+            "entity": "number.jb_max_current_offline_wanted"}}
+        assert charger_from_near_miss(dev, "mqtt", proposed) == {}
+
+    def test_the_near_miss_offer_survives_a_clean_control(self):
+        dev = [
+            _entry("number.jb_charging_current", "mqtt", "d1", "current", "A"),
+            _entry("sensor.jb_power", "mqtt", "d1", "power", "W"),
+            _entry("binary_sensor.jb_plug", "mqtt", "d1", "plug"),
+        ]
+        proposed = {"ev_current_control": {"entity": "number.jb_charging_current"}}
+        offer = charger_from_near_miss(dev, "mqtt", proposed)
+        assert offer["ev_charging_power_sensor"] == "sensor.jb_power"
+
+
+class TestNoRegression:
+    def test_a_plain_single_power_sensor_is_untouched(self):
+        entities = [_entry("sensor.keba_p30_power", "keba", "d1", "power", "W")]
+        result = {"ev_charging_power_sensor": "sensor.keba_p30_power"}
+        apply_charger_discovery_guards(result, entities)
+        assert result["ev_charging_power_sensor"] == "sensor.keba_p30_power"
+
+    def test_an_unknown_entity_is_left_alone(self):
         """A role pointing outside the family we were handed is left alone —
-        a drop there would be a guess of its own."""
+        a swap there would be a guess of its own."""
         result = {"ev_charging_power_sensor": "sensor.somewhere_else_offered"}
         _reject_capability_sensor(result, [])
         assert result["ev_charging_power_sensor"] == "sensor.somewhere_else_offered"
