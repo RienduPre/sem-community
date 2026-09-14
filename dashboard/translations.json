@@ -1533,7 +1533,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Nabíjení — SEM ustoupil",
-    "notif_charger_stood_down": "SEM ustoupil"
+    "notif_charger_stood_down": "SEM ustoupil",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3069,7 +3074,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Oplader — SEM trak sig",
-    "notif_charger_stood_down": "SEM trak sig"
+    "notif_charger_stood_down": "SEM trak sig",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4605,7 +4615,12 @@
     "config_help_import_surcharge": "Optionale Gebühr auf jede importierte kWh (Netznutzung + Energieabgabe). Nur wenn deine dynamische Preis-Entität sie nicht enthält. Keine Grundgebühr; kein Einfluss auf die Einspeisung.",
     "config_proposed_pair_incomplete": "halbes Paar — dieses Gerät hat keinen {missing}-Sensor, und eine Hälfte allein läse sich wie ein Zähler, der nur bezieht",
     "charger_status_stood_down": "Laden — SEM gibt nach",
-    "notif_charger_stood_down": "SEM gibt nach"
+    "notif_charger_stood_down": "SEM gibt nach",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "en": {
     "% of limit": "% of limit",
@@ -5177,7 +5192,7 @@
     "config_help_hp_power_sensor": "Optional — lets SEM include heat-pump draw in load tracking and savings.",
     "config_help_hp_priority": "Lower = higher priority. EV usually gets 1-3; heat pump 4-6; pool 7-10.",
     "config_help_hp_rated_power": "The heat pump's rated electrical draw in watts, used for surplus sizing when there's no power sensor to calibrate from. Default 2000 W.",
-    "config_help_hp_relay": "For SG-Ready setups: both relays must be set. Skip if your heat pump only exposes a climate entity.",
+    "config_help_hp_relay": "For SG-Ready setups: both contacts must be set. A contact is usually a switch; a text/number/select entity works too and asks for its two values. Skip if your heat pump only exposes a climate entity.",
     "config_help_hp_temperature_sensor": "The sensor SEM reads for the heat pump / buffer temperature.",
     "config_help_hw_energy_sensor": "A cumulative energy counter (kWh) for the hot water device when it has no power sensor. SEM derives live power from it (or autodetects a power sensor first).",
     "config_help_hw_entity": "A switch or water_heater entity SEM can toggle on/off to drive the boiler. Required.",
@@ -5230,8 +5245,8 @@
     "config_hp_power_sensor": "Power sensor",
     "config_hp_priority": "Priority",
     "config_hp_rated_power": "Heat pump rated power (W)",
-    "config_hp_relay1": "SG-Ready relay 1",
-    "config_hp_relay2": "SG-Ready relay 2",
+    "config_hp_relay1": "SG-Ready contact 1",
+    "config_hp_relay2": "SG-Ready contact 2",
     "config_hp_temperature_sensor": "Heat pump temperature sensor",
     "config_hw_energy_sensor": "Hot water energy sensor (kWh)",
     "config_hw_entity": "Boiler control entity",
@@ -6141,7 +6156,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Charging — SEM stood down",
-    "notif_charger_stood_down": "SEM stood down"
+    "notif_charger_stood_down": "SEM stood down",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "es": {
     "% of limit": "% del límite",
@@ -7677,7 +7697,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Cargando — SEM se retira",
-    "notif_charger_stood_down": "SEM se retira"
+    "notif_charger_stood_down": "SEM se retira",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9213,7 +9238,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Lataus — SEM väistyi",
-    "notif_charger_stood_down": "SEM väistyi"
+    "notif_charger_stood_down": "SEM väistyi",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -10749,7 +10779,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "En charge — SEM se retire",
-    "notif_charger_stood_down": "SEM se retire"
+    "notif_charger_stood_down": "SEM se retire",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12285,7 +12320,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Töltés — SEM visszalépett",
-    "notif_charger_stood_down": "SEM visszalépett"
+    "notif_charger_stood_down": "SEM visszalépett",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "it": {
     "% of limit": "% del limite",
@@ -13821,7 +13861,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "In carica — SEM si ritira",
-    "notif_charger_stood_down": "SEM si ritira"
+    "notif_charger_stood_down": "SEM si ritira",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15357,7 +15402,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Laden — SEM geeft toe",
-    "notif_charger_stood_down": "SEM geeft toe"
+    "notif_charger_stood_down": "SEM geeft toe",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "no": {
     "% of limit": "% av grense",
@@ -16893,7 +16943,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Lader — SEM trakk seg",
-    "notif_charger_stood_down": "SEM trakk seg"
+    "notif_charger_stood_down": "SEM trakk seg",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "pl": {
     "% of limit": "% limitu",
@@ -18429,7 +18484,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Ładowanie — SEM ustąpił",
-    "notif_charger_stood_down": "SEM ustąpił"
+    "notif_charger_stood_down": "SEM ustąpił",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "pt": {
     "% of limit": "% do limite",
@@ -19965,7 +20025,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "A carregar — SEM recuou",
-    "notif_charger_stood_down": "SEM recuou"
+    "notif_charger_stood_down": "SEM recuou",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "ro": {
     "% of limit": "% din limită",
@@ -21501,7 +21566,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Încărcare — SEM s-a retras",
-    "notif_charger_stood_down": "SEM s-a retras"
+    "notif_charger_stood_down": "SEM s-a retras",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23037,7 +23107,12 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "Laddar — SEM backade",
-    "notif_charger_stood_down": "SEM backade"
+    "notif_charger_stood_down": "SEM backade",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -24573,6 +24648,11 @@
     "config_help_import_surcharge": "Optional fee added to every imported kWh (transfer + energy tax). Only when your dynamic price entity excludes it. No fixed subscription; does not affect export.",
     "config_proposed_pair_incomplete": "half of a split pair — this device has no {missing} sensor, and one half alone would read as a meter that only ever imports",
     "charger_status_stood_down": "充电中 — SEM 已暂停干预",
-    "notif_charger_stood_down": "SEM 已暂停干预"
+    "notif_charger_stood_down": "SEM 已暂停干预",
+    "config_hp_relay1_on": "Contact 1 — ON value",
+    "config_hp_relay1_off": "Contact 1 — OFF value",
+    "config_hp_relay2_on": "Contact 2 — ON value",
+    "config_hp_relay2_off": "Contact 2 — OFF value",
+    "config_help_hp_contact_values": "This contact is a text/number/select entity, not a switch, so SEM needs the exact value to write for each position — the integration's own vocabulary (EMS-ESP carries SG-Ready as a bit string). Both are required."
   }
 }

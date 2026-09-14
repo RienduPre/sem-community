@@ -42,6 +42,10 @@ DOCS_SIDE = {
     "sensor_unavailable", "sensor_stale", "no_forecast_integration",
     "no_recorder", "heat_pump_relay_unavailable", "hot_water_entity_unavailable",
     "hot_water_temperature_sensor_unavailable", "heat_pump_partial_sg_ready",
+    # (#801) a SG-Ready contact that is a text/number/select entity is
+    # missing one of the two values SEM must write. The next step is the
+    # user's own config, and the docs carry what the two values mean.
+    "heat_pump_contact_values_missing",
     "charger_control_entity_broken", "keba_failsafe_active",
     # (#915) the write landed nowhere — the register, not SEM, is the next step
     "battery_control_write_not_taken",

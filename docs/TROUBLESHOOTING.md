@@ -819,6 +819,22 @@ wire and configure the second relay if your heat pump supports the full
 four-state scheme; otherwise this notice is informational and can be
 dismissed.
 
+## Heat pump SG-Ready contact values
+
+**Repair:** *"SG-Ready contact N cannot be driven"*.
+
+A SG-Ready contact does not have to be a switch — it can be a `text`,
+`number`, `select` or `input_*` entity, which is how a Buderus/Bosch behind
+EMS-ESP carries its two SG-Ready inputs (a bit string in a text field). SEM
+cannot invent the value to write into one of those, so it asks for two per
+contact: what to write to CLOSE it and what to write to OPEN it.
+
+This notice means one of the two is missing, so every SG-Ready command for
+that heat pump fails. **Fix:** open **Settings → Integrations → SEM →
+Configure → Heat Pump**, or the dashboard's **Configuration** tab, and fill
+both values for the contact named in the notice — or point it at a switch
+entity, which needs no values. The notice clears on the next cycle.
+
 ## Hot water switch unavailable
 
 The switch that starts your hot-water boost is unavailable — SEM cannot run

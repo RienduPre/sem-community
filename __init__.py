@@ -267,6 +267,10 @@ _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
     # #593: hardware battery lifetime-cycle sensor (preferred over the estimate).
     "battery_cycles_sensor",
     "heat_pump_relay1_entity", "heat_pump_relay2_entity",
+    # (#801) the ON/OFF values of a text/number/select contact — read at
+    # controller construction, so a change must reload like the entity itself.
+    "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+    "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
     "heat_pump_climate_entity", "heat_pump_power_sensor",
     "heat_pump_temperature_sensor",
     # #600 — load-device kWh energy counters (derive power when no power sensor);
@@ -1728,6 +1732,8 @@ def _heat_pump_rows(full_config: dict) -> list[dict]:
             "heat_pump_force_on_threshold", "heat_pump_invert_sg_ready",
             "heat_pump_sg_ready_service", "heat_pump_sg_ready_service_data",
             "heat_pump_sg_ready_state_entity",
+            "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+            "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
         ) if full_config.get(k) not in (None, "")},
     }]
     for _i, _row in enumerate(full_config.get("heat_pumps") or []):
@@ -2670,6 +2676,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
                 sg_ready_service=_svc or None,
                 sg_ready_service_data=_svc_data,
                 sg_ready_state_entity=_row.get("heat_pump_sg_ready_state_entity"),
+                relay1_on_value=_row.get("heat_pump_relay1_on_value"),
+                relay1_off_value=_row.get("heat_pump_relay1_off_value"),
+                relay2_on_value=_row.get("heat_pump_relay2_on_value"),
+                relay2_off_value=_row.get("heat_pump_relay2_off_value"),
             )
             # (#914) A reload or an HA restart leaves the relays as SEM had
             # them (#656) — re-own a boost SEM left on, so the next stop path
@@ -5701,6 +5711,8 @@ async def _async_register_phase_services(
         "heat_pump_rated_power", "heat_pump_force_on_threshold",
         "heat_pump_sg_ready_service", "heat_pump_sg_ready_service_data",
         "heat_pump_sg_ready_state_entity", "heat_pumps",
+        "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+        "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
     }
     # Hot water — config visibility (controller not currently wired
     # into the production path; v1.7.2-beta.2 surfaces config so

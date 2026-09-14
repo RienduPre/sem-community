@@ -610,11 +610,25 @@ async def async_get_config_entry_diagnostics(
                 "relay1_entity": data.get("heat_pump_relay1_entity"),
                 "relay2_entity": data.get("heat_pump_relay2_entity"),
                 "climate_entity": data.get("heat_pump_climate_entity"),
+                # (#801) A contact may be a text/number/select entity written
+                # with a user-given value. Without these a "the pump never
+                # boosts" export shows a perfectly-wired-looking contact and
+                # no reason — which is exactly what this block exists to stop.
+                "relay1_on_value": data.get("heat_pump_relay1_on_value"),
+                "relay1_off_value": data.get("heat_pump_relay1_off_value"),
+                "relay2_on_value": data.get("heat_pump_relay2_on_value"),
+                "relay2_off_value": data.get("heat_pump_relay2_off_value"),
+                "sg_ready_service": data.get("heat_pump_sg_ready_service"),
             },
             "live": {
                 "relay1_state": data.get("heat_pump_relay1_state"),
                 "relay2_state": data.get("heat_pump_relay2_state"),
                 "climate_state": data.get("heat_pump_climate_state"),
+                # (#421) the branch each write actually took — present in
+                # coordinator.data all along and omitted from this block.
+                "relay_path": data.get("heat_pump_relay_path"),
+                "activation_path": data.get("heat_pump_activation_path"),
+                "deactivation_path": data.get("heat_pump_deactivation_path"),
             },
         },
         "forecast": {

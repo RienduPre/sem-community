@@ -13,6 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **SG-Ready works on heat pumps whose contacts are not switches** (#801, by
+  @HorizonKane). A Buderus/Bosch behind EMS-ESP carries its two SG-Ready
+  inputs as `text` entities holding a bit string, so neither the switch
+  pickers nor the service payload's `{state}` placeholder could drive it — and
+  the only way through was a template helper, the workaround this project
+  tries not to ship. A SG-Ready contact may now be a `text`, `number`,
+  `select` or `input_*` entity: pick it in the same field and give the two
+  values SEM should write for that contact. The truth table, the NC inversion
+  and the restart read-back are unchanged; only the write service varies, and
+  each contact keeps its own pair of values because EMS-ESP's two inputs carry
+  bit strings of different widths. The SG-Ready **service** path — shipped in
+  2.1.0-beta.1 and never written down — is documented now too.
+- 🐛 **A heat pump SEM could not stand down is no longer reported as idle**
+  (#801 review). `deactivate()` discarded the contact write's verdict, so a
+  failed write left the pump physically boosting while SEM recorded IDLE / 0 W
+  and handed that power to the next device — the mirror of the rule the
+  activation path already honours. It now keeps the pump ACTIVE and retries.
+- 🐛 **A half-configured SG-Ready contact now says so** (#801 review). The
+  config flow refuses to save a value contact with one of its two values
+  empty, but the dashboard Config card saves each field on its own — so the
+  rule lives in a Repair raised against the live config, where both surfaces
+  meet. Previously: a green "saved" and a heat pump that never boosts again.
+
 # [2.1.0-beta.21] — 13.09.2026
 
 - 🐛 **"Finish overnight from: Grid" no longer buys the whole day's target at

@@ -1143,17 +1143,87 @@ contacts are probably wired normally-closed rather than normally-open. Turn
 on *Invert SG-Ready* in the heat pump section — it flips both contacts —
 rather than rewiring or swapping the two relay entities.
 
-### Relay configuration
+### Contact configuration
 
-You need two switch entities in HA to control the SG-Ready pins — typically
-a Shelly or ESPHome device connected to the heat pump's input terminals.
+You need two HA entities to drive the SG-Ready pins — typically a Shelly or
+ESPHome device wired to the heat pump's input terminals.
 
 | Config field | What to set |
 |--------------|------------|
-| Relay 1 entity | `switch.` entity for the first SG-Ready pin |
-| Relay 2 entity | `switch.` entity for the second SG-Ready pin |
+| SG-Ready contact 1 | The entity for the first SG-Ready pin |
+| SG-Ready contact 2 | The entity for the second SG-Ready pin |
 | Climate entity (optional) | Your heat pump's `climate.` entity for setpoint boost |
 | Power sensor (optional) | Power consumption sensor for the heat pump |
+
+#### When the contact is not a switch (#801)
+
+A contact is usually a `switch.`, and SEM turns it on and off. Some pumps do
+not expose one. A Buderus/Bosch behind **EMS-ESP**, for example, carries its
+SG-Ready inputs as `text.` entities holding a bit string — a switch service
+would do nothing to them.
+
+So a contact may also be a `text.`, `number.`, `select.` or the matching
+`input_*` helper. Pick it in the same field; SEM then asks for the two
+values it should write:
+
+| Config field | What to set |
+|--------------|------------|
+| Contact N — ON value | The value that CLOSES that contact |
+| Contact N — OFF value | The value that OPENS that contact |
+
+SEM writes them verbatim through the entity's own service (`text.set_value`,
+`number.set_value`, `select.select_option`). The values belong to your
+integration's vocabulary, not SEM's — they cannot be guessed, so both are
+required and the config refuses to save a value contact with either missing.
+The two contacts keep their own pair: on EMS-ESP the two inputs carry bit
+strings of different widths.
+
+Everything else is unchanged — the SG-Ready truth table, *Invert SG-Ready*
+for normally-closed wiring, and the restart read-back that re-owns a boost
+SEM left running all work the same way on a value contact.
+
+Worked example — EMS-ESP, where SG-Ready is inputs 1 and 4:
+
+| Field | Value |
+|-------|-------|
+| SG-Ready contact 1 | `text.ems_esp_boiler_input_1_options` |
+| Contact 1 — ON value | the bit string that activates input 1 |
+| Contact 1 — OFF value | the bit string that deactivates it |
+| SG-Ready contact 2 | `text.ems_esp_boiler_input_4_options` |
+| Contact 2 — ON / OFF value | the same, for input 4 |
+
+#### When the control surface is a service (#801)
+
+Some pumps are not driven through an entity at all — the integration exposes
+a command service instead. Fill the **SG-Ready service** fields and SEM calls
+it rather than touching the contacts:
+
+| Config field | What to set |
+|--------------|------------|
+| SG-Ready service | `domain.service` — e.g. `ems_esp.send_command`, or a `script.` of your own |
+| SG-Ready service data | A JSON object, the service's payload |
+| SG-Ready state read-back entity | Optional: an entity reporting the pump's current SG-Ready state |
+
+Any string value in the payload may use three placeholders, which SEM
+substitutes per call:
+
+| Placeholder | Becomes |
+|-------------|---------|
+| `{state}` | the SG-Ready state number, `1`–`4` |
+| `{relay1}` | `true` / `false` — contact 1 in the truth table |
+| `{relay2}` | `true` / `false` — contact 2 |
+
+```json
+{"command": "sgready", "value": "{state}"}
+```
+
+When a read-back entity is set, SEM checks after the write that the pump
+reports the state it commanded and logs a mismatch rather than assuming the
+command landed. The same entity lets SEM re-own a boost it left running
+across a restart.
+
+The service path and the contact path are alternatives: if a service is
+configured it IS the actuation, and the contacts are left alone.
 
 ### Setpoint boost
 

@@ -232,6 +232,14 @@ const WATCHED = [
 // #528 — entity-wiring keys that trigger an entry RELOAD when changed (mirror
 // of __init__.py:_SET_OPTION_STRUCTURAL_KEYS). Pickers for these stage their
 // edit and commit on one Apply, so the reload fires once for the whole batch.
+// (#801) Mirrors consts/devices.py — the domains a SG-Ready contact may
+// point at, and which of them are VALUE domains needing an ON/OFF value.
+// A switch contact is driven by turn_on/turn_off and needs neither.
+const CONTACT_VALUE_DOMAINS = new Set([
+    'text', 'input_text', 'number', 'input_number', 'select', 'input_select',
+]);
+const SG_READY_CONTACT_DOMAINS = ['switch', 'input_boolean', ...CONTACT_VALUE_DOMAINS];
+
 const STRUCTURAL_KEYS = new Set([
     'battery_soc_sensor',
     // #628/#696 — the three power-SOURCE overrides (Sensor sources section).
@@ -239,6 +247,10 @@ const STRUCTURAL_KEYS = new Set([
     // set_option; staging batches the three into one Apply/reload.
     'grid_power_sensor', 'solar_production_sensor', 'battery_power_sensor',
     'heat_pump_relay1_entity', 'heat_pump_relay2_entity',
+    // (#801) the ON/OFF values of a text/number/select contact — read at
+    // HeatPumpController construction, so structural like the entity itself.
+    'heat_pump_relay1_on_value', 'heat_pump_relay1_off_value',
+    'heat_pump_relay2_on_value', 'heat_pump_relay2_off_value',
     'heat_pump_climate_entity', 'heat_pump_power_sensor',
     'heat_pump_temperature_sensor', 'heat_pump_invert_sg_ready',
     'hot_water_entity', 'hot_water_power_sensor', 'hot_water_temperature_sensor',
@@ -466,6 +478,13 @@ class SEMConfigCard extends SEMLitBase {
     }
 
     /** Should this control appear in the current view? */
+    // (#801) True when a SG-Ready contact points at a VALUE entity, so the
+    // two value rows belong beside it. An unset or switch contact gets none.
+    _isValueContact(entityId) {
+        const eid = String(entityId || '');
+        return CONTACT_VALUE_DOMAINS.has(eid.split('.')[0]);
+    }
+
     _showsControl(key) {
         if (this._advanced) return true;
         // Entity-backed controls carry their domain; compare on the
@@ -1470,10 +1489,29 @@ class SEMConfigCard extends SEMLitBase {
         return html`
             ${statusBlock}
             <div class="hp-form">
-                ${this._renderPicker('heat_pump_relay1_entity', 'config_hp_relay1', ['switch', 'input_boolean'],
+                ${/* (#801) A SG-Ready contact is not always a switch — EMS-ESP
+                      carries them as text entities holding a bit string. The
+                      picker offers every domain SEM can drive; the two value
+                      rows appear only for a non-switch contact. Each field
+                      saves on its own through set_option, so the pairing rule
+                      cannot live here: a contact left with one value raises a
+                      Repair from the coordinator, against the live config
+                      (#801 review — this comment used to claim a refusal the
+                      dashboard path did not have). */ ''}
+                ${this._renderPicker('heat_pump_relay1_entity', 'config_hp_relay1', SG_READY_CONTACT_DOMAINS,
                     null, opts, 'config_help_hp_relay')}
-                ${this._renderPicker('heat_pump_relay2_entity', 'config_hp_relay2', ['switch', 'input_boolean'],
+                ${this._isValueContact(opts.heat_pump_relay1_entity) ? html`
+                    ${this._renderOptionTextInput('heat_pump_relay1_on_value', 'config_hp_relay1_on',
+                        opts, 'config_help_hp_contact_values', '100000000000')}
+                    ${this._renderOptionTextInput('heat_pump_relay1_off_value', 'config_hp_relay1_off',
+                        opts, 'config_help_hp_contact_values', '000000000000')}` : nothing}
+                ${this._renderPicker('heat_pump_relay2_entity', 'config_hp_relay2', SG_READY_CONTACT_DOMAINS,
                     null, opts, 'config_help_hp_relay')}
+                ${this._isValueContact(opts.heat_pump_relay2_entity) ? html`
+                    ${this._renderOptionTextInput('heat_pump_relay2_on_value', 'config_hp_relay2_on',
+                        opts, 'config_help_hp_contact_values', '100000000000')}
+                    ${this._renderOptionTextInput('heat_pump_relay2_off_value', 'config_hp_relay2_off',
+                        opts, 'config_help_hp_contact_values', '000000000000')}` : nothing}
                 ${/* #550: relay contact polarity — read at HeatPumpController
                       construction (structural). Was only on the native flow. */ ''}
                 ${this._renderOptionToggle('heat_pump_invert_sg_ready', 'config_hp_invert_sg_ready',
@@ -2264,6 +2302,36 @@ class SEMConfigCard extends SEMLitBase {
                     </div>
                 </div>
                 ${this._helpBlock(helpKey, cfg.default, cfg.unit, sid, 'option')}
+            </div>
+        `;
+    }
+
+    // (#801) A free-text option value. The SG-Ready contacts can point at a
+    // text/number/select entity instead of a switch, and then the two values
+    // SEM writes are the integration's own vocabulary (EMS-ESP carries them
+    // as bit strings) — never guessable, so they are typed beside the entity,
+    // the same shape as the charger phase-switch and charge-mode values.
+    _renderOptionTextInput(optionKey, labelKey, opts, helpKey, placeholder) {
+        if (!this._showsControl(optionKey)) return nothing;
+
+        const sid = 'opt:' + optionKey;
+        this._reg(sid);
+        const live = opts[optionKey] != null ? opts[optionKey] : '';
+        const dirty = this._isDirty(sid);
+        const cur = this._stagedVal(sid, live);
+        return html`
+            <div class="picker-cell ${dirty ? 'dirty' : ''}">
+                <div class="picker-row">
+                    <span class="picker-label">${this._t(labelKey)}${dirty ? html`<span class="dirty-dot">●</span>` : nothing}${this._helpBtn(helpKey)}</span>
+                    <input type="text" class="txt-opt" .value=${String(cur ?? '')}
+                           placeholder="${placeholder || ''}"
+                           @keydown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                           @blur=${(e) => {
+                               const v = e.target.value.trim();
+                               if (v !== String(cur ?? '')) this._stage(sid, 'option', v);
+                           }} />
+                </div>
+                ${this._helpBlock(helpKey, null, null, sid, 'option')}
             </div>
         `;
     }
