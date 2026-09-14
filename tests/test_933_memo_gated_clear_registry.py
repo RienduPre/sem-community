@@ -46,6 +46,13 @@ DECLARED: dict[str, str] = {
     "coordinator/battery_adapters/base.py::BatteryControlAdapter._write_force_discharge":
         "the first accepted write of each adapter lifetime clears once "
         "(_force_discharge_repair_reconciled, #933); a refused write proves nothing",
+    "coordinator/sensor_reader.py::SensorReader._corroborate_split_grid":
+        "the window's `reported` memo starts at None and a verdict is a bool, "
+        "so a fresh reader's first verdict always acts (#947); and the clear "
+        "does not depend on the corroborator running at all — the first PROVEN "
+        "grid read of a lifetime clears once via _split_proof_reconciled, which "
+        "covers a pick that IMPROVES to `declared` across a restart and so "
+        "never corroborates again (#933)",
     "coordinator/charger_reconciler.py::ChargerReconciler._retire_stand_down":
         "the memo starts at None, not False, so a fresh reconciler clears "
         "once on its first retire (#944); the Repair is non-persistent anyway",

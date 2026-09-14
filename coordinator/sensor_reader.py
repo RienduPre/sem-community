@@ -129,22 +129,53 @@ def parse_export_limited(state, unit) -> "Optional[bool]":
 # inferred a phantom connection (#739, live on PROD 08.08.2026).
 EV_ACTIVE_CHARGE_FLOOR_W = 500.0
 
-# Known patterns for split grid power sensors — single source of truth.
+# Known patterns for split grid power sensors — the LAST tier, and the weakest.
 # GRID_TRIGGER_HINTS is derived from these and used in __init__.py to
 # pre-filter new sensor events. Adding a new brand here automatically
 # updates the trigger filter — no second file to keep in sync.
+#
+# (#947) These match ENTITY IDS — a guess about one house — where the #915
+# roster matches an integration's own DECLARED keys. ``_declared_split_grid_power``
+# runs first for exactly that reason, and whatever these still pick has to
+# corroborate against the grid energy counters before SEM steers on it.
+#
+# The trailing comments used to be claims; they are now evidence, from an audit
+# of every cached upstream vocabulary (#947). Read "declared by" as: integrations
+# whose own repository declares a key containing this string.
+#   * ``power_production`` is declared by forecast_solar
+#     (``power_production_next_12hours``) and enphase_envoy
+#     (``current_power_production``) — SOLAR production — and by NO grid meter
+#     found. It is the string that made SEM read a solar forecast as the
+#     reporter's grid export meter. It is kept because it IS a real older-DSMR
+#     entity_id, and entity_ids are the namespace these match in; it is now
+#     harmless because a guess no longer steers unproven.
+#   * ``power_consumption`` is likewise declared by blebox, connectlife and a
+#     Daikin COMPRESSOR, and by no grid meter found.
+#   * ``from_grid_power`` and ``consumption_from_grid`` matched NOTHING in any
+#     cached vocabulary. They are kept rather than deleted because absence from
+#     the declared corpus is not proof of absence from a user's entity_ids, and
+#     the corroboration gate makes an idle pattern cost nothing.
+# Real DSMR declares ``current_power_usage``/``current_power_return``
+# (dsmr_reader) or per-phase keys (core dsmr); both now live in the lexicon,
+# which is where a name becomes evidence.
 IMPORT_PATTERNS: tuple[str, ...] = (
-    "import_from_grid", "pac_to_user", "grid_import", "from_grid_power",
-    "power_consumption",      # DSMR/P1 (NL/BE)
-    "consumption_from_grid",  # E3DC
-    "import_power",           # GivEnergy
-    "grid_imported_power",    # Senec
+    "import_from_grid",       # growatt_server (declared)
+    "pac_to_user",            # growatt_server TLX (declared)
+    "grid_import",            # anker_solix, eg4_web_monitor, abb (declared)
+    "from_grid_power",        # no declared match found
+    "power_consumption",      # NOT a grid meter in any declared vocabulary
+    "consumption_from_grid",  # no declared match found
+    "import_power",           # eg4_web_monitor (declared); also easee, a CHARGER
+    "grid_imported_power",    # senec (declared)
 )
 EXPORT_PATTERNS: tuple[str, ...] = (
-    "export_to_grid", "pac_to_grid", "grid_export", "to_grid_power",
-    "power_production",       # DSMR/P1 (NL/BE)
-    "export_power",           # GivEnergy
-    "grid_exported_power",    # Senec
+    "export_to_grid",         # growatt_server (declared)
+    "pac_to_grid",            # growatt_server TLX (declared)
+    "grid_export",            # anker_solix, eg4_web_monitor, abb (declared)
+    "to_grid_power",          # anker_solix sub-flows only (battery_to_grid_power)
+    "power_production",       # SOLAR production in every declared vocabulary
+    "export_power",           # eg4_web_monitor (declared); also easee, a CHARGER
+    "grid_exported_power",    # senec (declared)
 )
 GRID_TRIGGER_HINTS: tuple[str, ...] = tuple(set(IMPORT_PATTERNS + EXPORT_PATTERNS))
 
@@ -199,6 +230,87 @@ PLATFORM_BATTERY_SIGN_INVERT: dict[str, bool] = {
     "enphase_envoy": True,
     "solax": True,
 }
+
+
+# ── (#947) Corroborating a name-matched grid meter ──────────────────────
+#
+# When the Energy Dashboard hands SEM grid COUNTERS but no grid power entity,
+# SEM scans every sensor in the house and matches import/export meters by a
+# SUBSTRING of the entity_id (IMPORT_PATTERNS / EXPORT_PATTERNS above). Those
+# patterns are brand names — ``power_production`` is the DSMR/P1 feed-in
+# meter — and a substring is not evidence: on the #947 reporter's install it
+# matched ``sensor.power_production_now``, a SOLAR FORECAST entity, which SEM
+# then read as its grid export meter and steered the whole optimiser on.
+#
+# #911 answered that instance by EXCLUDING forecasts. A blacklist over every
+# sensor in a house can never be complete — the import patterns alone reach
+# ``power_consumption``, which names a heat pump, an appliance monitor and a
+# UPS as readily as a meter. The root cause is not which names collide; it is
+# that a pick made on NAME evidence is stored indistinguishably from one the
+# user configured, and is trusted forever after.
+#
+# So a name-only pick is a CANDIDATE. It becomes a meter when it agrees with
+# the thing SEM already has and did not guess at: the grid energy counter.
+# Integrate the candidate over a window, compare against the counter's own
+# delta over the SAME window, and let the house answer the question. A real
+# meter tracks its counter; a forecast, a heat pump or a charger does not.
+# Until the answer arrives SEM reports NO grid power and says so — "I could
+# not tell" is a third value, never folded into a confident number.
+#
+# A pick with DEVICE evidence (a power sensor on the grid counter's own
+# device — Growatt, DSMR, E3DC, Senec, every brand these patterns were
+# written for) is not a guess and never enters this path.
+
+#: Minimum energy on either side before a window may return a verdict. Below
+#: this the comparison is noise against noise — a quiet night says nothing
+#: about whether the candidate is the meter.
+GRID_PROOF_MIN_KWH: float = 0.05
+#: Minimum window length. Cloud counters (FusionSolar northbound, which is
+#: what #947 runs) publish every few minutes; a window shorter than this
+#: compares a 10 s integral against a counter that has not been written yet.
+GRID_PROOF_MIN_S: float = 900.0
+#: How far the integrated candidate may sit from the counter and still be the
+#: same meter. Generous on purpose: the question is "is this the grid meter or
+#: something else in the house", not "is it calibrated". A sub-load or an
+#: unrelated sensor misses by far more than half.
+GRID_PROOF_TOLERANCE: float = 0.5
+#: A real meter cannot read nothing while its OWN counter advances. A sub-load
+#: can and constantly does — a heat pump stops, the house keeps importing. Each
+#: time a counter moves, the candidate must account for at least this fraction
+#: of that move; one failure disqualifies the pair for the window. This is the
+#: discriminator the energy tolerance cannot be: a sub-load that runs at 87 %
+#: of house import passes any tolerance loose enough for a real meter's
+#: sampling error, and is caught here the first time it switches off.
+GRID_PROOF_MIN_SHARE: float = 0.2
+#: A window cannot run forever waiting for MIN_KWH — a house that neither
+#: imports nor exports for hours would leave the candidate unjudged and SEM
+#: blind. At this age the window restarts with fresh baselines instead.
+GRID_PROOF_MAX_S: float = 7200.0
+
+
+#: Sentinel for "carry the previous verdict", so None (still asking) is
+#: a value a caller can pass deliberately rather than a missing argument.
+_UNSET = object()
+
+
+def _fresh_grid_proof() -> dict:
+    """A corroboration window with nothing in it yet."""
+    return {
+        "pair": None,        # the (import, export) pick this window judges
+        "verdict": None,     # None = still asking, True = agrees, False = does not
+        "started": None,     # monotonic seconds
+        "last_sample": None,
+        "import_wh": 0.0,    # integral of the candidate import power
+        "export_wh": 0.0,
+        "import_base": None,  # counter reading at window start
+        "export_base": None,
+        "step_import": None,  # counter + integral at the last counter MOVE
+        "step_export": None,
+        "step_wh_import": 0.0,
+        "step_wh_export": 0.0,
+        "contradictions": 0,  # counter advanced while the candidate read ~nothing
+        "reported": None,    # last verdict pushed to the log/Repair
+    }
 
 
 @dataclass
@@ -500,6 +612,15 @@ class SensorReader:
             "confidence": None,  # "same-device" | "any-device" | None
             "warned": False,
         }
+        # (#947) Corroboration state for a NAME-ONLY pick — see
+        # ``_corroborate_split_grid``. A pick with device evidence skips it.
+        self._split_grid_proof: dict[str, Any] = _fresh_grid_proof()
+        #: Last (import, export, state) said about an unproven pair — the
+        #: warn-once guard for ``_report_unproven_grid``.
+        self._split_grid_unproven_said: Optional[tuple] = None
+        #: (#933) once per reader lifetime: the first PROVEN grid read clears a
+        #: guess Repair a previous lifetime left, whatever tier proved it.
+        self._split_proof_reconciled: bool = False
         self._uses_split_grid: bool = False
         # Warn-once guard for the discovery-*exception* path (#259); distinct from the
         # dict "warned" key (which guards "no sensor found"). Reset on cache invalidate.
@@ -2056,7 +2177,7 @@ class SensorReader:
             # re-discovery entirely, so a later-loading export sensor
             # was never adopted until restart.
             locked = (
-                disc["confidence"] == "same-device"
+                disc["confidence"] in ("declared", "same-device")
                 and disc["import"] and disc["export"]
             )
             if not locked and self._split_grid_scan_due(disc):
@@ -2114,20 +2235,54 @@ class SensorReader:
             if disc["import"]:
                 import_w = self._read_sensor(disc["import"], "grid_import")
                 export_w = self._read_sensor(disc["export"], "grid_export") if disc["export"] else 0.0
-                # SEM convention: negative = import, positive = export
-                readings.grid_power = export_w - import_w
-                self._grid_sign_detected = True  # No sign correction needed
-                if disc["export"]:
-                    self._audit_split_pair(
-                        "grid", "Grid (auto-discovered split pair)",
-                        import_w, disc["import"], export_w, disc["export"],
-                    )
+                # (#947) A pick with DEVICE evidence is a meter. A name-only
+                # pick has to earn it against the energy counters first, and
+                # steers nothing while the answer is still "I cannot tell".
+                if disc["confidence"] in ("declared", "same-device"):
+                    proven = True          # device evidence; nothing to prove
+                else:
+                    proven = self._corroborate_split_grid(
+                        disc, ed, import_w, export_w)
+                if proven:
+                    # (#933) A fresh reader's FIRST healthy verdict clears what
+                    # a previous lifetime left, once. Without this the clear is
+                    # gated on a per-lifetime memo: a pick that IMPROVES across
+                    # a restart — a name guess that becomes `declared` because
+                    # the roster learned the brand — never runs the corroborator
+                    # at all, so the old Repair would outlive the problem
+                    # forever. The Repair is persistent; the memo is not.
+                    if not self._split_proof_reconciled:
+                        self._split_proof_reconciled = True
+                        _ri.clear_split_grid_guessed(self.hass)
+                    # SEM convention: negative = import, positive = export
+                    readings.grid_power = export_w - import_w
+                    self._grid_sign_detected = True  # No sign correction needed
+                    if disc["export"]:
+                        self._audit_split_pair(
+                            "grid", "Grid (auto-discovered split pair)",
+                            import_w, disc["import"], export_w, disc["export"],
+                        )
+                else:
+                    self._report_unproven_grid(disc, proven)
             elif not disc["warned"]:
                 disc["warned"] = True
-                _LOGGER.warning(
-                    "No grid power sensor found (no combined and no split import/export). "
-                    "Grid power will be 0. Check Energy Dashboard grid configuration."
-                )
+                # (#947) Say which of the two silences this is. An export-only
+                # discovery is NOT "nothing found" — SEM has half a pair and
+                # declines to read "export minus zero" as the grid, because a
+                # house that imports would then read as one that never does.
+                if disc["export"]:
+                    _LOGGER.warning(
+                        "Only a grid EXPORT power sensor was found (%s) and no "
+                        "import half. SEM will not read export-minus-zero as the "
+                        "grid — grid power stays 0. Set grid_import_power_entity "
+                        "/ grid_export_power_entity to name both meters.",
+                        disc["export"],
+                    )
+                else:
+                    _LOGGER.warning(
+                        "No grid power sensor found (no combined and no split import/export). "
+                        "Grid power will be 0. Check Energy Dashboard grid configuration."
+                    )
 
         # (#933) The grid was read by an explicit path — SEM's own pair (the
         # guess Repair's own remedy, which reloads the entry), a declared
@@ -2673,20 +2828,28 @@ class SensorReader:
         return delta_a, delta_b
 
     def _sum_counter_states(self, entity_ids: list) -> Optional[float]:
-        """Sum energy-counter states; ``None`` when any is unreadable.
+        """Sum energy-counter states IN kWh; ``None`` when any is unreadable.
 
         Partial sums are worse than no judgement — one missing tariff
         counter mid-cycle would look like a counter reset.
+
+        (#947 review) The unit conversion is not cosmetic. This used to sum
+        ``float(state.state)`` raw while the POWER side was normalised to watts
+        by ``_read_sensor``, so a Wh counter (real hardware — #551) put the two
+        sides 1000x apart. For the sign voter that only compares DIRECTIONS,
+        scale never mattered; the #947 corroborator compares MAGNITUDES, and a
+        Wh install would have failed every window forever and been left
+        reporting no grid power — a regression on an install that worked.
         """
         total = 0.0
         for eid in entity_ids:
             state = self.hass.states.get(eid)
             if not state or state.state in ("unknown", "unavailable"):
                 return None
-            try:
-                total += float(state.state)
-            except (ValueError, TypeError):
+            kwh = energy_state_to_kwh(state, default=None)
+            if kwh is None:
                 return None
+            total += kwh
         return total
 
     def _audit_split_pair(
@@ -3059,6 +3222,85 @@ class SensorReader:
                 return True
         return False
 
+    def _declared_split_grid_power(self, ed) -> tuple[Optional[str], Optional[str]]:
+        """(#947) The grid meters this install's integrations DECLARE.
+
+        The #915 roster reads each integration's OWN repository and records
+        what it calls things — ``growatt_modbus`` declares
+        ``grid_import_power``/``grid_export_power``, ``senec`` declares
+        ``grid_imported_power``/``grid_exported_power``. That is evidence of a
+        different kind from a substring of an entity_id: it is the integration
+        author's semantic label, matched on ``translation_key`` (or a
+        ``unique_id`` segment), never on the entity_id the user renamed.
+
+        A forecast integration declares no grid role at all, so the #947
+        collision — ``power_production`` matching a solar forecast's
+        ``power_production_now`` — cannot arise on this tier. It is a narrow
+        tier on purpose: only a minority of roster rows carry vocabulary, and
+        everything it does not answer falls through to the name patterns,
+        which must still earn their place against the counters.
+
+        Returns ``(import_entity, export_entity, on_grid_device)``. The third
+        value is the DEVICE question, kept separate from the naming one:
+        declaring a grid meter says the entity measures a grid, not that it
+        measures THIS install's grid connection. A Senec battery retrofitted
+        behind an existing DSMR meter declares both halves and sits on another
+        device from the Energy Dashboard's counters, and its grid-tie point is
+        not the utility meter's. So a declared pick that cannot show device
+        affinity is still a strong CANDIDATE and still goes through the
+        corroboration window (#947 review — it was trusted unconditionally,
+        which reopened the very risk this issue closed, one tier up).
+        """
+        try:
+            from ..hardware_detection import (
+                roster_role_vocab as _vocab,
+                _entry_matches_declared as _matches,
+            )
+            registry = er.async_get(self.hass)
+        except Exception as e:  # noqa: BLE001 — no roster, no verdict
+            _LOGGER.debug("Declared grid-meter lookup unavailable: %s (#947)", e)
+            return None, None
+
+        wanted = {"grid_import_power": None, "grid_export_power": None}
+        grid_device_id = self._get_device_for_entity(
+            getattr(ed, "grid_import_energy", None))
+        # Deterministic order (#485 H6): the registry's iteration order is not
+        # contractual, and first-match-wins over an unsorted scan could swap
+        # which sensor plays import vs export between restarts.
+        entries = sorted(
+            (e for e in registry.entities.values()
+             if str(getattr(e, "entity_id", "")).startswith("sensor.")),
+            key=lambda e: e.entity_id,
+        )
+        best: dict[str, tuple] = {}
+        for entry in entries:
+            platform = str(getattr(entry, "platform", "") or "")
+            if not platform:
+                continue
+            for role in wanted:
+                body = _vocab(platform, role)
+                if not body["keys"]:
+                    continue
+                if _matches(entry, body["keys"], body["exact_only"]) is None:
+                    continue
+                # A declared entity on the grid counter's own device outranks
+                # a declared entity elsewhere — same brand, two inverters.
+                same_device = bool(
+                    grid_device_id
+                    and getattr(entry, "device_id", None) == grid_device_id)
+                rank = (1 if same_device else 0,)
+                if role not in best or rank > best[role][0]:
+                    best[role] = (rank, entry.entity_id)
+        imp = best.get("grid_import_power")
+        exp = best.get("grid_export_power")
+        # Affinity is claimed only when EVERY side SEM resolved sits on the
+        # grid counter's device — a mixed pair is not evidence about the pair.
+        sides = [x for x in (imp, exp) if x]
+        on_grid_device = bool(sides) and all(x[0][0] == 1 for x in sides)
+        return (imp[1] if imp else None,
+                exp[1] if exp else None,
+                on_grid_device)
+
     def _discover_split_grid_power(self, ed) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Discover separate import/export power sensors for setups without combined grid power.
 
@@ -3078,6 +3320,25 @@ class SensorReader:
         "same-device" if either side came from a device matching the grid energy
         sensor, "any-device" if matched by pattern only, or None if nothing matched.
         """
+        # (#947) TIER 1 — what the install's own integrations DECLARE. This
+        # runs before any name matching, because a declared role is evidence
+        # and a substring is not. A declared pair needs no corroboration.
+        declared_import, declared_export, on_grid_device = (
+            self._declared_split_grid_power(ed))
+        if declared_import or declared_export:
+            # "declared" is the trusted tier; "declared-elsewhere" names the
+            # same evidence WITHOUT device affinity, and corroborates.
+            conf = "declared" if on_grid_device else "declared-elsewhere"
+            result_key = (declared_import, declared_export, conf)
+            if result_key != self._last_split_grid_log:
+                self._last_split_grid_log = result_key
+                _LOGGER.info(
+                    "Grid power meters DECLARED by their integrations "
+                    "(%s): import=%s, export=%s (#947)",
+                    conf, declared_import, declared_export,
+                )
+            return declared_import, declared_export, conf
+
         import_patterns = IMPORT_PATTERNS
         export_patterns = EXPORT_PATTERNS
 
@@ -3199,6 +3460,9 @@ class SensorReader:
             "confidence": None,
             "warned": self._split_grid_discovery.get("warned", False),
         }
+        # (#947) A rediscovery invalidates the proof with the picks it judged.
+        self._split_grid_proof = _fresh_grid_proof()
+        self._split_grid_unproven_said = None
         # Re-allow the discovery-exception warning after a rediscovery (#259) — circumstances
         # have changed (e.g. a new sensor appeared), so a fresh failure is worth surfacing.
         self._split_grid_discovery_warned = False
@@ -3221,6 +3485,240 @@ class SensorReader:
             return isinstance(platform, str) and platform in self._FORECAST_PLATFORMS
         except Exception:  # noqa: BLE001 — no registry, no verdict
             return False
+
+    def _grid_counter_entities(self, ed) -> "tuple[list, list]":
+        """The grid import / export counter entity lists, tariff splits and
+        all (#485 H4). Same resolution the sign voter uses."""
+        def _lst(single, plural):
+            v = getattr(ed, plural, None)
+            if isinstance(v, (list, tuple)) and v:
+                return list(v)
+            one = getattr(ed, single, None)
+            return [one] if one else []
+        return (_lst("grid_import_energy", "grid_import_energy_list"),
+                _lst("grid_export_energy", "grid_export_energy_list"))
+
+    def _corroborate_split_grid(self, disc: dict, ed, import_w, export_w) -> Optional[bool]:
+        """(#947) Does this NAME-MATCHED pair actually measure the grid?
+
+        Integrates the candidate power over a window and compares it against
+        the grid energy counters' own movement over the same window. Returns
+        ``True`` (agrees — it is the meter), ``False`` (it is not) or ``None``
+        (not enough has happened yet to say). ``None`` is a verdict of its
+        own: the caller declines to steer rather than guessing.
+
+        The window restarts whenever the picks change, on a counter reset, and
+        once it ages past ``GRID_PROOF_MAX_S`` without meeting the energy
+        floor — so a quiet day never strands the pair unjudged.
+        """
+        proof = self._split_grid_proof
+        pair = (disc.get("import"), disc.get("export"))
+        if proof.get("pair") != pair:
+            self._split_grid_proof = proof = _fresh_grid_proof()
+            proof["pair"] = pair
+
+        imports, exports = self._grid_counter_entities(ed)
+        if not imports and not exports:
+            return None                      # nothing to corroborate against
+        now = time.monotonic()
+        import_val = self._sum_counter_states(imports) if imports else 0.0
+        export_val = self._sum_counter_states(exports) if exports else 0.0
+        if import_val is None or export_val is None:
+            return proof["verdict"]          # a counter is unreadable this cycle
+
+        if self._sign_vote_warmup > 0:
+            # (#947 review, open item closed) While HA's recorder is still
+            # replaying, counter states arrive in bursts that are not elapsed
+            # time. The sign voter already sits those cycles out and keeps its
+            # baselines fresh; the corroborator compares MAGNITUDES, so a
+            # replayed jump against a real-time integral would convict a good
+            # meter. Same gate, same reason: keep the baseline current, score
+            # nothing.
+            proof["started"] = None
+            proof["import_base"] = import_val
+            proof["export_base"] = export_val
+            proof["step_import"] = None
+            proof["step_export"] = None
+            return proof["verdict"]
+
+        if proof["started"] is None:
+            proof["started"] = now
+            proof["last_sample"] = now
+            proof["import_base"] = import_val
+            proof["export_base"] = export_val
+            # The verdict a previous window reached carries into this one —
+            # opening a fresh window must not un-steer a proven meter for a
+            # cycle, nor re-trust a rejected one.
+            return proof["verdict"]
+
+        # Integrate the candidates over the real elapsed time, not the nominal
+        # cycle — a slow or skipped cycle must not shrink the integral.
+        dt_s = max(0.0, now - (proof["last_sample"] or now))
+        proof["last_sample"] = now
+        proof["import_wh"] += max(0.0, float(import_w or 0.0)) * dt_s / 3600.0
+        proof["export_wh"] += max(0.0, float(export_w or 0.0)) * dt_s / 3600.0
+
+        # (#947 review) Judge each COUNTER MOVE as it happens. Two reasons:
+        # the sub-load discriminator needs the per-move share, and aligning the
+        # comparison to counter movements removes the edge error that forced a
+        # loose tolerance — a cloud counter several minutes stale at an
+        # arbitrary window end makes the integral and the delta cover different
+        # intervals, which is not the candidate's fault and must not count
+        # against it.
+        self._score_counter_move(proof, import_val, export_val)
+
+        deltas = self._counter_deltas(
+            proof["import_base"], proof["export_base"], import_val, export_val)
+        if deltas is None:
+            # Counter reset mid-window (#476) — the comparison is garbage.
+            self._restart_grid_proof(pair, proof)
+            return proof["verdict"]
+        counter_import_kwh, counter_export_kwh = deltas
+
+        age = now - proof["started"]
+        observed = max(proof["import_wh"], proof["export_wh"]) / 1000.0
+        counted = max(counter_import_kwh, counter_export_kwh)
+        if max(observed, counted) < GRID_PROOF_MIN_KWH:
+            if age >= GRID_PROOF_MAX_S:
+                # Nothing has flowed for two hours. Re-baseline rather than
+                # judge a pair on noise, and keep any verdict already reached.
+                self._restart_grid_proof(pair, proof)
+            return proof["verdict"]
+        if age < GRID_PROOF_MIN_S:
+            return proof["verdict"]
+
+        agrees = (
+            proof["contradictions"] == 0
+            and self._sides_agree(
+                proof["import_wh"] / 1000.0, counter_import_kwh, disc.get("import"))
+            and self._sides_agree(
+                proof["export_wh"] / 1000.0, counter_export_kwh, disc.get("export"))
+        )
+        self._report_grid_proof(disc, proof, agrees, counter_import_kwh,
+                                counter_export_kwh)
+        # Next window starts clean: a meter that agreed once must keep
+        # agreeing, and one that did not gets another chance on new evidence.
+        self._restart_grid_proof(pair, proof, verdict=agrees)
+        return agrees
+
+    def _restart_grid_proof(self, pair, prev: dict, *, verdict=_UNSET) -> None:
+        """Open a fresh window for pair, carrying what must survive one.
+
+        The VERDICT carries so a new window never un-steers a proven meter
+        for a cycle, and reported carries so the verdict is said once and
+        not re-logged every quarter of an hour. Forgetting the second was a
+        bug in the first draft: the reporter's warn-once guard lived on the
+        object that was thrown away right after it was set.
+        """
+        fresh = _fresh_grid_proof()
+        fresh["pair"] = pair
+        fresh["verdict"] = prev.get("verdict") if verdict is _UNSET else verdict
+        fresh["reported"] = prev.get("reported")
+        self._split_grid_proof = fresh
+
+    def _score_counter_move(self, proof: dict, import_val: float, export_val: float) -> None:
+        """Score the candidate against each COUNTER MOVE, as it happens.
+
+        A move is the only moment at which the counter and the integral are
+        known to cover the same interval. When one happens, the candidate must
+        account for at least ``GRID_PROOF_MIN_SHARE`` of it — a real meter
+        always does, because it is measuring the same electricity. A sub-load
+        does not: it switches off while the house keeps importing, and that
+        single moment disqualifies it however well the totals happen to line up.
+        """
+        for side, val in (("import", import_val), ("export", export_val)):
+            step = proof[f"step_{side}"]
+            wh_now = proof[f"{side}_wh"]
+            if step is None:
+                proof[f"step_{side}"] = val
+                proof[f"step_wh_{side}"] = wh_now
+                continue
+            moved = val - step
+            if moved < 0:
+                # A reset; the caller re-baselines the whole window.
+                proof[f"step_{side}"] = val
+                proof[f"step_wh_{side}"] = wh_now
+                continue
+            if moved < GRID_PROOF_MIN_KWH:
+                continue          # not a move worth judging yet
+            seen_kwh = (wh_now - proof[f"step_wh_{side}"]) / 1000.0
+            if seen_kwh < GRID_PROOF_MIN_SHARE * moved:
+                proof["contradictions"] += 1
+                _LOGGER.debug(
+                    "Split-grid candidate accounted for only %.3f of the "
+                    "%.3f kWh the %s counter moved — not this meter (#947)",
+                    seen_kwh, moved, side,
+                )
+            proof[f"step_{side}"] = val
+            proof[f"step_wh_{side}"] = wh_now
+
+    @staticmethod
+    def _sides_agree(observed_kwh: float, counted_kwh: float, entity) -> bool:
+        """One side of the pair: does the integrated candidate match what its
+        counter counted? A side with NO pick is vacuously fine — its zero is
+        an absence, not a contradicted measurement."""
+        if entity is None:
+            return True
+        scale = max(observed_kwh, counted_kwh)
+        if scale < GRID_PROOF_MIN_KWH:
+            return True                      # neither side moved: no dispute
+        return abs(observed_kwh - counted_kwh) <= GRID_PROOF_TOLERANCE * scale
+
+    def _report_grid_proof(self, disc, proof, agrees, counted_import, counted_export) -> None:
+        """Say what the counters answered — once per verdict change.
+
+        A rejection is the interesting line and it names the numbers, because
+        the alternative (#947 as filed) was a square wave of phantom import
+        that looked exactly like a measurement in the history graph.
+        """
+        if proof.get("reported") is agrees:
+            return
+        proof["reported"] = agrees
+        if agrees:
+            _LOGGER.info(
+                "Split-grid meters CORROBORATED by the energy counters "
+                "(import=%s, export=%s) — SEM will steer on them (#947)",
+                disc.get("import"), disc.get("export"),
+            )
+            _ri.clear_split_grid_guessed(self.hass)
+            return
+        _LOGGER.warning(
+            "Split-grid meters REJECTED: the name-matched sensors do not "
+            "track the grid energy counters. import=%s measured %.3f kWh "
+            "while the import counter moved %.3f kWh; export=%s measured "
+            "%.3f kWh while the export counter moved %.3f kWh. SEM reports NO "
+            "grid power rather than a wrong one — set "
+            "grid_import_power_entity / grid_export_power_entity to name the "
+            "real meters. (#947)",
+            disc.get("import"), proof["import_wh"] / 1000.0, counted_import,
+            disc.get("export"), proof["export_wh"] / 1000.0, counted_export,
+        )
+        _ri.raise_split_grid_rejected(
+            self.hass, import_entity=disc.get("import"),
+            export_entity=disc.get("export"),
+        )
+
+    def _report_unproven_grid(self, disc: dict, verdict) -> None:
+        """(#947) SEM has candidate grid meters it has not proven. Say so
+        ONCE per state, and leave ``grid_power`` at 0.
+
+        The distinction matters to the reader of the log: ``None`` is "still
+        watching", ``False`` is "asked and answered, these are not the
+        meters". Reporting them as one line would fold the failure to answer
+        into the negative — the exact confusion #925 was about.
+        """
+        state = "rejected" if verdict is False else "unproven"
+        if self._split_grid_unproven_said == (disc.get("import"), disc.get("export"), state):
+            return
+        self._split_grid_unproven_said = (disc.get("import"), disc.get("export"), state)
+        if verdict is False:
+            return          # _report_grid_proof already said it, with numbers
+        _LOGGER.info(
+            "Split-grid meters matched by NAME only (import=%s, export=%s) — "
+            "SEM reads 0 grid power until they agree with the grid energy "
+            "counters. (#947)",
+            disc.get("import"), disc.get("export"),
+        )
 
     def _report_split_grid_confidence(self, disc: dict) -> None:
         """(#911) An ``any-device`` adoption is a GUESS — pattern-matched

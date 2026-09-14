@@ -2960,7 +2960,9 @@ def _schedule_post_startup_tasks(
         if not getattr(reader, "_uses_split_grid", False):
             return
         disc = getattr(reader, "_split_grid_discovery", None)
-        if disc is None or disc.get("confidence") == "same-device":
+        # (#947) a DECLARED pick is settled evidence too — rediscovering it on
+        # every new energy-shaped entity is work with no possible new answer.
+        if disc is None or disc.get("confidence") in ("declared", "same-device"):
             return  # already locked in, nothing to upgrade
         eid = event.data.get("entity_id", "")
         if not any(hint in eid for hint in GRID_TRIGGER_HINTS):

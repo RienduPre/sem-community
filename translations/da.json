@@ -1731,8 +1731,8 @@
       "description": "SEM's battery platform is set to **Generic / other**, but the {brand} integration is loaded. Earlier versions of the options wizard offered only Generic and Deye and defaulted to Generic, so walking through that page once demoted a {brand} install to the generic adapter — no forcible charge, no idempotent register writes. Open **Settings → Integrations → SEM → Configure → Battery scheduler** and set **Battery charge platform** to **Auto-detect**. If Generic is a deliberate choice (a battery with its own control entities), set that entity and this notice goes away."
     },
     "split_grid_guessed": {
-      "title": "SEM guessed your grid power meters",
-      "description": "No grid power entity is configured and the Energy Dashboard gives none, so SEM matched entity names and adopted **{import_entity}** as the grid import meter and **{export_entity}** as the export meter — without any device evidence. If those are not your meters, every decision is steering on a wrong number. Open **Settings → Integrations → SEM → Configure → Sensors** and set **Grid import power** and **Grid export power** explicitly; this notice clears on the next read."
+      "title": "SEM is checking two guessed grid meters",
+      "description": "No grid power entity is configured and the Energy Dashboard gives none, so SEM matched entity names and found **{import_entity}** as a possible grid import meter and **{export_entity}** as a possible export meter — a name match, with no device evidence behind it. SEM will NOT steer on them until they agree with your grid energy counters, so grid power reads 0 for now. To skip the wait, open **Settings → Integrations → SEM → Configure → Sensors** and set **Grid import power** and **Grid export power** explicitly."
     },
     "battery_control_write_not_taken": {
       "title": "A battery control write is not taken: {entity_id}",
@@ -1749,6 +1749,10 @@
     "heat_pump_contact_values_missing": {
       "title": "SG-Ready contact {contact} cannot be driven",
       "description": "**{entity_id}** is set as SG-Ready {contact}, but it is a text/number/select entity and its **{missing}** value is not configured — so SEM has nothing to write and every SG-Ready command for this heat pump fails. Open **Settings → Integrations → SEM → Configure → Heat Pump** (or the dashboard's Configuration tab) and fill both the ON and the OFF value for this contact, or point it at a switch entity instead."
+    },
+    "split_grid_rejected": {
+      "title": "SEM could not find your grid power meters",
+      "description": "No grid power entity is configured and the Energy Dashboard gives none. SEM matched **{import_entity}** and **{export_entity}** by entity name, then checked them against your grid energy counters — and they do not track them, so they are not your meters. SEM reports **no grid power** rather than a wrong one. Open **Settings → Integrations → SEM → Configure → Sensors** and set **Grid import power** and **Grid export power** explicitly; this notice clears once real meters are named or the guesses start agreeing."
     }
   },
   "selector": {
