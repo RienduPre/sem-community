@@ -129,3 +129,85 @@ def test_the_off_mode_case_from_the_report_reads_zero():
     data = t.subs["ev"].process.data
     assert data["commanded_amps"] == 0
     assert data["budget_amps"] == 5
+
+
+# ── what the ruflo review refuted ─────────────────────────────────────
+
+def _run_full(coord, sem=None, power=None):
+    coord.time_manager = MagicMock()
+    coord.time_manager.is_night_mode.return_value = False
+    coord._curtailment_last = None
+    t = _Trace()
+    coord._trace_ev(t, sem or _sem_data(), power or _power())
+    return t.subs["ev"]
+
+
+def test_a_stalled_charger_is_not_absorbed_by_a_healthy_one():
+    """REFUTED: the fleet SUM was checked against ONE phase/voltage pair —
+    necessarily the primary's. A 1-phase charger drawing correctly and a
+    3-phase charger stalled at 0 W summed to a threshold the healthy one
+    cleared alone, so the stall read OK. That is the flap this check exists
+    to catch."""
+    from custom_components.solar_energy_management.coordinator.cycle_trace import (
+        LayerStatus,
+    )
+    a = SimpleNamespace(_current_setpoint=10, phases=1, voltage=230)   # drawing
+    b = SimpleNamespace(_current_setpoint=6, phases=3, voltage=230)    # stalled
+    coord = _coord(devices={"A": a, "B": b})
+    coord.config = {"ev_phases": 1, "ev_voltage": 230}                 # primary is 1φ
+    power = SimpleNamespace(battery_soc=50.0, ev_connected=True, ev_power=2300,
+                            ev_power_per_charger={"A": 2300.0, "B": 0.0})
+    ev = _run_full(coord, power=power)
+    assert ev.integration.data["match"] is False, "B is stalled and must show"
+    assert ev.integration.status is LayerStatus.DEGRADED
+    assert "B" in ev.integration.detail
+    assert ev.integration.data["per_charger_match"] == {"A": True, "B": False}
+
+
+def test_a_healthy_fleet_still_reads_ok():
+    from custom_components.solar_energy_management.coordinator.cycle_trace import (
+        LayerStatus,
+    )
+    a = SimpleNamespace(_current_setpoint=10, phases=1, voltage=230)
+    b = SimpleNamespace(_current_setpoint=6, phases=3, voltage=230)
+    coord = _coord(devices={"A": a, "B": b})
+    power = SimpleNamespace(battery_soc=50.0, ev_connected=True, ev_power=6440,
+                            ev_power_per_charger={"A": 2300.0, "B": 4140.0})
+    ev = _run_full(coord, power=power)
+    assert ev.integration.data["match"] is True
+    assert ev.integration.status is LayerStatus.OK
+
+
+def test_observer_mode_still_says_whether_sem_would_charge():
+    """REFUTED: observer mode zeroes every setpoint by design, so
+    commanded_amps is honestly 0 — but p_status then read IDLE always,
+    destroying the 'would charge' signal on the rig this project verifies on."""
+    from custom_components.solar_energy_management.coordinator.cycle_trace import (
+        LayerStatus,
+    )
+    coord = _coord(devices={"ev_charger": SimpleNamespace(_current_setpoint=0)},
+                   observer=True)
+    ev = _run_full(coord)
+    assert ev.process.data["commanded_amps"] == 0, "observer commands nothing"
+    assert ev.process.data["budget_amps"] == 7
+    assert ev.process.status is LayerStatus.OK, "SEM would charge — say so"
+
+
+def test_a_truly_idle_install_still_reads_idle():
+    from custom_components.solar_energy_management.coordinator.cycle_trace import (
+        LayerStatus,
+    )
+    coord = _coord(devices={"ev_charger": SimpleNamespace(_current_setpoint=0)})
+    ev = _run_full(coord, sem=_sem_data(calculated_current=0))
+    assert ev.process.status is LayerStatus.IDLE
+
+
+def test_the_fleet_roster_makes_absence_checkable():
+    """REFUTED (c): a charger dropped for an unreadable setpoint was
+    indistinguishable from one that is idle, because nothing said who the
+    fleet was."""
+    coord = _coord(devices={"a": SimpleNamespace(_current_setpoint="nope"),
+                            "b": SimpleNamespace(_current_setpoint=8)})
+    data = _run(coord)
+    assert data["fleet_charger_ids"] == ["a", "b"]
+    assert data["per_charger_amps"] == {"b": 8}

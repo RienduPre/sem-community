@@ -2346,6 +2346,36 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 continue
         return out
 
+    def _trace_ev_match_per_charger(self, power, connected) -> dict:
+        """(#961 review) Per-charger "is it actually drawing?", each against
+        its own phases, voltage and measured draw.
+
+        Returns ``{charger_id: True|False|None}`` — None where the question
+        cannot be asked (nothing commanded, or no per-charger power reading).
+        Empty when the install has no per-charger power slice at all, which
+        the caller reads as "fall back to the single-charger check".
+        """
+        devices = getattr(self, "_ev_devices", None) or {}
+        per_w = getattr(power, "ev_power_per_charger", None) or {}
+        if not devices or not per_w:
+            return {}
+        out: dict = {}
+        for cid, dev in devices.items():
+            key = str(cid)
+            if cid not in per_w and key not in per_w:
+                continue
+            watts = float(per_w.get(cid, per_w.get(key, 0.0)) or 0.0)
+            try:
+                amps = int(float(getattr(dev, "_current_setpoint", 0) or 0))
+                phases = int(getattr(dev, "phases", 0)
+                             or self.config.get("ev_phases", 3) or 3)
+                volts = int(getattr(dev, "voltage", 0)
+                            or self.config.get("ev_voltage", 230) or 230)
+            except (TypeError, ValueError):
+                continue
+            out[key] = ev_layer_match(amps, watts, phases, volts, connected)
+        return out
+
     def _trace_ev(self, trace, sem_data, power) -> None:
         st = trace.subsystem("ev")
         soc = round(float(getattr(power, "battery_soc", 0.0) or 0.0), 1)
@@ -2377,19 +2407,29 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         budget = round(float(getattr(sem_data, "available_power", 0.0) or 0.0))
         per_charger = self._trace_commanded_per_charger()
         amps = sum(per_charger.values()) if per_charger else budget_amps
-        p_status = LayerStatus.OK if amps > 0 else LayerStatus.IDLE
+        # (#961 review) Observer mode zeroes every setpoint on purpose
+        # (_zero_charger_setpoints), so ``commanded_amps`` is honestly 0 there
+        # — but the process layer must still say whether SEM WOULD charge, or
+        # the observer rig this project verifies on loses the one signal it is
+        # read for. The budget answers that when nothing is commanded.
+        p_status = (LayerStatus.OK if (amps > 0 or budget_amps > 0)
+                    else LayerStatus.IDLE)
         data = {
             "commanded_amps": amps,
             "budget_amps": budget_amps,
             "budget_w": budget,
         }
-        if len(getattr(self, "_ev_devices", None) or {}) > 1:
+        fleet_ids = sorted(str(c) for c in (getattr(self, "_ev_devices", None) or {}))
+        if len(fleet_ids) > 1:
             # Only a fleet needs the breakdown; a single charger's number is
             # already the whole story and a dict would just be noise. Gated on
             # the DEVICE count, not on how many parsed: a charger whose
             # setpoint could not be read must be visible by its absence from
-            # the dict, not hidden by shrinking the fleet to one.
+            # the dict, not hidden by shrinking the fleet to one — and the
+            # roster is published beside it (#961 review) so "absent" is
+            # checkable without knowing the fleet from somewhere else.
             data["per_charger_amps"] = per_charger
+            data["fleet_charger_ids"] = fleet_ids
         st.process = LayerRecord(p_status, reason, data)
 
         observed = round(float(getattr(power, "ev_power", 0.0) or 0.0))
@@ -2407,17 +2447,37 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # aren't commanding or the car is disconnected.
         # real phases/voltage (M2 — a 1φ charger's nominal is far lower; a
         # hardcoded 3φ threshold false-mismatches every 1-phase install).
-        match = ev_layer_match(
-            amps, observed,
-            int(self.config.get("ev_phases", 3) or 3),
-            int(self.config.get("ev_voltage", 230) or 230),
-            connected,
-        )
+        # (#961 review) A FLEET's match cannot be one sum against one
+        # phase/voltage pair. Amps do not add across chargers — a 1-phase box
+        # and a 3-phase box mean different watts per amp — and the threshold
+        # used ``self.config``'s single topology, necessarily the primary's.
+        # The reviewer's case: a 1-phase charger drawing correctly and a
+        # 3-phase charger STALLED at 0 W summed to a threshold the healthy one
+        # cleared on its own, so the stall read OK. That is precisely the flap
+        # this check exists to catch, so it is asked per charger, each against
+        # its OWN topology and its OWN draw, and the fleet is degraded if any
+        # charger is.
+        per_match = self._trace_ev_match_per_charger(power, connected)
+        if per_match:
+            verdicts = [v for v in per_match.values() if v is not None]
+            match = (None if not verdicts else all(verdicts))
+            stalled = sorted(c for c, v in per_match.items() if v is False)
+        else:
+            match = ev_layer_match(
+                amps, observed,
+                int(self.config.get("ev_phases", 3) or 3),
+                int(self.config.get("ev_voltage", 230) or 230),
+                connected,
+            )
+            stalled = []
         i_status = LayerStatus.OK if match in (None, True) else LayerStatus.DEGRADED
-        st.integration = LayerRecord(
-            i_status, f"observed {observed:.0f}W",
-            {"observed_w": observed, "commanded_amps": amps, "match": match},
-        )
+        detail = f"observed {observed:.0f}W"
+        if stalled:
+            detail += f" — not drawing: {', '.join(stalled)}"
+        idata = {"observed_w": observed, "commanded_amps": amps, "match": match}
+        if len(per_match) > 1:
+            idata["per_charger_match"] = per_match
+        st.integration = LayerRecord(i_status, detail, idata)
 
     def _trace_battery(self, trace, sem_data, power) -> None:
         st = trace.subsystem("battery")
