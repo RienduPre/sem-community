@@ -3679,7 +3679,10 @@ battery siblings already group on `config_entry_id`, which is why they never had
 exists. For the device-less remainder there is no identity left, only NAMES — the entity-id prefix
 at three widths, the name up to and including its first numeric TOKEN (HA disambiguates a second box
 either by suffixing every entity — `..._2` — or by its device name, which puts the digit in the
-middle where no fixed-width prefix can see it), and that trailing `_<n>` itself; each tried against
+middle where no fixed-width prefix can see it), and that trailing `_<n>` itself — the two numeric
+axes adopting only on HA's OWN numbering shape, every numbered name being an unnumbered name of the
+same set plus its number, starting at 2, because a platform that numbers its own sub-structure
+(`wb_garage_phase_1`…`_3`) is not two boxes and on a plugless platform the plug rule cannot say so; each tried against
 `config_entry_id` first and then without it (one box can span several entries: a rig's template
 helpers are one entry per entity). Finest first. **A name axis becomes a boundary only on evidence:
 at least TWO of its groups must show the charger shape on their own** — a power reading plus a plug
@@ -3706,7 +3709,10 @@ site totals sit one token from each loadpoint — and only that is dropped, beca
 fed one box's leftovers invents a second, partial charger. `build_detection_report` lists the drops
 under `unattributed`, which the diagnostics download carries, so the drop is visible, never silent.
 And a leftover that carries a MARK — a plug or a current control — refuses the axis outright rather
-than being dropped: a mark left over is one box's own steering, so the axis cut through a box.
+than being dropped: a mark left over is one box's own steering, so the axis cut through a box. A
+leftover that shows the charger shape ON ITS OWN is never attached at all: it is a box this axis
+could not place (a third, plugless wallbox beside two plug-bearing ones), and name distance would
+have folded it into whichever neighbour it happened to share a token with.
 The unproven case splits per CALLER, because the two directions cost different things: the paths
 that BIND merge (a split nobody proved must never shed a box's entities), while the prober keeps its
 name split (it binds nothing, and merging a rig's template platform into "one device" is what handed
@@ -3722,7 +3728,12 @@ comparison window is watching.
 shows neither a plug binary nor a current `number` (Easee's status is a plain `sensor`, its control
 a service) still collapse; so do two boxes one of whose plugs the user has disabled — a disabled
 entity is filtered before grouping, so the evidence is judged on what is live — and so do two boxes
-whose names no axis separates (`box` beside `box_garage`, with no digit anywhere). The one shape
+whose names no axis separates (`box` beside `box_garage`, with no digit anywhere), and two boxes
+sharing their first token where a finer axis was refused — the ladder then falls to the coarser one,
+which is still no worse than the single bucket #964 found. A site-level current `number` on a
+plugless multi-box platform (openWB's `openwb_global_max_current`) strands a mark and so keeps its
+loadpoints collapsed: the same stranded-mark rule that stops a JuiceBox's `limit_current` from
+splitting ONE box into two, and the fail-closed direction is the one we keep. The one shape
 that could still split a single box is a PLUGLESS platform publishing a separate current `number`
 per phase; no brand SEM knows does that, and the stranded-mark rule catches it wherever the phases
 leave anything behind.
@@ -3745,8 +3756,10 @@ re-attached leftovers and a pin on WHICH box is primary. Fourteen mutants — re
 `device_id`-only, lowering the threshold to one shaped group, removing each of the four name axes or
 the config entry, dropping the plug requirement, dropping the stranded-mark refusal, dropping the
 leftovers instead of re-attaching them, attaching them on a tie, appending them out of registry
-order, trying the axes coarsest-first, merging in the prober or dropping its floor, and pairing the
-report's two findings on the grouping key — are each killed.
+order, trying the axes coarsest-first, merging in the prober or flooring an axis already finer than
+its prefix, adopting a numeric axis on numbered sub-structure, attaching a leftover that is a box of
+its own, and pairing the report's two findings many-to-many or on the grouping key — are each
+killed.
 **Sweep question:** for every key this codebase groups by, is it OPTIONAL in its source of truth —
 and if it is absent, does the code get one bucket per missing value, or one bucket for *all* of
 them? A key that can be `None` is not an identity until the `None` case has its own answer. And when

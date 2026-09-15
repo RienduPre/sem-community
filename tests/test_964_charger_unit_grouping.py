@@ -893,3 +893,109 @@ class TestOrderIsPartOfTheContract:
             "sensor.keba_garage_charging_power"
         assert _discover(list(reversed(entries)))[0][
             "ev_charging_power_sensor"] == "sensor.keba_carport_charging_power"
+
+
+# ── Numbered sub-structure is not Home Assistant numbering a box ───────
+
+class TestOnlyHomeAssistantsOwnNumbering:
+    """The number axes exist for the shape HA actually produces: it keeps
+    the first box's name and appends `_2`. A platform that numbers its own
+    sub-structure — three phase legs — is not two boxes, and on a plugless
+    platform the plug rule cannot say so."""
+
+    def test_the_shape_test_itself(self):
+        from custom_components.solar_energy_management.hardware_detection \
+            import _is_ha_numbering
+        assert _is_ha_numbering(["garage", "garage_2"])
+        assert _is_ha_numbering(["#", "#_2", "#_3"])
+        assert not _is_ha_numbering(["wb", "wb_phase_1", "wb_phase_2"])
+        assert not _is_ha_numbering(["#_1", "#_2", "#_3"])   # HA starts at 2
+        assert not _is_ha_numbering(["garage", "carport"])
+
+    def test_phase_legs_numbered_inside_the_name_are_one_box(self):
+        entries = [
+            _ent(f"sensor.wallbox_garage_phase_{i}_power", "mqtt", "power")
+            for i in (1, 2, 3)
+        ] + [
+            _ent(f"number.wallbox_garage_phase_{i}_current", "mqtt", "current")
+            for i in (1, 2, 3)
+        ] + [_ent("sensor.wallbox_garage_total_energy", "mqtt", "energy")]
+        assert len(group_entities_by_unit(entries)) == 1
+        assert len(_discover(entries)) <= 1
+
+    def test_phase_legs_numbered_at_the_end_are_one_box(self):
+        entries = []
+        for i in (1, 2, 3):
+            entries += [_ent(f"sensor.wb_power_{i}", "mqtt", "power"),
+                        _ent(f"number.wb_current_{i}", "mqtt", "current")]
+        entries.append(_ent("sensor.wb_total_energy", "mqtt", "energy"))
+        assert len(group_entities_by_unit(entries)) == 1
+
+
+# ── A box the axis cannot place is never folded into its neighbour ─────
+
+class TestAnUnplaceableBoxIsNotALeftover:
+
+    def _entries(self):
+        # Two plug-bearing boxes and a third, plugless one whose name
+        # shares nothing with them. On the axis that separates the first
+        # two, the third is a "leftover" — and it is a whole charger.
+        return [
+            _ent("sensor.garage_wb_power", "keba", "power"),
+            _ent("binary_sensor.garage_wb_plug", "keba", "plug"),
+            _ent("sensor.carport_wb_power", "keba", "power"),
+            _ent("binary_sensor.carport_wb_plug", "keba", "plug"),
+            _ent("sensor.shed_ev_power", "keba", "power"),
+            _ent("number.shed_ev_current", "keba", "current"),
+        ]
+
+    def test_it_is_a_leftover_that_is_a_charger(self):
+        """Non-vacuity: name distance would hand it to one of the two."""
+        assert _shows_charger_shape(self._entries()[4:])
+        assert not _shows_charger_shape(self._entries()[4:], True)
+
+    def test_it_is_never_merged_into_another_box(self):
+        units = group_entities_by_unit(self._entries())
+        for members in units.values():
+            names = {str(e.entity_id).split(".", 1)[1].split("_")[0]
+                     for e in members}
+            # alone, or in the whole-platform merge that means "no split was
+            # proven" — never handed to ONE of its two neighbours
+            assert names in ({"shed"}, {"garage"}, {"carport"},
+                             {"shed", "garage", "carport"}), \
+                f"the third box was folded into a neighbour: {names}"
+        claimed = {str(e.entity_id) for g in units.values() for e in g}
+        assert claimed == {str(e.entity_id) for e in self._entries()}
+
+
+# ── The report stays honest about both sides ───────────────────────────
+
+class TestTheComparisonPairsOneToOne:
+
+    def test_home_assistants_own_pair_is_seen_by_both_sides(self):
+        entries = []
+        for suffix in ("", "_2"):
+            entries += [
+                _ent(f"sensor.keba_power{suffix}", "keba", "power"),
+                _ent(f"binary_sensor.keba_plug{suffix}", "keba", "plug"),
+                _ent(f"number.keba_current{suffix}", "keba", "current"),
+            ]
+        rep = build_detection_report(registry=_registry(entries))
+        assert len(rep["chargers"]) == 2
+        assert len(rep["prober_candidates"]) == 2
+        assert rep["disagreements"] == []
+
+    def test_a_merged_brand_row_cannot_absorb_two_candidates(self):
+        # One box's plug is missing, so the binding path merges while the
+        # prober still sees two shapes. That IS a disagreement — the
+        # comparison must not cancel it out by pairing both with the one row.
+        entries = [
+            _ent("sensor.wallbox_garage_power", "keba", "power"),
+            _ent("binary_sensor.wallbox_garage_plug", "keba", "plug"),
+            _ent("number.wallbox_garage_current", "keba", "current"),
+            _ent("sensor.wallbox_carport_power", "keba", "power"),
+            _ent("number.wallbox_carport_current", "keba", "current"),
+        ]
+        rep = build_detection_report(registry=_registry(entries))
+        assert len(rep["chargers"]) == 1 and len(rep["prober_candidates"]) == 2
+        assert [d["kind"] for d in rep["disagreements"]] == ["prober_only"]

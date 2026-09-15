@@ -1079,17 +1079,43 @@ def _shows_charger_shape(entities, require_plug: bool = False) -> bool:
     return "plug" in marks if require_plug else bool(marks)
 
 
-#: The name axes tried on a device-less platform, FINEST FIRST. Each is
-#: paired with the config entry first (a box is one entry) and then without
-#: it (one box can span several: a rig's template helpers are one entry per
-#: entity). Nothing here is an identity — the evidence rule below is what
-#: turns an axis into a boundary.
+def _is_ha_numbering(names) -> bool:
+    """Do these names look like Home Assistant numbering a SECOND box?
+
+    HA keeps the first box's name and appends ``_2`` — so every numbered
+    name here must be an unnumbered name of this same set plus its number,
+    and the numbers start at 2. ``garage`` beside ``garage_2`` passes.
+    Numbered SUB-STRUCTURE does not: three legs named ``wb_garage_phase_1``
+    …``_3`` have nothing in the set they were numbered from (the review of
+    this fix split a three-phase wallbox into three chargers that way), and
+    a set that is numbered all the way down never had a first box.
+    """
+    names = set(names)
+    numbered = [n for n in names if n.split("_")[-1].isdigit()]
+    if not numbered or len(numbered) == len(names):
+        return False
+    for name in numbered:
+        tokens = name.split("_")
+        if int(tokens[-1]) < 2 or "_".join(tokens[:-1]) not in names:
+            return False
+    return not any(t.isdigit() for n in names if n not in numbered
+                   for t in n.split("_"))
+
+
+#: The name axes tried on a device-less platform, FINEST FIRST — with the
+#: extra evidence an axis needs before it may be adopted at all, and whether
+#: it can land COARSER than the two-token prefix the prober floors on. Each
+#: is paired with the config entry first (a box is one entry) and then
+#: without it (one box can span several: a rig's template helpers are one
+#: entry per entity). Nothing here is an identity — the evidence rules are
+#: what turn an axis into a boundary.
 _UNIT_NAME_AXES = (
-    lambda eid: _entity_id_prefix(eid, 3),
-    lambda eid: _entity_id_prefix(eid, 2),
-    lambda eid: _entity_id_prefix(eid, 1),
-    lambda eid: _entity_id_through_number(eid),
-    lambda eid: "#" + _entity_id_suffix(eid),
+    (lambda eid: _entity_id_prefix(eid, 3), None, False),
+    (lambda eid: _entity_id_prefix(eid, 2), None, False),
+    (lambda eid: _entity_id_prefix(eid, 1), None, True),
+    (_entity_id_through_number, _is_ha_numbering, True),
+    (lambda eid: "#_" + _entity_id_suffix(eid) if _entity_id_suffix(eid)
+     else "#", _is_ha_numbering, False),
 )
 
 
@@ -1134,6 +1160,14 @@ def _attach_leftovers(shaped: Dict[Any, List[Any]],
 
     unplaced: List[List[Any]] = []
     for group in leftovers:
+        # A group that shows the charger shape on its own is a BOX this axis
+        # could not place, not a spare part of somebody else's: attaching it
+        # by name distance merged a plugless third wallbox into its neighbour
+        # (the review of this fix). It goes back unplaced, and the mark it
+        # carries then refuses the axis.
+        if _shows_charger_shape(group):
+            unplaced.append(group)
+            continue
         closest, best, tied = None, 0, False
         for key, members in shaped.items():
             score = max(_shared_leading_tokens(_tok(left), _tok(member))
@@ -1174,9 +1208,12 @@ def _split_deviceless(platform: str, plat_entities: List[Any],
 
     def _floor(groups: Dict[Any, List[Any]]) -> Dict[Any, List[Any]]:
         """The prober's partition is never COARSER than the two-token prefix
-        it has split on since #814 — an adopted axis may be wider than that
-        (one token, or the trailing number), and merging a rig's template
-        platform is what offered a garage door as a charger's start/stop."""
+        it has split on since #814 — a one-token axis, or the terminal merge,
+        is wider than that, and merging a rig's template platform is what
+        offered a garage door as a charger's start/stop. Applied only to
+        those: an axis already finer than the prefix (three tokens, or HA's
+        own numbering) must not be re-cut by it, which would shatter a box
+        the axis had just separated correctly."""
         if unproven_split != "prefix":
             return groups
         refined: Dict[Any, List[Any]] = {}
@@ -1188,8 +1225,10 @@ def _split_deviceless(platform: str, plat_entities: List[Any],
         return refined
 
     for with_entry in (True, False):
-        for name_of in _UNIT_NAME_AXES:
+        for name_of, accepts, coarse in _UNIT_NAME_AXES:
             groups = _keyed(name_of, with_entry)
+            if accepts is not None and not accepts([k[3] for k in groups]):
+                continue
             shaped = {k: v for k, v in groups.items()
                       if _shows_charger_shape(v, require_plug)}
             # TWO boxes or none: a split that finds ONE box is not separating
@@ -1203,7 +1242,7 @@ def _split_deviceless(platform: str, plat_entities: List[Any],
                 # may be steered by a cut. Refuse the axis, try the next.
                 if any(_charger_mark(e) for g in unplaced for e in g):
                     continue
-                return _floor(shaped)
+                return _floor(shaped) if coarse else shaped
     return _floor({("unit", platform, "", ""): list(plat_entities)})
 
 
@@ -2272,12 +2311,20 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     # binding paths deliberately group an unproven split differently, so
     # keying on it would report a disagreement on every device-less install
     # SEM has, which is exactly the population this section is watching.
+    # One to one, largest overlap first: a brand row that happens to span
+    # two boxes must not absorb both candidates and report agreement where
+    # the two sides plainly disagree.
+    overlaps = sorted(
+        ((len({str(v) for v in cand.get("roles", {}).values()}
+              & unit["entities"]), bi, ci)
+         for bi, unit in enumerate(brand_units)
+         for ci, cand in enumerate(cands)),
+        key=lambda t: (-t[0], t[1], t[2]))
     paired_brand, paired_prober = set(), set()
-    for bi, unit in enumerate(brand_units):
-        for ci, cand in enumerate(cands):
-            if {str(v) for v in cand.get("roles", {}).values()} & unit["entities"]:
-                paired_brand.add(bi)
-                paired_prober.add(ci)
+    for shared, bi, ci in overlaps:
+        if shared and bi not in paired_brand and ci not in paired_prober:
+            paired_brand.add(bi)
+            paired_prober.add(ci)
     report["disagreements"] = (
         [{"kind": "prober_only", "platform": c["platform"], "unit": c["unit"],
           "device_id": c["device_id"]}
