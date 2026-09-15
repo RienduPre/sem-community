@@ -86,7 +86,8 @@ def next_closed_window(now: datetime, upcoming) -> Optional[Tuple[datetime, date
 
 
 def sink_verdicts(*, now: datetime, tariff_level: Optional[str], upcoming,
-                  export_rate_known: bool, export_guard_enabled: bool,
+                  export_rate: Optional[float], export_rate_known: bool,
+                  export_guard_enabled: bool,
                   house_sink_enabled: bool, morning_window_enabled: bool,
                   departure: Optional[datetime], morning_hours: float,
                   forecast_refills_pack: bool,
@@ -94,7 +95,16 @@ def sink_verdicts(*, now: datetime, tariff_level: Optional[str], upcoming,
     """One verdict per sink. Unknown is OPEN, never CLOSED."""
     level = str(tariff_level or "").lower()
     out: _Verdicts = _Verdicts()
-    readable = export_guard_enabled and export_rate_known
+    readable = export_guard_enabled and export_rate_known and export_rate is not None
+    # The grid closes on the EXPORT price's sign — what the meter pays or
+    # charges for a kWh leaving the house. On a spot feed-in that is the
+    # same curve as the import level; on a static feed-in with a dynamic
+    # import it is not, and a negative IMPORT hour must not close the meter
+    # for a kWh that still earns 7.5 ct. The level still drives the house.
+    try:
+        export_negative = readable and float(export_rate) < 0.0
+    except (TypeError, ValueError):
+        export_negative = False
     win = next_closed_window(now, upcoming) if readable else None
 
     # grid export — CLOSED only on a READ negative level with the guard on
@@ -103,7 +113,7 @@ def sink_verdicts(*, now: datetime, tariff_level: Optional[str], upcoming,
     elif not export_rate_known:
         out["grid_export"] = SinkVerdict(
             "grid_export", OPEN, "export price unknown — not closing on a guess")
-    elif level == "negative":
+    elif export_negative:
         out["grid_export"] = SinkVerdict(
             "grid_export", CLOSED, "export price negative — the meter is closed",
             until=win[1] if win else None)

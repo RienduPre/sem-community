@@ -21,7 +21,7 @@ def _pp(hour, level):
 
 
 def _verdicts(**kw):
-    base = dict(now=NOW, tariff_level="normal", upcoming=[], export_rate_known=True,
+    base = dict(now=NOW, tariff_level="normal", upcoming=[], export_rate=0.075, export_rate_known=True,
                 export_guard_enabled=False, house_sink_enabled=False,
                 morning_window_enabled=False, departure=None, morning_hours=2.0,
                 forecast_refills_pack=False, pacing_horizon_end=None)
@@ -31,7 +31,7 @@ def _verdicts(**kw):
 
 class TestGridExport:
     def test_negative_level_with_the_guard_on_closes_the_grid(self):
-        v = _verdicts(tariff_level="negative", export_guard_enabled=True)
+        v = _verdicts(tariff_level="negative", export_rate=-0.05, export_guard_enabled=True)
         assert v["grid_export"].state == CLOSED
 
     def test_negative_level_with_the_guard_off_stays_open(self):
@@ -39,17 +39,22 @@ class TestGridExport:
 
     def test_an_unknown_price_is_open_never_closed(self):
         """#925 / class 86: 'I could not ask' is not 'the meter is hostile'."""
-        v = _verdicts(tariff_level="negative", export_guard_enabled=True,
+        v = _verdicts(tariff_level="negative", export_rate=-0.05, export_guard_enabled=True,
                       export_rate_known=False)
         assert v["grid_export"].state == OPEN
         assert "unknown" in v["grid_export"].reason
+
+    def test_a_negative_import_hour_with_a_positive_feedin_keeps_the_meter_open(self):
+        """Static feed-in, dynamic import: the kWh leaving the house still earns."""
+        v = _verdicts(tariff_level="negative", export_rate=0.075, export_guard_enabled=True)
+        assert v["grid_export"].state == OPEN
 
     def test_zero_is_worthless_not_hostile(self):
         assert _verdicts(tariff_level="cheap", export_guard_enabled=True)["grid_export"].state == OPEN
 
     def test_a_closed_verdict_says_when_the_meter_reopens(self):
         ups = [_pp(12, "negative"), _pp(13, "negative"), _pp(14, "normal")]
-        v = _verdicts(tariff_level="negative", export_guard_enabled=True, upcoming=ups)
+        v = _verdicts(tariff_level="negative", export_rate=-0.05, export_guard_enabled=True, upcoming=ups)
         assert v["grid_export"].until == NOW.replace(hour=14)
 
     def test_an_open_verdict_says_when_the_meter_will_close(self):
@@ -186,7 +191,7 @@ class TestTheDictIsComplete:
 
     def test_to_dict_is_serialisable(self):
         import json
-        v = _verdicts(tariff_level="negative", export_guard_enabled=True,
+        v = _verdicts(tariff_level="negative", export_rate=-0.05, export_guard_enabled=True,
                       upcoming=[_pp(12, "negative"), _pp(13, "normal")])
         json.dumps({k: sv.to_dict() for k, sv in v.items()})
 

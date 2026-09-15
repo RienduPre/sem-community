@@ -10941,14 +10941,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # export price is read with the SAME tri-state the forecast sell uses:
         # unreadable is a state, never 0, and never a closed meter.
         from .sink_verdicts import sink_verdicts
-        _xr_known = False
+        _xr, _xr_known = None, False
         _prov = getattr(self, "_tariff_provider", None)
         try:
             if _prov is not None and hasattr(_prov, "get_current_export_rate"):
-                float(_prov.get_current_export_rate())
+                _xr = float(_prov.get_current_export_rate())
                 _xr_known = True
         except Exception:  # noqa: BLE001 — unreadable is a state, not 0
-            _xr_known = False
+            _xr, _xr_known = None, False
         try:
             _ups = (getattr(_prov.get_tariff_data(), "upcoming_prices", None)
                     if _prov is not None else None)
@@ -10957,7 +10957,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         try:
             _verdicts = sink_verdicts(
                 now=dt_util.now(), tariff_level=tariff_level, upcoming=_ups,
-                export_rate_known=_xr_known,
+                export_rate=_xr, export_rate_known=_xr_known,
                 export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
                 house_sink_enabled=bool(self.config.get("battery_house_sink_enabled", False)),
                 morning_window_enabled=bool(self.config.get("ev_morning_window_enabled", False)),
