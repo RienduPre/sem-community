@@ -5000,6 +5000,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # same for both chargers?"). Compose one plan per charger;
                 # the fleet ``today_plan`` stays the primary's plan for
                 # sem-today-plan-card and as the card-side legacy fallback.
+                _gv = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
                 _shared_plan_kwargs = dict(
                     now=_now,
                     upcoming_prices=result.get("tariff_upcoming"),
@@ -5011,6 +5012,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     battery_empty_eta=_battery_empty_eta,
                     currency=result.get("tariff_currency", ""),
                     device_runs=self._device_run_rows(_now, _peak_t),
+                    # (arc #921) the grid verdict's until: next closing / reopening
+                    export_closes_at=(
+                        getattr(_gv, "until", None)
+                        if getattr(_gv, "state", "") == "open" else None),
+                    export_reopens_at=(
+                        getattr(_gv, "until", None)
+                        if getattr(_gv, "state", "") == "closed" else None),
                 )
                 _primary_cid = (_dl_pcfg or {}).get("id")
                 # Legacy flat-config installs have no ev_chargers list —
