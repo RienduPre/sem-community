@@ -71,3 +71,16 @@ class TestNegativeExportIsCounted:
         e = EnergyTotals()
         assert hasattr(e, "daily_grid_export_negative")
         assert hasattr(e, "daily_grid_export_negative_cost")
+
+
+class TestTheExposureIsVisible:
+    def test_both_sensors_are_declared(self):
+        from custom_components.solar_energy_management import sensor as sensor_mod
+        keys = {d.key for d in sensor_mod.SENSOR_TYPES}
+        assert {"daily_grid_export_negative_kwh", "daily_grid_export_negative_cost"} <= keys
+
+    def test_both_are_diagnostics(self):
+        from custom_components.solar_energy_management import sensor as sensor_mod
+        for d in sensor_mod.SENSOR_TYPES:
+            if d.key in ("daily_grid_export_negative_kwh", "daily_grid_export_negative_cost"):
+                assert d.entity_category is not None and d.entity_category.value == "diagnostic"

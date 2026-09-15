@@ -838,6 +838,12 @@
       "daily_grid_export_energy": {
         "name": "今日电网供电/上网量"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "负电价期间的出口电量"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "负电价出口成本"
+      },
       "daily_grid_import_energy": {
         "name": "今日电网购电量"
       },

@@ -838,6 +838,12 @@
       "daily_grid_export_energy": {
         "name": "Eksport i dag"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Eksporteret ved negativ pris"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Omkostning ved eksport til negativ pris"
+      },
       "daily_grid_import_energy": {
         "name": "Import i dag"
       },

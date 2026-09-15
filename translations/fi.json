@@ -838,6 +838,12 @@
       "daily_grid_export_energy": {
         "name": "Tänään myynti"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Viety negatiivisella hinnalla"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Viennin kustannus negatiivisella hinnalla"
+      },
       "daily_grid_import_energy": {
         "name": "Tänään osto"
       },

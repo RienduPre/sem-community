@@ -480,6 +480,20 @@ SENSOR_TYPES = [
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
     ),
+    # (#871, arc #921) What a hostile meter cost today. Both stay at 0.0 on a
+    # fixed feed-in tariff, which is every install until someone opts into spot.
+    SensorEntityDescription(
+        key="daily_grid_export_negative_kwh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="daily_grid_export_negative_cost",
+        state_class=SensorStateClass.TOTAL,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     SensorEntityDescription(
         key="daily_battery_charge_energy",
         device_class=SensorDeviceClass.ENERGY,
