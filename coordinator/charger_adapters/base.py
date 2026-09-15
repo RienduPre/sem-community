@@ -202,8 +202,10 @@ class ChargerAdapter(ABC):
 
         - ``(None, True)``  — no readable enable switch (N/A): KEBA,
           service control, or a ``button.`` start entity.
-        - ``(None, False)`` — switch present but ``unavailable``/``unknown``
-          (Wallbox locked / eco-smart): SEM cannot drive it → surface.
+        - ``(None, False)`` — no usable answer: the switch is present but
+          reads anything other than ``on``/``off`` (``unavailable`` /
+          ``unknown``, Wallbox locked / eco-smart). SEM cannot drive it →
+          surface.
         - ``(True/False, True)`` — switch on / off.
         """
         dev = self._device
@@ -211,7 +213,12 @@ class ChargerAdapter(ABC):
         if not ent or not str(ent).startswith(("switch.", "input_boolean.")):
             return (None, True)
         st = dev.hass.states.get(ent)
-        if st is None or st.state in ("unavailable", "unknown"):
+        # (#945) ``on``/``off`` are the only answers a switch can give. A
+        # third value is not "off" — reading it that way would accuse the
+        # box of refusing an assertion it was never coherently told, which
+        # is this issue's whole shape — so it joins the unreadable case and
+        # waits out the hold.
+        if st is None or st.state not in ("on", "off"):
             return (None, False)
         return (st.state == "on", True)
 
@@ -270,30 +277,43 @@ class ChargerAdapter(ABC):
         if claims:
             dev._session_active = True
 
-    async def report_enable_blocked(self) -> None:
-        """Surface an uncontrollable enable switch — once it has been one for
-        longer than a restart's warm-up (#945).
+    async def report_enable_blocked(self, now: "float | None" = None) -> None:
+        """Surface an enable switch SEM cannot keep on — once it has been one
+        for longer than a restart's warm-up (#945).
 
-        The switch being unreadable is not a rejected command, and it used to
-        be reported as one: this fed the device's 3-strike COMMAND counter,
-        which files its Repair after three cycles — ~30 s — so every HA
-        restart raised a persistent ERROR Repair while the charger's own
-        integration was still loading. The device owns the wall clock now
-        (#611's threshold, the same one #824 applies to this very entity);
-        below it this stays the reconciler's WARNING, which is already logged.
+        Neither condition that reaches this hook is a rejected command, and
+        both used to be reported as one: they fed the device's 3-strike
+        COMMAND counter (#462), which files its Repair after three CYCLES —
+        ~30 s — so every HA restart raised a persistent ERROR Repair while
+        the charger's own integration was still loading. The device owns the
+        wall clock now (#611's threshold, the same one #824 applies to this
+        very entity); below it this stays the reconciler's WARNING, which is
+        already logged.
 
-        Two conditions reach this hook and only ONE of them is silence:
+        Round one (2.1.0-beta.17) held only the FIRST of the two, and the
+        distinction it drew was wrong:
 
         * the switch is unreadable / uncontrollable — missing, ``unavailable``,
           or a brand status of *locked*. Nothing can be inferred yet, and a
           restart looks exactly like this, so it waits out the hold.
         * the switch is READABLE and sits ``off`` while SEM wants to charge,
-          with the #536 re-assert budget already spent. SEM wrote ``turn_on``
-          five times and watched it come back off: that is evidence, it is
-          the Eco-Smart/Autostart fault this surface was built for, and it
-          keeps its original three-cycle speed. Holding it for five minutes
-          would have made it unreportable, because a readable switch is
-          ``controllable`` and so retires the very hold it was waiting on.
+          with the #536 re-assert budget spent. That was called evidence
+          ("SEM wrote ``turn_on`` five times and watched it come back off")
+          and kept the three-cycle speed. But the three cycles that file the
+          Repair are the ones on which SEM sends NOTHING — the reconciler
+          returns the report ALONE so a successful write cannot flap it — and
+          a restart reaches this branch too, roughly 80 s after the switch
+          entity appears still ``off`` because its integration has not
+          reached the box yet. alexmc1510 restarted onto beta.22 and got the
+          same notice with the other sentence in it (#945 round 2).
+
+        So both wait, on ONE episode clock, and each keeps its own sentence.
+        The fear that a readable switch would retire the hold it is waiting
+        on was already answered in the same fix, on the other side: the
+        retire is keyed on the emitted ACTIONS, not on "can I read the
+        entity?" — and it now includes the re-asserts, which ARE the episode.
+        A charger with no readable enable switch at all files nothing: there
+        is no surface here to be blocked.
         """
         dev = self._device
         enabled, controllable = None, True
@@ -301,20 +321,30 @@ class ChargerAdapter(ABC):
             enabled, controllable = self.enable_state()
         except Exception as e:  # noqa: BLE001 — never let a report throw
             _LOGGER.debug("enable_state() failed in report: %s", e)
-        if controllable:
-            rec = getattr(dev, "_record_actuation_failure", None)
-            if rec is not None:
-                rec(RuntimeError(
-                    "enable switch will not stay on — cannot start charging"))
+        if controllable and enabled is not False:
+            # Nothing here is blocked. Either there is no readable enable
+            # switch AT ALL (``(None, True)`` — KEBA, a service, a button),
+            # or the switch has come back ``on`` between the decision's
+            # ``observe()`` and this report: the reconciler awaits actions
+            # before reporting, so the world can move underneath it. Both
+            # answer "no evidence", and the issue id is shared with the
+            # write path — a verdict invented here would be a verdict about
+            # somebody else's command.
+            _LOGGER.debug(
+                "enable-blocked reported on a surface that is not blocked "
+                "(enabled=%s) — nothing to surface (#945)", enabled)
             return
         note = getattr(dev, "_note_enable_blocked", None)
         if not callable(note):
             return
         try:
-            if not note():
+            from ..repair_issues import (
+                ENABLE_UNREADABLE, ENABLE_WILL_NOT_HOLD)
+            error = ENABLE_WILL_NOT_HOLD if controllable else ENABLE_UNREADABLE
+            if not note(now, error):
                 _LOGGER.debug(
-                    "enable switch not commandable — holding the Repair until "
-                    "the block outlasts a restart's warm-up (#945)")
+                    "enable switch not asserted (%s) — holding the Repair "
+                    "until it outlasts a restart's warm-up (#945)", error)
         except Exception as e:  # noqa: BLE001 — a repair never costs a cycle
             _LOGGER.debug("enable-blocked surface failed: %s", e)
 
