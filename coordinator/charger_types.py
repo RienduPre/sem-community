@@ -326,6 +326,13 @@ class BatteryIntent(Enum):
     """End a forced discharge — export no longer profitable or SOC
     hit the reserve floor. Restores the brand default."""
 
+    LIMIT_EXPORT = "limit_export"
+    """(#955) Cap the inverter's grid feed-in at ``export_limit_w`` — 0 W for a
+    closed meter. Issued by the export guard, last not first."""
+
+    RELEASE_EXPORT = "release_export"
+    """(#955) Put the feed-in limit back to what SEM found."""
+
     OFF = "off"
     """#523 (RienduPre) — SEM is fully hands-off this battery. On the
     transition INTO off the adapter does a one-time clean handoff (clear
@@ -353,6 +360,7 @@ class BatteryDecision:
     discharge_power_w: float = 0.0
     """Used iff intent == FORCE_DISCHARGE (#523) — battery→grid power."""
     floor_soc: float = 0.0
+    export_limit_w: float = 0.0   # (#955) the feed-in cap for LIMIT_EXPORT
     """Used iff intent == FORCE_DISCHARGE (#523) — stop discharging at
     this reserve SOC."""
     reason: str = ""
