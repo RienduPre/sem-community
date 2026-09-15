@@ -211,6 +211,21 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         self._last_export_limit_w = w
         self._last_intent = BatteryIntent.LIMIT_EXPORT
 
+    def export_release_recipe(self):
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        prior = getattr(self, "_export_prior", None)
+        if not ent or prior is None:
+            return None
+        return {"domain": "number", "service": "set_value",
+                "data": {"entity_id": ent, "value": float(prior)}}
+
+    def adopt_export_prior(self, recipe) -> None:
+        try:
+            self._export_prior = float((recipe or {}).get("data", {}).get("value"))
+        except (TypeError, ValueError):
+            self._export_prior = None
+        self._last_export_limit_w = 0.0
+
     async def command_release_export(self) -> None:
         ent = str(self._config.get("export_limit_entity", "") or "")
         prior = getattr(self, "_export_prior", None)

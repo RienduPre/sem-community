@@ -468,6 +468,18 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         self._last_export_limit_w = 0.0
         self._last_intent = BatteryIntent.LIMIT_EXPORT
 
+    def export_release_recipe(self):
+        ent = self._system_work_mode_entity
+        prior = getattr(self, "_export_mode_prior", None)
+        if not ent or not prior:
+            return None
+        return {"domain": "select", "service": "select_option",
+                "data": {"entity_id": ent, "option": prior}}
+
+    def adopt_export_prior(self, recipe) -> None:
+        self._export_mode_prior = (recipe or {}).get("data", {}).get("option") or None
+        self._last_export_limit_w = 0.0
+
     async def command_release_export(self) -> None:
         ent = self._system_work_mode_entity
         prior = getattr(self, "_export_mode_prior", None)

@@ -84,3 +84,113 @@ class TestTheUnloadHookOrder:
         i = src.index("async_release_export_guard")
         j = src.index("pending_pacing_release")
         assert i < j
+
+
+# ── review (HIGH): the cut must outlive a restart, survive a reload, and be replayable on removal ──
+
+from custom_components.solar_energy_management.coordinator.battery_adapters.generic import (
+    GenericBatteryAdapter,
+)
+from custom_components.solar_energy_management.coordinator.battery_adapters.huawei import (
+    HuaweiBatteryAdapter,
+)
+from custom_components.solar_energy_management.coordinator.sink_verdicts import CLOSED, SinkVerdict
+
+
+class _Store:
+    def __init__(self, rec=None):
+        self.rec = rec; self.saved = []
+    async def async_load(self):
+        return self.rec
+    async def async_save(self, data):
+        self.saved.append(data); self.rec = data
+
+
+def _live(store, *, observer=False, verdict=CLOSED, export_w=3000.0):
+    hass = MagicMock(); hass.services.async_call = AsyncMock()
+    hass.states.get = MagicMock(return_value=SimpleNamespace(state="11000"))
+    gen = GenericBatteryAdapter(hass, {"export_limit_entity": "number.inv_export_limit"})
+    fake = SimpleNamespace(
+        hass=hass, config={"export_guard_enabled": True}, _observer_mode=observer,
+        _export_guard=None, _sink_verdicts={"grid_export": SinkVerdict("grid_export", verdict, "t")},
+        _battery_adapters={"b1": gen}, _surplus_controller=MagicMock(),
+        _export_guard_store=lambda: store,
+        export_release_recipes=lambda: SEMCoordinator.export_release_recipes(fake),
+        _export_guard_persist=lambda engaged: SEMCoordinator._export_guard_persist(fake, engaged),
+        _export_guard_adopt=lambda g: SEMCoordinator._export_guard_adopt(fake, g),
+    )
+    return fake, hass, gen
+
+
+@pytest.mark.asyncio
+class TestTheCutOutlivesALifetime:
+    async def test_a_live_engage_writes_the_store_with_a_release_recipe(self):
+        store = _Store(); fake, hass, gen = _live(store)
+        for t in (0, 60, 130):
+            await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=3000.0, grid_power_unavailable=False), now=float(t))
+        assert fake._export_guard.state == "engaged"
+        assert store.saved and store.saved[-1]["engaged"] is True
+        rec = store.saved[-1]["recipes"]["b1"]
+        assert rec == {"domain": "number", "service": "set_value",
+                       "data": {"entity_id": "number.inv_export_limit", "value": 11000.0}}
+
+    async def test_an_observer_engage_writes_nothing(self):
+        store = _Store(); fake, hass, gen = _live(store, observer=True)
+        for t in (0, 60, 130):
+            await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=3000.0, grid_power_unavailable=False), now=float(t))
+        assert fake._export_guard.state == "engaged" and store.saved == []
+
+    async def test_a_new_lifetime_adopts_an_engaged_cut_and_its_prior(self):
+        store = _Store({"engaged": True, "since": "t", "recipes": {"b1": {
+            "domain": "number", "service": "set_value",
+            "data": {"entity_id": "number.inv_export_limit", "value": 9000.0}}}})
+        fake, hass, gen = _live(store, verdict="open", export_w=0.0)
+        await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=0.0, grid_power_unavailable=False), now=0.0)
+        assert fake._export_guard.state in ("engaged", "releasing")   # adopted, now on the open side
+        assert gen._export_prior == 9000.0                             # the ORIGINAL prior, not today's read
+        await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=0.0, grid_power_unavailable=False), now=400.0)
+        assert ("number", "set_value", {"entity_id": "number.inv_export_limit", "value": 9000.0}) in \
+            [(c.args[0], c.args[1], c.args[2]) for c in hass.services.async_call.await_args_list]
+        assert store.saved[-1] == {"engaged": False}
+
+    async def test_a_store_that_says_not_engaged_adopts_nothing(self):
+        store = _Store({"engaged": False}); fake, hass, gen = _live(store, verdict="open", export_w=0.0)
+        await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=0.0, grid_power_unavailable=False), now=0.0)
+        assert fake._export_guard.state == "idle"
+
+
+class TestRecipes:
+    def test_huawei_recipe_is_the_integrations_reset(self):
+        a = HuaweiBatteryAdapter(MagicMock(), {}); a._inverter_device_id = "dev"
+        assert a.export_release_recipe() == {"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
+                                             "data": {"device_id": "dev"}}
+
+    def test_generic_recipe_needs_a_captured_prior(self):
+        a = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"})
+        assert a.export_release_recipe() is None
+        a._export_prior = 5000.0
+        assert a.export_release_recipe()["data"] == {"entity_id": "number.x", "value": 5000.0}
+
+    def test_recipes_are_empty_in_observer_mode_or_when_idle(self):
+        g = ExportGuard(); g.state = "engaged"
+        a = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"}); a._export_prior = 1.0
+        assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g, _battery_adapters={"b1": a}, _observer_mode=True)) == {}
+        g2 = ExportGuard()
+        assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g2, _battery_adapters={"b1": a}, _observer_mode=False)) == {}
+        assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g, _battery_adapters={"b1": a}, _observer_mode=False)) == {"b1": a.export_release_recipe()}
+
+
+class TestUnloadSemantics:
+    def test_reload_stashes_and_disable_releases(self):
+        """Read the source: a plain reload stashes recipes (never calls the
+        adapters); a disable calls async_release_export_guard; removal replays."""
+        import inspect
+        import custom_components.solar_energy_management as init_mod
+        src = inspect.getsource(init_mod.async_unload_entry)
+        blk = src[src.index("(#955) The export cut FIRST"):src.index("pending_pacing_release")]
+        assert 'if entry.disabled_by is not None:' in blk
+        assert 'async_release_export_guard(reason="disabled")' in blk
+        assert '_PENDING_EXPORT_RELEASE[entry.entry_id] = _recipes' in blk
+        rm = inspect.getsource(init_mod.async_remove_entry)
+        assert "_PENDING_EXPORT_RELEASE.pop(entry.entry_id" in rm and "async_call" in rm
+        assert "_PENDING_EXPORT_RELEASE.pop(entry.entry_id, None)" in inspect.getsource(init_mod.async_setup_entry)

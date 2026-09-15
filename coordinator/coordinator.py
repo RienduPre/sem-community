@@ -10722,6 +10722,76 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         )
         return max(0, daily_target - consumed)
 
+    def _export_guard_store(self):
+        """(#955) Where an engaged export cut outlives this lifetime — an HA
+        restart never unloads the entry, and a cut nobody remembers is an
+        inverter stuck at zero feed-in with nothing left that knows why.
+        Scoped to the config entry like every SEM store (cleanup inventories
+        ``sem.export_guard.{entry_id}``)."""
+        entry_id = str(getattr(getattr(self, "config_entry", None), "entry_id", "") or "")
+        if not entry_id:
+            return None
+        try:
+            from homeassistant.helpers.storage import Store
+            return Store(self.hass, 1, f"sem.export_guard.{entry_id}")
+        except Exception:  # noqa: BLE001 — a store never costs a cycle
+            return None
+
+    def export_release_recipes(self) -> dict:
+        """(#955) Per battery, how to undo the cut WITHOUT the adapters —
+        what unload stashes for a removal and what the store carries across
+        a restart. Empty when nothing is engaged or nothing was written."""
+        guard = getattr(self, "_export_guard", None)
+        if (guard is None or guard.state not in ("engaged", "releasing", "refused")
+                or bool(getattr(self, "_observer_mode", False))):
+            return {}
+        out = {}
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                rec = adapter.export_release_recipe()
+            except Exception:  # noqa: BLE001
+                rec = None
+            if rec:
+                out[str(bid)] = rec
+        return out
+
+    async def _export_guard_persist(self, engaged: bool) -> None:
+        """Write the cut's existence (and the release recipes) to the store."""
+        store = self._export_guard_store()
+        if store is None:
+            return
+        try:
+            if engaged:
+                await store.async_save({"engaged": True, "since": dt_util.now().isoformat(),
+                                        "recipes": self.export_release_recipes()})
+            else:
+                await store.async_save({"engaged": False})
+        except Exception as exc:  # noqa: BLE001 — a store never costs a cycle
+            _LOGGER.debug("export guard store write failed: %s", exc)
+
+    async def _export_guard_adopt(self, guard) -> None:
+        """First tick of a lifetime: if a previous lifetime engaged the cut,
+        take it over — the guard starts ENGAGED and the adapters get their
+        priors back — so the cut is released when the meter reopens instead
+        of being forgotten."""
+        store = self._export_guard_store()
+        if store is None:
+            return
+        try:
+            rec = await store.async_load() or {}
+        except Exception:  # noqa: BLE001
+            rec = {}
+        if not isinstance(rec, dict) or not rec.get("engaged"):
+            return
+        guard.state = "engaged"
+        guard.reason = f"adopted an export cut from a previous lifetime (since {rec.get('since')})"
+        recipes = rec.get("recipes") or {}
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                adapter.adopt_export_prior(recipes.get(str(bid)))
+            except Exception:  # noqa: BLE001
+                pass
+
     async def async_release_export_guard(self, *, reason: str):
         """(#955, the #908 rule) Put the inverter's feed-in back if — and only
         if — SEM is the one holding it. Never raises: a teardown that fails
@@ -10747,6 +10817,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                                 bid, reason, exc)
         guard.state = "idle"
         guard.reason = f"released on {reason}"
+        _persist = getattr(self, "_export_guard_persist", None)
+        if callable(_persist):
+            await _persist(False)
         return (f"export guard released on {reason}: "
                 f"{', '.join(released) or 'nothing to release'}")
 
@@ -10770,6 +10843,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             self._export_guard = ExportGuard(
                 engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
                 release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
+            # (#949 pattern) a rig-shaped stand-in carries no store; the guard
+            # then behaves exactly as it did before the cut was persisted.
+            _adopt = getattr(self, "_export_guard_adopt", None)
+            if callable(_adopt):
+                await _adopt(self._export_guard)
         guard = self._export_guard
         enabled = bool(self.config.get("export_guard_enabled", False))
         verdict = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
@@ -10793,6 +10871,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 would = cmd.intent
             elif refused and intent is BatteryIntent.LIMIT_EXPORT:
                 guard.report_refused("; ".join(refused))
+            else:
+                # a LIVE cut (or release) outlives this lifetime — write it down
+                _persist = getattr(self, "_export_guard_persist", None)
+                if callable(_persist):
+                    await _persist(intent is BatteryIntent.LIMIT_EXPORT)
         self._export_guard_state = {
             "enabled": enabled, "state": guard.state, "reason": guard.reason,
             "would": would, "repair_wanted": guard.repair_wanted,

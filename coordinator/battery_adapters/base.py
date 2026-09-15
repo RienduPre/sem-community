@@ -454,6 +454,17 @@ class BatteryControlAdapter(ABC):
         """Put the feed-in limit back to what SEM found."""
         raise NotImplementedError("this battery adapter has no export control")
 
+    def export_release_recipe(self):
+        """(#955) How to undo THIS adapter's export cut without the adapter —
+        ``{"domain","service","data"}`` — persisted so a restart can adopt the
+        cut and a removal can replay the release. None = nothing to undo."""
+        return None
+
+    def adopt_export_prior(self, recipe) -> None:
+        """(#955) A previous lifetime engaged the cut; take over its prior so
+        ``command_release_export`` restores what SEM originally found."""
+        self._last_export_limit_w = 0.0
+
     async def command_off(self) -> None:
         """#523 (RienduPre): SEM hands-off this battery.
 

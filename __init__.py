@@ -125,6 +125,10 @@ _PENDING_LOAD_TEARDOWN: Dict[str, List["ControllableDevice"]] = {}
 # ``async_setup_entry``. A removed or disabled entry has no next lifetime to
 # adopt the engagement, so without this the register keeps SEM's cap for good.
 _PENDING_PACING_RESTORE: Dict[str, tuple] = {}
+#: (#955) entry_id -> {battery_id: release recipe} stashed by unload for a
+#: removal, exactly like the pacer's tuple above; a reload never pops it and
+#: the next setup clears it.
+_PENDING_EXPORT_RELEASE: dict = {}
 
 # (#935) And the same for a wallbox SEM parked: the box holds a standing "no"
 # — disabled contactor, 0 A stored, a persisted dead-man failsafe — which is
@@ -2112,6 +2116,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     # (#949) Same reasoning for the paced charge limit: SEM is back, and the
     # fresh writer adopts the engagement from its own record.
     _PENDING_PACING_RESTORE.pop(entry.entry_id, None)
+    _PENDING_EXPORT_RELEASE.pop(entry.entry_id, None)   # (#955) a stale stash never replays
     # (#935) A reload is not an abandonment: the charger stays parked and the
     # fresh cycle decides again in seconds.
     _PENDING_CHARGER_RELEASE.pop(entry.entry_id, None)
@@ -3087,6 +3092,17 @@ async def async_remove_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> None
         except Exception as e:  # noqa: BLE001 — a removal always completes
             _LOGGER.warning("SEM removed: charger hand-back failed: %s", e)
 
+    # (#955) the export cut, replayed from the recipes unload stashed — no
+    # coordinator, no adapters exist any more; the recipe is the release.
+    for _bid, _rec in (_PENDING_EXPORT_RELEASE.pop(entry.entry_id, None) or {}).items():
+        try:
+            await hass.services.async_call(_rec["domain"], _rec["service"],
+                                           dict(_rec.get("data") or {}), blocking=False)
+            _LOGGER.info("SEM removed: export cut released on %s via %s.%s",
+                         _bid, _rec["domain"], _rec["service"])
+        except Exception as e:  # noqa: BLE001 — a removal always completes
+            _LOGGER.warning("SEM removed: export cut release failed on %s: %s", _bid, e)
+
     held = _PENDING_PACING_RESTORE.pop(entry.entry_id, None)
     if held:
         from .coordinator.charge_pacing import async_release_pacing
@@ -3231,17 +3247,23 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             # (#949) Read the pacer's hold FIRST: the battery release below
             # flips the coordinator into observer mode, and everything after
             # that point is reasoning about a rig, not about this install.
-            # (#955) The export cut FIRST: an inverter left at zero feed-in by
-            # a removed SEM would throw away every surplus kWh with nothing
-            # left on the system that knows why. Same rule, same order as the
-            # pacer's hold below — and before observer mode flips.
+            # (#955) The export cut FIRST — same branch structure as the pacer
+            # below and the charger above: a DISABLE hands the inverter back now;
+            # a plain RELOAD leaves the cut in place (SEM is back in seconds and
+            # the store lets the next lifetime adopt it — releasing here would
+            # open the meter for a whole engage hold in a negative hour); a
+            # REMOVAL is replayed from async_remove_entry, without the adapters.
             try:
-                _said = await coordinator.async_release_export_guard(
-                    reason="disabled" if entry.disabled_by is not None else "unloaded")
-                if _said:
-                    _LOGGER.info("%s", _said)
+                if entry.disabled_by is not None:
+                    _said = await coordinator.async_release_export_guard(reason="disabled")
+                    if _said:
+                        _LOGGER.info("%s", _said)
+                else:
+                    _recipes = coordinator.export_release_recipes()
+                    if _recipes:
+                        _PENDING_EXPORT_RELEASE[entry.entry_id] = _recipes
             except Exception as exc:  # noqa: BLE001 — teardown must finish
-                _LOGGER.warning("export guard release failed on unload: %s", exc)
+                _LOGGER.warning("export guard hand-back failed on unload: %s", exc)
             from .coordinator.charge_pacing import (
                 async_release_pacing, pending_pacing_release,
             )

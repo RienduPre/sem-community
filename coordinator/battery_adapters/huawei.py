@@ -87,6 +87,13 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         self._last_export_limit_w = w
         self._last_intent = BatteryIntent.LIMIT_EXPORT
 
+    def export_release_recipe(self):
+        device_id = self._export_device_id()
+        if not device_id:
+            return None
+        return {"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
+                "data": {"device_id": device_id}}
+
     async def command_release_export(self) -> None:
         device_id = self._export_device_id()
         if not device_id:
