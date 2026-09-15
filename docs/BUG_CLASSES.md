@@ -3335,35 +3335,68 @@ is the one constant `UNAVAILABLE_REPAIR_THRESHOLD_S` (#611's warm-up) rather tha
 (class 46). Evidence counters stay for evidence: a command that raised keeps its three-strike
 contract (#462, framework-tier), and the absence path neither increments that counter nor is cleared
 by it — they share one issue id, so the write side owns the Repair whenever it has spoken. The
-clock's OTHER half must be retired by the CONDITION ending, and the condition is "did this cycle
-report the surface blocked?" — asked of the emitted actions, never of "can I read the entity?". Both
-halves of this fix got that wrong first and the error is instructive: only ONE of the two conditions
-reaching this surface is silence. A switch that is READABLE but stuck `off` (#536 Eco-Smart, the
-re-assert budget spent) is `enable_controllable=True` and blocked at the same time, so a hold retired
-on readability resets every cycle, never elapses, and makes that Repair unfileable — strictly worse
-than the bug, because the retire also deletes one a previous lifetime raised. Evidence keeps its
-original speed; only silence waits. Likewise a *write* is evidence about the entity it was written to
-and no other: zeroing the hold on a successful current write let a 0 A stop (one per 60 s reassert
-dwell, on every non-KEBA stop) starve a 300 s window forever.
+clock's OTHER half must be retired by the CONDITION ending, and the condition is "is SEM asserting
+this surface and not getting it?" — asked of the emitted actions, never of "can I read the entity?".
+Both halves of this fix got that wrong first and the error is instructive: a switch that is READABLE
+but stuck `off` (#536 Eco-Smart, the re-assert budget spent) is `enable_controllable=True` and blocked
+at the same time, so a hold retired on readability resets every cycle, never elapses, and makes that
+Repair unfileable — strictly worse than the bug, because the retire also deletes one a previous
+lifetime raised. Likewise a *write* is evidence about the entity it was written to and no other:
+zeroing the hold on a successful current write let a 0 A stop (one per 60 s reassert dwell, on every
+non-KEBA stop) starve a 300 s window forever.
+
+**Round 2 (#945, 2.1.0-beta.25) — the exemption was the bug.** Round one concluded from the above
+that only silence waits and that the readable-but-`off` switch keeps its three-CYCLE speed, being
+"evidence: SEM wrote `turn_on` five times and watched it come back off". alexmc1510 restarted onto
+beta.22 and got the identical Repair with the other sentence in it. Two things were wrong. First, the
+three cycles that FILE it are cycles on which SEM sends nothing at all — the reconciler returns
+`REPORT_ENABLE_BLOCKED` *alone*, so a successful write cannot flap the notice — so the verdict was
+three observations wearing the #462 counter whose Repair says "your last 3+ current commands were
+rejected". Second, a restart reaches that branch: the entity appears partway through the warm-up
+still reading `off`, because its integration has not reached the box yet, and 5 re-asserts + 3 reports
+is 80 s. **The episode is the unit, not the sub-case.** "SEM is asserting this switch and it is not
+holding" opens ONE wall clock spanning both the unreadable stretch and the re-asserts, retired only
+by a cycle that emits neither `ENABLE` nor `REPORT_ENABLE_BLOCKED` — the re-asserts ARE the episode,
+and treating them as quiet cycles also DELETED a standing Repair once per switch drop and re-raised
+it five cycles later (the write side's churn, one layer up). Each sub-case keeps its own sentence
+(`repair_issues.ENABLE_UNREADABLE` / `ENABLE_WILL_NOT_HOLD`, spelled once — class 46), and a charger
+whose `enable_state()` answers `(None, True)` — KEBA, a service, a button: no readable switch AT ALL
+— files nothing, because there is no surface here to be blocked and the id belongs to the write path
+as well. The generalisation: a verdict's patience must not be restarted by SEM's own retries, and
+"evidence" means a command that was SENT and refused, never an observation on a silent cycle.
 **Guard:** `tests/test_945_restart_enable_warmup.py` — the restart replayed through the real device
 and the real adapter (30 s of blocked cycles raise nothing; the threshold raises once, and only
 once), the vacuity twin (the command counter is untouched by a non-command, and #462's three rejected
 writes still raise with no time passing at all), the recovery edge driven through the real
 `observe()`, a pin that a switch recovering does NOT delete a Repair the write side raised, and the
-sibling pin that a missing battery entity spends no strike.
+sibling pin that a missing battery entity spends no strike. Round 2 adds the reporter's whole restart
+through the real `reconcile_and_apply` — the entity absent, then appearing `off`, then recovering —
+with the pin that makes it non-vacuous (the #536 budget really does run out here, and the cycles that
+used to file the Repair really do send NOTHING), plus the STRUCTURAL guard the class asked for:
+`ast_contracts.invented_evidence_call_sites` fails the build if any production call to
+`_record_actuation_failure` passes an exception SEM constructed rather than one an enclosing
+`except … as e` caught, and a second contract keeps the observing layer (every charger adapter) out
+of the write layer's counter entirely. Both are self-tested against a violation so they cannot pass
+vacuously, and both kill the pre-fix code.
 **Sweep question:** for every counter that turns repeated observations into a user-visible verdict —
-is each observation EVIDENCE (something happened and was refused) or SILENCE (nothing could be read)?
-And is its patience measured in cycles or in seconds? A cycle-counted threshold on a silent input is
-a promise about the coordinator's interval, not about the fault.
+is each observation EVIDENCE (a command was SENT and refused) or SILENCE (nothing could be read, or
+nothing was sent at all)? And is its patience measured in cycles or in seconds? A cycle-counted
+threshold on a silent input is a promise about the coordinator's interval, not about the fault. Then
+ask round 2's question: does SEM's own RETRY restart that patience — and if the verdict holds a
+Repair, does the retry also retire it?
 **Left for Guido:** (0) This surface shares ONE issue id with the write path (#462), which is why the
 unblocked-cycle clear must not fire for a predecessor's Repair (class 84's usual answer): on a
 KEBA/service/button charger there is no switch at all, so a first-of-lifetime clear there would
 delete a genuine "every command rejected" notice on the evidence of an entity that does not exist.
 The predecessor's copy is retired by #485 H5's first-good-write clear instead. Splitting the id would
 let each condition own its own lifecycle — and is what a new translation key (item 1) would want
-anyway. (1) The Repair TEXT is still the write path's: past the hold, a genuinely locked
-switch is reported as "SEM's last 3+ current commands were rejected". Saying it properly needs a new
-translation key in `strings.json` + all 16 translations — a product decision, not a sweep. (2) Past
+anyway. (1) The Repair TEXT is still the write path's, and round 2 makes this the
+sharpest residual: past the hold BOTH enable faults are reported as "SEM's last 3+ current commands
+to **{name}** were rejected" — the sentence alexmc1510 quoted back twice as evidence SEM was
+confused, and one that is false for this surface by construction, since the cycles that file it send
+nothing. Saying it properly needs a new `charger_enable_blocked` key with its own `fix_flow` in
+`strings.json` + all 16 translations, and it wants item (0)'s id split first (a persistent Repair
+already raised under the shared id has to be migrated). A product decision, not a sweep. (2) Past
 the hold a missing start/stop entity now raises TWO ERROR Repairs for one fact — this one and #824's
 `charger_control_entity_broken`, which watches the same `ev_start_stop_entity` on the same threshold.
 Deduping them means deciding which surface owns an uncommandable control entity. (3) The hold starts

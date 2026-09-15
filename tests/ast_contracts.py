@@ -129,3 +129,69 @@ def call_sites(callee: str, *, root: Optional[Path] = None,
                 hits.append((str(rel), n.lineno,
                              [k.arg for k in n.keywords if k.arg]))
     return hits
+
+
+def _except_bound_names(tree: ast.AST) -> dict:
+    """``{Call/expr node id: set(names bound by an enclosing except-as)}``.
+
+    Walks handlers rather than the whole tree so the binding is SCOPED: a
+    name caught three functions away does not count."""
+    bound: dict = {}
+
+    def walk(node, names: frozenset):
+        if isinstance(node, ast.Try):
+            for part in (node.body, node.orelse, node.finalbody):
+                for st in part:
+                    walk(st, names)
+            for h in node.handlers:
+                inner = names | ({h.name} if h.name else set())
+                for st in h.body:
+                    walk(st, frozenset(inner))
+            return
+        if isinstance(node, ast.Call):
+            bound[id(node)] = names
+        for child in ast.iter_child_nodes(node):
+            walk(child, names)
+
+    walk(tree, frozenset())
+    return bound
+
+
+def invented_evidence_call_sites(
+        callee: str, *, root: Optional[Path] = None,
+        skip_dirs: Iterable[str] = ("tests", "scripts", "node_modules",
+                                    ".git")) -> list:
+    """(#945, bug class 86) Every production call to ``callee`` whose first
+    positional argument is an exception SEM made up, rather than one an
+    enclosing ``except … as e`` actually caught.
+
+    This is the class-86 sweep question asked structurally, for any counter
+    that takes an exception as its evidence. A caught name means something
+    really happened and really refused; ``RuntimeError("the switch is off")``
+    means somebody turned an OBSERVATION into the same verdict — which is
+    how a restart's warm-up became "your last 3+ commands were rejected".
+
+    Returns ``[(relative_path, lineno, what_was_constructed)]``."""
+    root = root or Path(__file__).resolve().parent.parent
+    hits = []
+    for p in sorted(root.rglob("*.py")):
+        rel = p.relative_to(root)
+        if set(rel.parts) & set(skip_dirs):
+            continue
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+        bound = _except_bound_names(tree)
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and _callee_name(n) == callee):
+                continue
+            if not n.args:
+                continue
+            arg = n.args[0]
+            if isinstance(arg, ast.Name):
+                if arg.id in bound.get(id(n), frozenset()):
+                    continue          # a command really raised — evidence
+                hits.append((str(rel), n.lineno, arg.id))
+            else:
+                hits.append((str(rel), n.lineno,
+                             _callee_name(arg) if isinstance(arg, ast.Call)
+                             else type(arg).__name__))
+    return hits

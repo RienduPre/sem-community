@@ -50,9 +50,16 @@ from custom_components.solar_energy_management.coordinator.charger_reconciler im
 from custom_components.solar_energy_management.coordinator.coordinator import (
     SEMCoordinator,
 )
+from custom_components.solar_energy_management.coordinator.charger_types import (
+    ChargerDecision,
+    ChargerIntent,
+    ChargerPower,
+)
 from custom_components.solar_energy_management.devices.base import (
     CurrentControlDevice,
 )
+
+from .ast_contracts import call_sites, invented_evidence_call_sites
 
 #: The one constant, never a fresh literal (class 46).
 HOLD = ri.UNAVAILABLE_REPAIR_THRESHOLD_S
@@ -129,30 +136,73 @@ class TestTheRestartWindowIsSilent:
 
 
 @pytest.mark.unit
-class TestTheEvidenceCaseKeepsItsSpeed:
-    """A READABLE switch sitting ``off`` while SEM wants to charge, with the
-    #536 re-assert budget spent, is not silence: SEM wrote ``turn_on`` and
-    watched it come back off. It is also ``controllable``, so a hold retired
-    on readability would reset every cycle and this Repair could NEVER be
-    filed — the regression that made the first cut of this fix worse than
-    the bug."""
+class TestTheStuckSwitchWaitsOutTheWarmUpToo:
+    """Round one (2.1.0-beta.17) exempted this branch, on the reasoning that
+    a READABLE switch sitting ``off`` with the #536 re-assert budget spent is
+    evidence — "SEM wrote ``turn_on`` five times and watched it come back
+    off" — and so kept its three-CYCLE speed.
+
+    alexmc1510 restarted onto beta.22 and got the very same Repair with the
+    other sentence in it. The reasoning had two holes. The three cycles that
+    file it are cycles on which SEM sends NOTHING (the reconciler returns the
+    report ALONE, so a successful write cannot flap the notice), and a
+    restart reaches this branch as soon as the switch entity appears — still
+    ``off``, because its integration has not reached the box yet. So the
+    verdict landed ~80 s after the entity loaded, well inside the warm-up the
+    same fix was built to respect.
+
+    The fear that justified the exemption was already answered on the other
+    side of the fix: the hold is retired by the emitted ACTIONS, never by
+    "can I read the entity?", so a readable switch does not reset it."""
 
     @pytest.mark.asyncio
-    async def test_a_readable_but_stuck_switch_still_raises_in_three_cycles(self):
+    async def test_a_readable_but_stuck_switch_is_held_like_any_other(self):
         dev = _device(switch_state="off")
         adapter = GenericAdapter(dev)
         assert adapter.enable_state() == (False, True), (
             "the premise: a switch that reads 'off' is CONTROLLABLE"
         )
         with patch.object(ri, "raise_charger_actuation_failed") as raised:
-            await adapter.report_enable_blocked()
-            await adapter.report_enable_blocked()
+            for cycle in range(8):     # 80 s — what round one filed at
+                await adapter.report_enable_blocked(cycle * CYCLE)
             raised.assert_not_called()
-            await adapter.report_enable_blocked()
+            await adapter.report_enable_blocked(HOLD + 1.0)
             raised.assert_called_once()
-        assert dev._enable_blocked_since is None, (
-            "the wall-clock hold is for silence; evidence must not consult it"
+        assert raised.call_args.kwargs["error"] == ri.ENABLE_WILL_NOT_HOLD, (
+            "the two faults are different and keep different sentences"
         )
+
+    @pytest.mark.asyncio
+    async def test_a_non_command_never_spends_the_command_counter(self):
+        """The vacuity twin, for THIS branch. The cycles that used to file
+        this Repair sent nothing at all, yet each one spent a strike on the
+        counter whose Repair says "your last 3+ current commands were
+        rejected"."""
+        dev = _device(switch_state="off")
+        adapter = GenericAdapter(dev)
+        with patch.object(ri, "raise_charger_actuation_failed"):
+            for cycle in range(8):
+                await adapter.report_enable_blocked(cycle * CYCLE)
+        assert dev._actuation_failures == 0, (
+            "an observation was counted as a rejected command — the #945 shape"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_charger_with_no_enable_switch_files_nothing(self):
+        """``enable_state()`` answers ``(None, True)`` for a KEBA, a service-
+        or a button-controlled charger: N/A, not "fine". There is no surface
+        here to be blocked, and the issue id is shared with the write path —
+        so a verdict invented here would be a verdict about somebody else's
+        command."""
+        dev = _device()
+        dev.start_stop_entity = None
+        adapter = GenericAdapter(dev)
+        assert adapter.enable_state() == (None, True)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            for cycle in range(40):              # far past the hold
+                await adapter.report_enable_blocked(cycle * CYCLE)
+            raised.assert_not_called()
+        assert dev._actuation_failures == 0
 
 
 @pytest.mark.unit
@@ -316,6 +366,177 @@ class TestTheHoldIsRetiredByTheCycleNotByReadability:
                         [Action(ActionKind.REPORT_ENABLE_BLOCKED)])
             cleared.assert_not_called()
         assert dev._enable_blocked_since is not None
+
+
+# ── Round 2: alexmc1510's restart, end to end (2.1.0-beta.22) ────────────
+
+
+def _restart_device(world):
+    """The reporter's charger as an HA restart actually presents it: the
+    start/stop entity is absent for the first stretch, then appears reading
+    ``off`` because its own integration has not reached the box yet."""
+    hass = MagicMock()
+    hass.states.get = MagicMock(side_effect=lambda eid: (
+        SimpleNamespace(state=world["switch"], attributes={})
+        if (eid == SWITCH and world["switch"] is not None) else None))
+
+    async def _call(domain, service, data, blocking=False):
+        world["sent"].append(f"{domain}.{service}")
+    hass.services.async_call = AsyncMock(side_effect=_call)
+    hass.services.has_service = MagicMock(return_value=False)
+    dev = CurrentControlDevice(hass=hass, device_id="ev_charger_1",
+                               name="EV Charger", min_current=6.0,
+                               max_current=32.0, phases=3)
+    dev.start_stop_entity = SWITCH
+    return dev
+
+
+def _replay_restart(cycles, *, switch_appears_at=6, switch_recovers_at=None):
+    """Drive ``reconcile_and_apply`` — the real one — for ``cycles`` cycles of
+    a charger SEM wants to charge. Returns (raised_errors, sent_per_cycle)."""
+    world = {"switch": None, "sent": []}
+    dev = _restart_device(world)
+    adapter = GenericAdapter(dev)
+    rec = ChargerReconciler(charger_id="ev_charger_1", heartbeat_s=CYCLE)
+    raised, per_cycle = [], []
+    with patch.object(ri, "raise_charger_actuation_failed",
+                      side_effect=lambda h, d, name=None, error=None:
+                      raised.append(error)), \
+            patch.object(ri, "clear_charger_actuation_failed"):
+        for i in range(cycles):
+            if switch_appears_at is not None and i == switch_appears_at:
+                world["switch"] = "off"
+            if switch_recovers_at is not None and i == switch_recovers_at:
+                world["switch"] = "on"
+            before = len(world["sent"])
+            decision = ChargerDecision(charger_id="ev_charger_1", mode="solar",
+                                       intent=ChargerIntent.CHARGE_AT_AMPS,
+                                       commanded_amps=16, reason="solar")
+            power = ChargerPower(charger_id="ev_charger_1", power_w=0.0,
+                                 connected=True, charging=False)
+            asyncio.run(rec.reconcile_and_apply(decision, adapter, power,
+                                                i * CYCLE))
+            per_cycle.append(len(world["sent"]) - before)
+    return raised, per_cycle
+
+
+@pytest.mark.unit
+class TestTheReportersRestart:
+    """The whole arc through the real reconciler, the real adapter and the
+    real device — the only shape that shows why round one did not hold."""
+
+    def test_no_repair_inside_the_warm_up(self):
+        raised, _ = _replay_restart(int(HOLD // CYCLE))
+        assert raised == [], (
+            f"a restart filed {raised!r} inside the warm-up window"
+        )
+
+    def test_round_one_would_have_filed_at_eighty_seconds(self):
+        """The pin that makes the one above non-vacuous: the old threshold
+        really is crossed here. Five re-asserts spend the #536 budget, then
+        three REPORT-only cycles — and on those three SEM sends NOTHING,
+        which is what makes "your last 3+ commands were rejected" a lie."""
+        _, per_cycle = _replay_restart(14)
+        asserts = [i for i, n in enumerate(per_cycle) if n]
+        assert len(asserts) == 5, (
+            f"the #536 budget did not run out — re-asserts on {asserts}"
+        )
+        silent_after = per_cycle[asserts[-1] + 1:]
+        assert len(silent_after) >= 3 and not any(silent_after), (
+            "the cycles that used to file the Repair must send nothing"
+        )
+
+    def test_a_charger_that_comes_up_late_but_works_is_never_accused(self):
+        """A slow integration is the common case, and it must cost the owner
+        nothing at all."""
+        raised, _ = _replay_restart(60, switch_appears_at=6,
+                                    switch_recovers_at=20)
+        assert raised == []
+
+    def test_a_switch_that_really_will_not_hold_is_still_reported(self):
+        """The #536 Eco-Smart fault the surface exists for. It waits out the
+        warm-up now; it does not become unreportable."""
+        raised, _ = _replay_restart(int(HOLD // CYCLE) + 2)
+        assert raised == [ri.ENABLE_WILL_NOT_HOLD]
+
+    def test_the_re_asserts_do_not_restart_the_clock(self):
+        """The mechanism, stated on its own. If the five ENABLE cycles count
+        as quiet the episode clock restarts 50 s before the verdict — and,
+        worse, a switch dropping mid-session DELETES a standing Repair once
+        per drop and re-raises it five cycles later."""
+        world = {"switch": "off", "sent": []}
+        dev = _restart_device(world)
+        adapter = GenericAdapter(dev)
+        rec = ChargerReconciler(charger_id="ev_charger_1", heartbeat_s=CYCLE)
+        with patch.object(ri, "raise_charger_actuation_failed"), \
+                patch.object(ri, "clear_charger_actuation_failed") as cleared:
+            dev._note_enable_blocked(now=0.0)
+            assert dev._note_enable_blocked(now=HOLD + 1.0) is True
+            asyncio.run(rec._apply_actions(
+                [Action(ActionKind.ENABLE)], adapter,
+                SimpleNamespace(reason="test"), SimpleNamespace(power_w=0.0),
+                now=HOLD + 2.0))
+            cleared.assert_not_called()
+        assert dev._enable_blocked_since is not None
+        assert dev._enable_blocked_repair_raised is True
+
+
+@pytest.mark.unit
+class TestTheCounterCanOnlyBeFedByACommand:
+    """The structural guard — the class made unrepresentable rather than the
+    instance patched. ``_record_actuation_failure`` is #462's evidence
+    counter: three commands that RAISED. An exception SEM constructs to
+    describe something it merely OBSERVED is the class-86 shape, and it is
+    exactly how this bug was written twice."""
+
+    def test_no_production_call_invents_its_own_evidence(self):
+        invented = invented_evidence_call_sites("_record_actuation_failure")
+        assert invented == [], (
+            "a verdict was manufactured for the rejected-command counter at "
+            + "; ".join(f"{f}:{ln} ({what})" for f, ln, what in invented)
+        )
+
+    def test_the_guard_can_actually_see_a_violation(self):
+        """No-vacuous-pass: the contract above is worth nothing if the walker
+        cannot find the shape it forbids."""
+        import ast
+
+        from . import ast_contracts
+
+        src = (
+            "def outer():\n"
+            "    try:\n"
+            "        send()\n"
+            "    except OSError as e:\n"
+            "        dev._record_actuation_failure(e)\n"
+            "def observer():\n"
+            "    dev._record_actuation_failure(RuntimeError('switch is off'))\n"
+        )
+        tree = ast.parse(src)
+        bound = ast_contracts._except_bound_names(tree)
+        calls = sorted(
+            (n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and ast_contracts._callee_name(n) == "_record_actuation_failure"),
+            key=lambda n: n.lineno)   # ast.walk is breadth-first, not source
+        assert len(calls) == 2
+        caught, invented = calls
+        assert caught.args[0].id in bound[id(caught)], (
+            "a genuinely caught exception must be accepted"
+        )
+        assert not isinstance(invented.args[0], ast.Name), (
+            "the invented one must not look like a caught name"
+        )
+
+    def test_only_the_write_path_may_spend_it(self):
+        """The observation layer — every charger adapter — must not reach
+        into the write layer's evidence at all. That import direction is
+        what made both instances of this bug a one-line change."""
+        offenders = [(f, ln) for f, ln, _ in
+                     call_sites("_record_actuation_failure")
+                     if not f.startswith("devices/")]
+        assert offenders == [], (
+            f"an observing layer spends the command counter at {offenders}"
+        )
 
 
 # ── Sibling sweep: the same shape on the battery write verifier (#915) ────

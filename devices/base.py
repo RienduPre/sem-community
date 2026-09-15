@@ -2677,9 +2677,14 @@ class CurrentControlDevice(ControllableDevice):
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("actuation-failure repair clear failed: %s", exc)
 
-    def _note_enable_blocked(self, now: Optional[float] = None) -> bool:
-        """(#945) The enable switch is not commandable this cycle — is that
-        a Repair yet?
+    def _note_enable_blocked(self, now: Optional[float] = None,
+                             error: Optional[str] = None) -> bool:
+        """(#945) The enable switch is not doing what SEM asked this cycle —
+        is that a Repair yet?
+
+        ``error`` is the sentence the owner reads and names WHICH fault this
+        is (``repair_issues.ENABLE_UNREADABLE`` /
+        ``ENABLE_WILL_NOT_HOLD``); it defaults to the unreadable one.
 
         An unreadable enable switch is the ABSENCE of evidence, not a
         rejected command: ``hass.states.get`` returns None for every entity
@@ -2696,14 +2701,10 @@ class CurrentControlDevice(ControllableDevice):
         THRESHOLD_S`` of WALL CLOCK, so a warm-up cannot cry wolf however
         fast the coordinator cycles. Returns True once the Repair stands.
         """
-        if now is None:
-            now = time.monotonic()
-        if self._enable_blocked_since is None:
-            self._enable_blocked_since = now
+        if not self._note_enable_unasserted(now):
+            return False
         try:
             from ..coordinator import repair_issues as _ri
-            if (now - self._enable_blocked_since) < _ri.UNAVAILABLE_REPAIR_THRESHOLD_S:
-                return False
             # A Repair the WRITE side raised owns the surface: three
             # rejected commands are harder evidence than a silent switch,
             # and both would be the same issue id.
@@ -2713,11 +2714,42 @@ class CurrentControlDevice(ControllableDevice):
             self._actuation_repair_raised = True
             _ri.raise_charger_actuation_failed(
                 self.hass, self.device_id, name=self.name,
-                error="enable switch unavailable/locked — cannot start charging",
+                error=str(error or _ri.ENABLE_UNREADABLE),
             )
             return True
         except Exception as exc:  # noqa: BLE001 — never fail the cycle over a repair
             _LOGGER.debug("enable-blocked repair raise failed: %s", exc)
+            return False
+
+    def _note_enable_unasserted(self, now: Optional[float] = None) -> bool:
+        """(#945 round 2) SEM wants the enable surface ON and it is not —
+        open or advance the EPISODE clock, and answer "has this outlasted a
+        restart's warm-up yet?". Never raises a Repair: the cycles in which
+        SEM is still re-asserting the switch are part of the episode, not a
+        verdict about it.
+
+        The episode, not the sub-case, is what the clock is about. Round one
+        put the wall clock on the UNREADABLE switch only and left the
+        readable-but-``off`` one on ``_record_actuation_failure``'s three
+        CYCLES — so the hold covered the half of a restart in which the
+        entity does not exist yet, and the half after it appears (still
+        ``off``, because the integration has not reached the box) reached a
+        persistent ERROR Repair 80 s later. alexmc1510 restarted onto
+        2.1.0-beta.22 and got the same notice with the other sentence in it.
+        One episode — "SEM is asserting this switch and it is not holding" —
+        one clock, retired by the reconciler on a cycle that neither
+        re-asserts nor reports (``_note_enable_unblocked``).
+        """
+        if now is None:
+            now = time.monotonic()
+        if self._enable_blocked_since is None:
+            self._enable_blocked_since = now
+        try:
+            from ..coordinator import repair_issues as _ri
+            return ((now - self._enable_blocked_since)
+                    >= _ri.UNAVAILABLE_REPAIR_THRESHOLD_S)
+        except Exception as exc:  # noqa: BLE001 — never fail the cycle over a repair
+            _LOGGER.debug("enable-block hold unreadable: %s", exc)
             return False
 
     def _note_enable_unblocked(self) -> None:

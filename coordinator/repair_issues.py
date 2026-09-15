@@ -54,6 +54,18 @@ _LOGGER = logging.getLogger(__name__)
 # v1.7.1-beta.9.
 UNAVAILABLE_REPAIR_THRESHOLD_S: int = 300  # 5 minutes
 
+# (#945) The two things that can be wrong with a charger's ENABLE surface,
+# spelled once. They are the ``error`` detail of ``charger_actuation_failed``
+# — the sentence the owner reads — and they name DIFFERENT faults, so the
+# surface may not collapse them. Both are held on the wall clock above
+# (class 86): a restart makes an entity absent for minutes, and five
+# re-asserts that have not landed yet look exactly like a switch that
+# refuses to hold.
+ENABLE_UNREADABLE: str = (
+    "enable switch unavailable/locked — cannot start charging")
+ENABLE_WILL_NOT_HOLD: str = (
+    "enable switch will not stay on — cannot start charging")
+
 
 # ---------------------------------------------------------------------------
 # Per-sensor unavailability
