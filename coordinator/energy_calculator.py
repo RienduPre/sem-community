@@ -644,11 +644,20 @@ class EnergyCalculator:
             export_increment = (power.grid_export_power * interval_hours) / 1000
             self._accumulate("grid_export", today, month_key, year_key, export_increment)
             self._accumulate_cost("cost_export", today, month_key, year_key, export_increment * self._export_rate)
+            # (#871, arc #921) The same kWh counted again when the meter was
+            # hostile — a separate key, not a sign on the export total, because
+            # that total is what a user reads as "what I sent out".
+            if float(self._export_rate or 0.0) < 0:
+                self._accumulate("grid_export_negative", today, month_key, year_key, export_increment)
+                self._accumulate_cost("cost_export_negative", today, month_key, year_key,
+                                      export_increment * abs(float(self._export_rate)))
         self._reconcile_metered_energy(
             "grid_export", today, month_key, year_key,
             cost_key="cost_export", rate=self._export_rate,
         )
         energy.daily_grid_export = self._get_daily("grid_export", today)
+        energy.daily_grid_export_negative = self._get_daily("grid_export_negative", today)
+        energy.daily_grid_export_negative_cost = self._get_daily_cost("cost_export_negative", today)
         energy.monthly_grid_export = self._get_monthly("grid_export", month_key)
         energy.yearly_grid_export = self._get_yearly("grid_export", year_key)
 

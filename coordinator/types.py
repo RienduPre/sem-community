@@ -436,6 +436,12 @@ class EnergyTotals:
     daily_total_consumption: float = 0.0
     daily_grid_import: float = 0.0
     daily_grid_export: float = 0.0
+    #: (#871, arc #921) kWh exported while the export rate was NEGATIVE — energy
+    #: the meter charged for instead of paying for. Zero on every fixed-tariff
+    #: install, which is all of them today; the counter exists so the cost of
+    #: NOT acting is measurable before anything acts.
+    daily_grid_export_negative: float = 0.0
+    daily_grid_export_negative_cost: float = 0.0
     daily_battery_charge: float = 0.0
     daily_battery_discharge: float = 0.0
 
@@ -1169,6 +1175,8 @@ class SEMData:
             "daily_total_consumption": self.energy.daily_total_consumption,
             "daily_grid_import_energy": self.energy.daily_grid_import,
             "daily_grid_export_energy": self.energy.daily_grid_export,
+            "daily_grid_export_negative_kwh": self.energy.daily_grid_export_negative,
+            "daily_grid_export_negative_cost": self.energy.daily_grid_export_negative_cost,
             "daily_battery_charge_energy": self.energy.daily_battery_charge,
             "daily_battery_discharge_energy": self.energy.daily_battery_discharge,
             # (#770) Where today's battery charge came from, and what the
