@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.26] — 15.09.2026
+
 - 🐛 **Today's Plan announced one "EV charging starts" per pricing slot**
   (#963, by @HorizonKane). A charge running 14:00–17:00 arrives from the joint
   plan as three hourly blocks, and the plan strip drew a start row for each —
