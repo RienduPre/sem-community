@@ -442,6 +442,10 @@ class EnergyTotals:
     #: NOT acting is measurable before anything acts.
     daily_grid_export_negative: float = 0.0
     daily_grid_export_negative_cost: float = 0.0
+    monthly_grid_export_negative: float = 0.0
+    yearly_grid_export_negative: float = 0.0
+    monthly_grid_export_negative_cost: float = 0.0
+    yearly_grid_export_negative_cost: float = 0.0
     daily_battery_charge: float = 0.0
     daily_battery_discharge: float = 0.0
 

@@ -49,14 +49,17 @@ from custom_components.solar_energy_management.utils.time_manager import TimeMan
 _PERIODS = ("daily", "monthly", "yearly")
 
 
-def _make_calc() -> EnergyCalculator:
+def _make_calc(export_rate=None) -> EnergyCalculator:
     hass = MagicMock()
     hass.states.get = MagicMock(return_value=None)
+    config = {"update_interval": 120}
+    if export_rate is not None:
+        config["electricity_export_rate"] = export_rate   # (#871) a hostile meter
     # 120 s (the integration-gap ceiling) is the first cycle's assumed interval.
     # Deliberately the longest legal one: ``_get_daily`` rounds to 2 decimals,
     # so at a 30 s interval a 500 W flow reads back as a genuine 0.0 and the
     # probe would accuse itself of the very mismatch it is looking for.
-    return EnergyCalculator({"update_interval": 120}, TimeManager(hass))
+    return EnergyCalculator(config, TimeManager(hass))
 
 
 def _categories() -> list[str]:
@@ -104,9 +107,11 @@ class TestAccumulatorKeyRoundTrip666:
         # accumulators rather than accumulated itself, which is why it has
         # no monthly/yearly twin; the round-trip test below skips periods
         # that do not exist, and was confirmed to cover this one.
-        assert len(_categories()) == 10, (
-            f"expected 10 daily categories, found {_categories()} — if a "
-            "category was added or removed, confirm the guard still covers it"
+        assert len(_categories()) == 12, (
+            f"expected 12 daily categories, found {_categories()} — if a "
+            "category was added or removed, confirm the guard still covers it "
+            "(#871 added grid_export_negative and grid_export_negative_cost, "
+            "which integrate only while the export rate is NEGATIVE)"
         )
 
     @freeze_time("2026-07-15 12:00:00")
@@ -115,7 +120,11 @@ class TestAccumulatorKeyRoundTrip666:
         """THE closure. One ``_accumulate`` call writes all periods at once, so
         any period sitting at zero while its daily sibling moved means the read
         key does not match the write key."""
-        totals = _run_one_cycle(_make_calc())
+        # (#871) the negative-export categories integrate only while the
+        # export rate is negative — a hostile meter is the input they measure.
+        calc = (_make_calc(export_rate=-0.05)
+                if category.startswith("grid_export_negative") else _make_calc())
+        totals = _run_one_cycle(calc)
         moved = {
             period: getattr(totals, f"{period}_{category}")
             for period in _PERIODS

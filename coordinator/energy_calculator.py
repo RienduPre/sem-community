@@ -658,6 +658,10 @@ class EnergyCalculator:
         energy.daily_grid_export = self._get_daily("grid_export", today)
         energy.daily_grid_export_negative = self._get_daily("grid_export_negative", today)
         energy.daily_grid_export_negative_cost = self._get_daily_cost("cost_export_negative", today)
+        energy.monthly_grid_export_negative = self._get_monthly("grid_export_negative", month_key)
+        energy.yearly_grid_export_negative = self._get_yearly("grid_export_negative", year_key)
+        energy.monthly_grid_export_negative_cost = self._get_monthly_cost("cost_export_negative", month_key)
+        energy.yearly_grid_export_negative_cost = self._get_yearly_cost("cost_export_negative", year_key)
         energy.monthly_grid_export = self._get_monthly("grid_export", month_key)
         energy.yearly_grid_export = self._get_yearly("grid_export", year_key)
 

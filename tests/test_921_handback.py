@@ -76,14 +76,19 @@ class TestRelease:
 
 class TestTheUnloadHookOrder:
     def test_the_export_release_precedes_the_pacer_release_in_unload(self):
-        """Read the source: the #955 release sits inside async_unload_entry,
-        before the #949 pacer read and therefore before observer mode flips."""
-        import inspect
+        """AST, not source strings (#925): the #955 release sits inside
+        async_unload_entry before the #949 pacer read, so it runs before
+        observer mode flips."""
+        import ast, inspect
         import custom_components.solar_energy_management as init_mod
-        src = inspect.getsource(init_mod.async_unload_entry)
-        i = src.index("async_release_export_guard")
-        j = src.index("pending_pacing_release")
-        assert i < j
+        tree = ast.parse(inspect.getsource(init_mod.async_unload_entry))
+        first = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+                if name in ("async_release_export_guard", "pending_pacing_release"):
+                    first.setdefault(name, node.lineno)
+        assert first["async_release_export_guard"] < first["pending_pacing_release"]
 
 
 # ── review (HIGH): the cut must outlive a restart, survive a reload, and be replayable on removal ──
@@ -182,15 +187,26 @@ class TestRecipes:
 
 class TestUnloadSemantics:
     def test_reload_stashes_and_disable_releases(self):
-        """Read the source: a plain reload stashes recipes (never calls the
-        adapters); a disable calls async_release_export_guard; removal replays."""
-        import inspect
+        """AST, not source strings (#925): a plain reload stashes recipes and
+        never releases; a disable calls the release; removal replays the stash;
+        the next setup clears a stale stash."""
+        import ast, inspect
         import custom_components.solar_energy_management as init_mod
-        src = inspect.getsource(init_mod.async_unload_entry)
-        blk = src[src.index("(#955) The export cut FIRST"):src.index("pending_pacing_release")]
-        assert 'if entry.disabled_by is not None:' in blk
-        assert 'async_release_export_guard(reason="disabled")' in blk
-        assert '_PENDING_EXPORT_RELEASE[entry.entry_id] = _recipes' in blk
-        rm = inspect.getsource(init_mod.async_remove_entry)
-        assert "_PENDING_EXPORT_RELEASE.pop(entry.entry_id" in rm and "async_call" in rm
-        assert "_PENDING_EXPORT_RELEASE.pop(entry.entry_id, None)" in inspect.getsource(init_mod.async_setup_entry)
+
+        def calls(fn, name):
+            return [n for n in ast.walk(ast.parse(inspect.getsource(fn)))
+                    if isinstance(n, ast.Call)
+                    and (getattr(n.func, "attr", None) or getattr(n.func, "id", None)) == name]
+
+        def names(fn, ident):
+            return [n for n in ast.walk(ast.parse(inspect.getsource(fn)))
+                    if isinstance(n, ast.Name) and n.id == ident]
+
+        rel = calls(init_mod.async_unload_entry, "async_release_export_guard")
+        assert rel and all(
+            any(k.arg == "reason" and getattr(k.value, "value", None) == "disabled" for k in c.keywords)
+            for c in rel), "the unload release is only ever the DISABLE release"
+        assert names(init_mod.async_unload_entry, "_PENDING_EXPORT_RELEASE"), "reload must stash"
+        assert names(init_mod.async_remove_entry, "_PENDING_EXPORT_RELEASE") and \
+            calls(init_mod.async_remove_entry, "async_call"), "removal must replay the stash"
+        assert names(init_mod.async_setup_entry, "_PENDING_EXPORT_RELEASE"), "setup must clear a stale stash"

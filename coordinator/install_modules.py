@@ -255,11 +255,13 @@ ENTITY_MODULES: Mapping[tuple[str, str], frozenset[Module]] = _table(
         "yearly_battery_discharge_energy", "yearly_battery_savings",
     )),
     _rows("number", _B, (
+        "battery_morning_drain_floor_soc",   # arc #921 (#892): the pack's floor
         "battery_auto_start_soc", "battery_buffer_soc", "battery_capacity",
         "battery_max_discharge_power", "battery_priority_soc",
     )),
     _rows("switch", _B, (
         "battery_charge_pacing_enabled", "battery_may_export",
+        "battery_house_sink_enabled",   # arc #921 (#879)
         "forecast_spending_enabled",
     )),
     _rows("binary_sensor", _B, (
@@ -273,10 +275,12 @@ ENTITY_MODULES: Mapping[tuple[str, str], frozenset[Module]] = _table(
         "lifetime_ev_battery_share",
     )),
     _rows("number", _BE, (
+        "ev_morning_window_hours",           # arc #921 (#892): the pack AND the car
         "battery_assist_max_power", "battery_assist_min_surplus",
     )),
     _rows("switch", _BE, (
         "battery_may_assist_ev",
+        "ev_morning_window_enabled",    # arc #921 (#892): the pack AND the car
     )),
     _rows("sensor", _E, (
         "calculated_current", "charging_recommendation", "charging_strategy",

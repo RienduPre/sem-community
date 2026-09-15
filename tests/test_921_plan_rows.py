@@ -42,7 +42,11 @@ class TestExportRows:
 
 class TestTheCardKnowsTheKinds:
     def test_the_card_maps_both_kinds(self):
+        """The card's KINDS table, parsed — not its source text (#925)."""
+        import re
         from pathlib import Path
-        src = (Path(__file__).resolve().parent.parent / "dashboard" / "card" / "src" / "cards"
-               / "sem-today-plan-card.js").read_text(encoding="utf-8")
-        assert "export_closed:" in src and "export_reopens:" in src
+        text = (Path(__file__).resolve().parent.parent / "dashboard" / "card" / "src" / "cards"
+                / "sem-today-plan-card.js").read_text(encoding="utf-8")
+        table = text[text.index("const KINDS = {"):text.index("};", text.index("const KINDS = {"))]
+        kinds = set(re.findall(r"^\s*([a-z_]+):\s*\{", table, re.M))
+        assert {"export_closed", "export_reopens"} <= kinds

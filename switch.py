@@ -65,6 +65,20 @@ SWITCH_TYPES = [
         entity_category=EntityCategory.CONFIG,
         icon="mdi:speedometer-slow",
     ),
+    # (#778 phase 6) The two battery permissions. Switches rather than another
+    # battery mode because a mode is single-select and cannot say "may sell,
+    # may not touch the car". Both default to UNSET, which resolves to today's
+    # behaviour exactly — see consts/battery_permissions.
+    SwitchEntityDescription(
+        key="battery_may_export",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:transmission-tower-export",
+    ),
+    SwitchEntityDescription(
+        key="battery_may_assist_ev",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:car-electric",
+    ),
     # (arc #921) Four switches, all default OFF — the arc ships asleep like
     # the spending arc (#778) and charge pacing (#820), and is woken
     # deliberately per install. Persisted in PERSISTED_FLAG_DEFAULTS.
@@ -87,20 +101,6 @@ SWITCH_TYPES = [
         key="ev_morning_window_enabled",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:car-clock",
-    ),
-    # (#778 phase 6) The two battery permissions. Switches rather than another
-    # battery mode because a mode is single-select and cannot say "may sell,
-    # may not touch the car". Both default to UNSET, which resolves to today's
-    # behaviour exactly — see consts/battery_permissions.
-    SwitchEntityDescription(
-        key="battery_may_export",
-        entity_category=EntityCategory.CONFIG,
-        icon="mdi:transmission-tower-export",
-    ),
-    SwitchEntityDescription(
-        key="battery_may_assist_ev",
-        entity_category=EntityCategory.CONFIG,
-        icon="mdi:car-electric",
     ),
 ]
 
