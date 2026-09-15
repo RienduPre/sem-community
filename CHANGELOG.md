@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.25] — 15.09.2026
+
+- 🐛 **A restart no longer tells you your charger stopped listening — this
+  time for the other half of it** (#945, by @alexmc1510). beta.17 taught SEM
+  to wait out a restart when the charger's start/stop switch is not in Home
+  Assistant yet. But the switch APPEARS partway through a restart, still
+  reading off because its own integration has not reached the box, and that
+  path was untouched: SEM re-asserted the switch five times, gave up, and
+  eighty seconds later filed the same red notice with a different sentence —
+  "enable switch will not stay on". The three cycles that filed it are cycles
+  on which SEM sends nothing at all, so "SEM's last 3+ current commands were
+  rejected" was never true of them. SEM now measures how long it has actually
+  been unable to keep the switch on, in seconds rather than in cycles, and
+  good minutes pay that debt back down — so a charger that hiccups and
+  recovers is never accused, one that genuinely refuses still is, and a
+  charger you have fixed clears itself. Observer mode, which sends nothing by
+  design, reports nothing at all. Music for this one: Talk Talk, *It's My
+  Life* — "funny how I blind myself".
+
 # [2.1.0-beta.24] — 14.09.2026
 
 - 🐛 **A charger's advertised capability is no longer read as its
