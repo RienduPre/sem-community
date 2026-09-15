@@ -2342,6 +2342,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
     # live state (cards still read them) while excluding them from the recorder.
     _unrecorded_attributes = frozenset({
         "devices",
+        # (arc #921) live-card helpers, re-serialised every cycle
+        "sink_verdicts",
+        "export_guard",
         "anti_cycle_bounds",   # (#914) a constant off consts/bounds.py
         "device_list",
         "per_charger_states",
@@ -2867,6 +2870,12 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 # Observed phase model (#804 Phase A) — {cid: {active_phases,
                 # switch_entity, switch_valid}}.
                 "per_charger_phases": _per_charger_phases,
+                # (arc #921) the cycle's sink verdicts — {sink: {state, reason,
+                # until}} — and the export guard's own state. The plan strip and
+                # the grid card read these; the scalar twin is
+                # ``sensor.sem_export_guard_state``.
+                "sink_verdicts": self.coordinator.data.get("sink_verdicts") or {},
+                "export_guard": self.coordinator.data.get("export_guard") or {},
             })
         elif self.entity_description.key in (
             "roi_payback_years", "roi_annual_savings",

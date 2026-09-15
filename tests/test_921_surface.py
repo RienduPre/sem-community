@@ -86,3 +86,33 @@ class TestTheDashboardCarriesThem:
         text = (self.ROOT / "dashboard" / "card" / "src" / "cards" / "sem-grid-card.js").read_text(encoding="utf-8")
         keys = set(re.findall(r"'([a-z0-9_]+)'", text))
         assert "export_guard_state" in keys
+
+
+class TestTheVerdictsReachTheCard:
+    """Live on .46: the coordinator published them and the CARD saw nothing —
+    charging_state's attributes are a curated dict, not all of ``data``."""
+
+    def _attrs(self, data):
+        from unittest.mock import MagicMock
+        from custom_components.solar_energy_management.sensor import SEMSolarSensor
+        s = SEMSolarSensor.__new__(SEMSolarSensor)
+        s.coordinator = MagicMock(); s.coordinator.data = data
+        s.entity_description = next(
+            d for d in sensor_mod.SENSOR_TYPES if d.key == "charging_state")
+        return s.extra_state_attributes or {}
+
+    def test_charging_state_carries_the_verdicts_and_the_guard(self):
+        a = self._attrs({"charging_state": "idle",
+                         "sink_verdicts": {"grid_export": {"state": "closed", "reason": "r", "until": None}},
+                         "export_guard": {"state": "engaged", "reason": "r"}})
+        assert a["sink_verdicts"]["grid_export"]["state"] == "closed"
+        assert a["export_guard"]["state"] == "engaged"
+
+    def test_absent_is_an_empty_dict_not_a_crash(self):
+        a = self._attrs({"charging_state": "idle"})
+        assert a["sink_verdicts"] == {} and a["export_guard"] == {}
+
+    def test_both_are_unrecorded(self):
+        """#581: live-card helpers must not dominate the recorder."""
+        from custom_components.solar_energy_management.sensor import SEMSolarSensor
+        assert {"sink_verdicts", "export_guard"} <= SEMSolarSensor._unrecorded_attributes
