@@ -1053,6 +1053,57 @@ _UNIT_NAME_AXES = (
 )
 
 
+def _name_tokens(entity_id: str) -> List[str]:
+    return _object_id(entity_id).split("_")
+
+
+def _shared_leading_tokens(a: List[str], b: List[str]) -> int:
+    shared = 0
+    for left, right in zip(a, b):
+        if left != right:
+            break
+        shared += 1
+    return shared
+
+
+def _attach_leftovers(shaped: Dict[Any, List[Any]],
+                      leftovers: List[List[Any]]) -> None:
+    """Give an unshaped group back to the box it belongs to.
+
+    "Shows no charger shape" is not the same as "belongs to no box": two
+    boxes can shatter the SAME way at the very axis that separated them.
+    Two KEBAs named Garage and Carport publish ``<box>_charging_power`` and
+    ``<box>_charging_current`` under one name and ``<box>_plug_connected``
+    under another — the split is real and evidenced twice over, yet
+    dropping everything it left behind costs BOTH owners their plug binary,
+    and with it the ``keba.set_current`` target. So a leftover joins the
+    shaped group whose entity ids it shares the most leading name tokens
+    with, and only where exactly one group is closest. A leftover equally
+    close to both boxes is what "belongs to neither" actually looks like —
+    openWB's ``openwb_global_*`` site totals sit one token from every
+    loadpoint — and it stays out, reported as ``unattributed``.
+    """
+    tokens: Dict[str, List[str]] = {}
+
+    def _tok(entity) -> List[str]:
+        eid = str(getattr(entity, "entity_id", "") or "")
+        if eid not in tokens:
+            tokens[eid] = _name_tokens(eid)
+        return tokens[eid]
+
+    for group in leftovers:
+        closest, best, tied = None, 0, False
+        for key, members in shaped.items():
+            score = max(_shared_leading_tokens(_tok(left), _tok(member))
+                        for left in group for member in members)
+            if score > best:
+                closest, best, tied = key, score, False
+            elif score == best and best > 0 and key != closest:
+                tied = True
+        if closest is not None and not tied:
+            shaped[closest].extend(group)
+
+
 def _split_deviceless(platform: str, plat_entities: List[Any],
                       unproven_split: str) -> Dict[Any, List[Any]]:
     """The device-less half of ``group_entities_by_unit`` — see its docstring."""
@@ -1075,6 +1126,9 @@ def _split_deviceless(platform: str, plat_entities: List[Any],
             # TWO boxes or none: a split that finds ONE box is not separating
             # anything, it is only shedding the entities it left behind.
             if len(shaped) >= 2:
+                _attach_leftovers(
+                    shaped,
+                    [g for k, g in groups.items() if k not in shaped])
                 return shaped
     if unproven_split == "prefix":
         return _keyed(lambda eid: _entity_id_prefix(eid, 2), False)
@@ -1151,13 +1205,19 @@ def group_entities_by_unit(entities, *,
     for platform, plat_entities in deviceless.items():
         units.update(_split_deviceless(platform, plat_entities, unproven_split))
 
-    # First-appearance order: a unit's place is its earliest entity, so which
-    # charger is "primary" (the first entry the config path returns) does not
-    # depend on whether a box happens to carry a device id.
-    return dict(sorted(
-        units.items(),
-        key=lambda kv: min(position.get(str(getattr(e, "entity_id", "")), 0)
-                           for e in kv[1])))
+    # First-appearance order, for the units and inside each of them: a unit's
+    # place is its earliest entity, so which charger is "primary" (the first
+    # entry the config path returns) does not depend on whether a box happens
+    # to carry a device id — and a re-attached leftover takes its registry
+    # place rather than the end of the list, which is what a brand function
+    # that binds first- or last-wins reads.
+    def _place(entity) -> int:
+        return position.get(str(getattr(entity, "entity_id", "")), 0)
+
+    return {key: sorted(members, key=_place)
+            for key, members in sorted(units.items(),
+                                       key=lambda kv: min(_place(e)
+                                                          for e in kv[1]))}
 
 
 def unit_label(unit_key) -> str:

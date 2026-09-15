@@ -3690,11 +3690,15 @@ handing its owner a charger with no plug and a `keba.set_current` with no target
 JuiceBox beside a YAML-MQTT heat pump would have been deleted in favour of the heat pump. With the
 two-box threshold, an install with one box is grouped byte-identically to pre-#964, so the charger
 COUNT cannot move — which is why this could ride a release with no live device-less box to prove it
-on. When two boxes ARE found, the groups showing no shape are dropped: they belong to neither box,
-and a brand function fed one box's leftovers invents a second, partial charger (openWB's
-per-loadpoint MQTT entities are two real boxes; its `openwb_global_*` site totals are neither).
-`build_detection_report` lists them under `unattributed`, which the diagnostics download carries, so
-the drop is visible, never silent. The unproven case splits per CALLER, because the two directions
+on. When two boxes ARE found, a group showing no shape is first offered BACK to the
+box it belongs to, by longest shared leading name tokens and only where exactly one box is closest
+— because two boxes can shatter the SAME way at the axis that separated them (`<box>_charging_power`
+with `<box>_charging_current` under one name, `<box>_plug_connected` under another), and shedding
+that costs BOTH owners the plug binary and the `keba.set_current` target it is. What stays equally
+close to every box is what "belongs to neither" actually looks like — openWB's `openwb_global_*`
+site totals sit one token from each loadpoint — and only that is dropped, because a brand function
+fed one box's leftovers invents a second, partial charger. `build_detection_report` lists the drops
+under `unattributed`, which the diagnostics download carries, so the drop is visible, never silent. The unproven case splits per CALLER, because the two directions
 cost different things: the paths that BIND merge (a split nobody proved must never shed a box's
 entities), while the prober keeps its name split (it binds nothing, and merging a rig's template
 platform into "one device" is what handed a mock charger an SG-Ready switch for start/stop, #814).
@@ -3710,11 +3714,14 @@ through the grouping; two-box separation and one-box no-shatter in BOTH directio
 rule spelled out so they cannot pass vacuously; the unproven-split cases the review of this fix
 found (the KEBA with a current number, the JuiceBox beside a heat pump, a disabled mark, the rig's
 template platform); the config-entry, numeric-suffix and three-token axes each pinned by a case only
-that axis can separate; the leftover drop pinned exactly (a mutant that reports every entity as
-unattributed fails); and role-binding order-independence over permutations. Nine mutants — reverting
-to `device_id`-only, lowering the threshold to one shaped group, removing each of the three name
-axes or the config entry, keeping the leftovers, merging in the prober, flattening the charger
-shape, and dropping first-appearance order — are each killed.
+that axis can separate; two boxes that shatter the same way, each keeping its own plug and service
+target; the leftover drop pinned exactly at the tie (a mutant that reports every entity as
+unattributed fails, and so does one that hands the site total to a loadpoint); and role-binding
+order-independence over permutations, plus a registry-place pin on the re-attached leftovers. Eleven
+mutants — reverting to `device_id`-only, lowering the threshold to one shaped group, removing each
+of the three name axes or the config entry, dropping the leftovers instead of re-attaching them,
+attaching them on a tie, appending them out of registry order, merging in the prober, flattening the
+charger shape, and dropping first-appearance order — are each killed.
 **Sweep question:** for every key this codebase groups by, is it OPTIONAL in its source of truth —
 and if it is absent, does the code get one bucket per missing value, or one bucket for *all* of
 them? A key that can be `None` is not an identity until the `None` case has its own answer. And when

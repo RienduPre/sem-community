@@ -554,3 +554,88 @@ class TestTheAxesAPrefixCannotSee:
             loadpoint = {str(e.entity_id).split(".", 1)[1].split("_")[2]
                          for e in members}
             assert loadpoint in ({"1"}, {"2"}), f"a unit mixes loadpoints: {loadpoint}"
+
+
+# ── Two boxes that shatter the SAME way ────────────────────────────────
+
+class TestLeftoversGoBackToTheirBox:
+    """The two-box threshold refuses a split that finds ONE box. It does
+    not, by itself, protect the entities an ADOPTED split leaves behind —
+    and two boxes can shatter the same way at the very axis that separated
+    them, so the shedding hits both owners at once."""
+
+    def _entries(self):
+        # `<box>_charging_power` + `<box>_charging_current` share a name and
+        # are charger-shaped on their own; `<box>_plug_connected` is not.
+        return [
+            _ent("sensor.garage_charging_power", "keba", "power"),
+            _ent("number.garage_charging_current", "keba", "current"),
+            _ent("binary_sensor.garage_plug_connected", "keba", "plug"),
+            _ent("sensor.garage_total_energy", "keba", "energy"),
+            _ent("sensor.carport_charging_power", "keba", "power"),
+            _ent("number.carport_charging_current", "keba", "current"),
+            _ent("binary_sensor.carport_plug_connected", "keba", "plug"),
+            _ent("sensor.carport_total_energy", "keba", "energy"),
+        ]
+
+    def test_the_adopted_axis_really_does_orphan_them(self):
+        """Non-vacuity: the split below IS evidenced twice, and the plugs
+        and meters are genuinely not charger-shaped on their own."""
+        by_name = {}
+        for e in self._entries():
+            by_name.setdefault(_entity_id_prefix(e.entity_id), []).append(e)
+        shaped = {k for k, g in by_name.items() if _shows_charger_shape(g)}
+        assert shaped == {"garage_charging", "carport_charging"}
+        assert set(by_name) - shaped == {
+            "garage_plug", "garage_total", "carport_plug", "carport_total"}
+
+    def test_every_entity_lands_on_its_own_box(self):
+        units = group_entities_by_unit(self._entries())
+        assert len(units) == 2
+        claimed = {str(e.entity_id) for g in units.values() for e in g}
+        assert claimed == {str(e.entity_id) for e in self._entries()}
+        for members in units.values():
+            boxes = {str(e.entity_id).split(".", 1)[1].split("_")[0]
+                     for e in members}
+            assert len(boxes) == 1, f"a unit mixes boxes: {boxes}"
+
+    def test_each_charger_keeps_its_own_plug_and_service_target(self):
+        chargers = _discover(self._entries())
+        assert len(chargers) == 2
+        assert {(c["ev_charging_power_sensor"], c["ev_connected_sensor"],
+                 c["ev_charger_service_entity_id"], c["ev_total_energy_sensor"])
+                for c in chargers} == {
+            ("sensor.garage_charging_power",
+             "binary_sensor.garage_plug_connected",
+             "binary_sensor.garage_plug_connected",
+             "sensor.garage_total_energy"),
+            ("sensor.carport_charging_power",
+             "binary_sensor.carport_plug_connected",
+             "binary_sensor.carport_plug_connected",
+             "sensor.carport_total_energy"),
+        }
+
+    def test_a_leftover_equally_close_to_both_boxes_stays_out(self):
+        # The rule is "exactly one box is closest", not "somebody takes it":
+        # openWB's site total sits one token from either loadpoint.
+        entries = [
+            _ent("sensor.openwb_lp1_charging_power", "openwb2mqtt", "power"),
+            _ent("number.openwb_lp1_charging_current", "openwb2mqtt", "current"),
+            _ent("sensor.openwb_lp2_charging_power", "openwb2mqtt", "power"),
+            _ent("number.openwb_lp2_charging_current", "openwb2mqtt", "current"),
+            _ent("sensor.openwb_global_power", "openwb2mqtt", "power"),
+        ]
+        units = group_entities_by_unit(entries)
+        assert len(units) == 2
+        claimed = {str(e.entity_id) for g in units.values() for e in g}
+        assert "sensor.openwb_global_power" not in claimed
+
+    def test_a_reattached_leftover_keeps_its_registry_place(self):
+        # A brand function that binds first- or last-wins reads the list in
+        # order: a leftover must take its registry place, not the end.
+        entries = list(reversed(self._entries()))
+        order = {str(e.entity_id): i for i, e in enumerate(entries)}
+        for members in group_entities_by_unit(entries).values():
+            places = [order[str(e.entity_id)] for e in members]
+            assert places == sorted(places), (
+                f"a re-attached leftover jumped its registry place: {places}")
