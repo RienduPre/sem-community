@@ -3231,6 +3231,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             # (#949) Read the pacer's hold FIRST: the battery release below
             # flips the coordinator into observer mode, and everything after
             # that point is reasoning about a rig, not about this install.
+            # (#955) The export cut FIRST: an inverter left at zero feed-in by
+            # a removed SEM would throw away every surplus kWh with nothing
+            # left on the system that knows why. Same rule, same order as the
+            # pacer's hold below — and before observer mode flips.
+            try:
+                _said = await coordinator.async_release_export_guard(
+                    reason="disabled" if entry.disabled_by is not None else "unloaded")
+                if _said:
+                    _LOGGER.info("%s", _said)
+            except Exception as exc:  # noqa: BLE001 — teardown must finish
+                _LOGGER.warning("export guard release failed on unload: %s", exc)
             from .coordinator.charge_pacing import (
                 async_release_pacing, pending_pacing_release,
             )

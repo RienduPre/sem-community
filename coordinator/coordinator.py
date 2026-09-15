@@ -5783,6 +5783,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # (#953) how long the FREE window still has to run — the
                 # "finish" gate on the cheap-hours grid top-up.
                 daylight_remaining_s=self._daylight_remaining_s_now(),
+                # (#871, arc #921) the loads absorb before anything is clipped
+                grid_closed=bool(getattr(
+                    (getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
+                    "state", "open") == "closed"),
             )
             surplus_data.surplus_total_w = allocation.total_surplus_w
             surplus_data.surplus_distributable_w = allocation.distributable_surplus_w
@@ -10704,6 +10708,27 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             self._charger_daily_kwh(cid, energy) if cid else energy.daily_ev
         )
         return max(0, daily_target - consumed)
+
+    async def async_release_export_guard(self, *, reason: str):
+        """(#955, the #908 rule) Put the inverter's feed-in back if — and only
+        if — SEM is the one holding it. Never raises: a teardown that fails
+        half way must still let HA remove the entry. Returns a sentence for
+        the log, or None when there was nothing to release."""
+        guard = getattr(self, "_export_guard", None)
+        if guard is None or guard.state not in ("engaged", "releasing", "refused"):
+            return None
+        released = []
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                await adapter.command_release_export()
+                released.append(str(bid))
+            except Exception as exc:  # noqa: BLE001 — teardown must finish
+                _LOGGER.warning("export guard: could not release %s on %s: %s",
+                                bid, reason, exc)
+        guard.state = "idle"
+        guard.reason = f"released on {reason}"
+        return (f"export guard released on {reason}: "
+                f"{', '.join(released) or 'nothing to release'}")
 
     async def _run_export_guard(self, power, *, now=None) -> None:
         """(#955) The limit at the meter, AFTER the batteries ran this cycle.

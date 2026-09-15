@@ -1442,6 +1442,11 @@ class SurplusController:
         # (#925 audit) False when the grid sensor was unreadable this
         # cycle — grid_import_w is then a fallback, not a measurement.
         grid_import_known: bool = True,
+        # (#871, arc #921) the grid-export sink is CLOSED this cycle: the
+        # "always export a little" regulation buffer is the one threshold that
+        # exists to FEED the meter, so it relaxes to zero. Safety gates (peak
+        # guard, reserve SOC, stop-war) are untouched.
+        grid_closed: bool = False,
         # (#953) Seconds of daylight left today, from the coordinator's
         # TimeManager. None = no sun data; the cheap-hours grid top-up then
         # keeps its pre-#953 behaviour (unknown is not a claim about the sun).
@@ -1558,8 +1563,10 @@ class SurplusController:
         else:
             self._smoothed_surplus = 0.3 * filtered_w + 0.7 * self._smoothed_surplus
 
-        # Apply regulation offset
-        distributable = self._smoothed_surplus - self.regulation_offset
+        # Apply regulation offset — none while the meter is closed (#871)
+        _offset = 0.0 if grid_closed else self.regulation_offset
+        distributable = self._smoothed_surplus - _offset
+        self._grid_closed = bool(grid_closed)
         self._last_surplus = distributable
 
         # Feed-in/export limitation: add virtual surplus when approaching limit
