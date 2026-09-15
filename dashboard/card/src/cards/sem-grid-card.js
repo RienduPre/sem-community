@@ -148,7 +148,6 @@ class SEMGridCard extends SEMLitBase {
         const peakLimit = this._val('target_peak_limit');
         const peakMargin = this._val('peak_margin');
         const peakTrend = this._valStr('peak_trend');
-        ${guardState && guardState !== 'unknown' ? html`<div class="row" style="opacity:.85"><span>${this._t('export_guard')}</span><span>${guardState}</span></div>` : nothing}
         const peakColor = this._peakColor(peakPct);
         const peakMarginColor = peakMargin > 0 ? '#8DC892' : '#f06292';
         const fillW = (Math.min(Math.max(peakPct / 100, 0), 1) * 200).toFixed(1);
@@ -366,6 +365,8 @@ class SEMGridCard extends SEMLitBase {
                         <div class="metric-row">
                             <span class="metric-label">${this._t('trend')}</span>
                             <span class="metric-val">${peakTrend ? this._t(peakTrend) : '—'}</span>
+                            ${guardState && guardState !== 'unknown' && guardState !== 'unavailable' ? html`
+                                <div class="row" style="opacity:.85"><span>${this._t('export_guard')}</span><span>${guardState}</span></div>` : nothing}
                         </div>
                     </div>
 
