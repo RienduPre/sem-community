@@ -4795,6 +4795,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # scalar twin: the sensor's generic value path reads
                 # data[key] directly, and a dict is not a state.
                 result["battery_charge_pacing"] = _cp.get("action") or "idle"
+            _eg = getattr(self, "_export_guard_state", None)
+            if _eg:
+                result["export_guard"] = dict(_eg)
+                result["export_guard_state"] = _eg.get("state") or "idle"
+            _sv = getattr(self, "_sink_verdicts", None) or {}
+            result["sink_verdicts"] = {k: v.to_dict() for k, v in _sv.items()
+                                       if hasattr(v, "to_dict")}
             result["battery_last_night_surplus_kwh"] = _pe.get("battery_last_night_surplus_kwh")
             result["battery_last_night_date"] = _pe.get("battery_last_night_date")
             result["forecast_trust_d1"] = _pe.get("forecast_trust_d1")
@@ -7761,6 +7768,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 plan_gate=self._energy_plan_gate("battery"),
                 # (#638 one-gate C6) the plan's WHEN for the sell, pre-split.
                 arbitrage_sell=_arb_sell,
+                # (arc #921) the cycle's sink verdicts, computed once in the fleet state
+                sink_verdicts=getattr(self, "_sink_verdicts", None) or {},
                 forecast_sell=_fsell,
             )
 
@@ -7805,6 +7814,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 and not self.time_manager.is_night_mode()
                 and scheduler.state.value not in ("idle", "not_needed", "not_profitable")):
             scheduler.reset()
+        # (#955) The export guard runs LAST — after every battery had its
+        # say this cycle — and never costs a cycle: a guard that dies must
+        # say so loudly, not vanish (the peak guard's lesson, #864).
+        try:
+            await self._run_export_guard(power)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Export guard FAILED this cycle — no export cap is being "
+                            "applied (#955)", exc_info=True)
 
     async def _maybe_run_scheduler_evaluation(self, power, energy=None) -> None:
         """Trigger the scheduler's ``evaluate()`` at the daily time.
@@ -10672,6 +10689,55 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         )
         return max(0, daily_target - consumed)
 
+    async def _run_export_guard(self, power, *, now=None) -> None:
+        """(#955) The limit at the meter, AFTER the batteries ran this cycle.
+
+        Reads the cycle's grid verdict, feeds the guard the export the meter
+        still shows (a blind meter is None, never a number), and dispatches
+        its intent through every battery adapter's export verbs — observer
+        mode records a WOULD through the surplus controller and writes
+        nothing, exactly as ``actuate_battery`` does for every other intent.
+        The guard's own hysteresis (minutes) dominates any ordering nicety
+        inside one 10 s cycle.
+        """
+        import time as _time
+        from .actuate_battery import actuate_battery
+        from .charger_types import BatteryDecision, BatteryIntent
+        from .export_guard import ExportGuard, LIMIT_EXPORT
+        from .sink_verdicts import OPEN
+        if getattr(self, "_export_guard", None) is None:
+            self._export_guard = ExportGuard(
+                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
+                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
+        guard = self._export_guard
+        enabled = bool(self.config.get("export_guard_enabled", False))
+        verdict = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
+        state = getattr(verdict, "state", OPEN) if enabled else OPEN
+        export_w = (None if getattr(power, "grid_power_unavailable", False)
+                    else float(getattr(power, "grid_export_power", 0.0) or 0.0))
+        cmd = guard.update(_time.monotonic() if now is None else now, state, export_w)
+        would = None
+        if cmd.intent:
+            intent = (BatteryIntent.LIMIT_EXPORT if cmd.intent == LIMIT_EXPORT
+                      else BatteryIntent.RELEASE_EXPORT)
+            refused = []
+            for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+                decision = BatteryDecision(battery_id=str(bid), intent=intent,
+                                           export_limit_w=cmd.watts, reason=cmd.reason)
+                await actuate_battery(decision, adapter, observer=bool(self._observer_mode),
+                                      controller=getattr(self, "_surplus_controller", None))
+                if getattr(adapter, "_last_error", None):
+                    refused.append(f"{bid}: {adapter._last_error}")
+            if self._observer_mode:
+                would = cmd.intent
+            elif refused and intent is BatteryIntent.LIMIT_EXPORT:
+                guard.report_refused("; ".join(refused))
+        self._export_guard_state = {
+            "enabled": enabled, "state": guard.state, "reason": guard.reason,
+            "would": would, "repair_wanted": guard.repair_wanted,
+            "verdict": getattr(verdict, "reason", "no verdict"),
+        }
+
     def _compute_peak_slot_allowance(self, power) -> None:
         """(#864) The slot-budget allowance — the PREVENTIVE peak bound.
 
@@ -10898,6 +10964,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             if probe is None:
                 probe = CurtailmentProbe()
                 self._curtailment_probe = probe
+            # (#955) While SEM itself limits export, the #743 probe must not go
+            # looking for an inverter "someone else" is limiting: it would
+            # harvest the very energy the guard is deliberately clipping.
+            _eg = getattr(self, "_export_guard", None)
+            if _eg is not None and getattr(_eg, "state", "idle") == "engaged":
+                self._curtailment_last = {"state": "held_by_export_guard", "grant_w": 0.0}
+                return 0.0
             enabled = bool(self.config.get("curtailment_probe_enabled", False))
             if not enabled:
                 # Cheap early-out, but tick once so the state reads 'off'.

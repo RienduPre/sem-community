@@ -441,6 +441,8 @@ class BatteryView:
     cycle regardless of the live economics verdict."""
 
     forecast_sell: "Any" = None
+    #: (arc #921) the cycle's sink verdicts — {sink: SinkVerdict}; None/{} = every sink OPEN.
+    sink_verdicts: "Any" = None
     """(#778) ``(in_block, per_battery_power_w)`` from ``forecast_sell_gate``
     — the SPEND twin of ``arbitrage_sell``, fleet-split by the pipeline.
     decide_battery consults THIS gate when the verdict carries
