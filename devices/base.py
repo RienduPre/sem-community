@@ -2185,6 +2185,20 @@ class CurrentControlDevice(ControllableDevice):
         # 3-strike counter above, which at a 10 s cycle is 30 seconds.
         self._enable_blocked_since: Optional[float] = None
         self._enable_blocked_repair_raised: bool = False
+        #: (#945 round 2) When the CURRENT run of good cycles began.
+        #: Forgiveness is symmetric — the surface must be good for as long
+        #: as it had to be bad. A single good cycle retiring the episode is
+        #: what makes an OSCILLATING switch (the #536 Eco-Smart fault this
+        #: surface exists for) unreportable: the box drops it, SEM
+        #: re-asserts, it reads ``on`` once, and the clock starts over
+        #: forever. It is also what churns a standing Repair — raise,
+        #: delete, raise — once per blip.
+        self._enable_ok_since: Optional[float] = None
+        #: (#945 round 2) Which sentence the standing notice carries, so a
+        #: surface whose fault CHANGES (an absent switch that comes back and
+        #: then refuses to hold) is re-filed with the truth instead of
+        #: keeping the first diagnosis forever.
+        self._enable_blocked_error: Optional[str] = None
         # #485 H5: whether this instance has cleared a possible STALE
         # persistent Repair left by a previous device instance.
         self._stale_repair_checked: bool = False
@@ -2705,16 +2719,26 @@ class CurrentControlDevice(ControllableDevice):
             return False
         try:
             from ..coordinator import repair_issues as _ri
+            detail = str(error or _ri.ENABLE_UNREADABLE)
             # A Repair the WRITE side raised owns the surface: three
             # rejected commands are harder evidence than a silent switch,
             # and both would be the same issue id.
-            if self._enable_blocked_repair_raised or self._actuation_repair_raised:
+            if self._actuation_repair_raised and not self._enable_blocked_repair_raised:
                 return True
+            if (self._enable_blocked_repair_raised
+                    and self._enable_blocked_error == detail):
+                return True
+            # Either the first file of this episode, or the SAME episode
+            # whose fault has changed under it: an entity that was absent
+            # for the warm-up, came back, and then refused to hold is no
+            # longer "unavailable/locked", and the owner must not be left
+            # reading the first diagnosis forever. Same issue id, so the
+            # re-file replaces the notice rather than adding one.
             self._enable_blocked_repair_raised = True
             self._actuation_repair_raised = True
+            self._enable_blocked_error = detail
             _ri.raise_charger_actuation_failed(
-                self.hass, self.device_id, name=self.name,
-                error=str(error or _ri.ENABLE_UNREADABLE),
+                self.hass, self.device_id, name=self.name, error=detail,
             )
             return True
         except Exception as exc:  # noqa: BLE001 — never fail the cycle over a repair
@@ -2740,8 +2764,18 @@ class CurrentControlDevice(ControllableDevice):
         one clock, retired by the reconciler on a cycle that neither
         re-asserts nor reports (``_note_enable_unblocked``).
         """
+        if getattr(self, "observer_mode", False):
+            # (#945 round 2) Observer mode runs the whole decision and brand
+            # path and withholds only the SEND (#855). Not one ``turn_on``
+            # left the process, so there is nothing here that could have
+            # been refused — and this Repair tells the owner their hardware
+            # is out of SEM's control. The episode does not even open, so
+            # leaving observer mode later cannot file a verdict about
+            # cycles SEM sat out.
+            return False
         if now is None:
             now = time.monotonic()
+        self._enable_ok_since = None
         if self._enable_blocked_since is None:
             self._enable_blocked_since = now
         try:
@@ -2752,9 +2786,10 @@ class CurrentControlDevice(ControllableDevice):
             _LOGGER.debug("enable-block hold unreadable: %s", exc)
             return False
 
-    def _note_enable_unblocked(self) -> None:
-        """(#945) This cycle did not report the enable surface blocked —
-        retire the warm-up hold, and a Repair this path raised.
+    def _note_enable_unblocked(self, now: Optional[float] = None) -> None:
+        """(#945) This cycle asked nothing of the enable surface — start or
+        advance the GOOD run, and once it has lasted as long as a fault would
+        have had to, retire the episode and a Repair this path raised.
 
         Deliberately NOT ``_clear_actuation_failure``: that would also delete
         a genuine #462 Repair raised by three REJECTED writes, a different
@@ -2769,8 +2804,36 @@ class CurrentControlDevice(ControllableDevice):
         Repair a PREVIOUS lifetime left on this id is retired by #485 H5's
         first-good-write clear (``_stale_repair_checked``), which is evidence
         that SEM can command this charger.
+
+        (round 2) And deliberately not an IMMEDIATE clear. A single good
+        cycle is not the end of the episode — it is what an oscillating
+        switch looks like between drops, and the #536 Eco-Smart/Autostart
+        fault this whole surface exists for IS an oscillation: the box lets
+        the relay go, SEM re-asserts, it reads ``on`` for one cycle, it is
+        off again. Retiring on that blip reset the fault clock forever
+        (the box became unreportable — strictly worse than crying wolf) and
+        churned any standing notice, raising and deleting it once per blip.
+        So forgiveness costs what accusation costs: the surface must be good
+        for ``UNAVAILABLE_REPAIR_THRESHOLD_S``, the same constant, before the
+        episode is over. A charger the owner has actually fixed therefore
+        keeps the notice for up to five more minutes — and a Repair a
+        previous LIFETIME left behind is still retired at once by #485 H5's
+        first-good-write clear, which is real evidence and needs no hold.
         """
+        if now is None:
+            now = time.monotonic()
+        if self._enable_ok_since is None:
+            self._enable_ok_since = now
+        try:
+            from ..coordinator import repair_issues as _ri
+            hold = _ri.UNAVAILABLE_REPAIR_THRESHOLD_S
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("enable-block hold unreadable: %s", exc)
+            return
+        if (now - self._enable_ok_since) < hold:
+            return
         self._enable_blocked_since = None
+        self._enable_blocked_error = None
         if not self._enable_blocked_repair_raised:
             return
         self._enable_blocked_repair_raised = False

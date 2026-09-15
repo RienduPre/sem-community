@@ -59,7 +59,11 @@ from custom_components.solar_energy_management.devices.base import (
     CurrentControlDevice,
 )
 
-from .ast_contracts import call_sites, invented_evidence_call_sites
+from .ast_contracts import (
+    call_sites,
+    invented_evidence_call_sites,
+    symbol_reference_files,
+)
 
 #: The one constant, never a fresh literal (class 46).
 HOLD = ri.UNAVAILABLE_REPAIR_THRESHOLD_S
@@ -121,18 +125,26 @@ class TestTheRestartWindowIsSilent:
                 assert dev._note_enable_blocked(now=HOLD + extra) is True
             raised.assert_called_once()
 
-    def test_a_switch_that_answers_restarts_the_window(self):
-        """A blip must not accumulate towards the threshold across gaps."""
+    def test_a_sustained_answer_restarts_the_window(self):
+        """An old, long-since-mended fault must not count towards today's —
+        but forgiveness is symmetric (round 2): the surface has to be good
+        for as long as it would have had to be bad. One good cycle is what
+        an OSCILLATING switch looks like between drops, and treating it as
+        the end of the episode is what made the #536 fault unreportable."""
         dev = _device()
         with patch.object(ri, "raise_charger_actuation_failed") as raised, \
                 patch.object(ri, "clear_charger_actuation_failed"):
             dev._note_enable_blocked(now=0.0)
             dev._note_enable_blocked(now=HOLD - 10.0)
-            dev._note_enable_unblocked()             # it answered
-            dev._note_enable_blocked(now=HOLD)       # fresh window opens here
-            assert dev._note_enable_blocked(now=2 * HOLD - 10.0) is False
+            dev._note_enable_unblocked(now=HOLD - 10.0)          # it answered
+            dev._note_enable_unblocked(now=2 * HOLD - 10.0)      # …and held
+            assert dev._enable_blocked_since is None, (
+                "a sustained good run must end the episode"
+            )
+            dev._note_enable_blocked(now=2 * HOLD)     # fresh window opens
+            assert dev._note_enable_blocked(now=3 * HOLD - 10.0) is False
             raised.assert_not_called()
-            assert dev._note_enable_blocked(now=2 * HOLD + 1.0) is True
+            assert dev._note_enable_blocked(now=3 * HOLD + 1.0) is True
 
 
 @pytest.mark.unit
@@ -208,13 +220,17 @@ class TestTheStuckSwitchWaitsOutTheWarmUpToo:
 @pytest.mark.unit
 class TestRecovery:
 
-    def test_an_unblocked_cycle_retires_the_repair_this_path_raised(self):
+    def test_a_sustained_good_run_retires_the_repair_this_path_raised(self):
         dev = _device()
         with patch.object(ri, "raise_charger_actuation_failed"), \
                 patch.object(ri, "clear_charger_actuation_failed") as cleared:
             dev._note_enable_blocked(now=0.0)
             assert dev._note_enable_blocked(now=HOLD + 1.0) is True
-            dev._note_enable_unblocked()
+            # One good cycle is a blip, not a recovery — and retiring on it
+            # churned the notice, raise/delete/raise, once per blip.
+            dev._note_enable_unblocked(now=HOLD + 11.0)
+            cleared.assert_not_called()
+            dev._note_enable_unblocked(now=2 * HOLD + 12.0)
             cleared.assert_called_once_with(dev.hass, "ev_charger_1")
         assert dev._enable_blocked_repair_raised is False
         assert dev._actuation_repair_raised is False
@@ -282,8 +298,10 @@ class TestRecovery:
             # …and no re-raise churn on the next blocked cycle either.
             assert dev._note_enable_blocked(now=HOLD + 2.0) is True
             raised.assert_called_once()
-            # The condition ending is what retires it.
-            dev._note_enable_unblocked()
+            # The condition ending — and STAYING ended — is what retires it.
+            dev._note_enable_unblocked(now=HOLD + 3.0)
+            cleared.assert_not_called()
+            dev._note_enable_unblocked(now=2 * HOLD + 4.0)
             cleared.assert_called_once_with(dev.hass, "ev_charger_1")
 
 
@@ -334,7 +352,7 @@ class TestTheHoldIsRetiredByTheCycleNotByReadability:
     only one of them is distinguishable by reading the switch."""
 
     @staticmethod
-    def _apply(rec, dev, actions):
+    def _apply(rec, dev, actions, now=1.0):
         adapter = MagicMock()
         adapter._device = dev
         # Every surface the loop AWAITS has to be awaitable.
@@ -343,16 +361,23 @@ class TestTheHoldIsRetiredByTheCycleNotByReadability:
         adapter.arm_failsafe = AsyncMock()
         asyncio.run(rec._apply_actions(
             actions, adapter, SimpleNamespace(reason="test"),
-            SimpleNamespace(power_w=0.0), now=1.0))
+            SimpleNamespace(power_w=0.0), now=now))
 
-    def test_a_cycle_without_the_report_retires_the_hold(self):
+    def test_a_sustained_run_of_quiet_cycles_retires_the_hold(self):
         dev, rec = _device(), ChargerReconciler(charger_id="ev_charger_1",
                                                heartbeat_s=5.0)
         with patch.object(ri, "raise_charger_actuation_failed"), \
                 patch.object(ri, "clear_charger_actuation_failed") as cleared:
             dev._note_enable_blocked(now=0.0)
             assert dev._note_enable_blocked(now=HOLD + 1.0) is True
-            self._apply(rec, dev, [Action(ActionKind.WRITE_CURRENT, amps=16)])
+            self._apply(rec, dev, [Action(ActionKind.WRITE_CURRENT, amps=16)],
+                        now=HOLD + 11.0)
+            cleared.assert_not_called()
+            assert dev._enable_blocked_since is not None, (
+                "one quiet cycle is a blip; an oscillator produces one per drop"
+            )
+            self._apply(rec, dev, [Action(ActionKind.WRITE_CURRENT, amps=16)],
+                        now=2 * HOLD + 12.0)
             cleared.assert_called_once()
         assert dev._enable_blocked_since is None
 
@@ -391,32 +416,49 @@ def _restart_device(world):
     return dev
 
 
-def _replay_restart(cycles, *, switch_appears_at=6, switch_recovers_at=None):
+def _replay_restart(cycles, *, switch_appears_at=6, switch_recovers_at=None,
+                    switch_pattern=None, intent_pattern=None,
+                    want_clears=False):
     """Drive ``reconcile_and_apply`` — the real one — for ``cycles`` cycles of
-    a charger SEM wants to charge. Returns (raised_errors, sent_per_cycle)."""
+    a charger SEM wants to charge.
+
+    Returns ``(raised_errors, sent_per_cycle)``, or ``(raised_errors,
+    n_clears)`` with ``want_clears`` — the churn question needs both ends of
+    the Repair's lifecycle, not just the raises."""
     world = {"switch": None, "sent": []}
     dev = _restart_device(world)
     adapter = GenericAdapter(dev)
     rec = ChargerReconciler(charger_id="ev_charger_1", heartbeat_s=CYCLE)
-    raised, per_cycle = [], []
+    raised, per_cycle, clears = [], [], []
     with patch.object(ri, "raise_charger_actuation_failed",
                       side_effect=lambda h, d, name=None, error=None:
                       raised.append(error)), \
-            patch.object(ri, "clear_charger_actuation_failed"):
+            patch.object(ri, "clear_charger_actuation_failed",
+                         side_effect=lambda h, d: clears.append(d)):
         for i in range(cycles):
-            if switch_appears_at is not None and i == switch_appears_at:
-                world["switch"] = "off"
-            if switch_recovers_at is not None and i == switch_recovers_at:
-                world["switch"] = "on"
+            if switch_pattern is not None:
+                world["switch"] = switch_pattern(i)
+            else:
+                if switch_appears_at is not None and i == switch_appears_at:
+                    world["switch"] = "off"
+                if switch_recovers_at is not None and i == switch_recovers_at:
+                    world["switch"] = "on"
             before = len(world["sent"])
+            intent = (intent_pattern(i) if intent_pattern
+                      else ChargerIntent.CHARGE_AT_AMPS)
             decision = ChargerDecision(charger_id="ev_charger_1", mode="solar",
-                                       intent=ChargerIntent.CHARGE_AT_AMPS,
+                                       intent=intent,
                                        commanded_amps=16, reason="solar")
             power = ChargerPower(charger_id="ev_charger_1", power_w=0.0,
                                  connected=True, charging=False)
             asyncio.run(rec.reconcile_and_apply(decision, adapter, power,
                                                 i * CYCLE))
             per_cycle.append(len(world["sent"]) - before)
+    if want_clears:
+        # #485 H5 deletes a possible STALE Repair once per instance, before
+        # anything has been raised. That is a different fact; the churn
+        # question is about clears of a notice THIS lifetime filed.
+        return raised, max(0, len(clears) - 1)
     return raised, per_cycle
 
 
@@ -459,6 +501,20 @@ class TestTheReportersRestart:
         raised, _ = _replay_restart(int(HOLD // CYCLE) + 2)
         assert raised == [ri.ENABLE_WILL_NOT_HOLD]
 
+    def test_the_episode_starts_at_the_first_re_assert(self):
+        """The re-asserts ARE the episode, so the clock opens when SEM first
+        ASKS — not when it gives up asking 50 s later. With the switch
+        readable and ``off`` from cycle 0 there is no REPORT until the #536
+        budget runs out at cycle 5, so a clock armed only by the report
+        would land the verdict at 350 s instead of 300 s."""
+        at_300, _ = _replay_restart(int(HOLD // CYCLE) + 1,
+                                    switch_appears_at=0)
+        assert at_300 == [ri.ENABLE_WILL_NOT_HOLD]
+        # …and the cycle before it must still be silent, or the pin above
+        # would pass for a clock that started anywhere earlier.
+        before, _ = _replay_restart(int(HOLD // CYCLE), switch_appears_at=0)
+        assert before == []
+
     def test_the_re_asserts_do_not_restart_the_clock(self):
         """The mechanism, stated on its own. If the five ENABLE cycles count
         as quiet the episode clock restarts 50 s before the verdict — and,
@@ -479,6 +535,152 @@ class TestTheReportersRestart:
             cleared.assert_not_called()
         assert dev._enable_blocked_since is not None
         assert dev._enable_blocked_repair_raised is True
+
+
+@pytest.mark.unit
+class TestAnOscillatingSwitchIsStillReported:
+    """The review's blocker. The #536 fault this surface exists for is an
+    OSCILLATION — `charger_reconciler` says so: "a charger in an autonomous
+    mode (Wallbox Eco-Smart, app scheduling) keeps flipping its OWN enable
+    switch back off". The box drops the relay, SEM re-asserts, the switch
+    reads ``on`` for one cycle, it is off again. Retiring the episode on that
+    one good cycle made the fault unreportable FOREVER — a fail-open strictly
+    worse than the false alarm it was meant to cure — and churned any
+    standing notice, raise/delete/raise, once per blip."""
+
+    def test_a_switch_that_blips_on_is_still_reported(self):
+        raised, _ = _replay_restart(
+            80, switch_appears_at=0,
+            # on for one cycle in ten: the Eco-Smart trace
+            switch_pattern=lambda i: "on" if i % 10 == 9 else "off")
+        assert raised == [ri.ENABLE_WILL_NOT_HOLD], (
+            "an oscillating enable switch became unreportable"
+        )
+
+    def test_a_blipping_switch_does_not_churn_the_notice(self):
+        raised, cleared = _replay_restart(
+            200, switch_appears_at=0,
+            switch_pattern=lambda i: "on" if i % 10 == 9 else "off",
+            want_clears=True)
+        assert len(raised) == 1 and cleared == 0, (
+            f"the Repair churned: {len(raised)} raises, {cleared} clears"
+        )
+
+    def test_a_flapping_decision_does_not_reset_the_clock(self):
+        """The other way to break contiguity: SEM's own decision leaves
+        CHARGE for a cycle (a cloud passes) and comes back. The switch was
+        stuck off through all of it."""
+        raised, _ = _replay_restart(
+            80, switch_appears_at=0,
+            intent_pattern=lambda i: (ChargerIntent.CHARGE_AT_AMPS
+                                      if (i % 50) < 40 else ChargerIntent.IDLE))
+        assert raised == [ri.ENABLE_WILL_NOT_HOLD]
+
+    def test_a_charger_the_owner_fixed_does_clear(self):
+        """The twin: hysteresis must not make the notice immortal."""
+        raised, cleared = _replay_restart(
+            120, switch_appears_at=0, switch_recovers_at=40,
+            want_clears=True)
+        assert raised == [ri.ENABLE_WILL_NOT_HOLD] and cleared == 1
+
+
+@pytest.mark.unit
+class TestEachFaultKeepsItsOwnSentence:
+    """Two different things can be wrong with an enable surface and they need
+    different fixes from the owner. The episode is one; the diagnosis is
+    whatever is true when the verdict lands."""
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_switch_says_unavailable_or_locked(self):
+        dev = _device()
+        adapter = GenericAdapter(dev)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            await adapter.report_enable_blocked(0.0)
+            await adapter.report_enable_blocked(HOLD + 1.0)
+            raised.assert_called_once()
+        assert raised.call_args.kwargs["error"] == ri.ENABLE_UNREADABLE
+
+    @pytest.mark.asyncio
+    async def test_a_locked_brand_status_says_the_same(self):
+        """Wallbox Eco-Smart / Easee smart-start / Ohme pending: the switch
+        reads fine, the BRAND says locked (`generic.enable_state`)."""
+        dev = _device(switch_state="off")
+        dev.charging_status_entity = "sensor.wb_status"
+        dev.hass.states.get = MagicMock(side_effect=lambda eid: SimpleNamespace(
+            state=("locked" if eid == "sensor.wb_status" else "off"),
+            attributes={}))
+        adapter = GenericAdapter(dev)
+        assert adapter.enable_state() == (None, False)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            await adapter.report_enable_blocked(0.0)
+            await adapter.report_enable_blocked(HOLD + 1.0)
+        assert raised.call_args.kwargs["error"] == ri.ENABLE_UNREADABLE
+
+    @pytest.mark.asyncio
+    async def test_a_fault_that_changes_re_files_with_the_truth(self):
+        """An entity absent through the warm-up files "unavailable/locked".
+        If it then comes back and refuses to HOLD, the owner must not be
+        left reading the first diagnosis forever — same issue id, so the
+        re-file replaces the notice rather than adding one."""
+        world = {"switch": None, "sent": []}
+        dev = _restart_device(world)
+        adapter = GenericAdapter(dev)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            await adapter.report_enable_blocked(0.0)
+            await adapter.report_enable_blocked(HOLD + 1.0)
+            assert raised.call_args.kwargs["error"] == ri.ENABLE_UNREADABLE
+            world["switch"] = "off"           # it came back, and will not hold
+            await adapter.report_enable_blocked(HOLD + 11.0)
+            assert raised.call_count == 2
+            assert raised.call_args.kwargs["error"] == ri.ENABLE_WILL_NOT_HOLD
+            # …and then it stops. One notice per fault, not one per cycle.
+            await adapter.report_enable_blocked(HOLD + 21.0)
+            assert raised.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_third_switch_state_is_not_read_as_off(self):
+        """``on``/``off`` are the only answers a switch can give. Reading a
+        third value as "off" would accuse the box of refusing an assertion it
+        was never coherently told."""
+        dev = _device(switch_state="restoring")
+        adapter = GenericAdapter(dev)
+        assert adapter.enable_state() == (None, False)
+
+
+@pytest.mark.unit
+class TestObserverModeAccusesNobody:
+    """(#855) Observer mode runs the whole decision and brand path and
+    withholds only the SEND. Not one ``turn_on`` left the process — so there
+    is nothing that could have been refused, and this Repair tells the owner
+    their hardware is out of SEM's control."""
+
+    @pytest.mark.asyncio
+    async def test_a_withheld_assertion_files_nothing(self):
+        dev = _device(switch_state="off")
+        dev.observer_mode = True
+        adapter = GenericAdapter(dev)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            for cycle in range(80):            # far past the hold
+                await adapter.report_enable_blocked(cycle * CYCLE)
+            raised.assert_not_called()
+        assert dev._enable_blocked_since is None, (
+            "the episode must not even open, or leaving observer mode files "
+            "a verdict about cycles SEM sat out"
+        )
+
+    @pytest.mark.asyncio
+    async def test_leaving_observer_mode_starts_the_clock_from_there(self):
+        dev = _device(switch_state="off")
+        dev.observer_mode = True
+        adapter = GenericAdapter(dev)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            for cycle in range(80):
+                await adapter.report_enable_blocked(cycle * CYCLE)
+            dev.observer_mode = False
+            await adapter.report_enable_blocked(800.0)
+            raised.assert_not_called()
+            await adapter.report_enable_blocked(800.0 + HOLD + 1.0)
+            raised.assert_called_once()
 
 
 @pytest.mark.unit
@@ -527,16 +729,100 @@ class TestTheCounterCanOnlyBeFedByACommand:
             "the invented one must not look like a caught name"
         )
 
-    def test_only_the_write_path_may_spend_it(self):
+    def test_only_the_write_path_may_even_name_it(self):
         """The observation layer — every charger adapter — must not reach
-        into the write layer's evidence at all. That import direction is
-        what made both instances of this bug a one-line change."""
-        offenders = [(f, ln) for f, ln, _ in
-                     call_sites("_record_actuation_failure")
-                     if not f.startswith("devices/")]
+        into the write layer's evidence at all.
+
+        NAME, not call: this codebase reaches its hooks through
+        ``getattr(dev, "_record_actuation_failure", None)`` and then calls
+        the local, which is exactly how the bug was written and which every
+        callee-name contract is blind to. Asking who may MENTION the symbol
+        is the question indirection cannot dodge."""
+        offenders = [ref for ref in
+                     symbol_reference_files("_record_actuation_failure")
+                     if not ref[0].startswith("devices/")]
         assert offenders == [], (
-            f"an observing layer spends the command counter at {offenders}"
+            f"an observing layer reaches for the command counter at {offenders}"
         )
+        assert call_sites("_record_actuation_failure"), (
+            "the contract above is vacuous if the symbol has vanished"
+        )
+
+    def test_the_keyword_form_is_not_a_loophole(self):
+        """``_record_actuation_failure``'s parameter has a name, so
+        ``error=RuntimeError(...)`` is the natural spelling of the bug."""
+        import ast
+
+        from . import ast_contracts
+
+        tree = ast.parse(
+            "def f():\n"
+            "    dev._record_actuation_failure(error=RuntimeError('off'))\n")
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                    and ast_contracts._callee_name(n)
+                    == "_record_actuation_failure")
+        assert call.keywords and not call.args, "the probe is wrong"
+
+    def test_a_rebound_handler_name_is_not_evidence(self):
+        """``except OSError as e: e = RuntimeError(...)`` must not launder an
+        invented verdict through a name that once held a real one."""
+        import ast
+
+        from . import ast_contracts
+
+        tree = ast.parse(
+            "def f():\n"
+            "    try:\n"
+            "        send()\n"
+            "    except OSError as e:\n"
+            "        e = RuntimeError('switch is off')\n"
+            "        dev._record_actuation_failure(e)\n")
+        bound = ast_contracts._except_bound_names(tree)
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                    and ast_contracts._callee_name(n)
+                    == "_record_actuation_failure")
+        assert "e" not in bound[id(call)], (
+            "a name the handler overwrote was accepted as caught evidence"
+        )
+
+    def test_a_genuinely_caught_exception_in_an_except_star_is_evidence(self):
+        """No false FAILS either: ``except*`` binds exactly like ``except``."""
+        import ast
+
+        from . import ast_contracts
+
+        tree = ast.parse(
+            "def f():\n"
+            "    try:\n"
+            "        send()\n"
+            "    except* OSError as e:\n"
+            "        dev._record_actuation_failure(e)\n")
+        bound = ast_contracts._except_bound_names(tree)
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                    and ast_contracts._callee_name(n)
+                    == "_record_actuation_failure")
+        assert "e" in bound[id(call)]
+
+    def test_a_closure_written_inside_a_handler_is_not_evidence(self):
+        """Python deletes the ``except … as e`` name at handler exit, so a
+        function defined there and called later sees nothing."""
+        import ast
+
+        from . import ast_contracts
+
+        tree = ast.parse(
+            "def f():\n"
+            "    try:\n"
+            "        send()\n"
+            "    except OSError as e:\n"
+            "        def later():\n"
+            "            dev._record_actuation_failure(e)\n"
+            "        schedule(later)\n")
+        bound = ast_contracts._except_bound_names(tree)
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                    and ast_contracts._callee_name(n)
+                    == "_record_actuation_failure")
+        assert "e" not in bound[id(call)]
 
 
 # ── Sibling sweep: the same shape on the battery write verifier (#915) ────

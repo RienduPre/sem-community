@@ -1009,7 +1009,7 @@ class ChargerReconciler:
             _note_ok = getattr(_dev, "_note_enable_unblocked", None)
             if callable(_note_ok):
                 try:
-                    _note_ok()
+                    _note_ok(now)
                 except Exception as exc:  # noqa: BLE001 — never cost a cycle
                     _LOGGER.debug("_note_enable_unblocked() failed: %s", exc)
         for action in actions:
@@ -1033,9 +1033,15 @@ class ChargerReconciler:
                     "leave eco-smart mode) — %s", self.charger_id, decision.reason)
                 report = getattr(adapter, "report_enable_blocked", None)
                 if report is not None:
-                    # One clock for the whole episode — the cycle stamp the
-                    # arm above used, never a second read of the wall (#945).
-                    await report(now)
+                    try:
+                        # One clock for the whole episode — the cycle stamp
+                        # the arm above used, never a second read of the
+                        # wall (#945).
+                        await report(now)
+                    except TypeError:
+                        # An adapter still on the pre-#945 signature must
+                        # not abort the actuation cycle behind it.
+                        await report()
             elif action.kind is ActionKind.REPORT_STOP_WAR:
                 # #763 — once per ONSET (the #700 pattern): the ceasefire
                 # holds for half an hour and re-warning every 10 s cycle

@@ -211,7 +211,12 @@ class ChargerAdapter(ABC):
         if not ent or not str(ent).startswith(("switch.", "input_boolean.")):
             return (None, True)
         st = dev.hass.states.get(ent)
-        if st is None or st.state in ("unavailable", "unknown"):
+        # (#945) ``on``/``off`` are the only answers a switch can give. A
+        # third value is not "off" — reading it that way would accuse the
+        # box of refusing an assertion it was never coherently told, which
+        # is this issue's whole shape — so it joins the unreadable case and
+        # waits out the hold.
+        if st is None or st.state not in ("on", "off"):
             return (None, False)
         return (st.state == "on", True)
 
@@ -308,7 +313,6 @@ class ChargerAdapter(ABC):
         A charger with no readable enable switch at all files nothing: there
         is no surface here to be blocked.
         """
-        from ..repair_issues import ENABLE_UNREADABLE, ENABLE_WILL_NOT_HOLD
         dev = self._device
         enabled, controllable = None, True
         try:
@@ -325,11 +329,13 @@ class ChargerAdapter(ABC):
                 "enable-blocked reported on a charger with no readable enable "
                 "switch — nothing to surface (#945)")
             return
-        error = ENABLE_WILL_NOT_HOLD if controllable else ENABLE_UNREADABLE
         note = getattr(dev, "_note_enable_blocked", None)
         if not callable(note):
             return
         try:
+            from ..repair_issues import (
+                ENABLE_UNREADABLE, ENABLE_WILL_NOT_HOLD)
+            error = ENABLE_WILL_NOT_HOLD if controllable else ENABLE_UNREADABLE
             if not note(now, error):
                 _LOGGER.debug(
                     "enable switch not asserted (%s) — holding the Repair "
