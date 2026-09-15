@@ -993,14 +993,26 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
 # and every device-less box of a platform lands in the same bucket.
 # ============================================================
 
-def _entity_id_prefix(entity_id: str) -> str:
-    """The first two object-id tokens — ``sensor.keba_p30_power`` → ``keba_p30``.
+def _object_id(entity_id: str) -> str:
+    return entity_id.split(".", 1)[1] if "." in entity_id else entity_id
 
-    A NAME, not an identity: it is the last resort of ``group_entities_by_unit``
-    and is only ever adopted when the split it proposes is evidenced.
+
+def _entity_id_prefix(entity_id: str, tokens: int = 2) -> str:
+    """The first ``tokens`` object-id tokens — ``sensor.keba_p30_power`` → ``keba_p30``.
+
+    A NAME, not an identity: it is one of the axes ``group_entities_by_unit``
+    tries, and a split it proposes is only ever adopted with evidence.
     """
-    obj = entity_id.split(".", 1)[1] if "." in entity_id else entity_id
-    return "_".join(obj.split("_")[:2])
+    return "_".join(_object_id(entity_id).split("_")[:tokens])
+
+
+def _entity_id_suffix(entity_id: str) -> str:
+    """Home Assistant's OWN disambiguator for a second identically named box:
+    a trailing ``_<n>`` (``sensor.juicebox_power_2``). The one axis a prefix
+    cannot see, and the only thing that separates two boxes on one config
+    entry that their owner named the same."""
+    last = _object_id(entity_id).split("_")[-1]
+    return last if last.isdigit() else ""
 
 
 def _shows_charger_shape(entities) -> bool:
@@ -1012,7 +1024,7 @@ def _shows_charger_shape(entities) -> bool:
     plug, a toaster, or a site total; a plug binary alone is half a box.
 
     Used by the grouping below to answer one question and no other: did a
-    finer key find a second BOX, or only a second naming convention?
+    name axis find a second BOX, or only a second naming convention?
     """
     has_power = has_plug = has_current = False
     for e in entities:
@@ -1028,7 +1040,49 @@ def _shows_charger_shape(entities) -> bool:
     return has_power and (has_plug or has_current)
 
 
-def group_entities_by_unit(entities) -> Dict[Any, List[Any]]:
+#: The name axes tried on a device-less platform, FINEST FIRST. Each is
+#: paired with the config entry first (a box is one entry) and then without
+#: it (one box can span several: a rig's template helpers are one entry per
+#: entity). Nothing here is an identity — the evidence rule below is what
+#: turns an axis into a boundary.
+_UNIT_NAME_AXES = (
+    lambda eid: _entity_id_prefix(eid, 3),
+    lambda eid: _entity_id_prefix(eid, 2),
+    lambda eid: _entity_id_prefix(eid, 1),
+    lambda eid: "#" + _entity_id_suffix(eid),
+)
+
+
+def _split_deviceless(platform: str, plat_entities: List[Any],
+                      unproven_split: str) -> Dict[Any, List[Any]]:
+    """The device-less half of ``group_entities_by_unit`` — see its docstring."""
+    def _keyed(name_of, with_entry: bool) -> Dict[Any, List[Any]]:
+        out: Dict[Any, List[Any]] = {}
+        for e in plat_entities:
+            cid = getattr(e, "config_entry_id", None)
+            # A registry entry carries a str or None; anything else (a test
+            # double's auto-attribute) is not an identity to split on.
+            cid = cid if (with_entry and isinstance(cid, str)) else ""
+            out.setdefault(
+                ("unit", platform, cid, name_of(str(e.entity_id))), []
+            ).append(e)
+        return out
+
+    for with_entry in (True, False):
+        for name_of in _UNIT_NAME_AXES:
+            groups = _keyed(name_of, with_entry)
+            shaped = {k: v for k, v in groups.items() if _shows_charger_shape(v)}
+            # TWO boxes or none: a split that finds ONE box is not separating
+            # anything, it is only shedding the entities it left behind.
+            if len(shaped) >= 2:
+                return shaped
+    if unproven_split == "prefix":
+        return _keyed(lambda eid: _entity_id_prefix(eid, 2), False)
+    return {("unit", platform, "", ""): list(plat_entities)}
+
+
+def group_entities_by_unit(entities, *,
+                           unproven_split: str = "merge") -> Dict[Any, List[Any]]:
     """Partition registry entries into the PHYSICAL units they describe.
 
     ``device_id`` wins wherever it exists: it is the registry's own answer.
@@ -1040,75 +1094,78 @@ def group_entities_by_unit(entities) -> Dict[Any, List[Any]]:
     that searches that whole bucket for the best-named entity) could hand
     one charger the other charger's power sensor.
 
-    For the device-less remainder the key falls through the identities that
-    are still EVIDENCED, finest first:
+    For the device-less remainder there is no identity left, only NAMES —
+    the entity-id prefix at three widths, and the trailing ``_<n>`` Home
+    Assistant itself appends to a second box of the same name — each tried
+    against the config entry first and then without it. Finest first.
 
-    1. ``config_entry_id`` + entity-id prefix — one host-based box is one
-       config entry, and it is the only thing that separates two boxes a
-       user named identically (Home Assistant disambiguates those with a
-       numeric SUFFIX, which a prefix cannot see).
-    2. the entity-id prefix alone — what the prober has used since #814
-       (a YAML platform registers no config entry either).
-    3. one bucket per platform — the pre-#964 behaviour.
+    **A name axis becomes a boundary only on evidence: at least TWO of its
+    groups must show the charger shape on their own.** That is the whole
+    safety argument, and the reason this can ride a release with no live
+    device-less box to prove it on. Splitting on a name alone changes the
+    charger COUNT — a KEBA whose device is called "Keba" publishes
+    ``sensor.keba_charging_power``, ``number.keba_charging_current`` and
+    ``binary_sensor.keba_plug``: three prefixes, ONE box, and a split would
+    hand its owner a charger with no plug and a ``keba.set_current`` with no
+    target. A split that finds only ONE box separates nothing, so it is
+    refused; where there is one box the grouping is byte-identical to the
+    pre-#964 one.
 
-    A finer key is only ADOPTED when the split it proposes is evidenced:
-    at least one of the groups must show the charger shape on its own.
-    Otherwise it is naming noise rather than a box boundary — a KEBA whose
-    device is called "Keba" publishes ``sensor.keba_charging_power`` and
-    ``binary_sensor.keba_plug``: two prefixes, ONE box, and splitting it
-    would cost its owner the charger. That is the half that lets this ride
-    a release without a live device-less box to prove it on: where there is
-    only one box, every level either yields one group or is rejected, and
-    the charger COUNT cannot change.
+    When two boxes ARE found, the groups that show no shape are dropped:
+    they belong to neither box, and a brand function fed one box's leftovers
+    invents a second, partial charger out of them (openWB's per-loadpoint
+    MQTT entities are two real boxes; its ``openwb_global_*`` site totals are
+    neither). ``build_detection_report`` lists them under ``unattributed``,
+    so the drop is visible, never silent.
 
-    At an adopted level the groups that do NOT show the shape are dropped:
-    they cannot be attributed to either box, and a brand function fed one
-    box's leftovers invents a second, partial charger out of them (openWB's
-    per-loadpoint MQTT entities are two real boxes; its ``openwb_global_*``
-    site totals are neither). ``build_detection_report`` lists them under
-    ``unattributed`` so the drop is visible, never silent.
+    ``unproven_split`` is what a device-less platform gets when the names
+    propose a split the evidence does not carry:
 
-    Returns ``{unit_key: [entities]}``; a unit key is the ``device_id``
-    string where there was one, and an opaque tuple otherwise.
+    * ``"merge"`` — one bucket, the pre-#964 behaviour, for the paths that
+      BIND: a split nobody proved must never shed a box's entities.
+    * ``"prefix"`` — keep the two-token name split, the prober's behaviour
+      since #814: it binds nothing, an unproven fragment simply fails its
+      own shape test, and merging a rig's template platform into "one
+      device" is what handed a mock charger an SG-Ready switch for
+      start/stop.
+
+    Returns ``{unit_key: [entities]}`` in first-appearance order; a unit key
+    is the ``device_id`` string where there was one, and an opaque tuple
+    otherwise.
     """
+    entities = list(entities)
+    position: Dict[str, int] = {}
+    for i, e in enumerate(entities):
+        position.setdefault(str(getattr(e, "entity_id", "")), i)
+
     units: Dict[Any, List[Any]] = {}
     deviceless: Dict[str, List[Any]] = {}
     for e in entities:
         device_id = getattr(e, "device_id", None)
-        if device_id is None:
+        if device_id is None or device_id == "":
             deviceless.setdefault(
                 str(getattr(e, "platform", "") or ""), []).append(e)
         else:
             units.setdefault(device_id, []).append(e)
 
     for platform, plat_entities in deviceless.items():
-        def _entry_and_prefix(e, _p=platform):
-            cid = getattr(e, "config_entry_id", None)
-            # A registry entry carries a str or None; anything else (a test
-            # double's auto-attribute) is not an identity to split on.
-            cid = cid if isinstance(cid, str) and cid else ""
-            return ("unit", _p, cid, _entity_id_prefix(str(e.entity_id)))
+        units.update(_split_deviceless(platform, plat_entities, unproven_split))
 
-        def _prefix_only(e, _p=platform):
-            return ("unit", _p, _entity_id_prefix(str(e.entity_id)))
+    # First-appearance order: a unit's place is its earliest entity, so which
+    # charger is "primary" (the first entry the config path returns) does not
+    # depend on whether a box happens to carry a device id.
+    return dict(sorted(
+        units.items(),
+        key=lambda kv: min(position.get(str(getattr(e, "entity_id", "")), 0)
+                           for e in kv[1])))
 
-        adopted: Optional[Dict[Any, List[Any]]] = None
-        for key_fn in (_entry_and_prefix, _prefix_only):
-            groups: Dict[Any, List[Any]] = {}
-            for e in plat_entities:
-                groups.setdefault(key_fn(e), []).append(e)
-            if len(groups) < 2:
-                # The key found one unit: nothing to decide, nothing to drop.
-                adopted = groups
-                break
-            shaped = {k: v for k, v in groups.items() if _shows_charger_shape(v)}
-            if shaped:
-                adopted = shaped
-                break
-        if adopted is None:
-            adopted = {("unit", platform): list(plat_entities)}
-        units.update(adopted)
-    return units
+
+def unit_label(unit_key) -> str:
+    """A stable, readable token for a unit — the device id where there is
+    one, else ``platform/entry/name``. Report data: never parsed back."""
+    if isinstance(unit_key, str):
+        return unit_key
+    return "/".join(str(part) for part in tuple(unit_key)[1:])
 
 
 def unit_device_id(unit_key) -> Optional[str]:
@@ -1231,7 +1288,9 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
     # config path and the diagnostics report now use: keba_p30_* is one box;
     # a rig's template platform is not one device (live: a mock charger got
     # an SG-Ready switch for "start/stop").
-    devices = group_entities_by_unit(entries)
+    # The prober BINDS nothing, so where the evidence does not carry a split
+    # it keeps the name split rather than merging a platform into one device.
+    devices = group_entities_by_unit(entries, unproven_split="prefix")
 
     out: List[Dict[str, Any]] = []
     for device_key, dev_entities in devices.items():
@@ -1286,7 +1345,7 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
                 # (#964) the grouping key, so two DEVICE-LESS boxes stay two
                 # when the report pairs prober and brand findings — a pair of
                 # ``None`` device ids collapses into one.
-                "unit": str(device_key),
+                "unit": unit_label(device_key),
                 "roles": roles,
                 "evidence": evidence,
                 "control_visible": has_control,
@@ -2043,7 +2102,7 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             row = {
                 "platform": str(dev_entities[0].platform or platform),
                 "device_id": device_id,
-                "unit": str(unit_key),
+                "unit": unit_label(unit_key),
                 "mapped": mapped,
                 "unmapped": [_describe(e) for e in dev_entities
                              if str(e.entity_id) not in used],

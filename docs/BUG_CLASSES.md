@@ -3676,32 +3676,48 @@ entities by entity-id prefix. Two of three paths, one mechanism.
 sites in `hardware_detection.py`, and the same question for any future per-unit walk (PV strings and
 battery siblings already group on `config_entry_id`, which is why they never had it).
 **Closure:** one shared `group_entities_by_unit`, three callers. `device_id` wins wherever it
-exists; the device-less remainder falls through the identities that are still EVIDENCED, finest
-first — `config_entry_id` + entity-id prefix (one host-based box is one config entry, and it is the
-only thing that separates two boxes a user named identically, since HA disambiguates those by
-numeric SUFFIX), then the prefix alone, then one bucket per platform. **A finer key is only ADOPTED
-when the split it proposes is evidenced:** at least one resulting group must show the charger shape
-on its own (a power reading plus a plug binary or a current control, the prober's rule since #814).
-That is the half that matters, and the reason this could ride a release with no live device-less box
-to prove it on: sharing the prefix rule NAIVELY changes the charger COUNT — a KEBA whose device is
-called "Keba" publishes `sensor.keba_charging_power` and `binary_sensor.keba_plug`, two prefixes,
-ONE box — and splitting it would cost its owner the charger. Where there is one box, every level
-either yields one group or is rejected, so the count cannot move. At an adopted level the groups
-that do not show the shape are DROPPED rather than handed to a brand function, which would invent a
-second, partial charger out of one box's leftovers (openWB's per-loadpoint MQTT entities are two
-real boxes; its `openwb_global_*` site totals are neither) — and `build_detection_report` lists them
-under `unattributed`, so the drop is visible, never silent. **Known limit, fail-closed:** two
-device-less boxes of a brand that shows neither a plug binary nor a current `number` (Easee's status
-is a plain `sensor`, its control a service) still collapse — unevidenced, so unchanged.
-**Guard:** `tests/test_964_charger_unit_grouping.py` — an AST lint over the package that fails on
-any `*.setdefault(<expr>.device_id, …)` (the class recurs by someone writing that line in the next
-discovery path) plus a reflection pin that all three sites call the grouping function; two-box
-separation and one-box no-shatter pinned in BOTH directions with the pre-fix rule spelled out, so
-they cannot pass vacuously; the config-entry case, the leftover drop, the prober's live-rig
-behaviour (#814's SG-Ready switch) and an order-independence oracle. Four mutants — reverting to
-`device_id`-only, adopting the prefix split unconditionally (the literal fix this issue asked for),
-ignoring `config_entry_id`, and keeping the leftovers — are each killed.
+exists. For the device-less remainder there is no identity left, only NAMES — the entity-id prefix
+at three widths and the trailing `_<n>` Home Assistant itself appends to a second box of the same
+name (the one axis a prefix cannot see), each tried against `config_entry_id` first and then without
+it (one box can span several entries: a rig's template helpers are one entry per entity). Finest
+first. **A name axis becomes a boundary only on evidence: at least TWO of its groups must show the
+charger shape on their own** (a power reading plus a plug binary or a current control — the prober's
+rule since #814). That threshold is the whole safety argument, and the first draft of this fix got
+it wrong: adopting a split that finds ONE box separates nothing, it only sheds the entities it left
+behind — a KEBA called "Keba" whose `sensor.keba_charging_power` and `number.keba_charging_current`
+share the prefix `keba_charging` would have been "split" from its own `binary_sensor.keba_plug`,
+handing its owner a charger with no plug and a `keba.set_current` with no target; a YAML-MQTT
+JuiceBox beside a YAML-MQTT heat pump would have been deleted in favour of the heat pump. With the
+two-box threshold, an install with one box is grouped byte-identically to pre-#964, so the charger
+COUNT cannot move — which is why this could ride a release with no live device-less box to prove it
+on. When two boxes ARE found, the groups showing no shape are dropped: they belong to neither box,
+and a brand function fed one box's leftovers invents a second, partial charger (openWB's
+per-loadpoint MQTT entities are two real boxes; its `openwb_global_*` site totals are neither).
+`build_detection_report` lists them under `unattributed`, which the diagnostics download carries, so
+the drop is visible, never silent. The unproven case splits per CALLER, because the two directions
+cost different things: the paths that BIND merge (a split nobody proved must never shed a box's
+entities), while the prober keeps its name split (it binds nothing, and merging a rig's template
+platform into "one device" is what handed a mock charger an SG-Ready switch for start/stop, #814).
+**Known limits, all fail-closed to the pre-#964 behaviour:** two device-less boxes of a brand that
+shows neither a plug binary nor a current `number` (Easee's status is a plain `sensor`, its control
+a service) still collapse; so do two boxes one of whose marks the user has disabled — a disabled
+entity is filtered before grouping, so the evidence is judged on what is live.
+**Guard:** `tests/test_964_charger_unit_grouping.py` — an AST lint over the package that flags any
+`setdefault(…)`/`[…].append()` keyed on a registry entry's `device_id`, attribute, `getattr` or
+one-line temp alike (the class recurs by someone writing that line in the next discovery path), with
+a self-check on the shapes it must catch and must not; a reflection pin that all three sites funnel
+through the grouping; two-box separation and one-box no-shatter in BOTH directions with the pre-fix
+rule spelled out so they cannot pass vacuously; the unproven-split cases the review of this fix
+found (the KEBA with a current number, the JuiceBox beside a heat pump, a disabled mark, the rig's
+template platform); the config-entry, numeric-suffix and three-token axes each pinned by a case only
+that axis can separate; the leftover drop pinned exactly (a mutant that reports every entity as
+unattributed fails); and role-binding order-independence over permutations. Nine mutants — reverting
+to `device_id`-only, lowering the threshold to one shaped group, removing each of the three name
+axes or the config entry, keeping the leftovers, merging in the prober, flattening the charger
+shape, and dropping first-appearance order — are each killed.
 **Sweep question:** for every key this codebase groups by, is it OPTIONAL in its source of truth —
 and if it is absent, does the code get one bucket per missing value, or one bucket for *all* of
-them? A key that can be `None` is not an identity until the `None` case has its own answer.
+them? A key that can be `None` is not an identity until the `None` case has its own answer. And when
+the fallback is a heuristic: what does adopting it COST when it is wrong, and is that cost paid by
+the user who has one of the thing, or only by the user who has two?
 Refs #964 #962 #886 #814 #3.
