@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **The grid is not always a sink** (arc #921 — #955 #871 #926 #879 #892).
+  Every destination a kWh can take now gets a per-cycle OPEN / HELD / CLOSED
+  verdict, decided in one place from the tariff level and the export price —
+  never a price in the balance layer. Off by default, all of it.
+- ✨ **Export guard** (#955). While the export price is negative SEM caps
+  feed-in at zero at the inverter — after the battery, the car and the loads
+  had their turn, with hysteresis both ways, a refusal that says so, and a
+  hand-back on unload. Huawei via `huawei_solar` services, Deye via the work
+  mode select, anything else via a writable export-limit number. Off by default.
+- ✨ **A negative export price is a cost, not a free kWh** (#871). Two
+  diagnostics measure what a hostile meter cost today; the planner no longer
+  clamps the price to zero; the loads absorb before anything is clipped.
+- ✨ **Charge pacing holds headroom before the meter closes** (#926).
+- ✨ **The house as a battery sink** (#879) — keep the pack through cheap
+  hours, spend it on the house in expensive ones. Off by default.
+- ✨ **A morning EV window** (#892) — empty the pack into the car before
+  departure, down to a floor, when the forecast refills it. Off by default.
+
 - 🐛 **Today's Plan announced one "EV charging starts" per pricing slot**
   (#963, by @HorizonKane). A charge running 14:00–17:00 arrives from the joint
   plan as three hourly blocks, and the plan strip drew a start row for each —

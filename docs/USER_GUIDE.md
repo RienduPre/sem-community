@@ -1335,6 +1335,50 @@ Off on a fresh install: SEM sheds nothing until you enable it. Enable via **Enab
 
 ---
 
+## When the export price goes negative (arc #921)
+
+On a spot feed-in tariff (EPEX, Nord Pool, Tibber) the export price can go
+negative — you pay to export. SEM treats that as a **sink that has closed**,
+not as a price to optimise around. Every destination a kWh can take gets a
+per-cycle verdict:
+
+| verdict | meaning |
+|---|---|
+| **OPEN** | energy may go there (the sink's own gates still apply) |
+| **HELD** | it may, but not now — keep the energy where it is |
+| **CLOSED** | it may not; for the grid this is *enforced* at the inverter |
+
+The verdicts are published on `sensor.sem_charging_state` (`sink_verdicts`)
+and the Today's Plan strip shows when the meter closes and reopens.
+Everything below is **off by default** and lives on the Config tab under
+*Battery intelligence*.
+
+- **Exported while price negative** / **Cost of exporting at a negative
+  price** — two diagnostics that stay at zero on a fixed feed-in tariff.
+  They exist so the cost of doing nothing is a measured number.
+- **Export guard** — while the export price is negative, SEM caps feed-in at
+  **zero at the inverter**, *after* the battery, the car and the loads had
+  their turn this cycle: a kWh kept beats a kWh destroyed. Hysteresis both
+  ways (*Engage delay*, *Release delay*): spot prices cross zero often and the
+  inverter must not flap. Per brand: Huawei through `huawei_solar`'s services
+  (the integration's own reset is the restore), Deye through the #827 work
+  mode select (prior captured and restored), any other inverter through a
+  writable export-limit number. A brand with no export control refuses and
+  says so; three refusals raise a Repair. On unload, disable and removal the
+  cut is handed back **first**.
+- **Override external scheduling** — a Huawei under the grid operator's
+  digital-input schedule reports `DI Active Scheduling`; SEM refuses to
+  replace an operator's mode unless you say the operator allows it.
+- **House as a battery sink** — keep the pack through cheap and negative
+  hours (let the house import) and spend it on the house in expensive ones.
+- **Morning EV window** — before the configured departure, empty the pack
+  into the car down to the *Morning drain floor*, only when today's forecast
+  refills the pack.
+- **Charge pacing** now lands the pack full by the *earlier* of sunset and
+  the next closed meter, so the headroom is there when the price turns.
+
+SEM never curtails what the battery, the car and the loads could still take.
+
 ## Tariff Integration
 
 ![Costs Tab](images/sem_costs_tab.png)
