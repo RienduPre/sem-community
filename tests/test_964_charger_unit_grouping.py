@@ -293,13 +293,18 @@ class TestGroupingChokePoint:
     def _is_device_id_read(node) -> bool:
         """``e.device_id`` / ``getattr(e, "device_id", None)`` — the OPTIONAL
         attribute of a registry entry. A bare ``device_id`` parameter (SEM's
-        own surplus-device id) is a different thing and not this class."""
-        if isinstance(node, ast.Attribute) and node.attr == "device_id":
+        own surplus-device id) is a different thing and not this class, and
+        so is ``getattr(self._ev_device, "device_id", "ev_charger")``: the
+        receiver must be a plain NAME, which is what a registry entry is in
+        every walk that groups one — a loop variable."""
+        if (isinstance(node, ast.Attribute) and node.attr == "device_id"
+                and isinstance(node.value, ast.Name)):
             return True
         return (isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "getattr"
                 and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name)
                 and isinstance(node.args[1], ast.Constant)
                 and node.args[1].value == "device_id")
 
@@ -326,7 +331,8 @@ class TestGroupingChokePoint:
                     continue
                 names = {t.id for n in ast.walk(scope)
                          if isinstance(n, ast.Assign)
-                         and self._is_device_id_read(n.value)
+                         and any(self._is_device_id_read(x)
+                                 for x in ast.walk(n.value))
                          for t in n.targets if isinstance(t, ast.Name)}
                 if names:
                     for n in ast.walk(scope):
@@ -376,15 +382,25 @@ class TestGroupingChokePoint:
             'devices.setdefault(getattr(e, "device_id", None), []).append(e)',
             "did = e.device_id\n    devices.setdefault(did, []).append(e)",
             "devices[e.device_id].append(e)",
+            # the natural way to "handle" the None key — and the recurrence
+            'did = e.device_id or ""\n    devices.setdefault(did, []).append(e)',
+            'did = getattr(e, "device_id", None) or ""\n'
+            "    devices.setdefault(did, []).append(e)",
+            'devices.setdefault(e.device_id or "", []).append(e)',
         ]
         innocent = [
             "self._device_goals.setdefault(device_id, {}).update(clean)",
             "units.setdefault(unit_key, []).append(e)",
+            # SEM's own EV device, not a registry entry (coordinator.py)
+            'cid = getattr(self._ev_device, "device_id", "ev_charger")\n'
+            "    seen.setdefault(cid, {}).update(row)",
         ]
         for src in offending:
             assert self._flagged(f"def f(e, devices):\n    {src}\n"), src
         for src in innocent:
-            assert not self._flagged(f"def f(e, device_id, unit_key, units, clean):\n    {src}\n"), src
+            assert not self._flagged(
+                f"def f(e, device_id, unit_key, units, clean, seen, row):\n"
+                f"    {src}\n"), src
 
     def _flagged(self, source: str) -> bool:
         tree = ast.parse(source)
@@ -394,7 +410,8 @@ class TestGroupingChokePoint:
                 continue
             names = {t.id for n in ast.walk(scope)
                      if isinstance(n, ast.Assign)
-                     and self._is_device_id_read(n.value)
+                     and any(self._is_device_id_read(x)
+                             for x in ast.walk(n.value))
                      for t in n.targets if isinstance(t, ast.Name)}
             if names:
                 for n in ast.walk(scope):
@@ -578,16 +595,20 @@ class TestLeftoversGoBackToTheirBox:
             _ent("sensor.carport_total_energy", "keba", "energy"),
         ]
 
-    def test_the_adopted_axis_really_does_orphan_them(self):
-        """Non-vacuity: the split below IS evidenced twice, and the plugs
-        and meters are genuinely not charger-shaped on their own."""
+    def test_the_loose_shape_would_have_orphaned_them(self):
+        """Non-vacuity, and the reason the shape asks for a PLUG wherever
+        the platform has one: on the two-token axis each box's power and
+        current land together and look like a whole charger, while the plug
+        that box is steered by sits in a name of its own."""
         by_name = {}
         for e in self._entries():
             by_name.setdefault(_entity_id_prefix(e.entity_id), []).append(e)
-        shaped = {k for k, g in by_name.items() if _shows_charger_shape(g)}
-        assert shaped == {"garage_charging", "carport_charging"}
-        assert set(by_name) - shaped == {
+        loose = {k for k, g in by_name.items() if _shows_charger_shape(g)}
+        assert loose == {"garage_charging", "carport_charging"}
+        assert set(by_name) - loose == {
             "garage_plug", "garage_total", "carport_plug", "carport_total"}
+        # with the plug required, that axis proves nothing and is refused
+        assert not any(_shows_charger_shape(g, True) for g in by_name.values())
 
     def test_every_entity_lands_on_its_own_box(self):
         units = group_entities_by_unit(self._entries())
@@ -639,3 +660,236 @@ class TestLeftoversGoBackToTheirBox:
             places = [order[str(e.entity_id)] for e in members]
             assert places == sorted(places), (
                 f"a re-attached leftover jumped its registry place: {places}")
+
+
+# ── One box is one box, whatever its sub-structure is named ────────────
+
+class TestSubStructureIsNotASecondBox:
+    """A current control is not unique to a box WITHIN one box: a per-phase
+    leg carries one each, and so does a sub-meter. Found by the adversarial
+    review of this fix — with the loose shape, three phase legs read as
+    three chargers and shed the single plug they share."""
+
+    def _per_phase(self):
+        return [
+            _ent("sensor.wb_l1_power", "keba", "power"),
+            _ent("number.wb_l1_current", "keba", "current"),
+            _ent("sensor.wb_l2_power", "keba", "power"),
+            _ent("number.wb_l2_current", "keba", "current"),
+            _ent("sensor.wb_l3_power", "keba", "power"),
+            _ent("number.wb_l3_current", "keba", "current"),
+            _ent("binary_sensor.wb_plug", "keba", "plug"),
+            _ent("sensor.wb_total_energy", "keba", "energy"),
+        ]
+
+    def test_the_legs_really_do_look_like_chargers_without_the_plug_rule(self):
+        """Non-vacuity: each leg passes the loose shape on its own."""
+        legs = self._per_phase()
+        assert _shows_charger_shape(legs[0:2])
+        assert _shows_charger_shape(legs[2:4])
+        assert not _shows_charger_shape(legs[0:2], True)
+
+    def test_three_phase_legs_are_one_charger(self):
+        assert len(group_entities_by_unit(self._per_phase())) == 1
+        chargers = _discover(self._per_phase())
+        assert len(chargers) == 1
+        assert chargers[0]["ev_connected_sensor"] == "binary_sensor.wb_plug"
+        assert chargers[0]["ev_charger_service_entity_id"] == \
+            "binary_sensor.wb_plug"
+        assert chargers[0]["ev_total_energy_sensor"] == "sensor.wb_total_energy"
+
+    def test_a_total_beside_the_legs_is_not_a_fourth_box(self):
+        # the plug sits INSIDE a shaped group here, so no leftover is
+        # stranded — only the plug rule itself refuses this split.
+        entries = [
+            _ent("sensor.wb_total_power", "keba", "power"),
+            _ent("binary_sensor.wb_total_plug", "keba", "plug"),
+            _ent("sensor.wb_l1_power", "keba", "power"),
+            _ent("number.wb_l1_current", "keba", "current"),
+            _ent("sensor.wb_l2_power", "keba", "power"),
+            _ent("number.wb_l2_current", "keba", "current"),
+        ]
+        assert len(group_entities_by_unit(entries)) == 1
+        assert len(_discover(entries)) == 1
+
+    def test_a_stranded_mark_refuses_the_axis(self):
+        # A platform with no plug at all keeps the loose shape — and there
+        # the cut is caught by what it leaves behind: the current control
+        # that steers the box is not a leftover anybody may drop.
+        entries = [
+            _ent("sensor.juicebox_charging_power", "mqtt", "power"),
+            _ent("sensor.juicebox_grid_power", "mqtt", "power"),
+            _ent("number.juicebox_grid_current", "mqtt", "current"),
+            _ent("number.juicebox_charging_current", "mqtt", "current"),
+            _ent("number.juicebox_limit_current", "mqtt", "current"),
+        ]
+        units = group_entities_by_unit(entries)
+        assert len(units) == 1
+        claimed = {str(e.entity_id) for g in units.values() for e in g}
+        assert claimed == {str(e.entity_id) for e in entries}
+
+
+# ── The box number lives in the middle of the id ───────────────────────
+
+class TestTheNumberInsideTheName:
+
+    def _entries(self):
+        # HA disambiguates the second box by its DEVICE name, so the digit
+        # is a token in the middle — no fixed-width prefix and no trailing
+        # _<n> can see it, and "garage" is a prefix of "garage_2".
+        return [
+            _ent("sensor.garage_charging_power", "keba", "power"),
+            _ent("number.garage_charging_current", "keba", "current"),
+            _ent("binary_sensor.garage_plug_connected", "keba", "plug"),
+            _ent("sensor.garage_total_energy", "keba", "energy"),
+            _ent("sensor.garage_2_charging_power", "keba", "power"),
+            _ent("number.garage_2_charging_current", "keba", "current"),
+            _ent("binary_sensor.garage_2_plug_connected", "keba", "plug"),
+            _ent("sensor.garage_2_total_energy", "keba", "energy"),
+        ]
+
+    def test_no_other_axis_can_see_it(self):
+        """Non-vacuity: every width of prefix, and the trailing number,
+        either shatter the boxes or merge them."""
+        for width in (1, 2, 3):
+            by_name = {}
+            for e in self._entries():
+                by_name.setdefault(
+                    _entity_id_prefix(e.entity_id, width), []).append(e)
+            shaped = [g for g in by_name.values()
+                      if _shows_charger_shape(g, True)]
+            assert len(shaped) < 2, f"prefix width {width} already separates"
+
+    def test_two_complete_boxes(self):
+        chargers = _discover(self._entries())
+        assert len(chargers) == 2
+        assert {(c["ev_charging_power_sensor"], c["ev_connected_sensor"],
+                 c["ev_charger_service_entity_id"], c["ev_total_energy_sensor"])
+                for c in chargers} == {
+            ("sensor.garage_charging_power",
+             "binary_sensor.garage_plug_connected",
+             "binary_sensor.garage_plug_connected",
+             "sensor.garage_total_energy"),
+            ("sensor.garage_2_charging_power",
+             "binary_sensor.garage_2_plug_connected",
+             "binary_sensor.garage_2_plug_connected",
+             "sensor.garage_2_total_energy"),
+        }
+
+
+# ── A leftover that DOES belong to a box ───────────────────────────────
+
+class TestALeftoverThatFindsItsBox:
+
+    def _entries(self):
+        # Each box's meter is named outside the prefix that separated the
+        # boxes: `garage_energy_*` beside `garage_wb_*`.
+        return [
+            _ent("sensor.garage_wb_power", "keba", "power"),
+            _ent("binary_sensor.garage_wb_plug", "keba", "plug"),
+            _ent("sensor.garage_energy_total", "keba", "energy"),
+            _ent("sensor.carport_wb_power", "keba", "power"),
+            _ent("binary_sensor.carport_wb_plug", "keba", "plug"),
+            _ent("sensor.carport_energy_total", "keba", "energy"),
+        ]
+
+    def test_the_meter_is_a_leftover_of_the_adopted_axis(self):
+        """Non-vacuity: on the axis that separates the boxes, the meters
+        are groups of their own and show no charger shape."""
+        by_name = {}
+        for e in self._entries():
+            by_name.setdefault(_entity_id_prefix(e.entity_id), []).append(e)
+        assert set(by_name) == {"garage_wb", "garage_energy",
+                                "carport_wb", "carport_energy"}
+        assert not _shows_charger_shape(by_name["garage_energy"], True)
+
+    def test_each_meter_goes_back_to_its_own_box(self):
+        chargers = _discover(self._entries())
+        assert len(chargers) == 2
+        assert {(c["ev_charging_power_sensor"], c["ev_total_energy_sensor"])
+                for c in chargers} == {
+            ("sensor.garage_wb_power", "sensor.garage_energy_total"),
+            ("sensor.carport_wb_power", "sensor.carport_energy_total"),
+        }
+
+
+# ── What the diagnostics must NOT start saying ─────────────────────────
+
+class TestTheProberComparisonStaysQuiet:
+
+    def _one_deviceless_box(self):
+        return [
+            _ent("sensor.keba_p30_charging_power", "keba", "power"),
+            _ent("binary_sensor.keba_p30_plug", "keba", "plug"),
+            _ent("number.keba_p30_max_current", "keba", "current"),
+            _ent("sensor.keba_p30_total_energy", "keba", "energy"),
+        ]
+
+    def test_the_two_sides_really_do_group_it_differently(self):
+        """Non-vacuity: the prober keeps a name split the binding paths
+        merge, so a comparison keyed on the GROUP would disagree here."""
+        entries = self._one_deviceless_box()
+        brand = group_entities_by_unit(entries)
+        prober = group_entities_by_unit(entries, unproven_split="prefix")
+        assert list(brand) != list(prober)
+
+    def test_one_box_found_by_both_is_no_disagreement(self):
+        rep = build_detection_report(registry=_registry(self._one_deviceless_box()))
+        assert len(rep["chargers"]) == 1
+        assert len(rep["prober_candidates"]) == 1
+        assert rep["disagreements"] == []
+
+    def test_a_shape_only_the_prober_knows_is_still_reported(self):
+        """The section must not go silent: an unsupported brand the prober
+        recognises is exactly what it exists to surface (#814)."""
+        rep = build_detection_report(registry=_registry(
+            self._one_deviceless_box() + [
+                _ent("sensor.abl_power", "abl_emh1", "power", device_id="d9"),
+                _ent("binary_sensor.abl_plug", "abl_emh1", "plug", device_id="d9"),
+                _ent("number.abl_max_current", "abl_emh1", "current",
+                     device_id="d9"),
+            ]))
+        assert [(d["kind"], d["platform"]) for d in rep["disagreements"]] == \
+            [("prober_only", "abl_emh1")]
+
+    def test_the_prober_is_never_coarser_than_its_own_prefix(self):
+        # #814's rig: a garage door beside a template charger. An adopted
+        # one-token axis would hand the door over as start/stop.
+        reg = _registry([
+            _ent("switch.garage_door", "template"),
+            _ent("sensor.garage_power", "template", "power"),
+            _ent("binary_sensor.garage_plug", "template", "plug"),
+            _ent("switch.garage_start", "template"),
+            _ent("sensor.carport_power", "template", "power"),
+            _ent("binary_sensor.carport_plug", "template", "plug"),
+            _ent("switch.carport_start", "template"),
+        ])
+        assert probe_charger_candidates(registry=reg) == []
+
+
+# ── The order the axes are tried in, and the order units come back ─────
+
+class TestOrderIsPartOfTheContract:
+
+    def test_the_finest_axis_wins_over_a_coarser_one_that_also_fits(self):
+        # Two openWB loadpoints and a KEBA on one device-less platform: the
+        # one-token axis "fits" (openwb / keba) and merges the loadpoints.
+        entries = [
+            _ent("sensor.openwb_lp1_power", "openwb2mqtt", "power"),
+            _ent("binary_sensor.openwb_lp1_plug", "openwb2mqtt", "plug"),
+            _ent("sensor.openwb_lp2_power", "openwb2mqtt", "power"),
+            _ent("binary_sensor.openwb_lp2_plug", "openwb2mqtt", "plug"),
+            _ent("sensor.keba_p30_power", "openwb2mqtt", "power"),
+            _ent("binary_sensor.keba_p30_plug", "openwb2mqtt", "plug"),
+        ]
+        units = group_entities_by_unit(entries)
+        assert len(units) == 3, "a coarser axis merged the two loadpoints"
+
+    def test_the_first_charger_is_the_first_box_in_the_registry(self):
+        # `discover_ev_charger_from_registry` returns [0] and zero-config
+        # setup stores it, so which box is primary is not an accident.
+        entries = _two_keba_boxes()
+        assert _discover(entries)[0]["ev_charging_power_sensor"] == \
+            "sensor.keba_garage_charging_power"
+        assert _discover(list(reversed(entries)))[0][
+            "ev_charging_power_sensor"] == "sensor.keba_carport_charging_power"

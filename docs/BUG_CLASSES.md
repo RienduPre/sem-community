@@ -3677,12 +3677,18 @@ sites in `hardware_detection.py`, and the same question for any future per-unit 
 battery siblings already group on `config_entry_id`, which is why they never had it).
 **Closure:** one shared `group_entities_by_unit`, three callers. `device_id` wins wherever it
 exists. For the device-less remainder there is no identity left, only NAMES — the entity-id prefix
-at three widths and the trailing `_<n>` Home Assistant itself appends to a second box of the same
-name (the one axis a prefix cannot see), each tried against `config_entry_id` first and then without
-it (one box can span several entries: a rig's template helpers are one entry per entity). Finest
-first. **A name axis becomes a boundary only on evidence: at least TWO of its groups must show the
-charger shape on their own** (a power reading plus a plug binary or a current control — the prober's
-rule since #814). That threshold is the whole safety argument, and the first draft of this fix got
+at three widths, the name up to and including its first numeric TOKEN (HA disambiguates a second box
+either by suffixing every entity — `..._2` — or by its device name, which puts the digit in the
+middle where no fixed-width prefix can see it), and that trailing `_<n>` itself; each tried against
+`config_entry_id` first and then without it (one box can span several entries: a rig's template
+helpers are one entry per entity). Finest first. **A name axis becomes a boundary only on evidence:
+at least TWO of its groups must show the charger shape on their own** — a power reading plus a plug
+binary, or, only on a platform that publishes no plug at all (a JuiceBox over plain MQTT), plus a
+current control. Insisting on the PLUG wherever one exists is the second thing the review of this
+fix had to teach it: a current control is not unique to a box *within* one box, so three per-phase
+`number.*_current` legs beside three per-phase power sensors each passed the loose rule and split
+one wallbox into three chargers, shedding the single `binary_sensor.wb_plug` they share. A phase
+leg, a site total and a sub-meter never carry a plug. That threshold is the whole safety argument, and the first draft of this fix got
 it wrong: adopting a split that finds ONE box separates nothing, it only sheds the entities it left
 behind — a KEBA called "Keba" whose `sensor.keba_charging_power` and `number.keba_charging_current`
 share the prefix `keba_charging` would have been "split" from its own `binary_sensor.keba_plug`,
@@ -3698,14 +3704,28 @@ that costs BOTH owners the plug binary and the `keba.set_current` target it is. 
 close to every box is what "belongs to neither" actually looks like — openWB's `openwb_global_*`
 site totals sit one token from each loadpoint — and only that is dropped, because a brand function
 fed one box's leftovers invents a second, partial charger. `build_detection_report` lists the drops
-under `unattributed`, which the diagnostics download carries, so the drop is visible, never silent. The unproven case splits per CALLER, because the two directions
-cost different things: the paths that BIND merge (a split nobody proved must never shed a box's
-entities), while the prober keeps its name split (it binds nothing, and merging a rig's template
-platform into "one device" is what handed a mock charger an SG-Ready switch for start/stop, #814).
+under `unattributed`, which the diagnostics download carries, so the drop is visible, never silent.
+And a leftover that carries a MARK — a plug or a current control — refuses the axis outright rather
+than being dropped: a mark left over is one box's own steering, so the axis cut through a box.
+The unproven case splits per CALLER, because the two directions cost different things: the paths
+that BIND merge (a split nobody proved must never shed a box's entities), while the prober keeps its
+name split (it binds nothing, and merging a rig's template platform into "one device" is what handed
+a mock charger an SG-Ready switch for start/stop, #814) — with a FLOOR, since an adopted axis can be
+wider than the two-token prefix the prober has split on since #814, and a one-token axis offered a
+garage door as a charger's start/stop. The report's prober-vs-brand comparison pairs the two
+findings by the ENTITIES each claims, the way `config_flow._charger_already_installed` fingerprints
+a charger: the device id cannot do it (two device-less boxes both report `None`) and neither can the
+grouping key, since the two sides group an unproven split differently ON PURPOSE — keying on it
+reported a disagreement on every device-less install SEM has, which is the exact population #814's
+comparison window is watching.
 **Known limits, all fail-closed to the pre-#964 behaviour:** two device-less boxes of a brand that
 shows neither a plug binary nor a current `number` (Easee's status is a plain `sensor`, its control
-a service) still collapse; so do two boxes one of whose marks the user has disabled — a disabled
-entity is filtered before grouping, so the evidence is judged on what is live.
+a service) still collapse; so do two boxes one of whose plugs the user has disabled — a disabled
+entity is filtered before grouping, so the evidence is judged on what is live — and so do two boxes
+whose names no axis separates (`box` beside `box_garage`, with no digit anywhere). The one shape
+that could still split a single box is a PLUGLESS platform publishing a separate current `number`
+per phase; no brand SEM knows does that, and the stranded-mark rule catches it wherever the phases
+leave anything behind.
 **Guard:** `tests/test_964_charger_unit_grouping.py` — an AST lint over the package that flags any
 `setdefault(…)`/`[…].append()` keyed on a registry entry's `device_id`, attribute, `getattr` or
 one-line temp alike (the class recurs by someone writing that line in the next discovery path), with
@@ -3713,15 +3733,20 @@ a self-check on the shapes it must catch and must not; a reflection pin that all
 through the grouping; two-box separation and one-box no-shatter in BOTH directions with the pre-fix
 rule spelled out so they cannot pass vacuously; the unproven-split cases the review of this fix
 found (the KEBA with a current number, the JuiceBox beside a heat pump, a disabled mark, the rig's
-template platform); the config-entry, numeric-suffix and three-token axes each pinned by a case only
-that axis can separate; two boxes that shatter the same way, each keeping its own plug and service
-target; the leftover drop pinned exactly at the tie (a mutant that reports every entity as
-unattributed fails, and so does one that hands the site total to a loadpoint); and role-binding
-order-independence over permutations, plus a registry-place pin on the re-attached leftovers. Eleven
-mutants — reverting to `device_id`-only, lowering the threshold to one shaped group, removing each
-of the three name axes or the config entry, dropping the leftovers instead of re-attaching them,
-attaching them on a tie, appending them out of registry order, merging in the prober, flattening the
-charger shape, and dropping first-appearance order — are each killed.
+template platform); the config-entry, numeric-suffix, mid-name-number and three-token axes each
+pinned by a case only that axis can separate; two boxes that shatter the same way, each keeping its
+own plug and service target, and a leftover meter that finds its own box; one box's three phase legs
+and its total, each pinned as ONE charger with the loose shape spelled out so the pin cannot pass
+vacuously; the leftover drop pinned exactly at the tie (a mutant that reports every entity as
+unattributed fails, and so does one that hands the site total to a loadpoint); a quiet
+prober-vs-brand comparison on the device-less install, beside a prober-only finding that must still
+be reported; and role-binding order-independence over permutations, a registry-place pin on the
+re-attached leftovers and a pin on WHICH box is primary. Fourteen mutants — reverting to
+`device_id`-only, lowering the threshold to one shaped group, removing each of the four name axes or
+the config entry, dropping the plug requirement, dropping the stranded-mark refusal, dropping the
+leftovers instead of re-attaching them, attaching them on a tie, appending them out of registry
+order, trying the axes coarsest-first, merging in the prober or dropping its floor, and pairing the
+report's two findings on the grouping key — are each killed.
 **Sweep question:** for every key this codebase groups by, is it OPTIONAL in its source of truth —
 and if it is absent, does the code get one bucket per missing value, or one bucket for *all* of
 them? A key that can be `None` is not an identity until the `None` case has its own answer. And when

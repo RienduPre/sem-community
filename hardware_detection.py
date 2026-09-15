@@ -1006,6 +1006,20 @@ def _entity_id_prefix(entity_id: str, tokens: int = 2) -> str:
     return "_".join(_object_id(entity_id).split("_")[:tokens])
 
 
+def _entity_id_through_number(entity_id: str) -> str:
+    """The name up to and including its first purely numeric token —
+    ``sensor.garage_2_charging_power`` → ``garage_2``, and ``garage``'s own
+    ``sensor.garage_charging_power`` → ``garage``. When Home Assistant
+    disambiguates a second box by its DEVICE name rather than by suffixing
+    each entity, the digit sits in the middle of the id, where neither a
+    prefix of fixed width nor the trailing-``_<n>`` axis can see it."""
+    tokens = _name_tokens(entity_id)
+    for i, token in enumerate(tokens):
+        if token.isdigit():
+            return "_".join(tokens[:i + 1])
+    return tokens[0] if tokens else ""
+
+
 def _entity_id_suffix(entity_id: str) -> str:
     """Home Assistant's OWN disambiguator for a second identically named box:
     a trailing ``_<n>`` (``sensor.juicebox_power_2``). The one axis a prefix
@@ -1015,7 +1029,21 @@ def _entity_id_suffix(entity_id: str) -> str:
     return last if last.isdigit() else ""
 
 
-def _shows_charger_shape(entities) -> bool:
+def _charger_mark(entity) -> Optional[str]:
+    """The two entities only a CHARGER has, by domain + device class: the
+    plug binary that says a car is there, and the current control that
+    steers it (#814's rule). Never a name."""
+    eid = str(getattr(entity, "entity_id", "") or "")
+    dom = eid.split(".", 1)[0]
+    dc = getattr(entity, "original_device_class", None)
+    if dom == "binary_sensor" and dc == "plug":
+        return "plug"
+    if dom == "number" and dc == "current":
+        return "current"
+    return None
+
+
+def _shows_charger_shape(entities, require_plug: bool = False) -> bool:
     """Does this group of entities describe a charger ON ITS OWN?
 
     The same structural rule ``probe_charger_candidates`` admits a candidate
@@ -1023,21 +1051,32 @@ def _shows_charger_shape(entities) -> bool:
     — a plug binary or a current control. A power sensor alone is a smart
     plug, a toaster, or a site total; a plug binary alone is half a box.
 
-    Used by the grouping below to answer one question and no other: did a
-    name axis find a second BOX, or only a second naming convention?
+    ``require_plug`` narrows that to the plug binary alone, and the grouping
+    below turns it on wherever the platform publishes ANY plug — because a
+    current control is not unique to a box within one box. Three per-phase
+    ``number.*_current`` legs beside three per-phase power sensors each pass
+    the loose rule, so a name axis "found" three chargers in one wallbox and
+    shed the single plug they share (the review of this fix). A plug binary
+    is what a phase leg, a site total and a sub-meter never have.
+
+    Used by the grouping to answer one question and no other: did a name
+    axis find a second BOX, or only a second naming convention?
     """
-    has_power = has_plug = has_current = False
+    has_power = False
+    marks = set()
     for e in entities:
         eid = str(getattr(e, "entity_id", "") or "")
         dom = eid.split(".", 1)[0]
         dc = getattr(e, "original_device_class", None)
         if dom == "sensor" and dc == "power":
             has_power = True
-        elif dom == "binary_sensor" and dc == "plug":
-            has_plug = True
-        elif dom == "number" and dc == "current":
-            has_current = True
-    return has_power and (has_plug or has_current)
+            continue
+        mark = _charger_mark(e)
+        if mark:
+            marks.add(mark)
+    if not has_power:
+        return False
+    return "plug" in marks if require_plug else bool(marks)
 
 
 #: The name axes tried on a device-less platform, FINEST FIRST. Each is
@@ -1049,6 +1088,7 @@ _UNIT_NAME_AXES = (
     lambda eid: _entity_id_prefix(eid, 3),
     lambda eid: _entity_id_prefix(eid, 2),
     lambda eid: _entity_id_prefix(eid, 1),
+    lambda eid: _entity_id_through_number(eid),
     lambda eid: "#" + _entity_id_suffix(eid),
 )
 
@@ -1067,7 +1107,7 @@ def _shared_leading_tokens(a: List[str], b: List[str]) -> int:
 
 
 def _attach_leftovers(shaped: Dict[Any, List[Any]],
-                      leftovers: List[List[Any]]) -> None:
+                      leftovers: List[List[Any]]) -> List[List[Any]]:
     """Give an unshaped group back to the box it belongs to.
 
     "Shows no charger shape" is not the same as "belongs to no box": two
@@ -1081,7 +1121,8 @@ def _attach_leftovers(shaped: Dict[Any, List[Any]],
     with, and only where exactly one group is closest. A leftover equally
     close to both boxes is what "belongs to neither" actually looks like —
     openWB's ``openwb_global_*`` site totals sit one token from every
-    loadpoint — and it stays out, reported as ``unattributed``.
+    loadpoint — and it stays out: returned as unplaced, for the caller to
+    judge and for ``build_detection_report`` to list as ``unattributed``.
     """
     tokens: Dict[str, List[str]] = {}
 
@@ -1091,6 +1132,7 @@ def _attach_leftovers(shaped: Dict[Any, List[Any]],
             tokens[eid] = _name_tokens(eid)
         return tokens[eid]
 
+    unplaced: List[List[Any]] = []
     for group in leftovers:
         closest, best, tied = None, 0, False
         for key, members in shaped.items():
@@ -1102,6 +1144,9 @@ def _attach_leftovers(shaped: Dict[Any, List[Any]],
                 tied = True
         if closest is not None and not tied:
             shaped[closest].extend(group)
+        else:
+            unplaced.append(group)
+    return unplaced
 
 
 def _split_deviceless(platform: str, plat_entities: List[Any],
@@ -1119,20 +1164,47 @@ def _split_deviceless(platform: str, plat_entities: List[Any],
             ).append(e)
         return out
 
+    # Which mark makes a group a BOX here. A current control is not unique
+    # to a box WITHIN one box — per-phase legs carry one each — so wherever
+    # this platform publishes any plug binary at all, that is the mark, and
+    # a group without one is a phase, a total or a sub-meter. A platform
+    # that publishes none (a JuiceBox over plain MQTT) keeps the loose rule,
+    # which is the only mark it has left.
+    require_plug = any(_charger_mark(e) == "plug" for e in plat_entities)
+
+    def _floor(groups: Dict[Any, List[Any]]) -> Dict[Any, List[Any]]:
+        """The prober's partition is never COARSER than the two-token prefix
+        it has split on since #814 — an adopted axis may be wider than that
+        (one token, or the trailing number), and merging a rig's template
+        platform is what offered a garage door as a charger's start/stop."""
+        if unproven_split != "prefix":
+            return groups
+        refined: Dict[Any, List[Any]] = {}
+        for key, members in groups.items():
+            for e in members:
+                refined.setdefault(
+                    key + (_entity_id_prefix(str(e.entity_id), 2),), []
+                ).append(e)
+        return refined
+
     for with_entry in (True, False):
         for name_of in _UNIT_NAME_AXES:
             groups = _keyed(name_of, with_entry)
-            shaped = {k: v for k, v in groups.items() if _shows_charger_shape(v)}
+            shaped = {k: v for k, v in groups.items()
+                      if _shows_charger_shape(v, require_plug)}
             # TWO boxes or none: a split that finds ONE box is not separating
             # anything, it is only shedding the entities it left behind.
             if len(shaped) >= 2:
-                _attach_leftovers(
+                unplaced = _attach_leftovers(
                     shaped,
                     [g for k, g in groups.items() if k not in shaped])
-                return shaped
-    if unproven_split == "prefix":
-        return _keyed(lambda eid: _entity_id_prefix(eid, 2), False)
-    return {("unit", platform, "", ""): list(plat_entities)}
+                # A mark left over belongs to a box this axis cut through —
+                # it is the plug or the control of one of them, and no box
+                # may be steered by a cut. Refuse the axis, try the next.
+                if any(_charger_mark(e) for g in unplaced for e in g):
+                    continue
+                return _floor(shaped)
+    return _floor({("unit", platform, "", ""): list(plat_entities)})
 
 
 def group_entities_by_unit(entities, *,
@@ -2051,6 +2123,10 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         "unattributed": [],
     }
 
+    # (#964) the entities behind each charger row — the pairing key the
+    # prober comparison uses, never written into the report itself.
+    brand_units: List[Dict[str, Any]] = []
+
     for platform, discover_fn in _EV_CHARGER_PLATFORMS:
         def _matches(ep: str, _this=platform) -> bool:
             if _this == "zaptec":
@@ -2172,6 +2248,12 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             if mapping.get("_suggested_phase_switch"):
                 row["suggested_phase_switch"] = mapping["_suggested_phase_switch"]
             report["chargers"].append(row)
+            # (#964) what this unit is made of, for the prober pairing below
+            brand_units.append({
+                "platform": row["platform"], "unit": row["unit"],
+                "device_id": device_id,
+                "entities": {str(e.entity_id) for e in dev_entities},
+            })
 
     # (#814 Pillar A) the prober runs beside the brand walk. A candidate on
     # a device no brand function claimed = "prober_only" (a shape we could
@@ -2183,17 +2265,29 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     except Exception:  # noqa: BLE001 — the prober must never cost the report
         cands = []
     report["prober_candidates"] = cands
-    # (#964) pair on the UNIT, not on the device id: two device-less boxes
-    # both report ``device_id: None`` and collapsed into one row here.
-    brand_devices = {(c["platform"], c["unit"], c["device_id"])
-                     for c in report["chargers"]}
-    prober_devices = {(c["platform"], c["unit"], c["device_id"])
-                      for c in cands}
+    # (#964) Pair the two findings by the ENTITIES they claim, the way
+    # ``config_flow._charger_already_installed`` fingerprints a charger.
+    # The device id cannot do it — two device-less boxes both report
+    # ``None`` — and neither can the grouping key: the prober and the
+    # binding paths deliberately group an unproven split differently, so
+    # keying on it would report a disagreement on every device-less install
+    # SEM has, which is exactly the population this section is watching.
+    paired_brand, paired_prober = set(), set()
+    for bi, unit in enumerate(brand_units):
+        for ci, cand in enumerate(cands):
+            if {str(v) for v in cand.get("roles", {}).values()} & unit["entities"]:
+                paired_brand.add(bi)
+                paired_prober.add(ci)
     report["disagreements"] = (
-        [{"kind": "prober_only", "platform": p, "unit": u, "device_id": d}
-         for (p, u, d) in sorted(prober_devices - brand_devices, key=str)]
-        + [{"kind": "brand_only", "platform": p, "unit": u, "device_id": d}
-           for (p, u, d) in sorted(brand_devices - prober_devices, key=str)]
+        [{"kind": "prober_only", "platform": c["platform"], "unit": c["unit"],
+          "device_id": c["device_id"]}
+         for ci, c in sorted(enumerate(cands), key=lambda t: str(t[1]["unit"]))
+         if ci not in paired_prober]
+        + [{"kind": "brand_only", "platform": u["platform"], "unit": u["unit"],
+            "device_id": u["device_id"]}
+           for bi, u in sorted(enumerate(brand_units),
+                               key=lambda t: str(t[1]["unit"]))
+           if bi not in paired_brand]
     )
     # (#848) the census rides every report — what is installed, what SEM
     # knows, and the two gap lines that turn installs into detection
