@@ -3647,10 +3647,61 @@ second entity of the same domain and device_class that measures something adjace
 the other direction, another window, one phase — and does the matcher separate them, or pick by
 ordering? And before making a guard fail-closed: *trace what the missing value actually does
 downstream*, because "drop it" is only safe where absence is handled.
-Refs #962 #886 #947 #814 #816.
-**Open residual (#964, found by the adversarial review of a parallel #962 build):**
-`discover_all_ev_chargers_from_registry` and `build_detection_report` group by `device_id` with NO
-fallback for device-less entities — a KEBA over UDP registers none — so two such chargers of one
-platform collapse into one bucket and any sibling search, this guard's included, can cross chargers.
-`probe_charger_candidates` alone sub-groups by entity-id prefix; the other two sites should share it.
-Not folded into #962: it changes how chargers are COUNTED and wants its own live proof.
+**Residual, CLOSED in #964 (class 90):** the sibling search this class installs is only as
+honest as the bucket it searches — and two of the three discovery sites grouped device-less
+entities into ONE bucket per platform, so the best-ranked sibling could belong to the other
+charger.
+Refs #962 #886 #947 #814 #816 #964.
+
+### 90. An optional identity used as a grouping key — "no id" becomes one unit — GUARDED
+**Symptom:** a user with two chargers of one brand is offered ONE charger whose entities come from
+both boxes — the power sensor of the garage box, the plug of the carport box. Nothing errors: each
+entity is real, correctly classed and on the right platform; SEM simply believes there is one box.
+Downstream, every per-charger decision (budget, connected, charging, the SoC anchor) is made about
+a machine that does not exist, and the second charger is never offered at all.
+**Root shape:** the registry's `device_id` is the answer to "which box is this" — and it is
+OPTIONAL. An integration may register no device at all (KEBA's UDP integration, manually configured
+MQTT entities, YAML platforms). Code that groups with `devices.setdefault(e.device_id, [])` turns
+the ABSENCE of an identity into an identity: every device-less entity of a platform hashes to the
+same `None` key and lands in one bucket. The collapse is invisible because a bucket of two boxes
+looks exactly like a bucket of one — and the role pick that reads it cannot tell, whether it takes
+the first match, the last, or (since #962) the best-ranked sibling in the whole list. The
+per-charger twin of class 3 one layer earlier: class 3 reads the fleet where it wanted one charger;
+here the fleet IS one charger, by construction, before anything is read.
+**Live catch (#964, found by the adversarial review of #962):** `discover_all_ev_chargers_from_registry`
+(config) and `build_detection_report` (diagnostics) both keyed on `device_id` with no fallback,
+while `probe_charger_candidates` — the third site — already knew better and sub-grouped device-less
+entities by entity-id prefix. Two of three paths, one mechanism.
+**Where it lives:** every walk that turns registry entries into "devices" — the three EV discovery
+sites in `hardware_detection.py`, and the same question for any future per-unit walk (PV strings and
+battery siblings already group on `config_entry_id`, which is why they never had it).
+**Closure:** one shared `group_entities_by_unit`, three callers. `device_id` wins wherever it
+exists; the device-less remainder falls through the identities that are still EVIDENCED, finest
+first — `config_entry_id` + entity-id prefix (one host-based box is one config entry, and it is the
+only thing that separates two boxes a user named identically, since HA disambiguates those by
+numeric SUFFIX), then the prefix alone, then one bucket per platform. **A finer key is only ADOPTED
+when the split it proposes is evidenced:** at least one resulting group must show the charger shape
+on its own (a power reading plus a plug binary or a current control, the prober's rule since #814).
+That is the half that matters, and the reason this could ride a release with no live device-less box
+to prove it on: sharing the prefix rule NAIVELY changes the charger COUNT — a KEBA whose device is
+called "Keba" publishes `sensor.keba_charging_power` and `binary_sensor.keba_plug`, two prefixes,
+ONE box — and splitting it would cost its owner the charger. Where there is one box, every level
+either yields one group or is rejected, so the count cannot move. At an adopted level the groups
+that do not show the shape are DROPPED rather than handed to a brand function, which would invent a
+second, partial charger out of one box's leftovers (openWB's per-loadpoint MQTT entities are two
+real boxes; its `openwb_global_*` site totals are neither) — and `build_detection_report` lists them
+under `unattributed`, so the drop is visible, never silent. **Known limit, fail-closed:** two
+device-less boxes of a brand that shows neither a plug binary nor a current `number` (Easee's status
+is a plain `sensor`, its control a service) still collapse — unevidenced, so unchanged.
+**Guard:** `tests/test_964_charger_unit_grouping.py` — an AST lint over the package that fails on
+any `*.setdefault(<expr>.device_id, …)` (the class recurs by someone writing that line in the next
+discovery path) plus a reflection pin that all three sites call the grouping function; two-box
+separation and one-box no-shatter pinned in BOTH directions with the pre-fix rule spelled out, so
+they cannot pass vacuously; the config-entry case, the leftover drop, the prober's live-rig
+behaviour (#814's SG-Ready switch) and an order-independence oracle. Four mutants — reverting to
+`device_id`-only, adopting the prefix split unconditionally (the literal fix this issue asked for),
+ignoring `config_entry_id`, and keeping the leftovers — are each killed.
+**Sweep question:** for every key this codebase groups by, is it OPTIONAL in its source of truth —
+and if it is absent, does the code get one bucket per missing value, or one bucket for *all* of
+them? A key that can be `None` is not an identity until the `None` case has its own answer.
+Refs #964 #962 #886 #814 #3.

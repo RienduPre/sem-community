@@ -986,6 +986,138 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     _reject_capability_sensor(result, entities)
 
 
+# ============================================================
+# (#964) One physical unit, one bucket — the grouping every registry
+# discovery path shares. ``device_id`` is the registry's own answer and
+# is OPTIONAL; using it as the whole key makes "no device" an identity,
+# and every device-less box of a platform lands in the same bucket.
+# ============================================================
+
+def _entity_id_prefix(entity_id: str) -> str:
+    """The first two object-id tokens — ``sensor.keba_p30_power`` → ``keba_p30``.
+
+    A NAME, not an identity: it is the last resort of ``group_entities_by_unit``
+    and is only ever adopted when the split it proposes is evidenced.
+    """
+    obj = entity_id.split(".", 1)[1] if "." in entity_id else entity_id
+    return "_".join(obj.split("_")[:2])
+
+
+def _shows_charger_shape(entities) -> bool:
+    """Does this group of entities describe a charger ON ITS OWN?
+
+    The same structural rule ``probe_charger_candidates`` admits a candidate
+    by (#814): a power READING plus one of the two marks only a charger has
+    — a plug binary or a current control. A power sensor alone is a smart
+    plug, a toaster, or a site total; a plug binary alone is half a box.
+
+    Used by the grouping below to answer one question and no other: did a
+    finer key find a second BOX, or only a second naming convention?
+    """
+    has_power = has_plug = has_current = False
+    for e in entities:
+        eid = str(getattr(e, "entity_id", "") or "")
+        dom = eid.split(".", 1)[0]
+        dc = getattr(e, "original_device_class", None)
+        if dom == "sensor" and dc == "power":
+            has_power = True
+        elif dom == "binary_sensor" and dc == "plug":
+            has_plug = True
+        elif dom == "number" and dc == "current":
+            has_current = True
+    return has_power and (has_plug or has_current)
+
+
+def group_entities_by_unit(entities) -> Dict[Any, List[Any]]:
+    """Partition registry entries into the PHYSICAL units they describe.
+
+    ``device_id`` wins wherever it exists: it is the registry's own answer.
+    But it is optional — KEBA's UDP integration registers no device, and
+    manually configured MQTT entities have none either — and two of the
+    three discovery sites used it as the WHOLE key (#964). ``None`` is not
+    an identity: every device-less box of a platform collapsed into one
+    bucket, so a per-device role pick (and, since #962, a sibling RANKING
+    that searches that whole bucket for the best-named entity) could hand
+    one charger the other charger's power sensor.
+
+    For the device-less remainder the key falls through the identities that
+    are still EVIDENCED, finest first:
+
+    1. ``config_entry_id`` + entity-id prefix — one host-based box is one
+       config entry, and it is the only thing that separates two boxes a
+       user named identically (Home Assistant disambiguates those with a
+       numeric SUFFIX, which a prefix cannot see).
+    2. the entity-id prefix alone — what the prober has used since #814
+       (a YAML platform registers no config entry either).
+    3. one bucket per platform — the pre-#964 behaviour.
+
+    A finer key is only ADOPTED when the split it proposes is evidenced:
+    at least one of the groups must show the charger shape on its own.
+    Otherwise it is naming noise rather than a box boundary — a KEBA whose
+    device is called "Keba" publishes ``sensor.keba_charging_power`` and
+    ``binary_sensor.keba_plug``: two prefixes, ONE box, and splitting it
+    would cost its owner the charger. That is the half that lets this ride
+    a release without a live device-less box to prove it on: where there is
+    only one box, every level either yields one group or is rejected, and
+    the charger COUNT cannot change.
+
+    At an adopted level the groups that do NOT show the shape are dropped:
+    they cannot be attributed to either box, and a brand function fed one
+    box's leftovers invents a second, partial charger out of them (openWB's
+    per-loadpoint MQTT entities are two real boxes; its ``openwb_global_*``
+    site totals are neither). ``build_detection_report`` lists them under
+    ``unattributed`` so the drop is visible, never silent.
+
+    Returns ``{unit_key: [entities]}``; a unit key is the ``device_id``
+    string where there was one, and an opaque tuple otherwise.
+    """
+    units: Dict[Any, List[Any]] = {}
+    deviceless: Dict[str, List[Any]] = {}
+    for e in entities:
+        device_id = getattr(e, "device_id", None)
+        if device_id is None:
+            deviceless.setdefault(
+                str(getattr(e, "platform", "") or ""), []).append(e)
+        else:
+            units.setdefault(device_id, []).append(e)
+
+    for platform, plat_entities in deviceless.items():
+        def _entry_and_prefix(e, _p=platform):
+            cid = getattr(e, "config_entry_id", None)
+            # A registry entry carries a str or None; anything else (a test
+            # double's auto-attribute) is not an identity to split on.
+            cid = cid if isinstance(cid, str) and cid else ""
+            return ("unit", _p, cid, _entity_id_prefix(str(e.entity_id)))
+
+        def _prefix_only(e, _p=platform):
+            return ("unit", _p, _entity_id_prefix(str(e.entity_id)))
+
+        adopted: Optional[Dict[Any, List[Any]]] = None
+        for key_fn in (_entry_and_prefix, _prefix_only):
+            groups: Dict[Any, List[Any]] = {}
+            for e in plat_entities:
+                groups.setdefault(key_fn(e), []).append(e)
+            if len(groups) < 2:
+                # The key found one unit: nothing to decide, nothing to drop.
+                adopted = groups
+                break
+            shaped = {k: v for k, v in groups.items() if _shows_charger_shape(v)}
+            if shaped:
+                adopted = shaped
+                break
+        if adopted is None:
+            adopted = {("unit", platform): list(plat_entities)}
+        units.update(adopted)
+    return units
+
+
+def unit_device_id(unit_key) -> Optional[str]:
+    """The ``device_id`` a unit key carries, or ``None`` for a device-less
+    unit. Report data and migration metadata alike: an opaque grouping key
+    is never written out as if it were a registry device id."""
+    return unit_key if isinstance(unit_key, str) else None
+
+
 def discover_all_ev_chargers_from_registry(
     hass: HomeAssistant,
 ) -> List[Dict[str, str]]:
@@ -1022,13 +1154,14 @@ def discover_all_ev_chargers_from_registry(
         if not entities:
             continue
 
-        # Group entities by device_id to detect multiple chargers
-        # of the same brand (e.g., 2 Wallbox Pulsars)
-        devices: Dict[Optional[str], list] = {}
-        for e in entities:
-            devices.setdefault(e.device_id, []).append(e)
+        # Group entities by the physical unit they belong to: device_id
+        # where the registry has one (e.g., 2 Wallbox Pulsars), and the
+        # evidenced fallback where it has none (#964 — KEBA registers no
+        # device, and one bucket for "no device" mixes two boxes).
+        devices = group_entities_by_unit(entities)
 
-        for device_id, device_entities in devices.items():
+        for unit_key, device_entities in devices.items():
+            device_id = unit_device_id(unit_key)
             result = discover_fn(device_entities)
             if result:
                 # (#886) never drive a charger through its offline fallback
@@ -1093,22 +1226,16 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
                if not e.disabled_by
                and str(e.platform or "") != "solar_energy_management"]
     # Group by device; entities without a device (KEBA's UDP integration
-    # registers none) group per platform instead of being skipped.
-    # Device-less entities cluster by platform + object-id prefix (first two
-    # tokens): keba_p30_* is one box; a rig's template platform is not one
-    # device (live: a mock charger got an SG-Ready switch for "start/stop").
-    def _prefix(eid: str) -> str:
-        obj = eid.split(".", 1)[1] if "." in eid else eid
-        return "_".join(obj.split("_")[:2])
-    devices: Dict[Any, list] = {}
-    for e in entries:
-        key = (e.device_id if e.device_id is not None
-               else ("platform", str(e.platform or ""), _prefix(str(e.entity_id))))
-        devices.setdefault(key, []).append(e)
+    # registers none) group per platform instead of being skipped —
+    # ``group_entities_by_unit`` is the shared rule (#964), the same one the
+    # config path and the diagnostics report now use: keba_p30_* is one box;
+    # a rig's template platform is not one device (live: a mock charger got
+    # an SG-Ready switch for "start/stop").
+    devices = group_entities_by_unit(entries)
 
     out: List[Dict[str, Any]] = []
     for device_key, dev_entities in devices.items():
-        device_id = device_key if not isinstance(device_key, tuple) else None
+        device_id = unit_device_id(device_key)
         roles: Dict[str, str] = {}
         evidence: List[str] = []
         for e in dev_entities:
@@ -1156,6 +1283,10 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
             out.append({
                 "platform": str(dev_entities[0].platform or ""),
                 "device_id": device_id,
+                # (#964) the grouping key, so two DEVICE-LESS boxes stay two
+                # when the report pairs prober and brand findings — a pair of
+                # ``None`` device ids collapses into one.
+                "unit": str(device_key),
                 "roles": roles,
                 "evidence": evidence,
                 "control_visible": has_control,
@@ -1796,6 +1927,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         "chargers": [],
         "near_misses": [],
         "disabled_ignored": [],
+        # (#964) entities of a device-less platform that no unit could claim
+        # — dropped from the role walk on purpose, never silently.
+        "unattributed": [],
     }
 
     for platform, discover_fn in _EV_CHARGER_PLATFORMS:
@@ -1810,10 +1944,16 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             if e.disabled_by:
                 report["disabled_ignored"].append(str(e.entity_id))
         live = [e for e in plat_entities if not e.disabled_by]
-        devices: Dict[Optional[str], list] = {}
+        # (#964) the same unit grouping as the config path — a device-less
+        # platform is not one charger just because the registry has no
+        # device id for it.
+        devices = group_entities_by_unit(live)
+        attributed = {str(e.entity_id) for g in devices.values() for e in g}
         for e in live:
-            devices.setdefault(e.device_id, []).append(e)
-        for device_id, dev_entities in devices.items():
+            if str(e.entity_id) not in attributed:
+                report["unattributed"].append(_describe(e))
+        for unit_key, dev_entities in devices.items():
+            device_id = unit_device_id(unit_key)
             mapping = discover_fn(dev_entities) or {}
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
@@ -1903,6 +2043,7 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             row = {
                 "platform": str(dev_entities[0].platform or platform),
                 "device_id": device_id,
+                "unit": str(unit_key),
                 "mapped": mapped,
                 "unmapped": [_describe(e) for e in dev_entities
                              if str(e.entity_id) not in used],
@@ -1923,13 +2064,17 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     except Exception:  # noqa: BLE001 — the prober must never cost the report
         cands = []
     report["prober_candidates"] = cands
-    brand_devices = {(c["platform"], c["device_id"]) for c in report["chargers"]}
-    prober_devices = {(c["platform"], c["device_id"]) for c in cands}
+    # (#964) pair on the UNIT, not on the device id: two device-less boxes
+    # both report ``device_id: None`` and collapsed into one row here.
+    brand_devices = {(c["platform"], c["unit"], c["device_id"])
+                     for c in report["chargers"]}
+    prober_devices = {(c["platform"], c["unit"], c["device_id"])
+                      for c in cands}
     report["disagreements"] = (
-        [{"kind": "prober_only", "platform": p, "device_id": d}
-         for (p, d) in sorted(prober_devices - brand_devices, key=str)]
-        + [{"kind": "brand_only", "platform": p, "device_id": d}
-           for (p, d) in sorted(brand_devices - prober_devices, key=str)]
+        [{"kind": "prober_only", "platform": p, "unit": u, "device_id": d}
+         for (p, u, d) in sorted(prober_devices - brand_devices, key=str)]
+        + [{"kind": "brand_only", "platform": p, "unit": u, "device_id": d}
+           for (p, u, d) in sorted(brand_devices - prober_devices, key=str)]
     )
     # (#848) the census rides every report — what is installed, what SEM
     # knows, and the two gap lines that turn installs into detection
