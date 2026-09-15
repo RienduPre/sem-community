@@ -6923,6 +6923,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 return now.replace(hour=h, minute=m, second=0, microsecond=0)
 
             sunrise, sunset = _at(sr_s), _at(ss_s)
+            # (#926) Land full by the EARLIER of sunset and the next closed
+            # meter: every kWh of headroom the pack still has when the export
+            # price turns negative is a kWh the guard does not have to
+            # destroy. The verdict carries the closing time; no price here.
+            _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
+            _until = getattr(_bv, "until", None)
+            if (getattr(_bv, "state", "open") == "held" and _until is not None
+                    and now < _until < sunset):
+                sunset = _until
             _fd = getattr(getattr(self, "_forecast_reader", None),
                           "forecast_data", None)
             day_kwh = getattr(_fd, "forecast_today_kwh", None)
@@ -7211,8 +7220,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                   if soc is None else "none")))
         action = await self._charge_pacing_writer.apply(
             self.hass, entity, cap, observer=self._observer_mode)
+        _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
         self._charge_pacing_state = {
             "enabled": enabled,
+            # (#926) True while the pacer is landing the pack early for a
+            # closing meter — the card can say WHY the cap is tighter.
+            "headroom_for_closed_meter": bool(getattr(_bv, "state", "open") == "held"),
+            "lands_by": (getattr(_bv, "until", None).isoformat()
+                         if getattr(_bv, "state", "open") == "held"
+                         and getattr(_bv, "until", None) is not None else None),
             # The SOC this decision was actually taken on. Published because
             # it is the input that determines the cap, and because it is the
             # value that used to be a cycle stale (and 0.0 on the first cycle
