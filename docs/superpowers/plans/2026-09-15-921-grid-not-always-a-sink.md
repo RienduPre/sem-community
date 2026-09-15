@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13/3.14, Home Assistant custom integration, pytest + pytest-homeassistant-custom-component. Tests run from the CI layout: `rsync -a --delete --exclude=.git --exclude=node_modules ./ /tmp/ha-config-arc/custom_components/solar_energy_management/ && cd /tmp/ha-config-arc && PYTHONPATH=/tmp/ha-config-arc python3.12 -m pytest custom_components/solar_energy_management/tests/<file> -q -p no:warnings` — abbreviated below as `semtest <file>`. Lint: `/tmp/venv-ci/bin/ruff check <files>` (ruff 0.16.3, the CI pin).
 
-**Spec:** `docs/superpowers/specs/2026-09-15-921-grid-not-always-a-sink-design.md`. **Branch:** `feature/921-grid-not-always-a-sink` in the worktree `/home/sem/sem-arc-921`. Stage 4 (#956) is a later branch and not in this plan.
+**Spec:** `docs/superpowers/specs/2026-09-15-921-grid-not-always-a-sink-design.md`. **Branch:** `feature/921-grid-not-always-a-sink` in the worktree `/home/sem/sem-arc-921` (stages 1–3, Tasks 1–17). **Stage 4 (#956, Tasks 18–24) is its own branch `feature/956-roster-services`, cut from develop after the arc merges** — Guido, 15.09: adapters first, #956 after — and completes the arc.
 
 ---
 
@@ -1917,6 +1917,395 @@ Read `run_cycle`'s signature and `_sensors` (`tests/test_873_cycle_executes.py:8
 
 ---
 
+---
+
+# Stage 4 — #956: the roster learns service-shaped controls
+
+**Why it is a separate branch and still part of this plan.** The arc's guard ships on hand-written
+brand verbs (Task 7). #956 is what makes the *next* brand free: a capability offered as a
+SERVICE (Huawei's four `huawei_solar.*` export services, `forcible_charge`; KEBA's `keba.set_current`)
+is invisible to the crawler today — `scripts/crawl_integration_roster.py` never reads
+`services.yaml`, `ROLE_RULES` keys only on entity platforms, `SEM_CONFIG_KEY_FOR_ROLE` maps a role to
+an ENTITY-id key, and the Config card can therefore never propose one. Stage 4 teaches all four
+layers the second shape, then turns Task 7's hand-written Huawei table into a crawled row — with a
+parity test pinning that the adapter and the roster say the same thing, so neither can drift.
+
+**Branch:** `feature/956-roster-services` from develop (after the arc lands). **Read first:**
+`gh issue view 956`, `consts/role_lexicon.py` (`ROLE_RULES`, `SEM_CONFIG_KEY_FOR_ROLE`,
+`OBSERVE_ONLY_ROLES`, `PER_CHARGER_ROLES`, `AUTO_RESOLVED_ROLES`), the crawler's
+`_strings_urls` / `roles_from_vocabulary` / `_match_role` / `render_module` / `write_roles_baseline`,
+`hardware_detection.propose_roles_from_roster` / `_role_action` / `propose_for_installed`, and the
+three #915 structural tests (`test_915_roster_is_not_a_claim.py`, `test_915_roster_at_runtime.py`,
+`test_915_coverage_ratchet.py`) — every one of them must keep passing with the new shape.
+
+**The shape, in one sentence:** a role rule may match a *service* (`{"service": "<domain>.<name>",
+"fields": (...)}`) as well as an entity; a vocabulary row for a service-shaped role carries
+`{"platform": "service", "keys": ("set_zero_power_grid_connection", ...), "target": "device_id",
+"release": "reset_maximum_feed_grid_power"}`; the proposal for such a role resolves to a **service
+plus a target**, accepted into the config keys the adapters already read (`inverter_device_id` for
+Huawei, `export_limit_entity` for a number) — and a service is never proposed as writable without
+the same "SEM may write this" judgement the entity roles get (#810).
+
+### File structure (stage 4)
+
+| File | Responsibility |
+|---|---|
+| `scripts/crawl_integration_roster.py` | Tasks 18–19 — mine `services.yaml`; a second rule form; emit service rows |
+| `consts/role_lexicon.py` | Task 19 — `SERVICE_ROLE_RULES`, `SEM_SERVICE_TARGET_KEY_FOR_ROLE`, `WRITE_GATED_SERVICE_ROLES` |
+| `consts/integration_roster.py` (generated) | Task 20 — regenerated with service rows; `tests/roster_*_baseline.json` moved with the reason |
+| `hardware_detection.py` | Task 21 — `propose_roles_from_roster` intersects service roles with the install's *services* (`hass.services.async_services()`), `_role_action` → `set_option` on the target key |
+| `dashboard/card/src/cards/sem-config-card.js`, `dashboard/translations.json` | Task 22 — a service proposal renders "service · target" with the same accept button |
+| `coordinator/battery_adapters/huawei.py`, `tests/test_956_roster_services.py` | Task 23 — the hand-written Huawei export table becomes a read of the roster row; parity pinned |
+| `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` | Task 24 |
+
+---
+
+### Task 18: Mine `services.yaml` beside the entity vocabulary
+
+**Files:**
+- Modify: `scripts/crawl_integration_roster.py` (beside `_strings_urls`, `:412`)
+- Test: `tests/test_956_roster_services.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+"""#956 — the roster is blind to services; teach the crawler the second shape."""
+import importlib.util
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _crawler():
+    spec = importlib.util.spec_from_file_location("crawler", ROOT / "scripts" / "crawl_integration_roster.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+HUAWEI_SERVICES_YAML = """
+set_zero_power_grid_connection:
+  name: Set zero power grid connection
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          integration: huawei_solar
+set_maximum_feed_grid_power:
+  fields:
+    device_id: {required: true}
+    power: {required: true, selector: {number: {min: 0, max: 50000, unit_of_measurement: W}}}
+reset_maximum_feed_grid_power:
+  fields:
+    device_id: {required: true}
+forcible_charge:
+  fields:
+    device_id: {required: true}
+    power: {required: true}
+    duration: {required: true}
+"""
+
+
+class TestServicesAreMined:
+    def test_services_yaml_urls_sit_beside_strings(self):
+        c = _crawler()
+        urls = list(c._services_urls("wlcrs/huawei_solar", "huawei_solar", "hacs"))
+        assert any(u.endswith("/custom_components/huawei_solar/services.yaml") for u in urls)
+        assert any(u.endswith("/services.yaml") and "custom_components" not in u for u in urls), \
+            "content_in_root repos (wlcrs/huawei_solar is one) have no custom_components wrapper"
+
+    def test_core_services_come_from_the_core_tree(self):
+        c = _crawler()
+        urls = list(c._services_urls("", "keba", "core"))
+        assert urls == ["https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/components/keba/services.yaml"]
+
+    def test_the_parser_yields_name_and_field_set(self):
+        c = _crawler()
+        svc = c.parse_services_yaml(HUAWEI_SERVICES_YAML)
+        assert svc["set_zero_power_grid_connection"]["fields"] == ("device_id",)
+        assert svc["set_maximum_feed_grid_power"]["fields"] == ("device_id", "power")
+        assert "forcible_charge" in svc
+
+    def test_garbage_yields_nothing_not_an_exception(self):
+        c = _crawler()
+        assert c.parse_services_yaml("not: [valid") == {}
+        assert c.parse_services_yaml("") == {}
+```
+
+- [ ] **Step 2: Run it and watch it fail** — `semtest tests/test_956_roster_services.py` → `AttributeError: _services_urls`.
+
+- [ ] **Step 3: The URL builder and the parser**, beside `_strings_urls`:
+
+```python
+def _services_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
+    """Where an integration declares its SERVICES — the second shape a
+    capability arrives in (#956). Same layout rules as ``_strings_urls``:
+    core in the core tree, HACS under custom_components/ or content_in_root."""
+    if origin == "core":
+        yield f"https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/components/{domain}/services.yaml"
+        return
+    if not repo:
+        return
+    for branch in ("main", "master"):
+        for path in (f"custom_components/{domain}/services.yaml", "services.yaml"):
+            yield f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
+
+
+def parse_services_yaml(text: str) -> Dict[str, dict]:
+    """``{service_name: {"fields": (field, ...)}}`` — the name and the field
+    SET, which is all a rule can key on. Garbage is an empty dict, never an
+    exception: one bad file must not cost the whole crawl."""
+    try:
+        import yaml
+        doc = yaml.safe_load(text or "") or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    out = {}
+    for name, body in doc.items():
+        if not isinstance(name, str) or not isinstance(body, dict):
+            continue
+        fields = body.get("fields") or {}
+        out[name] = {"fields": tuple(sorted(str(f) for f in fields)) if isinstance(fields, dict) else ()}
+    return out
+```
+
+Wire it into the fetch: where `_strings_urls` results are fetched per row (`grep -n "_strings_urls(" scripts/crawl_integration_roster.py`), fetch `_services_urls` the same way (same `_get`, same cache, same `offline` flag) and attach the parsed dict to the row as `row["services"]`. `yaml` is already a HA dependency; the crawler runs on the dev box.
+
+- [ ] **Step 4: Run** → 4 passed. **Step 5: Commit** `git commit -m "feat(#956): the crawler reads services.yaml — the second shape a capability arrives in"`
+
+---
+
+### Task 19: A rule form that matches a service
+
+**Files:**
+- Modify: `consts/role_lexicon.py` (after `ROLE_RULES`), `scripts/crawl_integration_roster.py` (`roles_from_vocabulary`, `_match_role`)
+- Test: `tests/test_956_roster_services.py` (append)
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+class TestServiceRoleRules:
+    def test_the_lexicon_has_service_rules_for_the_export_cut(self):
+        from custom_components.solar_energy_management.consts import role_lexicon as lex
+        r = lex.SERVICE_ROLE_RULES["zero_export"]
+        assert r["platform"] == "service"
+        assert any(__import__("re").search(p, "set_zero_power_grid_connection", 2) for p in r["any"])
+        assert "release_any" in r      # the undo is part of the role, not an afterthought
+
+    def test_a_service_row_is_emitted_for_huawei(self):
+        c = _crawler()
+        from custom_components.solar_energy_management.consts import role_lexicon as lex
+        vocab = {"service": {"set_zero_power_grid_connection": {"fields": ("device_id",)},
+                             "reset_maximum_feed_grid_power": {"fields": ("device_id",)},
+                             "forcible_charge": {"fields": ("device_id", "duration", "power")}}}
+        roles = c.roles_from_vocabulary(vocab, lex, kind="energy")
+        row = roles["zero_export"]
+        assert row["platform"] == "service"
+        assert "set_zero_power_grid_connection" in row["keys"]
+        assert row["release"] == "reset_maximum_feed_grid_power"
+        assert row["target"] == "device_id"
+
+    def test_a_service_without_its_release_is_not_a_role(self):
+        """A cut SEM cannot undo is a cut SEM may not make (#908)."""
+        c = _crawler()
+        from custom_components.solar_energy_management.consts import role_lexicon as lex
+        vocab = {"service": {"set_zero_power_grid_connection": {"fields": ("device_id",)}}}
+        assert "zero_export" not in c.roles_from_vocabulary(vocab, lex, kind="energy")
+
+    def test_entity_rules_are_untouched(self):
+        from custom_components.solar_energy_management.consts import role_lexicon as lex
+        assert all(v["platform"] != "service" for v in lex.ROLE_RULES.values())
+```
+
+- [ ] **Step 2: Run and watch it fail.**
+
+- [ ] **Step 3: The rules** (`consts/role_lexicon.py`, after `ROLE_RULES`):
+
+```python
+#: (#956) Roles a brand offers as a SERVICE rather than an entity. ``any``
+#: matches the service NAME; ``fields_any`` a field it must carry; ``release_any``
+#: the service that undoes it — a role without its undo is not proposed
+#: (#908: hand back what you found). ``target`` names the field that
+#: addresses the device, which is what the config key stores.
+SERVICE_ROLE_RULES: Final[Dict[str, Dict[str, Any]]] = {
+    "zero_export": {
+        "platform": "service",
+        "any": (r"zero_power_grid", r"zero_export", r"set_maximum_feed_grid_power$"),
+        "fields_any": (r"device_id",),
+        "release_any": (r"reset_maximum_feed_grid_power", r"reset_export", r"clear_export_limit"),
+        "target": "device_id",
+    },
+    "battery_force_charge_service": {
+        "platform": "service",
+        "any": (r"^forcible_charge$", r"force_charge$"),
+        "fields_any": (r"device_id",),
+        "release_any": (r"stop_forcible_charge", r"stop_force_charge"),
+        "target": "device_id",
+    },
+}
+
+#: (#956) A service-shaped role is accepted into the key its ADAPTER already
+#: reads — never a new spelling of an existing setting.
+SEM_SERVICE_TARGET_KEY_FOR_ROLE: Final[Dict[str, str]] = {
+    "zero_export": "inverter_device_id",
+    "battery_force_charge_service": "inverter_device_id",
+}
+
+#: (#956) Service roles SEM may CALL only after the same write-safety
+#: judgement the entity roles get (#810): a declared service is not consent.
+WRITE_GATED_SERVICE_ROLES: Final[frozenset] = frozenset({"zero_export", "battery_force_charge_service"})
+```
+
+- [ ] **Step 4: The matcher and the row** (`scripts/crawl_integration_roster.py`): in `roles_from_vocabulary`, after the entity rules produce their rows, walk `vocab.get("service", {})` against `lexicon.SERVICE_ROLE_RULES`:
+
+```python
+    svc = vocab.get("service") or {}
+    for role, rule in getattr(lexicon, "SERVICE_ROLE_RULES", {}).items():
+        hits = [n for n, b in svc.items()
+                if any(re.search(p, n, re.I) for p in rule["any"])
+                and (not rule.get("fields_any")
+                     or any(re.search(p, f, re.I) for p in rule["fields_any"] for f in b.get("fields", ())))]
+        release = next((n for n in svc if any(re.search(p, n, re.I) for p in rule.get("release_any", ()))), None)
+        if hits and release:
+            out[role] = {"platform": "service", "keys": tuple(sorted(hits)), "options": (),
+                         "release": release, "target": rule.get("target", "device_id")}
+```
+
+`render_module` needs no change: rows are `repr`'d. `test_915_roster_is_not_a_claim.py::test_every_vocabulary_row_says_so` must still pass — read it; if it requires `kind_from == "vocabulary"` semantics per row, a service row satisfies the same rule (it came from the repo's own `services.yaml`).
+
+- [ ] **Step 5: Run** `semtest tests/test_956_roster_services.py tests/test_915_roster_is_not_a_claim.py` → pass. **Step 6: Commit** `git commit -m "feat(#956): a role rule may match a service — and only with its undo"`
+
+---
+
+### Task 20: Regenerate the roster with service rows
+
+- [ ] **Step 1:** `python3 scripts/crawl_integration_roster.py --refresh --write` (network; ~minutes), then `python3 scripts/crawl_integration_roster.py --roles-baseline` — **read the diff of `tests/roster_roles_baseline.json` before committing** (the file's own header: never regenerate it in the same breath as `--write` without reading the diff). Expect gains only (service rows for `huawei_solar`, possibly `keba`, `deye`), no lost keys.
+- [ ] **Step 2:** `semtest tests/test_915_coverage_ratchet.py tests/test_915_roster_is_not_a_claim.py tests/test_855_brand_footprint_ratchet.py` → pass; the coverage baseline (`tests/roster_coverage_baseline.json`) moves with the reason in the commit.
+- [ ] **Step 3: Commit** `git commit -m "chore(#956): roster regenerated — service-shaped roles for the brands that publish them"`
+
+---
+
+### Task 21: Propose a service role against the install's own services
+
+**Files:**
+- Modify: `hardware_detection.py` (`propose_roles_from_roster`, `_role_action`, `propose_for_installed`)
+- Test: `tests/test_956_roster_services.py` (append)
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from custom_components.solar_energy_management import hardware_detection as hd
+
+
+def _roster_with(vocab):
+    return SimpleNamespace(ROLE_VOCAB={"huawei_solar": vocab}, ROSTER={"huawei_solar": {"kind": "energy"}})
+
+
+HUAWEI_ROW = {"zero_export": {"platform": "service", "keys": ("set_zero_power_grid_connection", "set_maximum_feed_grid_power"),
+                              "options": (), "release": "reset_maximum_feed_grid_power", "target": "device_id"}}
+
+
+class TestServiceProposals:
+    def test_a_service_the_install_registers_is_proposed_with_its_target(self):
+        with patch.object(hd, "_roster", return_value=_roster_with(HUAWEI_ROW)):
+            props = hd.propose_roles_from_roster(
+                [], "huawei_solar",
+                services_of=lambda dom: {"set_zero_power_grid_connection", "reset_maximum_feed_grid_power"},
+                device_id_of=lambda dom: "dev-123")
+        assert props["zero_export"]["service"] == "huawei_solar.set_zero_power_grid_connection"
+        assert props["zero_export"]["release"] == "huawei_solar.reset_maximum_feed_grid_power"
+        assert props["zero_export"]["target"] == "dev-123"
+
+    def test_a_service_the_install_does_not_register_is_not_proposed(self):
+        """An INTERSECTION, like the entity roles: the roster never invents hardware."""
+        with patch.object(hd, "_roster", return_value=_roster_with(HUAWEI_ROW)):
+            props = hd.propose_roles_from_roster([], "huawei_solar", services_of=lambda dom: set(),
+                                                 device_id_of=lambda dom: "dev-123")
+        assert "zero_export" not in props
+
+    def test_a_service_present_without_its_release_is_not_proposed(self):
+        with patch.object(hd, "_roster", return_value=_roster_with(HUAWEI_ROW)):
+            props = hd.propose_roles_from_roster([], "huawei_solar",
+                                                 services_of=lambda dom: {"set_zero_power_grid_connection"},
+                                                 device_id_of=lambda dom: "dev-123")
+        assert "zero_export" not in props
+
+    def test_the_action_writes_the_adapters_own_key_and_is_write_gated(self):
+        act = hd._role_action("zero_export")
+        assert act == {"config_key": "inverter_device_id", "action": "set_option", "write_gated": True}
+
+    def test_the_default_callables_are_not_required_by_entity_callers(self):
+        """Every existing caller passes only (dev_entities, domain) — unchanged."""
+        with patch.object(hd, "_roster", return_value=_roster_with({})):
+            assert hd.propose_roles_from_roster([], "huawei_solar") == {}
+```
+
+- [ ] **Step 2: Run and watch it fail.**
+
+- [ ] **Step 3: The intersection with services.** `propose_roles_from_roster(dev_entities, domain, *, state_of=None, strategy_values=None, services_of=None, device_id_of=None)`: after the entity roles, for each vocabulary row with `platform == "service"`, take `registered = services_of(domain)` (default: `lambda dom: set()`, so existing callers see no change) and propose only when a `keys` member AND the `release` are both registered; `target` comes from `device_id_of(domain)` (default: `lambda dom: ""`). Proposal shape: `{"service": f"{domain}.{name}", "release": f"{domain}.{release}", "target": target, "matched_key": name}`. In `propose_for_installed`, pass `services_of=lambda dom: set(hass.services.async_services().get(dom, {}))` and `device_id_of=` the same resolver `HuaweiBatteryAdapter._autodetect_battery_device` uses (lift it to a module function `resolve_brand_device_id(hass, domain)` so both share it). `_role_action`: consult `SEM_SERVICE_TARGET_KEY_FOR_ROLE` and add `"write_gated": role in WRITE_GATED_SERVICE_ROLES`; existing entity roles return exactly what they return today (pin that with a parametrised test over `SEM_CONFIG_KEY_FOR_ROLE`).
+
+- [ ] **Step 4: Run** `semtest tests/test_956_roster_services.py tests/test_915_roster_at_runtime.py tests/test_915_write_verification.py` → pass. **Step 5: Commit** `git commit -m "feat(#956): a service-shaped role is proposed as an intersection with the install's own services"`
+
+---
+
+### Task 22: The Config card shows a service proposal
+
+**Files:**
+- Modify: `dashboard/card/src/cards/sem-config-card.js` (the `roster_proposals` renderer, `:1103-1140`), `dashboard/translations.json` (16 languages), then `npm run build`
+- Test: `tests/test_956_roster_services.py` (append: the card's proposal branch names both `service` and `target` — parsed from the renderer's template, not `assert … in src`)
+
+- [ ] A proposal carrying `service` renders `service · target` where an entity proposal renders the entity id, uses the same accept button through `_saveOption(p.config_key, target, fieldKey)`, and — when `write_gated` — the button reads *"Allow SEM to call this"* (`config_proposed_write_gated`, 16 languages) so the consent is explicit (#810). `test_963`'s parity guard covers plan keys only; add the two new keys to the parity check in `test_956_roster_services.py` the same way.
+
+- [ ] **Commit** `git commit -m "feat(#956): the Config tab proposes a service-shaped control with explicit consent"`
+
+---
+
+### Task 23: The hand-written Huawei table becomes a roster read — parity pinned
+
+**Files:**
+- Modify: `coordinator/battery_adapters/huawei.py` (Task 7's verbs)
+- Test: `tests/test_956_roster_services.py` (append)
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+class TestParity:
+    def test_the_adapter_and_the_roster_name_the_same_services(self):
+        """One source of truth: the recipe the adapter replays on removal IS
+        the roster's release; the cut it issues IS the roster's key."""
+        from custom_components.solar_energy_management.consts import integration_roster as r
+        from custom_components.solar_energy_management.coordinator.battery_adapters.huawei import (
+            HuaweiBatteryAdapter,
+        )
+        row = r.ROLE_VOCAB["huawei_solar"]["zero_export"]
+        a = HuaweiBatteryAdapter(MagicMock(), {}); a._inverter_device_id = "dev"
+        assert a.export_release_recipe()["service"] == row["release"]
+        assert HuaweiBatteryAdapter.EXPORT_CUT_SERVICE in row["keys"]
+```
+
+- [ ] **Step 2–3:** `HuaweiBatteryAdapter.EXPORT_CUT_SERVICE = "set_zero_power_grid_connection"` and `EXPORT_RELEASE_SERVICE = "reset_maximum_feed_grid_power"` become class constants read from the roster row at import when present (`_roster_row("huawei_solar", "zero_export")`), falling back to the literals — so a roster regeneration that renames a service fails the parity test instead of silently diverging. Deye's row is entity-shaped (`select`), so its verb stays as built; the parity test for Deye pins `zero_export_to_load` against `ROLE_VOCAB["deye"]["battery_strategy"]["options"]` if the roster carries it, else is skipped with the reason.
+
+- [ ] **Commit** `git commit -m "feat(#956): the Huawei export verbs read the roster row — parity pinned, no second source of truth"`
+
+---
+
+### Task 24: Docs
+
+- [ ] `docs/ARCHITECTURE.md` roster section: the second shape, the intersection with `hass.services`, the consent gate. `docs/USER_GUIDE.md` "Detected hardware": a service proposal looks like *service · device* and asks for consent. `CHANGELOG.md`: ✨ **The roster can see a control that arrives as a service** (#956) — one bullet.
+- [ ] **Commit** `git commit -m "docs(#956): a capability's shape is the author's choice — the roster now reads both"`
+
+### Before merge (stage 4)
+
+- Full suite green; ruff clean; CI green on the PR.
+- Challenge record `~/claude-jobs/challenge-feature-956-roster-services.md` — ask ruflo to REFUTE: *"no service is ever proposed without its release, without being registered on the install, or without explicit consent; and the entity roles' proposals are byte-for-byte what they were."*
+- Live check on .46: the Config tab lists Huawei's zero-export service with its device; accepting writes `inverter_device_id`; the guard (Task 7) then has a device without any manual config.
+- Merge on Guido's word with `SEM_FEAT_OK`.
+
 ## Before merge
 
 - Full suite green from `/tmp/ha-config-arc`; `/tmp/venv-ci/bin/ruff check .` clean; CI green on the pushed branch (3.13 and 3.14 rungs).
@@ -1928,4 +2317,5 @@ Read `run_cycle`'s signature and `_sensors` (`tests/test_873_cycle_executes.py:8
 
 - **Spec coverage:** §2 model → Task 3; §3 rows → Tasks 5–12; §4.1 → 3; §4.2 → 5; §4.3 → 6–7; §4.4 → 13; §4.5 → 8; §4.6 → 9–12; §4.7 → 14; §5 → 4, 8; §6 → 5, 6, 8; §7 → every task + 16; §8 stages 1–3 → Tasks 1–2, 3–8, 9–15; §9 → Task 8's probe hold and the Amber carve-out left in `get_current_export_rate`.
 - **Type consistency:** `SinkVerdict(sink, state, reason, until)` everywhere; `ExportGuard.update(now, verdict_state, export_w) → ExportCommand(intent, watts, reason)`; adapter verbs `command_limit_export(watts)` / `command_release_export()`; `BatteryDecision.export_limit_w`; `FleetCycleState.sink_verdicts` / `FleetContext.sink_verdicts` / `BatteryView.sink_verdicts`; `FleetContext.ev_morning_window_open`.
+- **Stage 4 coverage:** #956's four gaps (source, rule form, acceptance path, write gate) → Tasks 18, 19, 21/22, 21; the hand-written Huawei table → Task 23; every #915 structural test named where it must keep passing.
 - **Known soft spots, named:** Task 1's calculator fixture and Task 12's surplus-controller gate name must be read from the file before writing (the plan says so at both points); Task 16's NEGATIVE-level tariff stub is copied from an existing test rather than invented; the Deye export cap is a mode, not watts, and says so.

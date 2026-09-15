@@ -206,7 +206,8 @@ sink_verdicts()  ──────────────► FleetCycleState.s
 4. **#956** — the roster learns service-shaped roles; the brand table becomes a crawled role.
 
 Stages 1–3 ship together on this branch, default-OFF (gate 4: complete and inert), proven once on
-.175, merged on Guido's word with `SEM_FEAT_OK`. Stage 4 is its own branch on the same role shape.
+.175, merged on Guido's word with `SEM_FEAT_OK`. Stage 4 (#956) is its own branch on the same role
+shape — planned in full as Tasks 18–24 of the same plan, so the arc's plan is the complete arc.
 
 ## 9. Not this arc
 
