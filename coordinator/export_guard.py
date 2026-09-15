@@ -87,6 +87,10 @@ class ExportGuard:
                 self.reason = (f"meter closed for {held:.0f}s of "
                                f"{self.engage_hold_s:.0f}s — waiting it out")
                 return ExportCommand(None, 0.0, self.reason)
+            if export_w is None:
+                self.state = "holding"
+                self.reason = "meter closed but unreadable — not cutting on a guess"
+                return ExportCommand(None, 0.0, self.reason)
             if exp < EXPORT_EPS_W:
                 self.state = "holding"
                 self.reason = "meter closed and the sinks absorb everything — nothing to clip"

@@ -448,6 +448,11 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         """Deye's zero-export is a MODE, not a wattage: any cap selects
         ``zero_export_to_load``. The prior mode is captured exactly as the
         force-discharge path captures it, and restored on release."""
+        if not self._system_work_mode_control:
+            # (review) the same consent command_force_discharge asks for: the
+            # entity is persisted even when the control checkbox is off, and a
+            # select SEM was never allowed to drive must not be driven here.
+            raise NotImplementedError("Deye system work mode control is off — SEM may not drive it")
         ent = self._system_work_mode_entity
         target = (self._system_work_mode_options or {}).get("zero_export_to_load")
         if not ent or not target:

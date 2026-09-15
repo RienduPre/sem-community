@@ -81,6 +81,12 @@ class TestLastNotFirst:
         out = _run(g, [(0, CLOSED, None), (ENGAGE_HOLD_S + 1, CLOSED, None)])
         assert out == [None, None] and g.state == "holding"
 
+    def test_a_blind_meter_says_so_not_that_the_sinks_absorbed_everything(self):
+        """Review: 'could not measure' must never read as 'measured zero' (class 86)."""
+        g = ExportGuard()
+        _run(g, [(0, CLOSED, None), (ENGAGE_HOLD_S + 1, CLOSED, None)])
+        assert "unreadable" in g.reason
+
 
 class TestRefusal:
     def test_refused_is_sticky_until_release(self):

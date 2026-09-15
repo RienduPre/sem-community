@@ -32,18 +32,43 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
     # ── (#955) export control is SERVICE-shaped on huawei_solar ──────────
     _EXTERNAL_MODES = ("di active scheduling", "remote scheduling")
 
+    def _export_readback_entity(self) -> str:
+        """The huawei_solar ``*_active_power_control`` sensor — configured, or
+        found in the entity registry (review of the first cut: the config key
+        is never written by the flow, so a config-only read was dead code and
+        the guard WOULD have written under DI Active Scheduling)."""
+        ent = str(self._config.get("export_control_readback_entity", "") or "")
+        if ent:
+            return ent
+        try:
+            from homeassistant.helpers import entity_registry as er
+            reg = er.async_get(self._hass)
+            for e in reg.entities.values():
+                if (str(getattr(e, "platform", "")) == "huawei_solar"
+                        and "active_power_control" in str(e.entity_id)):
+                    return str(e.entity_id)
+        except Exception:  # noqa: BLE001 — no registry, no read-back
+            pass
+        return ""
+
     def _external_scheduling(self) -> bool:
         """The inverter is under an operator's digital-input / remote schedule:
         a zero-export write would REPLACE a mode that is not SEM's to replace."""
-        ent = self._config.get("export_control_readback_entity", "")
+        ent = self._export_readback_entity()
         st = self._hass.states.get(ent) if ent else None
         mode = str(getattr(st, "state", "") or "").lower()
         return any(m in mode for m in self._EXTERNAL_MODES)
 
+    def _export_device_id(self) -> str:
+        """The RESOLVED battery/inverter device id — configured or autodetected
+        (#523), the same one every other Huawei service call uses."""
+        return str(getattr(self, "_inverter_device_id", "")
+                   or self._config.get("inverter_device_id", "") or "")
+
     async def command_limit_export(self, watts: float) -> None:
-        device_id = self._config.get("inverter_device_id", "")
+        device_id = self._export_device_id()
         if not device_id:
-            raise NotImplementedError("no inverter_device_id configured")
+            raise NotImplementedError("no Huawei battery/inverter device found (inverter_device_id)")
         if self._external_scheduling() and not bool(
                 self._config.get("export_guard_override_external", False)):
             raise NotImplementedError(
@@ -63,9 +88,9 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         self._last_intent = BatteryIntent.LIMIT_EXPORT
 
     async def command_release_export(self) -> None:
-        device_id = self._config.get("inverter_device_id", "")
+        device_id = self._export_device_id()
         if not device_id:
-            raise NotImplementedError("no inverter_device_id configured")
+            raise NotImplementedError("no Huawei battery/inverter device found (inverter_device_id)")
         # The integration provides the restore itself: reset IS the prior, so
         # there is nothing to capture and nothing to strand across a restart.
         await self._hass.services.async_call(

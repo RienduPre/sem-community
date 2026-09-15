@@ -105,6 +105,48 @@ class TestHuawei:
         with pytest.raises(NotImplementedError, match="inverter_device_id"):
             await a.command_limit_export(0.0)
 
+    async def test_the_autodetected_device_id_is_used_when_the_config_has_none(self):
+        """Review, CRITICAL: the config key is never written by the flow; every
+        real install relies on #523's autodetection — the first cut ignored it."""
+        hass = _hass()
+        a = HuaweiBatteryAdapter(hass, {})
+        a._inverter_device_id = "detected-battery"          # what __init__'s autodetect sets
+        await a.command_limit_export(0.0)
+        assert ("huawei_solar", "set_zero_power_grid_connection", {"device_id": "detected-battery"}) in _calls(hass)
+
+    async def test_the_readback_is_found_in_the_registry_and_refuses_under_di(self, monkeypatch):
+        """Review, CRITICAL: `export_control_readback_entity` is never configured,
+        so the refusal was dead code — the read-back must be autodetected."""
+        from homeassistant.helpers import entity_registry as er
+        hass = _hass({"sensor.wr_active_power_control": SimpleNamespace(state="DI Active Scheduling")})
+        reg = SimpleNamespace(entities={"x": SimpleNamespace(platform="huawei_solar",
+                                                              entity_id="sensor.wr_active_power_control")})
+        monkeypatch.setattr(er, "async_get", lambda h: reg)
+        a = HuaweiBatteryAdapter(hass, {}); a._inverter_device_id = "detected-battery"
+        with pytest.raises(NotImplementedError, match="external scheduling"):
+            await a.command_limit_export(0.0)
+        assert _calls(hass) == []
+
+
+@pytest.mark.asyncio
+class TestDeye:
+    async def test_refuses_without_work_mode_consent(self):
+        """Review, MEDIUM: the select is persisted even when the control checkbox
+        is off; command_force_discharge asks for consent, so must this."""
+        from custom_components.solar_energy_management.coordinator.battery_adapters.deye import (
+            DeyeBatteryAdapter,
+        )
+        hass = _hass({"select.deye_system_work_mode": SimpleNamespace(state="Selling First")})
+        a = DeyeBatteryAdapter(hass, {
+            "deye_system_work_mode_entity": "select.deye_system_work_mode",
+            "deye_system_work_mode_control": False,
+            "deye_system_work_mode_selling_first_option": "Selling First",
+            "deye_system_work_mode_zero_export_to_load_option": "Zero Export To Load",
+        })
+        with pytest.raises(NotImplementedError, match="control is off"):
+            await a.command_limit_export(0.0)
+        assert _calls(hass) == []
+
 
 @pytest.mark.asyncio
 class TestGeneric:
