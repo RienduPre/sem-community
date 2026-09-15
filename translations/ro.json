@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "Costul exportului la preț negativ"
       },
+      "export_guard_state": {
+        "name": "Gardă de export"
+      },
       "daily_grid_import_energy": {
         "name": "Import azi"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Gardă de export"
+      },
+      "export_guard_override_external": {
+        "name": "Gardă de export: ignoră controlul extern"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Casa ca destinație a bateriei"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Fereastra de dimineață VE"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Asistență baterie – surplus solar min."
+      },
+      "export_guard_engage_s": {
+        "name": "Gardă de export: întârziere de activare (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Gardă de export: întârziere de eliberare (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Fereastra de dimineață VE (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Prag de descărcare dimineața (%)"
       },
       "regulation_offset": {
         "name": "Decalaj de reglare"

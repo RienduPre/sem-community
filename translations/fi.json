@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "Viennin kustannus negatiivisella hinnalla"
       },
+      "export_guard_state": {
+        "name": "Vientivahti"
+      },
       "daily_grid_import_energy": {
         "name": "Tänään osto"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Vientivahti"
+      },
+      "export_guard_override_external": {
+        "name": "Vientivahti: ohita ulkoinen ohjaus"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Talo akun kohteena"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Aamuikkuna sähköautolle"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Akkutuki – vähimmäisaurinkoylijäämä"
+      },
+      "export_guard_engage_s": {
+        "name": "Vientivahti: kytkentäviive (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Vientivahti: vapautusviive (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Aamuikkuna sähköauto (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Aamun purkualaraja (%)"
       },
       "regulation_offset": {
         "name": "Säätöpoikkeama"

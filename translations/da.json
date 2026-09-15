@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "Omkostning ved eksport til negativ pris"
       },
+      "export_guard_state": {
+        "name": "Eksportvagt"
+      },
       "daily_grid_import_energy": {
         "name": "Import i dag"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Eksportvagt"
+      },
+      "export_guard_override_external": {
+        "name": "Eksportvagt: tilsidesæt ekstern styring"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Huset som batteriaftager"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Morgenvindue for elbilen"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Batteristøtte – min. soloverskud"
+      },
+      "export_guard_engage_s": {
+        "name": "Eksportvagt: indkoblingsforsinkelse (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Eksportvagt: frigivelsesforsinkelse (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Morgenvindue elbil (t)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Afladningsgulv om morgenen (%)"
       },
       "regulation_offset": {
         "name": "Reguleringsoffset"

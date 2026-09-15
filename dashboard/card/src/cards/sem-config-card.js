@@ -215,6 +215,11 @@ const WATCHED = [
     'number.sem_battery_priority_soc', 'number.sem_battery_buffer_soc',
     'number.sem_battery_auto_start_soc',
     'number.sem_battery_assist_min_surplus', 'number.sem_battery_assist_max_power',
+    // arc #921
+    'switch.sem_export_guard_enabled', 'switch.sem_export_guard_override_external',
+    'switch.sem_battery_house_sink_enabled', 'switch.sem_ev_morning_window_enabled',
+    'number.sem_export_guard_engage_s', 'number.sem_export_guard_release_s',
+    'number.sem_ev_morning_window_hours', 'number.sem_battery_morning_drain_floor_soc',
     'number.sem_cheap_price_threshold', 'number.sem_expensive_price_threshold',
     'number.sem_minimum_solar_power',
     'number.sem_update_interval',
@@ -2426,6 +2431,18 @@ class SEMConfigCard extends SEMLitBase {
                 'number', null, opts, 'config_help_charge_power_limit_entity')}
             ${this._renderOptionNumberInput('inverter_ac_limit_w', 'config_inverter_ac_limit',
                 { min: 0, max: 100000, step: 100, unit: 'W', default: 0 }, opts, 'config_help_inverter_ac_limit')}
+            ${/* arc #921 — the grid is not always a sink. Four switches, all
+                  default OFF, and their numbers. Same pattern as the pacing
+                  switch above: the entity is the source of truth, the card stages. */ ''}
+            <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle('switch.sem_export_guard_enabled', 'export_guard', T, 'config_help_export_guard')}
+            ${this._renderStepper('number.sem_export_guard_engage_s', 'export_guard_engage_s', T, 'config_help_export_guard_engage_s')}
+            ${this._renderStepper('number.sem_export_guard_release_s', 'export_guard_release_s', T, 'config_help_export_guard_release_s')}
+            ${this._renderToggle('switch.sem_export_guard_override_external', 'export_guard_override', T, 'config_help_export_guard_override')}
+            ${this._renderToggle('switch.sem_battery_house_sink_enabled', 'battery_house_sink', T, 'config_help_battery_house_sink')}
+            ${this._renderToggle('switch.sem_ev_morning_window_enabled', 'ev_morning_window', T, 'config_help_ev_morning_window')}
+            ${this._renderStepper('number.sem_ev_morning_window_hours', 'ev_morning_window_hours', T, 'config_help_ev_morning_window_hours')}
+            ${this._renderStepper('number.sem_battery_morning_drain_floor_soc', 'battery_morning_drain_floor_soc', T, 'config_help_battery_morning_drain_floor_soc')}
             ${deye ? html`
                 <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
                 ${this._renderOptionToggle('deye_system_work_mode_control', 'config_deye_system_work_mode',

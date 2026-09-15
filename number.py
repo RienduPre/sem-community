@@ -148,6 +148,27 @@ NUMBER_TYPES = [
         native_step=100,
         mode=NumberMode.SLIDER,
     ),
+    # (arc #921) the export guard's holds, the morning EV window and its floor
+    NumberEntityDescription(
+        key="export_guard_engage_s", native_unit_of_measurement="s",
+        native_min_value=30, native_max_value=900, native_step=10,
+        mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG,
+    ),
+    NumberEntityDescription(
+        key="export_guard_release_s", native_unit_of_measurement="s",
+        native_min_value=60, native_max_value=1800, native_step=10,
+        mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG,
+    ),
+    NumberEntityDescription(
+        key="ev_morning_window_hours", native_unit_of_measurement="h",
+        native_min_value=0.5, native_max_value=6, native_step=0.5,
+        mode=NumberMode.SLIDER, entity_category=EntityCategory.CONFIG,
+    ),
+    NumberEntityDescription(
+        key="battery_morning_drain_floor_soc", native_unit_of_measurement="%",
+        native_min_value=10, native_max_value=90, native_step=5,
+        mode=NumberMode.SLIDER, entity_category=EntityCategory.CONFIG,
+    ),
     # (#559 Phase 0) threshold for the surplus-availability signal
     # (binary_sensor.sem_surplus_available + the surplus event) that user
     # automations of self-managed (peak_only) devices subscribe to.
@@ -681,6 +702,10 @@ class SEMNumberEntity(CoordinatorEntity, NumberEntity):
             DEFAULT_DAILY_EV_TARGET,
             DEFAULT_BATTERY_ASSIST_MAX_POWER,
             DEFAULT_BATTERY_ASSIST_MIN_SURPLUS,
+            DEFAULT_EXPORT_GUARD_ENGAGE_S,
+            DEFAULT_EXPORT_GUARD_RELEASE_S,
+            DEFAULT_EV_MORNING_WINDOW_HOURS,
+            DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC,
             DEFAULT_REGULATION_OFFSET,
             DEFAULT_DEMAND_CHARGE_RATE,
             DEFAULT_CHEAP_PRICE_THRESHOLD,
@@ -702,6 +727,10 @@ class SEMNumberEntity(CoordinatorEntity, NumberEntity):
             "ev_target_soc_max": 100,
             "battery_assist_max_power": DEFAULT_BATTERY_ASSIST_MAX_POWER,
             "battery_assist_min_surplus": DEFAULT_BATTERY_ASSIST_MIN_SURPLUS,
+            "export_guard_engage_s": DEFAULT_EXPORT_GUARD_ENGAGE_S,
+            "export_guard_release_s": DEFAULT_EXPORT_GUARD_RELEASE_S,
+            "ev_morning_window_hours": DEFAULT_EV_MORNING_WINDOW_HOURS,
+            "battery_morning_drain_floor_soc": DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC,
             "surplus_event_threshold": 1500,
             "regulation_offset": DEFAULT_REGULATION_OFFSET,
             "demand_charge_rate": DEFAULT_DEMAND_CHARGE_RATE,

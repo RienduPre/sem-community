@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "Koszt eksportu przy ujemnej cenie"
       },
+      "export_guard_state": {
+        "name": "Strażnik eksportu"
+      },
       "daily_grid_import_energy": {
         "name": "Import dziś"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Strażnik eksportu"
+      },
+      "export_guard_override_external": {
+        "name": "Strażnik eksportu: pomiń sterowanie zewnętrzne"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Dom jako odbiorca baterii"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Poranne okno EV"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Wsparcie baterii – min. nadwyżka solarna"
+      },
+      "export_guard_engage_s": {
+        "name": "Strażnik eksportu: opóźnienie włączenia (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Strażnik eksportu: opóźnienie zwolnienia (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Poranne okno EV (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Poranny próg rozładowania (%)"
       },
       "regulation_offset": {
         "name": "Przesunięcie regulacji"

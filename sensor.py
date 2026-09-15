@@ -494,6 +494,12 @@ SENSOR_TYPES = [
         state_class=SensorStateClass.TOTAL,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    # (#955) the export guard's state: idle | holding | engaged | releasing | refused
+    SensorEntityDescription(
+        key="export_guard_state",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower-off",
+    ),
     SensorEntityDescription(
         key="daily_battery_charge_energy",
         device_class=SensorDeviceClass.ENERGY,

@@ -1,0 +1,78 @@
+"""arc #921 — the surface: four switches default OFF and persisted, four numbers, the state sensor.
+
+Guido, 20.08: every setting reachable on the SEM dashboard — the options flow
+alone is never enough. And every switch ships OFF (gate 4: complete and
+inert), which the persisted-flag table must say too, or the coordinator
+resolves it differently at setup than the switch does at runtime.
+"""
+from pathlib import Path
+
+from custom_components.solar_energy_management import number as number_mod
+from custom_components.solar_energy_management import sensor as sensor_mod
+from custom_components.solar_energy_management import switch as switch_mod
+from custom_components.solar_energy_management.persisted_flags import PERSISTED_FLAG_DEFAULTS
+
+SWITCHES = ("export_guard_enabled", "export_guard_override_external",
+            "battery_house_sink_enabled", "ev_morning_window_enabled")
+NUMBERS = ("export_guard_engage_s", "export_guard_release_s",
+           "ev_morning_window_hours", "battery_morning_drain_floor_soc")
+
+
+class TestSwitches:
+    def test_all_four_exist(self):
+        keys = {d.key for d in switch_mod.SWITCH_TYPES}
+        assert set(SWITCHES) <= keys
+
+    def test_all_four_are_persisted_and_default_off(self):
+        for k in SWITCHES:
+            assert PERSISTED_FLAG_DEFAULTS[k] is False, k
+
+    def test_all_four_are_config_category(self):
+        for d in switch_mod.SWITCH_TYPES:
+            if d.key in SWITCHES:
+                assert d.entity_category is not None and d.entity_category.value == "config", d.key
+
+
+class TestNumbers:
+    def test_all_four_exist_with_sane_bounds(self):
+        by_key = {d.key: d for d in number_mod.NUMBER_TYPES}
+        for k in NUMBERS:
+            assert k in by_key, k
+        assert by_key["ev_morning_window_hours"].native_min_value == 0.5
+        assert by_key["battery_morning_drain_floor_soc"].native_max_value == 90
+        assert by_key["export_guard_engage_s"].native_min_value >= 30
+        assert by_key["export_guard_release_s"].native_min_value >= 60
+
+    def test_the_defaults_match_what_the_code_falls_back_to(self):
+        """The coordinator's ``config.get(key, default)`` fallbacks and the
+        number entities' defaults must be the same numbers, or a fresh install
+        and a reconfigured one behave differently."""
+        from custom_components.solar_energy_management.consts.core import (
+            DEFAULT_EXPORT_GUARD_ENGAGE_S, DEFAULT_EXPORT_GUARD_RELEASE_S,
+            DEFAULT_EV_MORNING_WINDOW_HOURS, DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC,
+        )
+        assert (DEFAULT_EXPORT_GUARD_ENGAGE_S, DEFAULT_EXPORT_GUARD_RELEASE_S,
+                DEFAULT_EV_MORNING_WINDOW_HOURS, DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC) == (120, 300, 2.0, 50)
+
+
+class TestSensor:
+    def test_the_guard_state_is_a_diagnostic_sensor(self):
+        d = next(d for d in sensor_mod.SENSOR_TYPES if d.key == "export_guard_state")
+        assert d.entity_category is not None and d.entity_category.value == "diagnostic"
+
+
+class TestTheDashboardCarriesThem:
+    """Every setting in the GUI (Guido, 20.08): the Config tab's card renders
+    the toggles and numbers; the grid card shows the guard's state."""
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def test_every_new_entity_is_on_the_config_card(self):
+        src = (self.ROOT / "dashboard" / "card" / "src" / "cards" / "sem-config-card.js").read_text(encoding="utf-8")
+        for k in SWITCHES:
+            assert f"switch.sem_{k}" in src, k
+        for k in NUMBERS:
+            assert f"number.sem_{k}" in src, k
+
+    def test_the_grid_card_shows_the_guard_state(self):
+        src = (self.ROOT / "dashboard" / "card" / "src" / "cards" / "sem-grid-card.js").read_text(encoding="utf-8")
+        assert "export_guard_state" in src

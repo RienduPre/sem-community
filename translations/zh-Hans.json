@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "负电价出口成本"
       },
+      "export_guard_state": {
+        "name": "出口守护"
+      },
       "daily_grid_import_energy": {
         "name": "今日电网购电量"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "出口守护"
+      },
+      "export_guard_override_external": {
+        "name": "出口守护：覆盖外部调度"
+      },
+      "battery_house_sink_enabled": {
+        "name": "住宅作为电池去向"
+      },
+      "ev_morning_window_enabled": {
+        "name": "电动车晨间窗口"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "蓄电池辅助最低太阳能富余功率"
+      },
+      "export_guard_engage_s": {
+        "name": "出口守护启动延迟（秒）"
+      },
+      "export_guard_release_s": {
+        "name": "出口守护解除延迟（秒）"
+      },
+      "ev_morning_window_hours": {
+        "name": "电动车晨间窗口（小时）"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "晨间放电下限（%）"
       },
       "regulation_offset": {
         "name": "调节偏差补偿/偏置"

@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "Kosten van export bij negatieve prijs"
       },
+      "export_guard_state": {
+        "name": "Exportwaker"
+      },
       "daily_grid_import_energy": {
         "name": "Vandaag Import"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Exportwaker"
+      },
+      "export_guard_override_external": {
+        "name": "Exportwaker: externe sturing negeren"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Huis als batterij-afnemer"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Ochtendvenster voor de EV"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Batterij Ondersteuning Min. Zonne-overschot"
+      },
+      "export_guard_engage_s": {
+        "name": "Exportwaker inschakelvertraging (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Exportwaker vrijgavevertraging (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Ochtendvenster EV (u)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Ochtend-ontlaadondergrens (%)"
       },
       "regulation_offset": {
         "name": "Regelingsoffset"

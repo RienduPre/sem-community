@@ -844,6 +844,9 @@
       "daily_grid_export_negative_cost": {
         "name": "Custo de exportar a preço negativo"
       },
+      "export_guard_state": {
+        "name": "Guarda de exportação"
+      },
       "daily_grid_import_energy": {
         "name": "Importação hoje"
       },
@@ -1423,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Guarda de exportação"
+      },
+      "export_guard_override_external": {
+        "name": "Guarda de exportação: ignorar controlo externo"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Casa como destino da bateria"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Janela matinal do VE"
       }
     },
     "number": {
@@ -1440,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Assistência bateria – excedente solar mín."
+      },
+      "export_guard_engage_s": {
+        "name": "Guarda de exportação: atraso de ativação (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Guarda de exportação: atraso de libertação (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Janela matinal VE (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Piso de descarga matinal (%)"
       },
       "regulation_offset": {
         "name": "Offset de regulação"
