@@ -129,3 +129,141 @@ def call_sites(callee: str, *, root: Optional[Path] = None,
                 hits.append((str(rel), n.lineno,
                              [k.arg for k in n.keywords if k.arg]))
     return hits
+
+
+#: Directories a source contract never walks. Anything generated, vendored
+#: or virtual belongs here: `_production_files` parses every file it reaches,
+#: so one un-parseable tree would turn a contract into a crash rather than a
+#: finding.
+_SKIP_DIRS = ("tests", "scripts", "node_modules", ".git", "__pycache__",
+              ".venv", "venv", "build", "dist", ".tox", ".mypy_cache")
+
+
+def _rebinds(node: ast.AST, name: str) -> bool:
+    """Does this statement rebind ``name``? A handler's exception name that
+    has been overwritten is no longer evidence that anything was caught."""
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name) and n.id == name and isinstance(
+                n.ctx, (ast.Store, ast.Del)):
+            return True
+    return False
+
+
+#: Bodies Python evaluates in their OWN scope. An ``except … as e`` name is
+#: deleted at handler exit, so a closure written inside the handler and called
+#: later sees nothing — the binding must not leak into these.
+_OWN_SCOPE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+              ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _except_bound_names(tree: ast.AST) -> dict:
+    """``{id(Call node): frozenset(names an enclosing except-as has bound)}``.
+
+    Walks handlers rather than the whole tree so the binding is SCOPED: a
+    name caught three functions away does not count, a name the handler
+    reassigned no longer counts, and a name referenced from a nested
+    function or comprehension does not count either (Python has deleted it
+    by then). ``except*`` groups bind exactly the same way."""
+    bound: dict = {}
+
+    def walk(node, names: frozenset):
+        if isinstance(node, _OWN_SCOPE):
+            names = frozenset()
+        if isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))) \
+                and hasattr(node, "handlers"):
+            for part in (node.body, node.orelse, node.finalbody):
+                for st in part:
+                    walk(st, names)
+            for h in node.handlers:
+                if h.type is not None:
+                    walk(h.type, names)
+                inner = names | ({h.name} if h.name else set())
+                for st in h.body:
+                    walk(st, frozenset(inner))
+                    if h.name and _rebinds(st, h.name):
+                        inner = set(inner) - {h.name}
+            return
+        if isinstance(node, ast.Call):
+            bound[id(node)] = names
+        for child in ast.iter_child_nodes(node):
+            walk(child, names)
+
+    walk(tree, frozenset())
+    return bound
+
+
+def _production_files(root: Optional[Path], skip_dirs: Iterable[str]):
+    root = root or Path(__file__).resolve().parent.parent
+    for p in sorted(root.rglob("*.py")):
+        rel = p.relative_to(root)
+        if set(rel.parts) & set(skip_dirs):
+            continue
+        yield rel, ast.parse(p.read_text(encoding="utf-8"))
+
+
+def invented_evidence_call_sites(
+        callee: str, *, root: Optional[Path] = None,
+        skip_dirs: Iterable[str] = _SKIP_DIRS) -> list:
+    """(#945, bug class 86) Every production call to ``callee`` whose
+    evidence argument is an exception SEM made up, rather than one an
+    enclosing ``except … as e`` actually caught.
+
+    This is the class-86 sweep question asked structurally, for any counter
+    that takes an exception as its evidence. A caught name means something
+    really happened and really refused; ``RuntimeError("the switch is off")``
+    means somebody turned an OBSERVATION into the same verdict — which is
+    how a restart's warm-up became "your last 3+ commands were rejected".
+
+    Checks the first positional AND every keyword argument, because the
+    parameter has a name and the keyword form is the natural spelling. Pair
+    it with :func:`symbol_reference_files` — a call reached through
+    ``getattr(obj, "callee")`` is invisible here BY NAME, which is exactly
+    how the bug was written.
+
+    Returns ``[(relative_path, lineno, what_was_constructed)]``."""
+    hits = []
+    for rel, tree in _production_files(root, skip_dirs):
+        bound = _except_bound_names(tree)
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Call) and _callee_name(n) == callee):
+                continue
+            args = list(n.args[:1]) + [k.value for k in n.keywords]
+            for arg in args:
+                if isinstance(arg, ast.Name):
+                    if arg.id in bound.get(id(n), frozenset()):
+                        continue      # a command really raised — evidence
+                    hits.append((str(rel), n.lineno, arg.id))
+                elif isinstance(arg, ast.Call):
+                    hits.append((str(rel), n.lineno, _callee_name(arg)))
+                else:
+                    hits.append((str(rel), n.lineno, type(arg).__name__))
+    return hits
+
+
+def symbol_reference_files(name: str, *, root: Optional[Path] = None,
+                           skip_dirs: Iterable[str] = _SKIP_DIRS) -> list:
+    """Every production file that so much as NAMES ``name`` in code — as a
+    definition, an attribute access, or the string inside a ``getattr``.
+
+    The companion to :func:`invented_evidence_call_sites`, and the reason
+    it is not enough on its own: this codebase reaches its hooks through
+    ``getattr(dev, "_record_actuation_failure", None)`` and then calls the
+    local, so every callee-name contract is blind to the one shape the bug
+    actually used. Answer "who may even MENTION this?" instead — a question
+    indirection cannot dodge.
+
+    Returns ``[(relative_path, lineno)]``, ignoring comments and docstrings
+    by construction (bare string constants are not scanned)."""
+    hits = []
+    for rel, tree in _production_files(root, skip_dirs):
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and n.attr == name:
+                hits.append((str(rel), n.lineno))
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and n.name == name:
+                hits.append((str(rel), n.lineno))
+            elif isinstance(n, ast.Call) and _callee_name(n) == "getattr":
+                for a in n.args[1:2]:
+                    if isinstance(a, ast.Constant) and a.value == name:
+                        hits.append((str(rel), n.lineno))
+    return sorted(set(hits))

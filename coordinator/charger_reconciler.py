@@ -982,15 +982,34 @@ class ChargerReconciler:
         # switch that is readable but stuck OFF is controllable AND blocked,
         # so retiring the hold on readability reset it every single cycle:
         # the window never elapsed, the #536 Repair could never stand, and
-        # the retire deleted one a previous lifetime had raised. "Did this
-        # cycle report the surface blocked?" is the question the hold is
-        # actually about, and it is answered here for both sub-cases at once.
-        if not any(a.kind is ActionKind.REPORT_ENABLE_BLOCKED for a in actions):
-            _note_ok = getattr(getattr(adapter, "_device", None),
-                               "_note_enable_unblocked", None)
+        # the retire deleted one a previous lifetime had raised. "Is SEM
+        # asserting this switch and not getting it?" is the question the
+        # hold is actually about, and it is answered here for both sub-cases
+        # at once.
+        #
+        # (#945 round 2) ENABLE counts as asserting. The re-asserts ARE the
+        # episode — five of them, one per cycle, and only then does the
+        # backoff turn into a REPORT. Treating them as quiet cycles both
+        # restarted the clock 50 s before the verdict (so the warm-up hold
+        # covered the wrong half of a restart) and DELETED a standing Repair
+        # once per switch drop, re-raising it five cycles later: the same
+        # churn the write side was taught not to cause, one layer up.
+        _asserting = any(
+            a.kind in (ActionKind.ENABLE, ActionKind.REPORT_ENABLE_BLOCKED)
+            for a in actions)
+        _dev = getattr(adapter, "_device", None)
+        if _asserting:
+            _arm = getattr(_dev, "_note_enable_unasserted", None)
+            if callable(_arm):
+                try:
+                    _arm(now)     # opens/advances the clock; never a verdict
+                except Exception as exc:  # noqa: BLE001 — never cost a cycle
+                    _LOGGER.debug("_note_enable_unasserted() failed: %s", exc)
+        else:
+            _note_ok = getattr(_dev, "_note_enable_unblocked", None)
             if callable(_note_ok):
                 try:
-                    _note_ok()
+                    _note_ok(now)
                 except Exception as exc:  # noqa: BLE001 — never cost a cycle
                     _LOGGER.debug("_note_enable_unblocked() failed: %s", exc)
         for action in actions:
@@ -1014,7 +1033,9 @@ class ChargerReconciler:
                     "leave eco-smart mode) — %s", self.charger_id, decision.reason)
                 report = getattr(adapter, "report_enable_blocked", None)
                 if report is not None:
-                    await report()
+                    # One clock for the whole episode — the cycle stamp the
+                    # arm above used, never a second read of the wall (#945).
+                    await report(now)
             elif action.kind is ActionKind.REPORT_STOP_WAR:
                 # #763 — once per ONSET (the #700 pattern): the ceasefire
                 # holds for half an hour and re-warning every 10 s cycle

@@ -94,14 +94,18 @@ DECLARED: dict[str, str] = {
     "coordinator/sensor_reader.py::SensorReader._read_sensor":
         "the first live read of each reader lifetime clears once "
         "(_sensor_repair_reconciled, #933)",
-    "devices/base.py::CurrentControlDevice._note_enable_unblocked":
+    "devices/base.py::CurrentControlDevice._drain_enable_episode":
         "NOT a first-of-lifetime clear, on purpose (#945): the issue id is "
         "shared with the write side (#462) and an unblocked enable switch is "
         "no evidence that current commands land — a KEBA/service/button "
         "charger has no switch at all, so clearing on its first cycle would "
         "delete a genuine 'every command rejected' Repair. A predecessor's "
         "Repair on this id is retired by #485 H5's first-good-write clear "
-        "(_stale_repair_checked), which IS evidence SEM can command it",
+        "(_stale_repair_checked), which IS evidence SEM can command it. "
+        "(round 2) The gate is now the fault INTEGRAL reaching empty rather "
+        "than a single quiet cycle: one good cycle is what an oscillating "
+        "switch looks like between drops, and clearing on it both churned "
+        "the notice and made the #536 fault unreportable",
     "devices/base.py::CurrentControlDevice._clear_actuation_failure":
         "the first good write of each device instance clears once "
         "(_stale_repair_checked, #485 H5)",

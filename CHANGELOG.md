@@ -13,6 +13,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Today's Plan announced one "EV charging starts" per pricing slot**
+  (#963, by @HorizonKane). A charge running 14:00–17:00 arrives from the joint
+  plan as three hourly blocks, and the plan strip drew a start row for each —
+  his screenshot showed six starts for two charges. The strip keeps the
+  earliest eight rows, so the duplicates pushed out everything later than
+  20:00 — his plan is missing the "Min reached" row the composer emitted at
+  21:00, along with the night window and the deadline. Touching blocks now
+  merge into one window announced once; a real gap stays a real second start.
+
+- 🌍 **The Today's Plan card is translated again** (#963). Thirteen of its
+  eighteen strings carried the English source text in thirteen of the sixteen
+  languages, so a German install read `EV charging starts` over
+  `geplantes Fenster — Block des Energieplans`. All sixteen languages are
+  complete, and a test now fails the build if a plan string is left in English.
+
+# [2.1.0-beta.25] — 15.09.2026
+
+- 🐛 **A restart no longer tells you your charger stopped listening — this
+  time for the other half of it** (#945, by @alexmc1510). beta.17 taught SEM
+  to wait out a restart when the charger's start/stop switch is not in Home
+  Assistant yet. But the switch APPEARS partway through a restart, still
+  reading off because its own integration has not reached the box, and that
+  path was untouched: SEM re-asserted the switch five times, gave up, and
+  eighty seconds later filed the same red notice with a different sentence —
+  "enable switch will not stay on". The three cycles that filed it are cycles
+  on which SEM sends nothing at all, so "SEM's last 3+ current commands were
+  rejected" was never true of them. SEM now measures how long it has actually
+  been unable to keep the switch on, in seconds rather than in cycles, and
+  good minutes pay that debt back down — so a charger that hiccups and
+  recovers is never accused, one that genuinely refuses still is, and a
+  charger you have fixed clears itself. Observer mode, which sends nothing by
+  design, reports nothing at all. Music for this one: Talk Talk, *It's My
+  Life* — "funny how I blind myself".
+
+# [2.1.0-beta.24] — 14.09.2026
+
+- 🐛 **A charger's advertised capability is no longer read as its
+  measurement** (by @bgthb in #962). His Huawei SCharger 22-KT over
+  [lbbrhzn/ocpp](https://github.com/lbbrhzn/ocpp) read as drawing full power at
+  all times, with no car plugged in: auto-detection had bound
+  `sensor.wallbox_power_offered` — OCPP's `Power.Offered`, the 22 kW the box
+  advertises it *could* give — as the charging-power sensor, and an
+  `…_export_interval` counter as the total-energy one. OCPP names its sensors
+  after the protocol's measurands, so one charge point publishes
+  `Power.Active.Import`, `Power.Offered` and `Power.Active.Export` all as
+  `device_class: power`; every brand matcher bound these read roles on that
+  device class alone and kept the first or last entity it saw, so registry
+  ORDER picked. SEM then infers a connection from physics — current cannot
+  flow without a plug — so an idle charger read as a charging car forever.
+- 🛡️ **Detection now separates what a charger measures from what it
+  advertises** (#962). A read role naming a capability (`offered`, `limit`,
+  `max`, `rated`, …) or the wrong quantity (`export`, `reactive`) is swapped
+  for the sibling that measures — same device class, same unit family, never a
+  polyphase leg, never an entity already holding another role — chosen by a
+  stable rank over the entity id rather than by registry order. It swaps and
+  never drops: a name SEM merely finds suspicious must not cost anyone their
+  charger. The guard sits at the one choke point all four registry discovery
+  paths share, so it holds for every brand, including the next one.
+
 # [2.1.0-beta.23] — 14.09.2026
 
 - 🐛 **The EV trace no longer calls the fleet budget a command** (#961, found
