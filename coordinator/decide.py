@@ -281,10 +281,16 @@ def _battery_assist_split(view: ChargerView) -> tuple[float, float]:
     # mode carries the consent. The budget (spendable > 0, tonight's floor)
     # stays the SAFETY either way.
     if surplus < f.battery_assist_min_surplus_w:
+        # (#892) a morning window the user opened is consent AND budget: the
+        # pack is spent into the car on purpose, bounded by the drain floor
+        # decide_battery enforces — so the solar gate does not apply.
+        _window = bool(getattr(f, "ev_morning_window_open", False))
         _consent = (getattr(view, "mode", None) == "solar_plus_battery"
-                    or bool(getattr(f, "forecast_spending_enabled", False)))
-        if not (_consent
-                and float(getattr(f, "battery_spendable_kwh", 0.0) or 0.0) > 0.0):
+                    or bool(getattr(f, "forecast_spending_enabled", False))
+                    or _window)
+        _budget_ok = (float(getattr(f, "battery_spendable_kwh", 0.0) or 0.0) > 0.0
+                      or _window)
+        if not (_consent and _budget_ok):
             return surplus, 0.0
     potential = battery_assist_potential_w(
         f.battery_soc,

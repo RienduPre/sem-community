@@ -10948,6 +10948,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             battery_commanded=self._battery_commanded(),
             curtailment_grant_w=self._curtailment_grant_w(power),
             sink_verdicts=_verdicts,
+            morning_window_open=bool(
+                getattr(_verdicts.get("ev"), "state", "") == "open"
+                and self.config.get("ev_morning_window_enabled", False)),
         )
 
     def _curtailment_grant_w(self, power) -> float:

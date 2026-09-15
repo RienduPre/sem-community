@@ -723,6 +723,10 @@ class FleetContext:
     """(arc #921) the cycle's sink verdicts — ``{sink: SinkVerdict}``. Empty
     until computed, and an empty dict reads as "every sink OPEN" everywhere."""
 
+    ev_morning_window_open: bool = False
+    """(#892) the ev sink verdict is OPEN this cycle — the pack may feed the
+    car below the solar gate, down to the drain floor."""
+
     home_w: float = 0.0
     """Home consumption (W). Pre-priority-attribution this was
     the slack variable; post-#349 it's a first-class demand."""
@@ -985,6 +989,9 @@ class FleetCycleState:
     #: (arc #921) the cycle's sink verdicts, computed once in
     #: ``_build_fleet_cycle_state`` and read by every consumer from here.
     sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    #: (#892) the ev sink verdict is OPEN this cycle — a morning window the
+    #: user opened; the charger side may offer the pack below the solar gate.
+    morning_window_open: bool = False
 
 
 @dataclass(frozen=True)
