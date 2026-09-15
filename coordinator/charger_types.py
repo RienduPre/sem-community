@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Dict
 
 from .plan_verdict import PlanVerdict
 
@@ -709,6 +709,10 @@ class FleetContext:
     production. Added to the surplus exactly like measured solar;
     0.0 whenever the probe is off/idle."""
 
+    sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    """(arc #921) the cycle's sink verdicts — ``{sink: SinkVerdict}``. Empty
+    until computed, and an empty dict reads as "every sink OPEN" everywhere."""
+
     home_w: float = 0.0
     """Home consumption (W). Pre-priority-attribution this was
     the slack variable; post-#349 it's a first-class demand."""
@@ -968,6 +972,9 @@ class FleetCycleState:
     # treats exactly like measured solar (see coordinator/curtailment.py).
     # 0.0 = probe off/idle — the entire feature disappears from the math.
     curtailment_grant_w: float = 0.0
+    #: (arc #921) the cycle's sink verdicts, computed once in
+    #: ``_build_fleet_cycle_state`` and read by every consumer from here.
+    sink_verdicts: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

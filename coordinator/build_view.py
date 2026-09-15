@@ -195,6 +195,8 @@ def build_charger_view(
         curtailment_grant_w=float(
             getattr(fleet_state, "curtailment_grant_w", 0.0) or 0.0,
         ),
+        # (arc #921) the sink verdicts ride the same one-place thread.
+        sink_verdicts=dict(getattr(fleet_state, "sink_verdicts", None) or {}),
         home_w=float(getattr(power_reading, "home_consumption_power", 0.0) or 0.0),
         battery_charge_w=float(getattr(power_reading, "battery_charge_power", 0.0) or 0.0),
         battery_discharge_w=float(getattr(power_reading, "battery_discharge_power", 0.0) or 0.0),

@@ -6865,6 +6865,41 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         except Exception:  # noqa: BLE001 — no sun frame, no claim
             return None
 
+    # ── arc #921 inputs to the sink verdicts ───────────────────────────
+    def _ev_departure_dt(self):
+        """(#892) The configured departure as a datetime — today, or tomorrow
+        once it has passed — or None when no departure entity is set/readable."""
+        ent = self.config.get("ev_departure_time_entity", "")
+        st = self.hass.states.get(ent) if ent else None
+        if not st or str(getattr(st, "state", "")) in ("unknown", "unavailable", ""):
+            return None
+        try:
+            h, m = (int(x) for x in str(st.state).split(":")[:2])
+        except (TypeError, ValueError):
+            return None
+        now = dt_util.now()
+        dep = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        return dep if dep > now else dep + timedelta(days=1)
+
+    def _forecast_refills_pack(self) -> bool:
+        """(#892) Will today's remaining forecast put back what a morning window
+        takes? Conservative on purpose: an unknown forecast is False."""
+        _fd = getattr(getattr(self, "_forecast_reader", None), "forecast_data", None)
+        remaining = getattr(_fd, "forecast_remaining_today_kwh", None)
+        cap = float(getattr(self, "battery_capacity_kwh", 0.0) or 0.0)
+        if remaining is None or cap <= 0:
+            return False
+        floor = float(self.config.get("battery_morning_drain_floor_soc", 50.0) or 50.0)
+        return float(remaining) >= cap * (1.0 - floor / 100.0)
+
+    def _pacing_horizon_end(self):
+        """(#926) Sunset+10 today as a datetime — the pacer's own horizon."""
+        try:
+            h, m = (int(x) for x in self.time_manager.get_sunset_plus_10_time().split(":"))
+            return dt_util.now().replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:  # noqa: BLE001 — no frame, no horizon
+            return None
+
     def _today_pacing_ledger(self) -> list:
         """(#820) Today's remaining-day slots, or [] outside daylight /
         without a forecast. Same sun frame and home-draw fallback the
@@ -10787,6 +10822,40 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # (#864) The slot-budget allowance — the PREVENTIVE peak bound.
         self._compute_peak_slot_allowance(power)
 
+        # (arc #921) one verdict per sink, computed here and nowhere else. The
+        # export price is read with the SAME tri-state the forecast sell uses:
+        # unreadable is a state, never 0, and never a closed meter.
+        from .sink_verdicts import sink_verdicts
+        _xr_known = False
+        _prov = getattr(self, "_tariff_provider", None)
+        try:
+            if _prov is not None and hasattr(_prov, "get_current_export_rate"):
+                float(_prov.get_current_export_rate())
+                _xr_known = True
+        except Exception:  # noqa: BLE001 — unreadable is a state, not 0
+            _xr_known = False
+        try:
+            _ups = (getattr(_prov.get_tariff_data(), "upcoming_prices", None)
+                    if _prov is not None else None)
+        except Exception:  # noqa: BLE001
+            _ups = None
+        try:
+            _verdicts = sink_verdicts(
+                now=dt_util.now(), tariff_level=tariff_level, upcoming=_ups,
+                export_rate_known=_xr_known,
+                export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
+                house_sink_enabled=bool(self.config.get("battery_house_sink_enabled", False)),
+                morning_window_enabled=bool(self.config.get("ev_morning_window_enabled", False)),
+                departure=self._ev_departure_dt(),
+                morning_hours=float(self.config.get("ev_morning_window_hours", 2.0) or 2.0),
+                forecast_refills_pack=self._forecast_refills_pack(),
+                pacing_horizon_end=self._pacing_horizon_end(),
+            )
+        except Exception:  # noqa: BLE001 — a verdict bug must not kill a cycle
+            _LOGGER.warning("sink verdicts FAILED this cycle — every sink reads "
+                            "OPEN until it recovers (arc #921)", exc_info=True)
+            _verdicts = {}
+        self._sink_verdicts = _verdicts
         return FleetCycleState(
             power=power,
             config=self.config,
@@ -10812,6 +10881,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             battery_priority=battery_priority,
             battery_commanded=self._battery_commanded(),
             curtailment_grant_w=self._curtailment_grant_w(power),
+            sink_verdicts=_verdicts,
         )
 
     def _curtailment_grant_w(self, power) -> float:
