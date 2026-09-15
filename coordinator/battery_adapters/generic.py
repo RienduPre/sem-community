@@ -190,6 +190,37 @@ class GenericBatteryAdapter(BatteryControlAdapter):
             return True
         return bool(self._force_charge_switch and self._target_soc_entity)
 
+    # ── (#955) export control is a writable number, when there is one ────
+    async def command_limit_export(self, watts: float) -> None:
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        if not ent:
+            raise NotImplementedError("no export limit entity configured")
+        if not ent.startswith("number."):
+            raise NotImplementedError(
+                f"{ent} is read-only — an export limit SEM can see but not set")
+        if getattr(self, "_export_prior", None) is None:
+            st = self._hass.states.get(ent)
+            try:
+                self._export_prior = float(getattr(st, "state", None))
+            except (TypeError, ValueError):
+                raise NotImplementedError(
+                    f"{ent} is unreadable — nothing to restore to") from None
+        w = max(0.0, float(watts))
+        await self._hass.services.async_call(
+            "number", "set_value", {"entity_id": ent, "value": w})
+        self._last_export_limit_w = w
+        self._last_intent = BatteryIntent.LIMIT_EXPORT
+
+    async def command_release_export(self) -> None:
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        prior = getattr(self, "_export_prior", None)
+        if ent and prior is not None:
+            await self._hass.services.async_call(
+                "number", "set_value", {"entity_id": ent, "value": float(prior)})
+        self._export_prior = None
+        self._last_export_limit_w = None
+        self._last_intent = BatteryIntent.RELEASE_EXPORT
+
     async def command_normal(self) -> None:
         await self._write_force_discharge(0.0)  # #523 mutual exclusion
         # AC-coupled (Sessy): self-consumption is its OWN power strategy

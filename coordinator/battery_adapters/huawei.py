@@ -29,6 +29,50 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
     """Huawei battery control. Delegates forced charge to the
     existing :class:`HuaweiChargeAdapter` for backward compat."""
 
+    # ── (#955) export control is SERVICE-shaped on huawei_solar ──────────
+    _EXTERNAL_MODES = ("di active scheduling", "remote scheduling")
+
+    def _external_scheduling(self) -> bool:
+        """The inverter is under an operator's digital-input / remote schedule:
+        a zero-export write would REPLACE a mode that is not SEM's to replace."""
+        ent = self._config.get("export_control_readback_entity", "")
+        st = self._hass.states.get(ent) if ent else None
+        mode = str(getattr(st, "state", "") or "").lower()
+        return any(m in mode for m in self._EXTERNAL_MODES)
+
+    async def command_limit_export(self, watts: float) -> None:
+        device_id = self._config.get("inverter_device_id", "")
+        if not device_id:
+            raise NotImplementedError("no inverter_device_id configured")
+        if self._external_scheduling() and not bool(
+                self._config.get("export_guard_override_external", False)):
+            raise NotImplementedError(
+                "inverter is under external scheduling — an operator's mode is "
+                "not SEM's to replace")
+        w = max(0.0, float(watts))
+        if self._last_export_limit_w is not None and abs(self._last_export_limit_w - w) < 1.0:
+            return                       # #538 — a repeat is pure cost
+        if w <= 0.0:
+            await self._hass.services.async_call(
+                "huawei_solar", "set_zero_power_grid_connection", {"device_id": device_id})
+        else:
+            await self._hass.services.async_call(
+                "huawei_solar", "set_maximum_feed_grid_power",
+                {"device_id": device_id, "power": int(round(w))})
+        self._last_export_limit_w = w
+        self._last_intent = BatteryIntent.LIMIT_EXPORT
+
+    async def command_release_export(self) -> None:
+        device_id = self._config.get("inverter_device_id", "")
+        if not device_id:
+            raise NotImplementedError("no inverter_device_id configured")
+        # The integration provides the restore itself: reset IS the prior, so
+        # there is nothing to capture and nothing to strand across a restart.
+        await self._hass.services.async_call(
+            "huawei_solar", "reset_maximum_feed_grid_power", {"device_id": device_id})
+        self._last_export_limit_w = None
+        self._last_intent = BatteryIntent.RELEASE_EXPORT
+
     @classmethod
     def expected_operating_modes(cls):
         """(#845) SEM's whole model assumes the LUNA sits in

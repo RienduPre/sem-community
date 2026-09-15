@@ -440,6 +440,20 @@ class BatteryControlAdapter(ABC):
         self._last_error = None
         self._last_intent = BatteryIntent.STOP_FORCE_DISCHARGE
 
+    # ── (#955) export control: the dialect is per brand ──────────────────
+    #: What the adapter last wrote as an export cap; None = released / never.
+    _last_export_limit_w: Optional[float] = None
+
+    async def command_limit_export(self, watts: float) -> None:
+        """Cap grid feed-in at ``watts`` (0 = zero export). Brands without an
+        export control raise ``NotImplementedError`` — the guard records the
+        refusal; it is a state, not a crash."""
+        raise NotImplementedError("this battery adapter has no export control")
+
+    async def command_release_export(self) -> None:
+        """Put the feed-in limit back to what SEM found."""
+        raise NotImplementedError("this battery adapter has no export control")
+
     async def command_off(self) -> None:
         """#523 (RienduPre): SEM hands-off this battery.
 

@@ -443,6 +443,38 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
             self._system_work_mode_entity, selling, "select")
         return bool(ok)
 
+    # ── (#955) export control is the System Work Mode select on Deye ─────
+    async def command_limit_export(self, watts: float) -> None:
+        """Deye's zero-export is a MODE, not a wattage: any cap selects
+        ``zero_export_to_load``. The prior mode is captured exactly as the
+        force-discharge path captures it, and restored on release."""
+        ent = self._system_work_mode_entity
+        target = (self._system_work_mode_options or {}).get("zero_export_to_load")
+        if not ent or not target:
+            raise NotImplementedError("no Deye system work mode select configured")
+        current = self._get_state(ent)
+        if current == target:
+            self._last_export_limit_w = 0.0
+            return
+        if current and current in self._system_work_mode_options.values():
+            self._export_mode_prior = str(current)
+        if not await self._write_and_verify(ent, target, "select"):
+            raise RuntimeError("Deye work mode write did not verify")
+        self._last_export_limit_w = 0.0
+        self._last_intent = BatteryIntent.LIMIT_EXPORT
+
+    async def command_release_export(self) -> None:
+        ent = self._system_work_mode_entity
+        prior = getattr(self, "_export_mode_prior", None)
+        if not ent:
+            raise NotImplementedError("no Deye system work mode select configured")
+        if prior and self._get_state(ent) != prior:
+            if not await self._write_and_verify(ent, prior, "select"):
+                raise RuntimeError("Deye work mode restore did not verify")
+        self._export_mode_prior = None
+        self._last_export_limit_w = None
+        self._last_intent = BatteryIntent.RELEASE_EXPORT
+
     async def command_stop_force_discharge(self) -> bool:
         """(#827) Restore the pre-spend mode. With no captured prior (a
         restart mid-spend), fall back to Zero Export To Load — the SAFE
