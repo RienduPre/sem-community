@@ -52,6 +52,17 @@ class TestRelease:
         assert await SEMCoordinator.async_release_export_guard(fake, reason="unloaded") is None
         adapter.command_release_export.assert_not_awaited()
 
+    async def test_observer_mode_releases_nothing_and_resets_the_guard(self):
+        """Review of the first cut, HIGH: the guard reaches 'engaged' in observer
+        mode too (its state is time + measured export), but nothing was ever
+        written — so a release would be the first REAL write, on the rig's
+        shared Huawei. #936's rule: left exactly as found."""
+        fake, g, adapter = _fake("engaged")
+        fake._observer_mode = True
+        said = await SEMCoordinator.async_release_export_guard(fake, reason="unloaded")
+        adapter.command_release_export.assert_not_awaited()
+        assert g.state == "idle" and said is None
+
     async def test_no_guard_at_all_is_fine(self):
         fake = SimpleNamespace(_battery_adapters={}, _observer_mode=False)
         assert await SEMCoordinator.async_release_export_guard(fake, reason="unloaded") is None

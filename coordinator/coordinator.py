@@ -7798,6 +7798,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 arbitrage_sell=_arb_sell,
                 # (arc #921) the cycle's sink verdicts, computed once in the fleet state
                 sink_verdicts=getattr(self, "_sink_verdicts", None) or {},
+                # (#892) pre-gated: the switch AND the verdict, never the raw state
+                morning_window_open=bool(
+                    getattr((getattr(self, "_sink_verdicts", None) or {}).get("ev"),
+                            "state", "") == "open"
+                    and self.config.get("ev_morning_window_enabled", False)),
                 forecast_sell=_fsell,
             )
 
@@ -10724,6 +10729,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         the log, or None when there was nothing to release."""
         guard = getattr(self, "_export_guard", None)
         if guard is None or guard.state not in ("engaged", "releasing", "refused"):
+            return None
+        if bool(getattr(self, "_observer_mode", False)):
+            # Observer mode recorded WOULDs and wrote nothing (#936: the rig's
+            # batteries are left exactly as found) — releasing would be the
+            # first real write of the lifetime, on hardware SEM never touched.
+            guard.state = "idle"
+            guard.reason = f"observer — nothing was written, nothing to release ({reason})"
             return None
         released = []
         for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():

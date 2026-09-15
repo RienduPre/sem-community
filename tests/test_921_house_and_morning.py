@@ -22,7 +22,8 @@ from custom_components.solar_energy_management.coordinator.sink_verdicts import 
 )
 
 
-def _view(*, house=None, ev=None, soc=80.0, ev_connected=False, cfg_extra=None):
+def _view(*, house=None, ev=None, soc=80.0, ev_connected=False, cfg_extra=None,
+          window=None):
     cfg = {"battery_max_discharge_power": 4000, "battery_max_charge_power_w": 5000,
            "battery_mode": "auto", "battery_morning_drain_floor_soc": 50.0}
     cfg.update(cfg_extra or {})
@@ -31,10 +32,13 @@ def _view(*, house=None, ev=None, soc=80.0, ev_connected=False, cfg_extra=None):
         verdicts["house"] = SinkVerdict("house", house, "t")
     if ev:
         verdicts["ev"] = SinkVerdict("ev", ev, "t")
+    if window is None:
+        window = (ev == OPEN)          # the gated flag the coordinator computes
     return BatteryView(runtime=BatteryRuntime(battery_id="b1", last_known_soc=soc), config=cfg,
                        fleet=FleetContext(), charging_state="idle", ev_charging=ev_connected,
                        ev_connected=ev_connected, home_consumption_w=800.0,
-                       scheduler_decision=None, sink_verdicts=verdicts)
+                       scheduler_decision=None, sink_verdicts=verdicts,
+                       morning_window_open=window)
 
 
 class TestHouse:
@@ -56,6 +60,23 @@ class TestHouse:
     def test_held_yields_to_off(self):
         d = decide_battery(_view(house=HELD, cfg_extra={"battery_mode": "off"}))
         assert d.intent is BatteryIntent.OFF
+
+
+class TestTheDisabledSentinelNeverLiftsTheClamp:
+    """Review of the first cut, CRITICAL: with the #892 switch OFF the ev
+    verdict is OPEN ("legacy assist rule") and decide_battery read that raw
+    state as a morning window — the EV protection clamp was bypassed on
+    every install. The PROD-2026-06-26 shape this clamp exists for:"""
+
+    def test_everything_off_ev_connected_low_surplus_soc_83_is_the_clamp(self):
+        v = _view(ev=OPEN, ev_connected=True, soc=83.0, window=False)
+        d = decide_battery(v)
+        assert d.intent is BatteryIntent.LIMIT_DISCHARGE, d.reason
+        assert "morning window" not in d.reason
+
+    def test_the_raw_verdict_alone_never_opens_the_window(self):
+        v = _view(ev=OPEN, ev_connected=True, soc=83.0, window=False)
+        assert "morning window" not in decide_battery(v).reason
 
 
 class TestMorningEv:
