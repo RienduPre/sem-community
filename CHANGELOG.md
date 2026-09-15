@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Today's Plan announced one "EV charging starts" per pricing slot**
+  (#963, by @HorizonKane). A charge running 14:00–17:00 arrives from the joint
+  plan as three hourly blocks, and the plan strip drew a start row for each —
+  his screenshot showed six starts for two charges. The strip keeps the
+  earliest eight rows, so the duplicates pushed out everything later than
+  20:00 — his plan is missing the "Min reached" row the composer emitted at
+  21:00, along with the night window and the deadline. Touching blocks now
+  merge into one window announced once; a real gap stays a real second start.
+
+- 🌍 **The Today's Plan card is translated again** (#963). Thirteen of its
+  eighteen strings carried the English source text in thirteen of the sixteen
+  languages, so a German install read `EV charging starts` over
+  `geplantes Fenster — Block des Energieplans`. All sixteen languages are
+  complete, and a test now fails the build if a plan string is left in English.
+
 # [2.1.0-beta.25] — 15.09.2026
 
 - 🐛 **A restart no longer tells you your charger stopped listening — this

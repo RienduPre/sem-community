@@ -141,6 +141,30 @@ def _consecutive_blocks(
     return blocks
 
 
+def _merge_touching(
+    blocks: List[tuple],
+    join_gap: timedelta = timedelta(minutes=1),
+) -> List[tuple]:
+    """(#963) Collapse ``(start, end)`` pairs that touch into single windows.
+
+    The joint plan hands out one block per pricing slot, but a user reads the
+    plan for *transitions*: a run of adjacent slots is ONE charge that starts
+    once. Only genuinely adjacent blocks merge — ``join_gap`` absorbs slot
+    arithmetic (an end at 14:59:59.999 against a start at 15:00), never a real
+    pause. A gap means SEM stops and starts again, and that second start is a
+    transition the user wants to see.
+
+    Assumes ``blocks`` is sorted by start, which is the caller's contract.
+    """
+    windows: List[tuple] = []
+    for start, end in blocks:
+        if windows and start <= windows[-1][1] + join_gap:
+            windows[-1] = (windows[-1][0], max(windows[-1][1], end))
+        else:
+            windows.append((start, end))
+    return windows
+
+
 def compose_today_plan(
     *,
     now: datetime,
@@ -290,14 +314,29 @@ def compose_today_plan(
             parsed_blocks.append((bs, be))
         if parsed_blocks:
             parsed_blocks.sort()
-            for bs, _be in parsed_blocks:
+            # (#963, @HorizonKane: "scheduler full of events that won't
+            # happen") The joint plan is expressed in hourly BLOCKS, so a
+            # charge running 14:00–17:00 arrives here as three of them. One
+            # row per block announced "EV charging starts" three times for a
+            # single start — and since the composer caps at 8 rows, six such
+            # rows evicted the solar peak, the night window and the deadline,
+            # leaving a plan made almost entirely of events that never happen.
+            # Merge blocks that TOUCH into windows and announce each window's
+            # start once. A real gap stays a real second start: his 17:00 hole
+            # is SEM stopping and starting again, which is worth a row.
+            windows = _merge_touching(parsed_blocks)
+            for bs, _be in windows:
                 if now < bs < horizon:
                     rows.append(PlanRow(
                         when=bs, kind=KIND_EV_CHARGE_START,
                         label="plan_ev_charge_start",
                         detail="plan_ev_charge_joint",
                     ))
-            last_end = parsed_blocks[-1][1]
+            # The last WINDOW's end, not the last block's: for touching,
+            # non-overlapping allocations (what pack_night emits) these are
+            # the same instant; for a block contained in an earlier one it is
+            # the honest answer where the old value was the inner block's.
+            last_end = windows[-1][1]
             if now < last_end < horizon:
                 # The plan's own promise — not a rate estimate.
                 rows.append(PlanRow(

@@ -445,3 +445,55 @@ class TestNoRegression:
         result = {"ev_charging_power_sensor": "sensor.somewhere_else_offered"}
         _reject_capability_sensor(result, [])
         assert result["ev_charging_power_sensor"] == "sensor.somewhere_else_offered"
+
+
+def _e(entity_id, device_class=None):
+    """One OCPP entity on one device, in the shape ``_entry`` builds."""
+    return _entry(entity_id, "ocpp", "dev-ocpp", device_class)
+
+
+class TestBothWordOrders:
+    """(review of a parallel #962 build, 15.09) OCPP writes the qualifier LAST
+    (`power_offered`, `power_reactive_import`); most other brands write it
+    FIRST (`offered_power`, `reactive_power`). The guard matches on the word,
+    not on a compound token — pinned so it cannot regress into one."""
+
+    def test_offered_power_adjective_first_is_swapped_for_the_measurement(self):
+        ents = [
+            _e("sensor.box_offered_power", "power"),
+            _e("sensor.box_charging_power", "power"),
+        ]
+        m = {"ev_charging_power_sensor": "sensor.box_offered_power"}
+        apply_charger_discovery_guards(m, ents)
+        assert m["ev_charging_power_sensor"] == "sensor.box_charging_power"
+
+    def test_reactive_power_adjective_first_is_never_the_better_sibling(self):
+        """A disqualified binding must not be repaired INTO a different wrong one."""
+        ents = [
+            _e("sensor.box_power_offered", "power"),
+            _e("sensor.box_reactive_power", "power"),
+            _e("sensor.box_power_active_import", "power"),
+        ]
+        m = {"ev_charging_power_sensor": "sensor.box_power_offered"}
+        apply_charger_discovery_guards(m, ents)
+        assert m["ev_charging_power_sensor"] == "sensor.box_power_active_import"
+
+    def test_the_reporters_exact_registry_order(self):
+        """@bgthb's device, in the order that reproduced BOTH wrong bindings on
+        the unfixed code: offered listed last (last-wins power), export_interval
+        listed first (first-wins energy)."""
+        ents = [
+            _e("sensor.wallbox_status_connector"),
+            _e("sensor.wallbox_energy_active_export_interval", "energy"),
+            _e("sensor.wallbox_energy_active_import_register", "energy"),
+            _e("sensor.wallbox_power_active_import", "power"),
+            _e("sensor.wallbox_power_reactive_import", "power"),
+            _e("sensor.wallbox_power_offered", "power"),
+            _e("number.wallbox_maximum_current", "current"),
+            _e("switch.wallbox_charge_control"),
+        ]
+        from custom_components.solar_energy_management.hardware_detection import _discover_ocpp
+        m = _discover_ocpp(ents)
+        apply_charger_discovery_guards(m, ents)
+        assert m["ev_charging_power_sensor"] == "sensor.wallbox_power_active_import"
+        assert m["ev_total_energy_sensor"] == "sensor.wallbox_energy_active_import_register"

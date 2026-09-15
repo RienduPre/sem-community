@@ -3648,3 +3648,9 @@ the other direction, another window, one phase — and does the matcher separate
 ordering? And before making a guard fail-closed: *trace what the missing value actually does
 downstream*, because "drop it" is only safe where absence is handled.
 Refs #962 #886 #947 #814 #816.
+**Open residual (#964, found by the adversarial review of a parallel #962 build):**
+`discover_all_ev_chargers_from_registry` and `build_detection_report` group by `device_id` with NO
+fallback for device-less entities — a KEBA over UDP registers none — so two such chargers of one
+platform collapse into one bucket and any sibling search, this guard's included, can cross chargers.
+`probe_charger_candidates` alone sub-groups by entity-id prefix; the other two sites should share it.
+Not folded into #962: it changes how chargers are COUNTED and wants its own live proof.
