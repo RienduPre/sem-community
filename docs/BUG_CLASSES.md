@@ -3335,35 +3335,104 @@ is the one constant `UNAVAILABLE_REPAIR_THRESHOLD_S` (#611's warm-up) rather tha
 (class 46). Evidence counters stay for evidence: a command that raised keeps its three-strike
 contract (#462, framework-tier), and the absence path neither increments that counter nor is cleared
 by it — they share one issue id, so the write side owns the Repair whenever it has spoken. The
-clock's OTHER half must be retired by the CONDITION ending, and the condition is "did this cycle
-report the surface blocked?" — asked of the emitted actions, never of "can I read the entity?". Both
-halves of this fix got that wrong first and the error is instructive: only ONE of the two conditions
-reaching this surface is silence. A switch that is READABLE but stuck `off` (#536 Eco-Smart, the
-re-assert budget spent) is `enable_controllable=True` and blocked at the same time, so a hold retired
-on readability resets every cycle, never elapses, and makes that Repair unfileable — strictly worse
-than the bug, because the retire also deletes one a previous lifetime raised. Evidence keeps its
-original speed; only silence waits. Likewise a *write* is evidence about the entity it was written to
-and no other: zeroing the hold on a successful current write let a 0 A stop (one per 60 s reassert
-dwell, on every non-KEBA stop) starve a 300 s window forever.
+clock's OTHER half must be retired by the CONDITION ending, and the condition is "is SEM asserting
+this surface and not getting it?" — asked of the emitted actions, never of "can I read the entity?".
+Both halves of this fix got that wrong first and the error is instructive: a switch that is READABLE
+but stuck `off` (#536 Eco-Smart, the re-assert budget spent) is `enable_controllable=True` and blocked
+at the same time, so a hold retired on readability resets every cycle, never elapses, and makes that
+Repair unfileable — strictly worse than the bug, because the retire also deletes one a previous
+lifetime raised. Likewise a *write* is evidence about the entity it was written to and no other:
+zeroing the hold on a successful current write let a 0 A stop (one per 60 s reassert dwell, on every
+non-KEBA stop) starve a 300 s window forever.
+
+**Round 2 (#945, 2.1.0-beta.25) — the exemption was the bug.** Round one concluded from the above
+that only silence waits and that the readable-but-`off` switch keeps its three-CYCLE speed, being
+"evidence: SEM wrote `turn_on` five times and watched it come back off". alexmc1510 restarted onto
+beta.22 and got the identical Repair with the other sentence in it. Two things were wrong. First, the
+three cycles that FILE it are cycles on which SEM sends nothing at all — the reconciler returns
+`REPORT_ENABLE_BLOCKED` *alone*, so a successful write cannot flap the notice — so the verdict was
+three observations wearing the #462 counter whose Repair says "your last 3+ current commands were
+rejected". Second, a restart reaches that branch: the entity appears partway through the warm-up
+still reading `off`, because its integration has not reached the box yet, and 5 re-asserts + 3 reports
+is 80 s. **The episode is the unit, not the sub-case.** "SEM is asserting this switch and it is not
+holding" opens ONE wall clock spanning both the unreadable stretch and the re-asserts, retired only
+by a cycle that emits neither `ENABLE` nor `REPORT_ENABLE_BLOCKED` — the re-asserts ARE the episode,
+and treating them as quiet cycles also DELETED a standing Repair once per switch drop and re-raised
+it five cycles later (the write side's churn, one layer up). Each sub-case keeps its own sentence
+(`repair_issues.ENABLE_UNREADABLE` / `ENABLE_WILL_NOT_HOLD`, spelled once — class 46), and a charger
+whose `enable_state()` answers `(None, True)` — KEBA, a service, a button: no readable switch AT ALL
+— files nothing, because there is no surface here to be blocked and the id belongs to the write path
+as well. The generalisation: a verdict's patience must not be restarted by SEM's own retries, and
+"evidence" means a command that was SENT and refused, never an observation on a silent cycle.
+
+**And forgiveness must cost what accusation costs.** The first cut of round 2 retired the episode on
+any cycle that asserted nothing — which is exactly what an OSCILLATING switch looks like between
+drops, and the #536 Eco-Smart/Autostart fault this surface exists for IS an oscillation (the box lets
+the relay go, SEM re-asserts, it reads `on` for one cycle, it is off again). Measured against
+`develop`: a switch stuck off but reading `on` one cycle in ten went from *reported* to **never
+reported at all** — a fail-open strictly worse than the false alarm being cured — and a standing
+notice churned raise/delete/raise once per blip. The same break came from SEM's own decision leaving
+CHARGE for a cycle. So good time pays the fault down one second per second — a
+leaky bucket, not a timestamp.
+
+That correction needed a correction of its own, and it is the sharper lesson. Holding the FAULT on a
+plain "since" timestamp while holding only the GOOD run on a window makes the verdict "300 s have
+passed since the first bad cycle and no clean 300 s fitted inside" — which is not a statement about
+the fault at all. One bad cycle per 299 s, a **3 % duty cycle**, reached the ERROR Repair at exactly
+the speed of a permanently dead switch, and could never clear. A cloud charger whose entity goes
+`unavailable` for one poll every few minutes is ordinary hardware (#893), so this was class 86
+re-entered through the accumulation door: good time spent as evidence. Only BAD time may buy a
+verdict, so the fault is an integral — filled while SEM is asserting and not getting it, drained
+one-for-one while the surface is fine, raised at the hold, retired at empty. The level is CAPPED at
+the hold, because guilt that is unbounded makes recovery unbounded: a day of a dead switch would
+otherwise need a day of good operation to pay off and the notice would outlive the repair. A charger the owner has actually fixed clears in the time
+its fault had earned, at most one hold; a Repair a previous
+LIFETIME left behind is still retired at once by #485 H5's first-good-write clear, which is real
+evidence and needs no hold. Two more asymmetries fell out of the same review: a fault that CHANGES
+under a standing notice (an absent switch that comes back and then refuses to hold) re-files with the
+truth instead of keeping the first diagnosis forever, and **observer mode files nothing at all** —
+`send()` withheld every `turn_on`, so there is no refusal to report (class-86 residual (6), closed).
 **Guard:** `tests/test_945_restart_enable_warmup.py` — the restart replayed through the real device
 and the real adapter (30 s of blocked cycles raise nothing; the threshold raises once, and only
 once), the vacuity twin (the command counter is untouched by a non-command, and #462's three rejected
 writes still raise with no time passing at all), the recovery edge driven through the real
 `observe()`, a pin that a switch recovering does NOT delete a Repair the write side raised, and the
-sibling pin that a missing battery entity spends no strike.
+sibling pin that a missing battery entity spends no strike. Round 2 adds the reporter's whole restart
+through the real `reconcile_and_apply` — the entity absent, then appearing `off`, then recovering —
+with the pin that makes it non-vacuous (the #536 budget really does run out here, and the cycles that
+used to file the Repair really do send NOTHING), plus the STRUCTURAL guard the class asked for:
+`ast_contracts.invented_evidence_call_sites` fails the build if any production call to
+`_record_actuation_failure` passes an exception SEM constructed rather than one an enclosing
+`except … as e` caught — positional OR keyword, with a rebound handler name, an `except*` group, and
+a closure written inside a handler (where Python has already deleted the name) all decided correctly,
+each self-tested against a probe. That contract alone was NOT enough, and the way it failed is the
+lesson: the bug called the counter as `getattr(dev, "_record_actuation_failure", None)` and then
+invoked the local, which is this codebase's dominant idiom for such hooks and which every
+callee-NAME contract is blind to. So the load-bearing guard asks who may even MENTION the symbol —
+`symbol_reference_files`, counting attribute accesses, defs and `getattr` string literals — and
+requires every reference to live under `devices/`. Indirection cannot dodge that question. Re-injecting
+the verbatim pre-fix body is caught; six further mutants (immediate retire, one sentence for both
+faults, observer mode accusing hardware, never re-filing a changed fault, a third switch state read
+as `off`, and a clock armed only by the report) each fail at least one pin.
 **Sweep question:** for every counter that turns repeated observations into a user-visible verdict —
-is each observation EVIDENCE (something happened and was refused) or SILENCE (nothing could be read)?
-And is its patience measured in cycles or in seconds? A cycle-counted threshold on a silent input is
-a promise about the coordinator's interval, not about the fault.
+is each observation EVIDENCE (a command was SENT and refused) or SILENCE (nothing could be read, or
+nothing was sent at all)? And is its patience measured in cycles or in seconds? A cycle-counted
+threshold on a silent input is a promise about the coordinator's interval, not about the fault. Then
+ask round 2's question: does SEM's own RETRY restart that patience — and if the verdict holds a
+Repair, does the retry also retire it?
 **Left for Guido:** (0) This surface shares ONE issue id with the write path (#462), which is why the
 unblocked-cycle clear must not fire for a predecessor's Repair (class 84's usual answer): on a
 KEBA/service/button charger there is no switch at all, so a first-of-lifetime clear there would
 delete a genuine "every command rejected" notice on the evidence of an entity that does not exist.
 The predecessor's copy is retired by #485 H5's first-good-write clear instead. Splitting the id would
 let each condition own its own lifecycle — and is what a new translation key (item 1) would want
-anyway. (1) The Repair TEXT is still the write path's: past the hold, a genuinely locked
-switch is reported as "SEM's last 3+ current commands were rejected". Saying it properly needs a new
-translation key in `strings.json` + all 16 translations — a product decision, not a sweep. (2) Past
+anyway. (1) The Repair TEXT is still the write path's, and round 2 makes this the
+sharpest residual: past the hold BOTH enable faults are reported as "SEM's last 3+ current commands
+to **{name}** were rejected" — the sentence alexmc1510 quoted back twice as evidence SEM was
+confused, and one that is false for this surface by construction, since the cycles that file it send
+nothing. Saying it properly needs a new `charger_enable_blocked` key with its own `fix_flow` in
+`strings.json` + all 16 translations, and it wants item (0)'s id split first (a persistent Repair
+already raised under the shared id has to be migrated). A product decision, not a sweep. (2) Past
 the hold a missing start/stop entity now raises TWO ERROR Repairs for one fact — this one and #824's
 `charger_control_entity_broken`, which watches the same `ev_start_stop_entity` on the same threshold.
 Deduping them means deciding which surface owns an uncommandable control entity. (3) The hold starts
@@ -3374,17 +3443,20 @@ tests SILENCE by re-reading the entity on the cycle the third strike lands, not 
 verdict actually saw: a register that contradicted three writes but happens to read `unavailable` on
 that cycle is pushed into the 300 s hold while `last_unverified_seen` still carries the contradicting
 number. A five-minute delay on a real #915 fault, never a false negative — the verdict would have to
-carry its own "was this silence?" flag to be exact. (5) The hold now accumulates only across
-CONSECUTIVE reporting cycles, where the old cycle counter accumulated across gaps: `REPORT_ENABLE_
-BLOCKED` is emitted only while desired is CHARGE, or OFF/IDLE against a live draw, so a genuinely
-app-locked charger on a fluctuating-surplus day restarts its window on every idle-and-not-drawing
-cycle and #548 can surface well after five minutes. Any five continuous minutes of charge-desire
-still files it, so it is delayed surfacing and not a false negative — but it is a real sensitivity
-change, and the fix (accumulate the block, don't restart it) needs a decision about what counts as
-the same episode. (6) Pre-existing, found in this change's review: in OBSERVER mode `send` withholds
-and returns False, so `ensure_enabled` can never close the switch — an observer install whose switch
-reads `off` walks the re-assert budget and files this ERROR Repair in ~70 s, claiming commands were
-rejected in the one mode that promises to send nothing. Unchanged here; it belongs with residual (1).
+carry its own "was this silence?" flag to be exact. ~~(5)~~ **CLOSED in round 2.** The hold used to
+accumulate only across CONSECUTIVE reporting cycles, where the old cycle counter accumulated across
+gaps, so an app-locked charger on a fluctuating-surplus day restarted its window on every
+idle-and-not-drawing cycle and #548 could surface well after five minutes. The symmetric good-run
+hold answers "what counts as the same episode": a gap shorter than the hold itself is not the end of
+one. ~~(6)~~ **CLOSED in round 2.** In OBSERVER mode `send` withholds and returns False, so
+`ensure_enabled` can never close the switch — an observer install whose switch read `off` walked the
+re-assert budget and filed this ERROR Repair in ~70 s, claiming commands were rejected in the one
+mode that promises to send nothing. The episode no longer even opens while `observer_mode` is set, so
+leaving observer mode cannot file a verdict about cycles SEM sat out either. (7) New, from round 2's
+own review: `_apply_actions` defaults `now` to `getattr(self, "_last_apply_at", 0.0)`, so a bare
+reconciler instance would stamp the episode at `0.0` and the next real `time.monotonic()` files
+instantly. Unreachable in production (`actuate.py` always passes `now`) and reached today only by
+tests built on bare instances, but it is a zero-valued clock in a tree that measures wall time.
 Refs #945 #611 #824 #915 #462 #536 #548 #840 #627.
 
 ### 87. A register that lists only half the world, asked a yes/no question — GUARDED
