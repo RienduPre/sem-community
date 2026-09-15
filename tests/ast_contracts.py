@@ -131,6 +131,14 @@ def call_sites(callee: str, *, root: Optional[Path] = None,
     return hits
 
 
+#: Directories a source contract never walks. Anything generated, vendored
+#: or virtual belongs here: `_production_files` parses every file it reaches,
+#: so one un-parseable tree would turn a contract into a crash rather than a
+#: finding.
+_SKIP_DIRS = ("tests", "scripts", "node_modules", ".git", "__pycache__",
+              ".venv", "venv", "build", "dist", ".tox", ".mypy_cache")
+
+
 def _rebinds(node: ast.AST, name: str) -> bool:
     """Does this statement rebind ``name``? A handler's exception name that
     has been overwritten is no longer evidence that anything was caught."""
@@ -195,8 +203,7 @@ def _production_files(root: Optional[Path], skip_dirs: Iterable[str]):
 
 def invented_evidence_call_sites(
         callee: str, *, root: Optional[Path] = None,
-        skip_dirs: Iterable[str] = ("tests", "scripts", "node_modules",
-                                    ".git")) -> list:
+        skip_dirs: Iterable[str] = _SKIP_DIRS) -> list:
     """(#945, bug class 86) Every production call to ``callee`` whose
     evidence argument is an exception SEM made up, rather than one an
     enclosing ``except … as e`` actually caught.
@@ -234,9 +241,7 @@ def invented_evidence_call_sites(
 
 
 def symbol_reference_files(name: str, *, root: Optional[Path] = None,
-                           skip_dirs: Iterable[str] = (
-                               "tests", "scripts", "node_modules",
-                               ".git")) -> list:
+                           skip_dirs: Iterable[str] = _SKIP_DIRS) -> list:
     """Every production file that so much as NAMES ``name`` in code — as a
     definition, an attribute access, or the string inside a ``getattr``.
 

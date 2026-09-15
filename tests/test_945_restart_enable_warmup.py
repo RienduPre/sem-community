@@ -142,7 +142,7 @@ class TestTheRestartWindowIsSilent:
                 "a sustained good run must end the episode"
             )
             dev._note_enable_blocked(now=2 * HOLD)     # fresh window opens
-            assert dev._note_enable_blocked(now=3 * HOLD - 10.0) is False
+            assert dev._note_enable_blocked(now=3 * HOLD - 20.0) is False
             raised.assert_not_called()
             assert dev._note_enable_blocked(now=3 * HOLD + 1.0) is True
 
@@ -339,7 +339,7 @@ class TestTheAdapterHook:
                 "the hook never started the clock, so it can never surface"
             )
             # …and once the block has outlasted a restart's warm-up:
-            dev._enable_blocked_since -= (HOLD + 1.0)
+            dev._enable_last_at -= (HOLD + 1.0)
             await adapter.report_enable_blocked()
             raised.assert_called_once()
             assert dev._actuation_failures == 0
@@ -585,6 +585,73 @@ class TestAnOscillatingSwitchIsStillReported:
 
 
 @pytest.mark.unit
+class TestOnlyBadTimeBuysAVerdict:
+    """The second review's blocker. The first cut of the hysteresis held the
+    FAULT on a plain "since" timestamp and only the GOOD run on a hold — so
+    the verdict was not "the surface was bad for 300 s", it was "300 s have
+    passed since the first bad cycle and no clean 300 s fitted inside". One
+    bad cycle per 299 s — a 3 % duty cycle — reached the ERROR Repair at
+    exactly the speed of a permanently dead switch, and could never clear.
+
+    A cloud charger whose entity goes ``unavailable`` for one poll every few
+    minutes is ordinary hardware (#893), so this was bug class 86 re-entered
+    through the accumulation door: good time spent as evidence."""
+
+    def test_a_healthy_switch_that_blips_is_never_accused(self):
+        raised, _ = _replay_restart(
+            120, switch_appears_at=None,
+            # 10 s unreadable once every 200 s; ON for all the rest
+            switch_pattern=lambda i: None if (i % 20 == 0 and i) else "on")
+        assert raised == [], (
+            "a healthy charger was accused because good time counted as bad"
+        )
+
+    def test_the_blip_does_not_even_accumulate(self):
+        """The state, not just the surface: a bucket that fills and never
+        drains would file eventually, just later."""
+        dev = _device(switch_state="off")
+        for i in range(400):
+            if i % 20 == 0:
+                dev._note_enable_unasserted(now=i * CYCLE)
+            else:
+                dev._note_enable_unblocked(now=i * CYCLE)
+        assert dev._enable_blocked_for == 0.0
+        assert dev._enable_blocked_since is None
+
+    def test_a_blip_buys_back_only_a_blip(self):
+        """The symmetry stated on its own: good time pays the bucket down
+        one second per second, so a one-cycle recovery cannot retire a fault
+        that took five minutes to earn."""
+        dev = _device(switch_state="off")
+        with patch.object(ri, "raise_charger_actuation_failed"), \
+                patch.object(ri, "clear_charger_actuation_failed") as cleared:
+            dev._note_enable_blocked(now=0.0)
+            assert dev._note_enable_blocked(now=HOLD + 1.0) is True
+            dev._note_enable_unblocked(now=HOLD + 11.0)
+            assert dev._enable_blocked_for == HOLD - 10.0
+            cleared.assert_not_called()
+            # …and the full debt, once paid, does retire it.
+            dev._note_enable_unblocked(now=2 * HOLD + 11.0)
+            assert dev._enable_blocked_for == 0.0
+            cleared.assert_called_once()
+
+    def test_a_long_fault_does_not_outlive_its_repair(self):
+        """Guilt is capped at the hold, so recovery is capped too. An
+        uncapped bucket after a day of a dead switch would need a DAY of
+        good operation to pay off, and the notice would outlive the fix."""
+        dev = _device(switch_state="off")
+        with patch.object(ri, "raise_charger_actuation_failed"), \
+                patch.object(ri, "clear_charger_actuation_failed") as cleared:
+            dev._note_enable_blocked(now=0.0)
+            for hour in range(1, 25):                # a day of a dead switch
+                dev._note_enable_blocked(now=hour * 3600.0)
+            assert dev._enable_blocked_for == HOLD
+            # …and the owner fixes it. One hold of good, not one day.
+            dev._note_enable_unblocked(now=24 * 3600.0 + HOLD + 1.0)
+            cleared.assert_called_once()
+
+
+@pytest.mark.unit
 class TestEachFaultKeepsItsOwnSentence:
     """Two different things can be wrong with an enable surface and they need
     different fixes from the owner. The episode is one; the diagnosis is
@@ -638,6 +705,21 @@ class TestEachFaultKeepsItsOwnSentence:
             assert raised.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_a_switch_that_reads_on_is_never_accused(self):
+        """The report re-reads the world, and the reconciler AWAITS actions
+        before it reports — so the switch can come back ``on`` underneath a
+        REPORT_ENABLE_BLOCKED decided one moment earlier. There is nothing
+        blocked, and the issue id belongs to the write path too."""
+        dev = _device(switch_state="on")
+        adapter = GenericAdapter(dev)
+        assert adapter.enable_state() == (True, True)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            for cycle in range(80):
+                await adapter.report_enable_blocked(cycle * CYCLE)
+            raised.assert_not_called()
+        assert dev._enable_blocked_for == 0.0
+
+    @pytest.mark.asyncio
     async def test_a_third_switch_state_is_not_read_as_off(self):
         """``on``/``off`` are the only answers a switch can give. Reading a
         third value as "off" would accuse the box of refusing an assertion it
@@ -667,6 +749,26 @@ class TestObserverModeAccusesNobody:
             "the episode must not even open, or leaving observer mode files "
             "a verdict about cycles SEM sat out"
         )
+
+    @pytest.mark.asyncio
+    async def test_an_episode_open_before_observer_mode_is_not_frozen(self):
+        """The trap: an episode already running when the switch is flipped
+        would otherwise sit at whatever level it had reached and file on the
+        FIRST cycle after observer mode ends — the hold spent entirely in
+        the one mode that promises SEM sent nothing."""
+        dev = _device(switch_state="off")
+        adapter = GenericAdapter(dev)
+        with patch.object(ri, "raise_charger_actuation_failed") as raised:
+            for cycle in range(29):                  # 290 s: one shy of it
+                await adapter.report_enable_blocked(cycle * CYCLE)
+            raised.assert_not_called()
+            dev.observer_mode = True
+            for cycle in range(29, 229):             # …and SEM stands down
+                await adapter.report_enable_blocked(cycle * CYCLE)
+            dev.observer_mode = False
+            await adapter.report_enable_blocked(2290.0)
+            raised.assert_not_called()   # the frozen hold would file here
+        assert dev._enable_blocked_for <= CYCLE
 
     @pytest.mark.asyncio
     async def test_leaving_observer_mode_starts_the_clock_from_there(self):
@@ -747,6 +849,22 @@ class TestTheCounterCanOnlyBeFedByACommand:
         assert call_sites("_record_actuation_failure"), (
             "the contract above is vacuous if the symbol has vanished"
         )
+
+    def test_only_the_write_path_may_touch_the_counters_state(self):
+        """The class is "an observation spends the rejected-command
+        counter", not "one function name is called wrongly". An adapter
+        doing ``dev._actuation_failures += 1`` reproduces the whole bug
+        without ever naming the function, so the STATE is in the contract
+        too."""
+        for symbol in ("_actuation_failures", "_actuation_repair_raised"):
+            offenders = [ref for ref in symbol_reference_files(symbol)
+                         if not ref[0].startswith("devices/")]
+            assert offenders == [], (
+                f"{symbol} is reached from outside the write path: {offenders}"
+            )
+            assert symbol_reference_files(symbol), (
+                f"{symbol} has vanished — the contract would pass vacuously"
+            )
 
     def test_the_keyword_form_is_not_a_loophole(self):
         """``_record_actuation_failure``'s parameter has a name, so

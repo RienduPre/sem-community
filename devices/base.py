@@ -2185,15 +2185,24 @@ class CurrentControlDevice(ControllableDevice):
         # 3-strike counter above, which at a 10 s cycle is 30 seconds.
         self._enable_blocked_since: Optional[float] = None
         self._enable_blocked_repair_raised: bool = False
-        #: (#945 round 2) When the CURRENT run of good cycles began.
-        #: Forgiveness is symmetric — the surface must be good for as long
-        #: as it had to be bad. A single good cycle retiring the episode is
-        #: what makes an OSCILLATING switch (the #536 Eco-Smart fault this
-        #: surface exists for) unreportable: the box drops it, SEM
-        #: re-asserts, it reads ``on`` once, and the clock starts over
-        #: forever. It is also what churns a standing Repair — raise,
-        #: delete, raise — once per blip.
-        self._enable_ok_since: Optional[float] = None
+        #: (#945 round 2) Seconds of BAD time this episode has accumulated —
+        #: a leaky bucket, filled while SEM is asserting the enable surface
+        #: and not getting it, drained one-for-one while it is fine.
+        #:
+        #: Neither a cycle count nor a wall clock survives contact with real
+        #: chargers. A cycle count is a promise about the coordinator's
+        #: interval (the #945 bug). A "since" timestamp retired by one good
+        #: cycle makes an OSCILLATING switch — the #536 Eco-Smart fault this
+        #: surface exists for — unreportable forever, and churns any standing
+        #: notice once per blip. And a "since" timestamp retired only by a
+        #: sustained good run counts the good time as fault time: a healthy
+        #: switch that goes ``unavailable`` for one cycle every 200 s (a
+        #: cloud charger's routine poll failure) reaches the verdict at the
+        #: same speed as a dead one. Only bad time may buy a verdict.
+        self._enable_blocked_for: float = 0.0
+        #: Cycle stamp of the last enable-surface observation, so the bucket
+        #: integrates WALL time and cannot be outrun by a fast interval.
+        self._enable_last_at: Optional[float] = None
         #: (#945 round 2) Which sentence the standing notice carries, so a
         #: surface whose fault CHANGES (an absent switch that comes back and
         #: then refuses to hold) is re-filed with the truth instead of
@@ -2764,27 +2773,73 @@ class CurrentControlDevice(ControllableDevice):
         one clock, retired by the reconciler on a cycle that neither
         re-asserts nor reports (``_note_enable_unblocked``).
         """
+        if now is None:
+            now = time.monotonic()
         if getattr(self, "observer_mode", False):
             # (#945 round 2) Observer mode runs the whole decision and brand
             # path and withholds only the SEND (#855). Not one ``turn_on``
             # left the process, so there is nothing here that could have
             # been refused — and this Repair tells the owner their hardware
-            # is out of SEM's control. The episode does not even open, so
-            # leaving observer mode later cannot file a verdict about
-            # cycles SEM sat out.
+            # is out of SEM's control. These cycles DRAIN rather than merely
+            # not filling: an episode that was open when the switch was
+            # flipped would otherwise sit frozen at whatever level it had
+            # reached and file on the first cycle after observer mode ends,
+            # with no warm-up at all.
+            self._drain_enable_episode(now)
             return False
-        if now is None:
-            now = time.monotonic()
-        self._enable_ok_since = None
+        hold = self._enable_hold_s()
+        if hold is None:
+            return False
+        delta = self._enable_tick(now)
         if self._enable_blocked_since is None:
             self._enable_blocked_since = now
+        # Capped at the hold: guilt is bounded, so RECOVERY is bounded too.
+        # An uncapped bucket after a day of a dead switch would need a day of
+        # good operation to pay off, and the notice would outlive the repair.
+        self._enable_blocked_for = min(hold, self._enable_blocked_for + delta)
+        return self._enable_blocked_for >= hold
+
+    def _enable_hold_s(self) -> Optional[float]:
+        """#611's warm-up, the one constant (class 46) — or None if the
+        repair module cannot be read, in which case nothing is decided."""
         try:
             from ..coordinator import repair_issues as _ri
-            return ((now - self._enable_blocked_since)
-                    >= _ri.UNAVAILABLE_REPAIR_THRESHOLD_S)
-        except Exception as exc:  # noqa: BLE001 — never fail the cycle over a repair
+            return float(_ri.UNAVAILABLE_REPAIR_THRESHOLD_S)
+        except Exception as exc:  # noqa: BLE001 — never fail a cycle over a repair
             _LOGGER.debug("enable-block hold unreadable: %s", exc)
-            return False
+            return None
+
+    def _enable_tick(self, now: float) -> float:
+        """Wall seconds since the last enable observation. Never negative and
+        never the whole clock: the first observation of a lifetime has no
+        predecessor to measure from, so it buys nothing."""
+        last = self._enable_last_at
+        self._enable_last_at = now
+        if last is None or now <= last:
+            return 0.0
+        return now - last
+
+    def _drain_enable_episode(self, now: float) -> None:
+        """Good time pays the bucket down one-for-one; empty ends the
+        episode and retires a Repair this path raised."""
+        hold = self._enable_hold_s()
+        if hold is None:
+            return
+        delta = self._enable_tick(now)
+        self._enable_blocked_for = max(0.0, self._enable_blocked_for - delta)
+        if self._enable_blocked_for > 0.0:
+            return
+        self._enable_blocked_since = None
+        self._enable_blocked_error = None
+        if not self._enable_blocked_repair_raised:
+            return
+        self._enable_blocked_repair_raised = False
+        self._actuation_repair_raised = False
+        try:
+            from ..coordinator import repair_issues as _ri
+            _ri.clear_charger_actuation_failed(self.hass, self.device_id)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("enable-blocked repair clear failed: %s", exc)
 
     def _note_enable_unblocked(self, now: Optional[float] = None) -> None:
         """(#945) This cycle asked nothing of the enable surface — start or
@@ -2810,39 +2865,19 @@ class CurrentControlDevice(ControllableDevice):
         switch looks like between drops, and the #536 Eco-Smart/Autostart
         fault this whole surface exists for IS an oscillation: the box lets
         the relay go, SEM re-asserts, it reads ``on`` for one cycle, it is
-        off again. Retiring on that blip reset the fault clock forever
-        (the box became unreportable — strictly worse than crying wolf) and
+        off again. Retiring on that blip reset the fault clock forever (the
+        box became unreportable — strictly worse than crying wolf) and
         churned any standing notice, raising and deleting it once per blip.
-        So forgiveness costs what accusation costs: the surface must be good
-        for ``UNAVAILABLE_REPAIR_THRESHOLD_S``, the same constant, before the
-        episode is over. A charger the owner has actually fixed therefore
-        keeps the notice for up to five more minutes — and a Repair a
-        previous LIFETIME left behind is still retired at once by #485 H5's
-        first-good-write clear, which is real evidence and needs no hold.
+        So good time pays the bucket down one second per second instead:
+        forgiveness costs exactly what accusation cost, a blip buys back only
+        a blip, and a charger the owner has actually fixed clears in the time
+        its fault had earned. A Repair a previous LIFETIME left behind is
+        still retired at once by #485 H5's first-good-write clear, which is
+        real evidence and needs no hold.
         """
         if now is None:
             now = time.monotonic()
-        if self._enable_ok_since is None:
-            self._enable_ok_since = now
-        try:
-            from ..coordinator import repair_issues as _ri
-            hold = _ri.UNAVAILABLE_REPAIR_THRESHOLD_S
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.debug("enable-block hold unreadable: %s", exc)
-            return
-        if (now - self._enable_ok_since) < hold:
-            return
-        self._enable_blocked_since = None
-        self._enable_blocked_error = None
-        if not self._enable_blocked_repair_raised:
-            return
-        self._enable_blocked_repair_raised = False
-        self._actuation_repair_raised = False
-        try:
-            from ..coordinator import repair_issues as _ri
-            _ri.clear_charger_actuation_failed(self.hass, self.device_id)
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.debug("enable-blocked repair clear failed: %s", exc)
+        self._drain_enable_episode(now)
 
     def _session_energy_sensor_id(self):
         """Entity id of the box's OWN session-energy register sensor

@@ -202,8 +202,10 @@ class ChargerAdapter(ABC):
 
         - ``(None, True)``  — no readable enable switch (N/A): KEBA,
           service control, or a ``button.`` start entity.
-        - ``(None, False)`` — switch present but ``unavailable``/``unknown``
-          (Wallbox locked / eco-smart): SEM cannot drive it → surface.
+        - ``(None, False)`` — no usable answer: the switch is present but
+          reads anything other than ``on``/``off`` (``unavailable`` /
+          ``unknown``, Wallbox locked / eco-smart). SEM cannot drive it →
+          surface.
         - ``(True/False, True)`` — switch on / off.
         """
         dev = self._device
@@ -319,15 +321,18 @@ class ChargerAdapter(ABC):
             enabled, controllable = self.enable_state()
         except Exception as e:  # noqa: BLE001 — never let a report throw
             _LOGGER.debug("enable_state() failed in report: %s", e)
-        if controllable and enabled is None:
-            # No readable enable switch AT ALL (KEBA, a service, a button).
-            # There is nothing here that could be blocked, so SEM has no
-            # evidence to file and files nothing — and the issue id is
-            # shared with the write path, so a verdict invented here would
-            # be a verdict about somebody else's command.
+        if controllable and enabled is not False:
+            # Nothing here is blocked. Either there is no readable enable
+            # switch AT ALL (``(None, True)`` — KEBA, a service, a button),
+            # or the switch has come back ``on`` between the decision's
+            # ``observe()`` and this report: the reconciler awaits actions
+            # before reporting, so the world can move underneath it. Both
+            # answer "no evidence", and the issue id is shared with the
+            # write path — a verdict invented here would be a verdict about
+            # somebody else's command.
             _LOGGER.debug(
-                "enable-blocked reported on a charger with no readable enable "
-                "switch — nothing to surface (#945)")
+                "enable-blocked reported on a surface that is not blocked "
+                "(enabled=%s) — nothing to surface (#945)", enabled)
             return
         note = getattr(dev, "_note_enable_blocked", None)
         if not callable(note):

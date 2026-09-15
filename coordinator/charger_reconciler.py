@@ -1033,15 +1033,9 @@ class ChargerReconciler:
                     "leave eco-smart mode) — %s", self.charger_id, decision.reason)
                 report = getattr(adapter, "report_enable_blocked", None)
                 if report is not None:
-                    try:
-                        # One clock for the whole episode — the cycle stamp
-                        # the arm above used, never a second read of the
-                        # wall (#945).
-                        await report(now)
-                    except TypeError:
-                        # An adapter still on the pre-#945 signature must
-                        # not abort the actuation cycle behind it.
-                        await report()
+                    # One clock for the whole episode — the cycle stamp the
+                    # arm above used, never a second read of the wall (#945).
+                    await report(now)
             elif action.kind is ActionKind.REPORT_STOP_WAR:
                 # #763 — once per ONSET (the #700 pattern): the ceasefire
                 # holds for half an hour and re-warning every 10 s cycle

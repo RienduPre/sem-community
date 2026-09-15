@@ -3372,14 +3372,26 @@ the relay go, SEM re-asserts, it reads `on` for one cycle, it is off again). Mea
 `develop`: a switch stuck off but reading `on` one cycle in ten went from *reported* to **never
 reported at all** — a fail-open strictly worse than the false alarm being cured — and a standing
 notice churned raise/delete/raise once per blip. The same break came from SEM's own decision leaving
-CHARGE for a cycle. So the good run is held on the SAME `UNAVAILABLE_REPAIR_THRESHOLD_S`: the surface
-must be good for as long as it would have had to be bad. A charger the owner has actually fixed keeps
-the notice up to five minutes longer, which is the price of not crying wolf twice; a Repair a previous
+CHARGE for a cycle. So good time pays the fault down one second per second — a
+leaky bucket, not a timestamp.
+
+That correction needed a correction of its own, and it is the sharper lesson. Holding the FAULT on a
+plain "since" timestamp while holding only the GOOD run on a window makes the verdict "300 s have
+passed since the first bad cycle and no clean 300 s fitted inside" — which is not a statement about
+the fault at all. One bad cycle per 299 s, a **3 % duty cycle**, reached the ERROR Repair at exactly
+the speed of a permanently dead switch, and could never clear. A cloud charger whose entity goes
+`unavailable` for one poll every few minutes is ordinary hardware (#893), so this was class 86
+re-entered through the accumulation door: good time spent as evidence. Only BAD time may buy a
+verdict, so the fault is an integral — filled while SEM is asserting and not getting it, drained
+one-for-one while the surface is fine, raised at the hold, retired at empty. The level is CAPPED at
+the hold, because guilt that is unbounded makes recovery unbounded: a day of a dead switch would
+otherwise need a day of good operation to pay off and the notice would outlive the repair. A charger the owner has actually fixed clears in the time
+its fault had earned, at most one hold; a Repair a previous
 LIFETIME left behind is still retired at once by #485 H5's first-good-write clear, which is real
 evidence and needs no hold. Two more asymmetries fell out of the same review: a fault that CHANGES
 under a standing notice (an absent switch that comes back and then refuses to hold) re-files with the
 truth instead of keeping the first diagnosis forever, and **observer mode files nothing at all** —
-`send()` withheld every `turn_on`, so there is no refusal to report (class-86 residual (4), closed).
+`send()` withheld every `turn_on`, so there is no refusal to report (class-86 residual (6), closed).
 **Guard:** `tests/test_945_restart_enable_warmup.py` — the restart replayed through the real device
 and the real adapter (30 s of blocked cycles raise nothing; the threshold raises once, and only
 once), the vacuity twin (the command counter is untouched by a non-command, and #462's three rejected
