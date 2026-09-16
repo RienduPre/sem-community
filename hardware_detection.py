@@ -1125,7 +1125,8 @@ def _name_tokens(entity_id: str) -> List[str]:
 
 def _shared_leading_tokens(a: List[str], b: List[str]) -> int:
     shared = 0
-    for left, right in zip(a, b):
+    # strict=False is the point: the shorter name ends the comparison.
+    for left, right in zip(a, b, strict=False):
         if left != right:
             break
         shared += 1
