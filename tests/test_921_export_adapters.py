@@ -60,7 +60,10 @@ class TestTheBaseRefuses:
 class TestHuawei:
     def _adapter(self, states=None, override=False):
         hass = _hass(states)
-        cfg = {"inverter_device_id": "dev-huawei",
+        # the INVERTER device — the feed-in verbs validate for it and
+        # reject the battery one (#955, found on PROD). Auto-resolution has
+        # its own file: tests/test_955_huawei_export_device.py
+        cfg = {"inverter_device_id": "dev-battery", "export_device_id": "dev-huawei",
                "export_guard_override_external": override,
                "export_control_readback_entity": "sensor.inverter_active_power_control"}
         return HuaweiBatteryAdapter(hass, cfg), hass
@@ -105,14 +108,34 @@ class TestHuawei:
         with pytest.raises(NotImplementedError, match="inverter_device_id"):
             await a.command_limit_export(0.0)
 
-    async def test_the_autodetected_device_id_is_used_when_the_config_has_none(self):
-        """Review, CRITICAL: the config key is never written by the flow; every
-        real install relies on #523's autodetection — the first cut ignored it."""
+    async def test_the_autodetected_battery_is_NOT_what_the_cut_is_sent_to(self):
+        """The corrected form of a review note that was half right.
+
+        It said: the config key is never written by the flow, so every real
+        install relies on #523's autodetection. True — but that autodetection
+        finds the BATTERY device (`connected_energy_storage` / `/battery`), and
+        `huawei_solar` validates the feed-in verbs for the INVERTER, so acting
+        on the note as written made the cut refuse on every zero-config
+        install. Resolution now walks the battery up to its inverter; see
+        tests/test_955_huawei_export_device.py for the registry shapes.
+        """
+        from unittest.mock import patch
         hass = _hass()
         a = HuaweiBatteryAdapter(hass, {})
         a._inverter_device_id = "detected-battery"          # what __init__'s autodetect sets
-        await a.command_limit_export(0.0)
-        assert ("huawei_solar", "set_zero_power_grid_connection", {"device_id": "detected-battery"}) in _calls(hass)
+        reg = SimpleNamespace(devices={
+            "detected-battery": SimpleNamespace(
+                id="detected-battery",
+                identifiers={("huawei_solar", "SN123/battery_1")},
+                via_device_id="the-inverter"),
+            "the-inverter": SimpleNamespace(
+                id="the-inverter", identifiers={("huawei_solar", "SN123")},
+                via_device_id=None),
+        })
+        with patch("homeassistant.helpers.device_registry.async_get", return_value=reg):
+            await a.command_limit_export(0.0)
+        assert ("huawei_solar", "set_zero_power_grid_connection",
+                {"device_id": "the-inverter"}) in _calls(hass)
 
     async def test_the_readback_is_found_in_the_registry_and_refuses_under_di(self, monkeypatch):
         """Review, CRITICAL: `export_control_readback_entity` is never configured,
@@ -122,7 +145,7 @@ class TestHuawei:
         reg = SimpleNamespace(entities={"x": SimpleNamespace(platform="huawei_solar",
                                                               entity_id="sensor.wr_active_power_control")})
         monkeypatch.setattr(er, "async_get", lambda h: reg)
-        a = HuaweiBatteryAdapter(hass, {}); a._inverter_device_id = "detected-battery"
+        a = HuaweiBatteryAdapter(hass, {"export_device_id": "the-inverter"})
         with pytest.raises(NotImplementedError, match="external scheduling"):
             await a.command_limit_export(0.0)
         assert _calls(hass) == []

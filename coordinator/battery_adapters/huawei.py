@@ -60,10 +60,71 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         return any(m in mode for m in self._EXTERNAL_MODES)
 
     def _export_device_id(self) -> str:
-        """The RESOLVED battery/inverter device id — configured or autodetected
-        (#523), the same one every other Huawei service call uses."""
-        return str(getattr(self, "_inverter_device_id", "")
-                   or self._config.get("inverter_device_id", "") or "")
+        """The INVERTER device — not the battery one every other call uses.
+
+        `huawei_solar` splits its services by device TYPE: `forcible_charge`
+        resolves a battery (`.../battery_1`), while the feed-in verbs go
+        through `get_inverter_data`, which raises `wrong_device_type` for
+        anything that is not the inverter itself. `_inverter_device_id` is,
+        despite its name, the BATTERY device — `_autodetect_battery_device`
+        looks for `connected_energy_storage` or `/battery` on purpose (#523).
+
+        Handing that to `set_zero_power_grid_connection` refuses EVERY time, on
+        every zero-config Huawei install — which is the common one. It never
+        surfaced because the unit tests stub the id and the rig ran in observer
+        mode, where the call is never made. Found on PROD by reading the
+        device registry rather than by firing at it: `Inverter` is
+        `('huawei_solar', 'BT2470369058')`, `Battery 1` is
+        `('huawei_solar', 'BT2470369058/battery_1')` with `via_device_id`
+        pointing at the inverter.
+        """
+        cached = getattr(self, "_export_device_id_cache", None)
+        if cached is not None:
+            return cached
+        found = self._resolve_inverter_device() or ""
+        self._export_device_id_cache = found
+        return found
+
+    def _resolve_inverter_device(self) -> str | None:
+        """The huawei_solar device the feed-in verbs accept.
+
+        An explicit ``export_device_id`` wins. Otherwise: the battery hangs off
+        its inverter via ``via_device_id``, which is the authoritative link;
+        failing that (a solar-only Huawei), a root device whose identifier
+        carries no ``/`` sub-part — optimizers and batteries both have one.
+        """
+        explicit = str(self._config.get("export_device_id", "") or "")
+        if explicit:
+            return explicit
+        try:
+            from homeassistant.helpers import device_registry as dr
+            reg = dr.async_get(self._hass)
+        except Exception:  # noqa: BLE001 — resolution never breaks a cycle
+            return None
+
+        def _hw_ident(dev):
+            for ident in getattr(dev, "identifiers", ()) or ():
+                try:
+                    domain, value = ident
+                except (ValueError, TypeError):
+                    continue
+                if domain == "huawei_solar":
+                    return str(value)
+            return None
+
+        batt_id = str(getattr(self, "_inverter_device_id", "") or "")
+        if batt_id:
+            batt = reg.devices.get(batt_id)
+            via = getattr(batt, "via_device_id", None) if batt else None
+            if via and _hw_ident(reg.devices.get(via)) is not None:
+                return via
+        for dev in reg.devices.values():
+            ident = _hw_ident(dev)
+            if ident is None or "/" in ident:
+                continue
+            if getattr(dev, "via_device_id", None) is None:
+                return dev.id
+        return None
 
     async def command_limit_export(self, watts: float) -> None:
         device_id = self._export_device_id()

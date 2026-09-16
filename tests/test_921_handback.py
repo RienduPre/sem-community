@@ -207,8 +207,7 @@ class TestTheCutOutlivesALifetime:
             "domain": "number", "service": "set_value",
             "data": {"entity_id": "number.inv_export_limit", "value": 9000.0}}}})
         fake, _, cut = _live(store, verdict=CLOSED)
-        untouched = HuaweiBatteryAdapter(MagicMock(), {})
-        untouched._inverter_device_id = "dev"
+        untouched = HuaweiBatteryAdapter(MagicMock(), {"export_device_id": "dev"})
         untouched.adopt_export_prior = MagicMock()
         fake._battery_adapters["b2"] = untouched
         await fake._ensure_export_guard()
@@ -226,7 +225,7 @@ class TestTheCutOutlivesALifetime:
 
 class TestRecipes:
     def test_huawei_recipe_is_the_integrations_reset(self):
-        a = HuaweiBatteryAdapter(MagicMock(), {}); a._inverter_device_id = "dev"
+        a = HuaweiBatteryAdapter(MagicMock(), {"export_device_id": "dev"})
         assert a.export_release_recipe() == {"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
                                              "data": {"device_id": "dev"}}
 
@@ -252,7 +251,7 @@ class TestRecipes:
         g = ExportGuard(); g.state = "engaged"; g._applied = True
         cut = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"})
         cut._export_prior = 1.0; cut._last_export_intent = ExportIntent.LIMIT
-        untouched = HuaweiBatteryAdapter(MagicMock(), {}); untouched._inverter_device_id = "dev"
+        untouched = HuaweiBatteryAdapter(MagicMock(), {"export_device_id": "dev"})
         assert untouched.export_release_recipe() is not None      # it CAN undo one
         assert untouched.holds_export_cut() is False              # but holds none
         out = SEMCoordinator.export_release_recipes(SimpleNamespace(
