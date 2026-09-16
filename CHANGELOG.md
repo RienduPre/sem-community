@@ -26,8 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is handed back only to the inverter SEM actually cut — a second brand's
   feed-in limit is never touched. Off by default.
 - ✨ **A negative export price is a cost, not a free kWh** (#871). Two
-  diagnostics measure what a hostile meter cost today; the planner no longer
-  clamps the price to zero; the loads absorb before anything is clipped.
+  diagnostics measure what a hostile meter cost today, and while the meter is
+  closed the loads absorb before anything is clipped. (The day-ledger unclamp
+  — the one part of this arc that is not behind a switch — ships separately on
+  `fix/871-export-price-clamp` with its own proof.)
 - ✨ **Charge pacing holds headroom before the meter closes** (#926).
 - ✨ **The house as a battery sink** (#879) — keep the pack through cheap
   hours, spend it on the house in expensive ones. Off by default.

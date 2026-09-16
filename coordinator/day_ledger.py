@@ -108,11 +108,7 @@ def build_day_slots(*, start: datetime, end: datetime, day_kwh: float,
         if surplus_w >= surplus_margin_w:
             slots.append(LedgerSlot(
                 start=t, end=slot_end,
-                # (#871) NOT max(0.0, …). The clamp made a negative export rate
-                # — one you PAY — look identical to a free kWh, and a planner
-                # cannot prefer another sink over a cost it cannot see. ``or 0.0``
-                # still handles an absent rate, the only case the clamp covered.
-                price=float(export_rate or 0.0),
+                price=max(0.0, float(export_rate or 0.0)),
                 level_cheap=True, home_w=0.0,
                 cap_override_w=surplus_w,
                 solar_w=solar_w, home_gross_w=home_w,
