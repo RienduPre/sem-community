@@ -3075,6 +3075,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 # model can fill, and the model itself per slot.
                 "need_kwh": cp.get("need_kwh"),
                 "fill_kwh_at_max": cp.get("fill_kwh_at_max"),
+                # (#820) the drain the cap now covers, and the margin it carries
+                "drain_kwh": cp.get("drain_kwh"),
+                "headroom_pct": cp.get("headroom_pct"),
                 "hw_max_charge_w": cp.get("hw_max_charge_w"),
                 "slots": cp.get("slots"),
                 "action": cp.get("action"),

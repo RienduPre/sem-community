@@ -1590,6 +1590,15 @@ still read Off. Closing it means discovering `light.*` (and the other on/off dom
 entities, which ALSO makes them `is_controllable` → **auto-shed-eligible fleet-wide**
 (`load_management._get_devices_for_shedding` sheds any controllable, non-critical device). That is a
 load-shed *policy* change, not a display fix — Guido's call before it ships.
+**Third catch (#820, @ArneGollin1987, 16.09):** the mirror image. `charge_pacing.paced_charge_cap_w`
+solved the pace from surplus hours only — deficit hours counted as zero — while the *authoritative*
+model the user sees, `provisional_soc_curve`, walks the house drawing the pack DOWN in exactly those
+hours. Two models of one day, and the one that ACTS was the weaker. An afternoon cloud or a midday
+EV session grew the need by a kWh the cap never saw, and the evening "could not reach the pacing
+watts". Same file, same fix shape: the solver reads the drain the curve already knows (`_drain_kwh`).
+The cousin defect beside it — a cap solved to land full in the LAST slot exactly, no margin, against a
+docstring that promised "sunset − margin" — is class 46 (b), a discarded field: `end_margin_slots`
+existed, defaulted to no margin, and no caller set it.
 
 ---
 
