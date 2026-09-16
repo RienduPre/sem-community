@@ -138,6 +138,8 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         w = max(0.0, float(watts))
         if self._last_export_limit_w is not None and abs(self._last_export_limit_w - w) < 1.0:
             return                       # #538 — a repeat is pure cost
+        # (#908) Capture what SEM is about to replace, BEFORE replacing it.
+        self._capture_export_prior()
         if w <= 0.0:
             await self._hass.services.async_call(
                 "huawei_solar", "set_zero_power_grid_connection", {"device_id": device_id})
@@ -148,10 +150,66 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         self._last_export_limit_w = w
         self._last_export_intent = ExportIntent.LIMIT
 
+    #: Mode string (the readback sensor's own words) -> how to put it back.
+    #: ``reset_maximum_feed_grid_power`` is NOT a universal restore: the
+    #: integration documents it as *"Set Active Power Control to 'Unlimited'"*,
+    #: so using it on an inverter that was under DI scheduling or a percent cap
+    #: silently moves it to a THIRD state (#908 — hand back what SEM found).
+    _RESTORE = {
+        "unlimited": ("reset_maximum_feed_grid_power", None),
+        "di active scheduling": ("set_di_active_power_scheduling", None),
+        "zero power": ("set_zero_power_grid_connection", None),
+    }
+
+    def _capture_export_prior(self) -> None:
+        """(#908) Read the inverter's CURRENT active-power mode, once per cut.
+
+        Found on PROD, whose SUN2000 has sat in ``DI Active Scheduling`` — the
+        grid operator's ripple-control receiver driving the dry contacts — for
+        as long as its history goes back. ``ACTIVE_POWER_CONTROL_MODE`` is ONE
+        register with five mutually exclusive values, so SEM's zero-export does
+        not sit beside the operator's mode, it REPLACES it; and the old release
+        would then have left the inverter ``Unlimited``, out of the operator's
+        scheme entirely, with nothing in SEM aware of it.
+        """
+        if getattr(self, "_export_prior_mode", None) is not None:
+            return
+        ent = self._export_readback_entity()
+        st = self._hass.states.get(ent) if ent else None
+        if st is None:
+            self._export_prior_mode = ("", None)
+            return
+        attrs = getattr(st, "attributes", None) or {}
+        self._export_prior_mode = (
+            str(getattr(st, "state", "") or ""),
+            {"watt": attrs.get("maximum_power_watt"),
+             "percent": attrs.get("maximum_power_percent")},
+        )
+
     def export_release_recipe(self):
+        """How to put the inverter back exactly as SEM found it."""
         device_id = self._export_device_id()
         if not device_id:
             return None
+        mode, nums = getattr(self, "_export_prior_mode", None) or ("", None)
+        key = str(mode).strip().lower()
+        if key in self._RESTORE:
+            service, _ = self._RESTORE[key]
+            return {"domain": "huawei_solar", "service": service,
+                    "data": {"device_id": device_id}}
+        if key.startswith("limited to") and nums:
+            if key.endswith("%") and nums.get("percent") is not None:
+                return {"domain": "huawei_solar",
+                        "service": "set_maximum_feed_grid_power_percent",
+                        "data": {"device_id": device_id,
+                                 "power_percentage": float(nums["percent"])}}
+            if nums.get("watt") is not None:
+                return {"domain": "huawei_solar",
+                        "service": "set_maximum_feed_grid_power",
+                        "data": {"device_id": device_id,
+                                 "power": int(nums["watt"])}}
+        # Unknown or unread: 'Unlimited' is the integration's own reset and the
+        # safest thing left — it can only ever ALLOW more export, never less.
         return {"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
                 "data": {"device_id": device_id}}
 
@@ -159,10 +217,14 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         device_id = self._export_device_id()
         if not device_id:
             raise NotImplementedError("no Huawei battery/inverter device found (inverter_device_id)")
-        # The integration provides the restore itself: reset IS the prior, so
-        # there is nothing to capture and nothing to strand across a restart.
+        # Put back the mode SEM found — NOT always 'Unlimited'. One register,
+        # five mutually exclusive values (#908).
+        recipe = self.export_release_recipe() or {
+            "domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
+            "data": {"device_id": device_id}}
         await self._hass.services.async_call(
-            "huawei_solar", "reset_maximum_feed_grid_power", {"device_id": device_id})
+            recipe["domain"], recipe["service"], dict(recipe["data"]))
+        self._export_prior_mode = None
         self._last_export_limit_w = None
         self._last_export_intent = ExportIntent.RELEASE
 

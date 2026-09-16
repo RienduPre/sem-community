@@ -130,3 +130,84 @@ class TestTheWriteUsesIt:
         with _registry({}):
             with pytest.raises(NotImplementedError):
                 await a.command_limit_export(0.0)
+
+
+# ── (#908) the release must restore the mode SEM FOUND, not "Unlimited" ──
+
+class _State:
+    def __init__(self, state, watt=None, percent=None):
+        self.state = state
+        self.attributes = {"maximum_power_watt": watt, "maximum_power_percent": percent}
+
+
+def _with_mode(mode_state):
+    a = _adapter(config={"export_device_id": INV,
+                         "export_control_readback_entity": "sensor.apc",
+                         "export_guard_override_external": True})
+    a._hass.states.get = MagicMock(return_value=mode_state)
+    calls = []
+
+    async def _call(domain, service, data, *args, **kw):
+        calls.append((domain, service, dict(data)))
+    a._hass.services.async_call = MagicMock(side_effect=_call)
+    return a, calls
+
+
+@pytest.mark.asyncio
+class TestTheReleaseRestoresWhatWasFound:
+    """PROD's SUN2000 has sat in DI Active Scheduling — the grid operator's
+    ripple-control receiver on the dry contacts — for its whole history.
+    ACTIVE_POWER_CONTROL_MODE is ONE register with five mutually exclusive
+    values, and `reset_maximum_feed_grid_power` is documented by the
+    integration as *"Set Active Power Control to 'Unlimited'"*. So the old
+    release would have taken the inverter OUT of the operator's scheme and
+    left it there, with nothing in SEM aware of it."""
+
+    async def test_di_scheduling_is_put_back_not_unlimited(self):
+        a, calls = _with_mode(_State("DI Active Scheduling", watt=0, percent=0.0))
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "set_di_active_power_scheduling", calls
+        assert calls[-1][1] != "reset_maximum_feed_grid_power"
+
+    async def test_an_unlimited_inverter_still_gets_the_plain_reset(self):
+        a, calls = _with_mode(_State("Unlimited"))
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "reset_maximum_feed_grid_power"
+
+    async def test_a_watt_cap_is_put_back_at_its_own_number(self):
+        a, calls = _with_mode(_State("Limited to 7000W", watt=7000, percent=70.0))
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "set_maximum_feed_grid_power"
+        assert calls[-1][2]["power"] == 7000
+
+    async def test_a_percent_cap_is_put_back_at_its_own_number(self):
+        a, calls = _with_mode(_State("Limited to 60.0%", watt=0, percent=60.0))
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "set_maximum_feed_grid_power_percent"
+        assert calls[-1][2]["power_percentage"] == 60.0
+
+    async def test_an_unreadable_mode_falls_back_to_the_reset(self):
+        """Unknown is not a licence to invent: 'Unlimited' can only ever ALLOW
+        more export than SEM's cut, never less."""
+        a, calls = _with_mode(None)
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "reset_maximum_feed_grid_power"
+
+    async def test_the_prior_is_captured_before_the_cut_not_after(self):
+        """Capture after the write would record SEM's own 'Zero Power'."""
+        a, calls = _with_mode(_State("DI Active Scheduling"))
+        await a.command_limit_export(0.0)
+        assert a._export_prior_mode[0] == "DI Active Scheduling"
+        assert calls[0][1] == "set_zero_power_grid_connection"
+
+    async def test_the_recipe_persisted_for_a_restart_carries_the_same_mode(self):
+        """A restart replays the RECIPE, so it must name the prior mode too —
+        otherwise the cut outlives SEM and the hand-back is still wrong."""
+        a, _ = _with_mode(_State("DI Active Scheduling"))
+        await a.command_limit_export(0.0)
+        assert a.export_release_recipe()["service"] == "set_di_active_power_scheduling"
