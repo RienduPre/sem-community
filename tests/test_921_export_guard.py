@@ -174,3 +174,53 @@ class TestTheIntentsDispatch:
         from custom_components.solar_energy_management.coordinator import actuate_battery as m
         assert BatteryIntent.LIMIT_EXPORT not in m._POWER_DERIVED_INTENTS
         assert BatteryIntent.RELEASE_EXPORT not in m._POWER_DERIVED_INTENTS
+
+
+class TestOnlyUndoWhatYouTook:
+    """Live on .175: the guard emitted RELEASE_EXPORT after a hold that never
+    cut. On Huawei that is a real ``reset_maximum_feed_grid_power`` call over a
+    limit SEM never set — or over one somebody ELSE set. #908's rule."""
+
+    def test_a_hold_that_never_cut_releases_nothing(self):
+        g = ExportGuard()
+        _run(g, [(0, CLOSED, 0.0), (ENGAGE_HOLD_S + 1, CLOSED, 0.0)])   # holding, never engaged
+        assert g.state == "holding"
+        out = _run(g, [(1000, OPEN, 0.0), (1000 + RELEASE_HOLD_S + 1, OPEN, 0.0)])
+        assert out == [None, None]
+        assert g.state == "idle"
+
+    def test_a_hold_that_never_cut_goes_idle_immediately(self):
+        """No release hysteresis to serve when nothing is held down."""
+        g = ExportGuard()
+        _run(g, [(0, CLOSED, 0.0), (ENGAGE_HOLD_S + 1, CLOSED, 0.0)])
+        assert g.update(1000, OPEN, 0.0).intent is None
+        assert g.state == "idle" and "nothing to release" in g.reason
+
+    def test_a_real_cut_still_releases(self):
+        g = ExportGuard()
+        _run(g, [(0, CLOSED, 500.0), (ENGAGE_HOLD_S + 1, CLOSED, 500.0)])
+        assert g.state == "engaged"
+        out = _run(g, [(1000, OPEN, 0.0), (1000 + RELEASE_HOLD_S + 1, OPEN, 0.0)])
+        assert out == [None, "release_export"]
+
+    def test_the_flag_resets_so_a_second_episode_behaves(self):
+        g = ExportGuard()
+        _run(g, [(0, CLOSED, 500.0), (ENGAGE_HOLD_S + 1, CLOSED, 500.0),
+                 (1000, OPEN, 0.0), (1000 + RELEASE_HOLD_S + 1, OPEN, 0.0)])
+        assert g.state == "idle"
+        _run(g, [(2000, CLOSED, 0.0), (2000 + ENGAGE_HOLD_S + 1, CLOSED, 0.0)])   # holds only
+        assert _run(g, [(3000, OPEN, 0.0)]) == [None] and g.state == "idle"
+
+    def test_a_teardown_hands_back_nothing_after_a_mere_hold(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock
+        import asyncio
+        from custom_components.solar_energy_management.coordinator.coordinator import SEMCoordinator
+        g = ExportGuard()
+        _run(g, [(0, CLOSED, 0.0), (ENGAGE_HOLD_S + 1, CLOSED, 0.0)])
+        adapter = MagicMock(command_release_export=AsyncMock(), _last_error=None)
+        fake = SimpleNamespace(_export_guard=g, _battery_adapters={"b1": adapter},
+                               _observer_mode=False)
+        assert asyncio.run(SEMCoordinator.async_release_export_guard(fake, reason="unloaded")) is None
+        adapter.command_release_export.assert_not_awaited()
+        assert SEMCoordinator.export_release_recipes(fake) == {}

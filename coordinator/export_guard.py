@@ -58,6 +58,11 @@ class ExportGuard:
         self._open_since: Optional[float] = None
         self._refusals: int = 0
         self.repair_wanted: bool = False
+        #: (live on .175) Did this guard ever actually APPLY a cut? A guard
+        #: that only ever HELD has nothing to undo, and releasing anyway
+        #: would call the inverter's reset over a limit SEM never set — or
+        #: over one somebody ELSE set. #908: hand back only what you took.
+        self._applied: bool = False
 
     def report_refused(self, why: str) -> None:
         """The adapter could not (or may not) apply the cut. Sticky until the
@@ -96,12 +101,22 @@ class ExportGuard:
                 self.reason = "meter closed and the sinks absorb everything — nothing to clip"
                 return ExportCommand(None, 0.0, self.reason)
             self.state = "engaged"
+            self._applied = True
             self.reason = f"export {exp:.0f} W into a closed meter — cutting to 0 W"
             return ExportCommand(LIMIT_EXPORT, 0.0, self.reason)
         # OPEN (HELD is not a grid state) — release with hysteresis
         self._closed_since = None
         if self.state == "idle":
             return ExportCommand(None, 0.0, "export guard idle")
+        if not self._applied and self.state != "refused":
+            # Only ever HELD — nothing was written, so there is nothing to put
+            # back. Straight to idle, silently (live on .175: the guard emitted
+            # a release after a hold that never cut, which on Huawei is a real
+            # reset service call over a limit SEM never set).
+            self.state = "idle"
+            self.reason = "meter open — nothing was cut, nothing to release"
+            self._open_since = None
+            return ExportCommand(None, 0.0, self.reason)
         if self._open_since is None:
             self._open_since = now
         held = now - self._open_since
@@ -112,10 +127,12 @@ class ExportGuard:
                            f"{self.release_hold_s:.0f}s — holding the cut")
             return ExportCommand(None, 0.0, self.reason)
         was_refused = self.state == "refused"
+        applied = self._applied
         self.state = "idle"
         self.reason = "export guard idle"
         self._refusals = 0
         self.repair_wanted = False
         self._open_since = None
-        return ExportCommand(None if was_refused else RELEASE_EXPORT, 0.0,
-                             "meter open — releasing the cut")
+        self._applied = False
+        return ExportCommand(None if (was_refused or not applied) else RELEASE_EXPORT,
+                             0.0, "meter open — releasing the cut")

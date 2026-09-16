@@ -10742,7 +10742,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         what unload stashes for a removal and what the store carries across
         a restart. Empty when nothing is engaged or nothing was written."""
         guard = getattr(self, "_export_guard", None)
-        if (guard is None or guard.state not in ("engaged", "releasing", "refused")
+        if (guard is None or not getattr(guard, "_applied", False)
                 or bool(getattr(self, "_observer_mode", False))):
             return {}
         out = {}
@@ -10784,6 +10784,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         if not isinstance(rec, dict) or not rec.get("engaged"):
             return
         guard.state = "engaged"
+        # an adopted cut WAS applied — by the previous lifetime — so the
+        # release gate must see it, or the cut could never be handed back.
+        guard._applied = True
         guard.reason = f"adopted an export cut from a previous lifetime (since {rec.get('since')})"
         recipes = rec.get("recipes") or {}
         for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
@@ -10798,7 +10801,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         half way must still let HA remove the entry. Returns a sentence for
         the log, or None when there was nothing to release."""
         guard = getattr(self, "_export_guard", None)
-        if guard is None or guard.state not in ("engaged", "releasing", "refused"):
+        if guard is None or not getattr(guard, "_applied", False):
+            # #908 again: a guard that only ever HELD wrote nothing, so a
+            # teardown has nothing to hand back.
             return None
         if bool(getattr(self, "_observer_mode", False)):
             # Observer mode recorded WOULDs and wrote nothing (#936: the rig's

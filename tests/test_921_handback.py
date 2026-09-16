@@ -22,6 +22,7 @@ class TestInventory:
 
 def _fake(state):
     g = ExportGuard(); g.state = state
+    g._applied = state in ("engaged", "releasing", "refused")   # it wrote something
     adapter = MagicMock(command_release_export=AsyncMock(), _last_error=None)
     return SimpleNamespace(_export_guard=g, _battery_adapters={"b1": adapter},
                            _observer_mode=False), g, adapter
@@ -34,6 +35,13 @@ class TestRelease:
         said = await SEMCoordinator.async_release_export_guard(fake, reason="unloaded")
         adapter.command_release_export.assert_awaited_once()
         assert g.state == "idle" and "released" in said and "unloaded" in said
+
+    async def test_a_hold_that_never_cut_hands_back_nothing(self):
+        """Live on .175 (#908): only undo what SEM itself took."""
+        fake, g, adapter = _fake("holding")
+        fake._export_guard._applied = False
+        assert await SEMCoordinator.async_release_export_guard(fake, reason="unloaded") is None
+        adapter.command_release_export.assert_not_awaited()
 
     async def test_a_releasing_or_refused_guard_is_released_too(self):
         for st in ("releasing", "refused"):
@@ -177,7 +185,7 @@ class TestRecipes:
         assert a.export_release_recipe()["data"] == {"entity_id": "number.x", "value": 5000.0}
 
     def test_recipes_are_empty_in_observer_mode_or_when_idle(self):
-        g = ExportGuard(); g.state = "engaged"
+        g = ExportGuard(); g.state = "engaged"; g._applied = True
         a = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"}); a._export_prior = 1.0
         assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g, _battery_adapters={"b1": a}, _observer_mode=True)) == {}
         g2 = ExportGuard()
