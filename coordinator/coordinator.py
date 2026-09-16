@@ -10881,6 +10881,23 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _persist = getattr(self, "_export_guard_persist", None)
                 if callable(_persist):
                     await _persist(intent is BatteryIntent.LIMIT_EXPORT)
+        # (live on .175) While the cut is ON, say so EVERY cycle — on the
+        # published state and on the observer surface. The first build set
+        # ``would`` only on the cycle the intent was issued, so a person
+        # watching the rig saw one flash and then nothing, for a feature whose
+        # whole promise is that it is holding the meter shut.
+        if self._observer_mode and guard.state in ("engaged", "releasing", "refused"):
+            would = would or ("limit_export" if guard.state == "engaged" else guard.state)
+            _ctl = getattr(self, "_surplus_controller", None)
+            if _ctl is not None:
+                try:
+                    _ctl.publish_observer_decision(
+                        key="export_guard", name="grid export",
+                        action=("limit_export" if guard.state == "engaged"
+                                else guard.state),
+                        power_w=0.0, reason=guard.reason, kind="battery")
+                except Exception:  # noqa: BLE001 — the surface never breaks the seam
+                    pass
         self._export_guard_state = {
             "enabled": enabled, "state": guard.state, "reason": guard.reason,
             "would": would, "repair_wanted": guard.repair_wanted,

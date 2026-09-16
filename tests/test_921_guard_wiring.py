@@ -103,3 +103,59 @@ class TestTheGuardTicks:
             await SEMCoordinator._run_export_guard(fake, power, now=float(t))
         adapter.command_release_export.assert_awaited_once()
         assert fake._export_guard_state["state"] == "idle"
+
+
+@pytest.mark.asyncio
+class TestTheCutIsVisibleInObserverMode:
+    """Live on .175 with the compressed sim: the guard ENGAGED and the rig's
+    own observer surface showed nothing — the cut published under
+    ``battery:<id>``, the same key as the battery's discharge decision, so the
+    two clobbered each other every cycle; and ``would`` was set only on the
+    single cycle the intent fired. #855: a case is judged on what would hit
+    the wire, so the wire must be readable."""
+
+    async def test_the_cut_has_its_own_observer_key(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from custom_components.solar_energy_management.coordinator.actuate_battery import (
+            actuate_battery,
+        )
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            BatteryDecision, BatteryIntent,
+        )
+        ctl = MagicMock(); a = MagicMock(command_limit_export=AsyncMock(), _last_error=None)
+        await actuate_battery(BatteryDecision("primary", BatteryIntent.LIMIT_EXPORT,
+                                              export_limit_w=0.0, reason="closed"),
+                              a, observer=True, controller=ctl)
+        assert ctl.publish_observer_decision.call_args.kwargs["key"] == "export:primary"
+
+    async def test_a_normal_battery_decision_keeps_its_key(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from custom_components.solar_energy_management.coordinator.actuate_battery import (
+            actuate_battery,
+        )
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            BatteryDecision, BatteryIntent,
+        )
+        ctl = MagicMock(); a = MagicMock(command_normal=AsyncMock(), _last_error=None)
+        await actuate_battery(BatteryDecision("primary", BatteryIntent.NORMAL, reason="n"),
+                              a, observer=True, controller=ctl)
+        assert ctl.publish_observer_decision.call_args.kwargs["key"] == "battery:primary"
+
+    async def test_an_engaged_cut_says_so_every_cycle_not_once(self):
+        fake, power, adapter, ctl = _fake(verdict=CLOSED, export_w=3000.0, observer=True)
+        for t in (0, 60, 130):
+            await SEMCoordinator._run_export_guard(fake, power, now=float(t))
+        assert fake._export_guard_state["state"] == "engaged"
+        assert fake._export_guard_state["would"] == "limit_export"
+        ctl.publish_observer_decision.reset_mock()
+        await SEMCoordinator._run_export_guard(fake, power, now=200.0)   # a later, quiet cycle
+        assert fake._export_guard_state["would"] == "limit_export", "the flash became silence"
+        kw = ctl.publish_observer_decision.call_args.kwargs
+        assert kw["key"] == "export_guard" and kw["action"] == "limit_export"
+        assert kw["kind"] == "battery", "the rig's sim filters on kind battery/charger"
+
+    async def test_an_idle_guard_publishes_nothing(self):
+        fake, power, adapter, ctl = _fake(verdict=OPEN, export_w=0.0, observer=True)
+        await SEMCoordinator._run_export_guard(fake, power, now=0.0)
+        assert not [c for c in ctl.publish_observer_decision.call_args_list
+                    if c.kwargs.get("key") == "export_guard"]
