@@ -1200,46 +1200,6 @@ class, and does the new precondition hold for them?**
 
 ---
 
-### 90. A new control decides in the orchestrator instead of the decide layer — two producers of one decision — GUARDED
-**Symptom:** on the rig, a feature whose whole promise is *"I am holding the meter shut"* is
-invisible. The observer surface shows the battery's own verdict where the export cut should be, or
-shows the cut for exactly one cycle and then nothing. Nothing errors, the cut is genuinely applied,
-and every unit test passes — the two decisions simply overwrite each other under one key, so the
-one surface a person judges the feature by (#855: a case is judged on what would hit the wire)
-cannot show both.
-**Root shape:** a new control axis is built where it is easiest to reach the inputs — inside the
-coordinator's cycle — rather than in the layer that already decides. The tracker ticks, decides and
-writes in one method, so the codebase gains a SECOND producer of a decision type and a second call
-site for a seam built to be the only one. The collision on the observer key is the visible tip; the
-cause is that the axis never entered the decide layer. Everything downstream inherits it: the cut
-loops every adapter because no decider chose one (a house-level quantity riding a per-device path,
-so a two-battery single-inverter install issues the same service call twice — de-duplication at the
-brand hides it, cf. class 38); the hand-back asks the adapter *"could you undo a cut"* instead of
-*"are you holding one"*, which on a mixed fleet (#531) resets a limit the OWNER set; and the
-decision cannot be unit-tested without building a whole coordinator, which is how the same arc
-shipped a guard that released a cut it never made.
-**Why it survives review:** the layering is obeyed *downward* — there IS an adapter per brand and
-there IS a seam — so the diff looks like the neighbouring feature it claims to mirror. Only the
-question "where is the decision made?" separates them, and that question is invisible in a diff
-that adds files rather than changing them. The tell in SEM's own history: `#864`'s peak guard puts
-its tracker's value on the fleet state and clamps in `decide.py`; the export guard put nothing on
-the fleet state at all.
-**Cure:** the tracker leaves a VALUE on the cycle state; a pure function turns it into an intent;
-one seam writes it; one adapter is chosen by capability, not by insertion order. Three named
-methods instead of one long one, each exercisable alone.
-**Guard:** `tests/test_921_one_track.py` — one producing file per decision type, exactly one
-production call site per seam, the seam's observer key named nowhere else (counting IMPORTS: the
-first version of that pin missed `from .actuate_export import OBSERVER_KEY` and was vacuous), every
-decider free of hass/adapter/await/service-call, and the tick proven to run after the verdicts it
-reads. Every pin was mutated to confirm it fails.
-**Sweep question:** for any control that writes to hardware — *which file constructs its decision,
-and is anything else allowed to?* Then: does its tracker put a value on the cycle state, or keep it
-in a method? A control whose decision type is built in exactly one place cannot grow a second track.
-**Scope note:** SEM does NOT have a universal "every write goes through a decide layer" rule —
-`charge_pacing` and `load_management` call services directly, and a review refuted that broader
-framing. The class is about a control gaining a second producer of a decision that already has one.
-Refs #955 #921 #864 #855 #908 #936 #531 #538.
-
 ## Meta-classes (the coherence audit hunts these too)
 
 - **Duplicated mechanism** — the same debounce/retry/reconcile/swap built in 2+ places (e.g. the
@@ -3687,10 +3647,162 @@ second entity of the same domain and device_class that measures something adjace
 the other direction, another window, one phase — and does the matcher separate them, or pick by
 ordering? And before making a guard fail-closed: *trace what the missing value actually does
 downstream*, because "drop it" is only safe where absence is handled.
-Refs #962 #886 #947 #814 #816.
-**Open residual (#964, found by the adversarial review of a parallel #962 build):**
-`discover_all_ev_chargers_from_registry` and `build_detection_report` group by `device_id` with NO
-fallback for device-less entities — a KEBA over UDP registers none — so two such chargers of one
-platform collapse into one bucket and any sibling search, this guard's included, can cross chargers.
-`probe_charger_candidates` alone sub-groups by entity-id prefix; the other two sites should share it.
-Not folded into #962: it changes how chargers are COUNTED and wants its own live proof.
+**Residual, CLOSED in #964 (class 90):** the sibling search this class installs is only as
+honest as the bucket it searches — and two of the three discovery sites grouped device-less
+entities into ONE bucket per platform, so the best-ranked sibling could belong to the other
+charger.
+Refs #962 #886 #947 #814 #816 #964.
+
+### 90. An optional identity used as a grouping key — "no id" becomes one unit — GUARDED
+**Symptom:** a user with two chargers of one brand is offered ONE charger whose entities come from
+both boxes — the power sensor of the garage box, the plug of the carport box. Nothing errors: each
+entity is real, correctly classed and on the right platform; SEM simply believes there is one box.
+Downstream, every per-charger decision (budget, connected, charging, the SoC anchor) is made about
+a machine that does not exist, and the second charger is never offered at all.
+**Root shape:** the registry's `device_id` is the answer to "which box is this" — and it is
+OPTIONAL. An integration may register no device at all (KEBA's UDP integration, manually configured
+MQTT entities, YAML platforms). Code that groups with `devices.setdefault(e.device_id, [])` turns
+the ABSENCE of an identity into an identity: every device-less entity of a platform hashes to the
+same `None` key and lands in one bucket. The collapse is invisible because a bucket of two boxes
+looks exactly like a bucket of one — and the role pick that reads it cannot tell, whether it takes
+the first match, the last, or (since #962) the best-ranked sibling in the whole list. The
+per-charger twin of class 3 one layer earlier: class 3 reads the fleet where it wanted one charger;
+here the fleet IS one charger, by construction, before anything is read.
+**Live catch (#964, found by the adversarial review of #962):** `discover_all_ev_chargers_from_registry`
+(config) and `build_detection_report` (diagnostics) both keyed on `device_id` with no fallback,
+while `probe_charger_candidates` — the third site — already knew better and sub-grouped device-less
+entities by entity-id prefix. Two of three paths, one mechanism.
+**Where it lives:** every walk that turns registry entries into "devices" — the three EV discovery
+sites in `hardware_detection.py`, and the same question for any future per-unit walk (PV strings and
+battery siblings already group on `config_entry_id`, which is why they never had it).
+**Closure:** one shared `group_entities_by_unit`, three callers. `device_id` wins wherever it
+exists. For the device-less remainder there is no identity left, only NAMES — the entity-id prefix
+at three widths, the name up to and including its first numeric TOKEN (HA disambiguates a second box
+either by suffixing every entity — `..._2` — or by its device name, which puts the digit in the
+middle where no fixed-width prefix can see it), and that trailing `_<n>` itself — the two numeric
+axes adopting only on HA's OWN numbering shape, every numbered name being an unnumbered name of the
+same set plus its number, starting at 2, because a platform that numbers its own sub-structure
+(`wb_garage_phase_1`…`_3`) is not two boxes and on a plugless platform the plug rule cannot say so; each tried against
+`config_entry_id` first and then without it (one box can span several entries: a rig's template
+helpers are one entry per entity). Finest first. **A name axis becomes a boundary only on evidence:
+at least TWO of its groups must show the charger shape on their own** — a power reading plus a plug
+binary, or, only on a platform that publishes no plug at all (a JuiceBox over plain MQTT), plus a
+current control. Insisting on the PLUG wherever one exists is the second thing the review of this
+fix had to teach it: a current control is not unique to a box *within* one box, so three per-phase
+`number.*_current` legs beside three per-phase power sensors each passed the loose rule and split
+one wallbox into three chargers, shedding the single `binary_sensor.wb_plug` they share. A phase
+leg, a site total and a sub-meter never carry a plug. That threshold is the whole safety argument, and the first draft of this fix got
+it wrong: adopting a split that finds ONE box separates nothing, it only sheds the entities it left
+behind — a KEBA called "Keba" whose `sensor.keba_charging_power` and `number.keba_charging_current`
+share the prefix `keba_charging` would have been "split" from its own `binary_sensor.keba_plug`,
+handing its owner a charger with no plug and a `keba.set_current` with no target; a YAML-MQTT
+JuiceBox beside a YAML-MQTT heat pump would have been deleted in favour of the heat pump. With the
+two-box threshold, an install with one box is grouped byte-identically to pre-#964, so the charger
+COUNT cannot move — which is why this could ride a release with no live device-less box to prove it
+on. When two boxes ARE found, a group showing no shape is first offered BACK to the
+box it belongs to, by longest shared leading name tokens and only where exactly one box is closest
+— because two boxes can shatter the SAME way at the axis that separated them (`<box>_charging_power`
+with `<box>_charging_current` under one name, `<box>_plug_connected` under another), and shedding
+that costs BOTH owners the plug binary and the `keba.set_current` target it is. What stays equally
+close to every box is what "belongs to neither" actually looks like — openWB's `openwb_global_*`
+site totals sit one token from each loadpoint — and only that is dropped, because a brand function
+fed one box's leftovers invents a second, partial charger. `build_detection_report` lists the drops
+under `unattributed`, which the diagnostics download carries, so the drop is visible, never silent.
+And a leftover that carries a MARK — a plug or a current control — refuses the axis outright rather
+than being dropped: a mark left over is one box's own steering, so the axis cut through a box. A
+leftover that shows the charger shape ON ITS OWN is never attached at all: it is a box this axis
+could not place (a third, plugless wallbox beside two plug-bearing ones), and name distance would
+have folded it into whichever neighbour it happened to share a token with.
+The unproven case splits per CALLER, because the two directions cost different things: the paths
+that BIND merge (a split nobody proved must never shed a box's entities), while the prober keeps its
+name split (it binds nothing, and merging a rig's template platform into "one device" is what handed
+a mock charger an SG-Ready switch for start/stop, #814) — with a FLOOR, since an adopted axis can be
+wider than the two-token prefix the prober has split on since #814, and a one-token axis offered a
+garage door as a charger's start/stop. The report's prober-vs-brand comparison pairs the two
+findings by the ENTITIES each claims, the way `config_flow._charger_already_installed` fingerprints
+a charger: the device id cannot do it (two device-less boxes both report `None`) and neither can the
+grouping key, since the two sides group an unproven split differently ON PURPOSE — keying on it
+reported a disagreement on every device-less install SEM has, which is the exact population #814's
+comparison window is watching.
+**Known limits, all fail-closed to the pre-#964 behaviour:** two device-less boxes of a brand that
+shows neither a plug binary nor a current `number` (Easee's status is a plain `sensor`, its control
+a service) still collapse; so do two boxes one of whose plugs the user has disabled — a disabled
+entity is filtered before grouping, so the evidence is judged on what is live — and so do two boxes
+whose names no axis separates (`box` beside `box_garage`, with no digit anywhere), and two boxes
+sharing their first token where a finer axis was refused — the ladder then falls to the coarser one,
+which is still no worse than the single bucket #964 found. A site-level current `number` on a
+plugless multi-box platform (openWB's `openwb_global_max_current`) strands a mark and so keeps its
+loadpoints collapsed: the same stranded-mark rule that stops a JuiceBox's `limit_current` from
+splitting ONE box into two, and the fail-closed direction is the one we keep. The one shape
+that could still split a single box is a PLUGLESS platform publishing a separate current `number`
+per phase; no brand SEM knows does that, and the stranded-mark rule catches it wherever the phases
+leave anything behind.
+**Guard:** `tests/test_964_charger_unit_grouping.py` — an AST lint over the package that flags any
+`setdefault(…)`/`[…].append()` keyed on a registry entry's `device_id`, attribute, `getattr` or
+one-line temp alike (the class recurs by someone writing that line in the next discovery path), with
+a self-check on the shapes it must catch and must not; a reflection pin that all three sites funnel
+through the grouping; two-box separation and one-box no-shatter in BOTH directions with the pre-fix
+rule spelled out so they cannot pass vacuously; the unproven-split cases the review of this fix
+found (the KEBA with a current number, the JuiceBox beside a heat pump, a disabled mark, the rig's
+template platform); the config-entry, numeric-suffix, mid-name-number and three-token axes each
+pinned by a case only that axis can separate; two boxes that shatter the same way, each keeping its
+own plug and service target, and a leftover meter that finds its own box; one box's three phase legs
+and its total, each pinned as ONE charger with the loose shape spelled out so the pin cannot pass
+vacuously; the leftover drop pinned exactly at the tie (a mutant that reports every entity as
+unattributed fails, and so does one that hands the site total to a loadpoint); a quiet
+prober-vs-brand comparison on the device-less install, beside a prober-only finding that must still
+be reported; and role-binding order-independence over permutations, a registry-place pin on the
+re-attached leftovers and a pin on WHICH box is primary. Fourteen mutants — reverting to
+`device_id`-only, lowering the threshold to one shaped group, removing each of the four name axes or
+the config entry, dropping the plug requirement, dropping the stranded-mark refusal, dropping the
+leftovers instead of re-attaching them, attaching them on a tie, appending them out of registry
+order, trying the axes coarsest-first, merging in the prober or flooring an axis already finer than
+its prefix, adopting a numeric axis on numbered sub-structure, attaching a leftover that is a box of
+its own, and pairing the report's two findings many-to-many or on the grouping key — are each
+killed.
+**Sweep question:** for every key this codebase groups by, is it OPTIONAL in its source of truth —
+and if it is absent, does the code get one bucket per missing value, or one bucket for *all* of
+them? A key that can be `None` is not an identity until the `None` case has its own answer. And when
+the fallback is a heuristic: what does adopting it COST when it is wrong, and is that cost paid by
+the user who has one of the thing, or only by the user who has two?
+Refs #964 #962 #886 #814 #3.
+
+### 91. A new control decides in the orchestrator instead of the decide layer — two producers of one decision — GUARDED
+**Symptom:** on the rig, a feature whose whole promise is *"I am holding the meter shut"* is
+invisible. The observer surface shows the battery's own verdict where the export cut should be, or
+shows the cut for exactly one cycle and then nothing. Nothing errors, the cut is genuinely applied,
+and every unit test passes — the two decisions simply overwrite each other under one key, so the
+one surface a person judges the feature by (#855: a case is judged on what would hit the wire)
+cannot show both.
+**Root shape:** a new control axis is built where it is easiest to reach the inputs — inside the
+coordinator's cycle — rather than in the layer that already decides. The tracker ticks, decides and
+writes in one method, so the codebase gains a SECOND producer of a decision type and a second call
+site for a seam built to be the only one. The collision on the observer key is the visible tip; the
+cause is that the axis never entered the decide layer. Everything downstream inherits it: the cut
+loops every adapter because no decider chose one (a house-level quantity riding a per-device path,
+so a two-battery single-inverter install issues the same service call twice — de-duplication at the
+brand hides it, cf. class 38); the hand-back asks the adapter *"could you undo a cut"* instead of
+*"are you holding one"*, which on a mixed fleet (#531) resets a limit the OWNER set; and the
+decision cannot be unit-tested without building a whole coordinator, which is how the same arc
+shipped a guard that released a cut it never made.
+**Why it survives review:** the layering is obeyed *downward* — there IS an adapter per brand and
+there IS a seam — so the diff looks like the neighbouring feature it claims to mirror. Only the
+question "where is the decision made?" separates them, and that question is invisible in a diff
+that adds files rather than changing them. The tell in SEM's own history: `#864`'s peak guard puts
+its tracker's value on the fleet state and clamps in `decide.py`; the export guard put nothing on
+the fleet state at all.
+**Cure:** the tracker leaves a VALUE on the cycle state; a pure function turns it into an intent;
+one seam writes it; one adapter is chosen by capability, not by insertion order. Three named
+methods instead of one long one, each exercisable alone.
+**Guard:** `tests/test_921_one_track.py` — one producing file per decision type, exactly one
+production call site per seam, the seam's observer key named nowhere else (counting IMPORTS: the
+first version of that pin missed `from .actuate_export import OBSERVER_KEY` and was vacuous), every
+decider free of hass/adapter/await/service-call, and the tick proven to run after the verdicts it
+reads. Every pin was mutated to confirm it fails.
+**Sweep question:** for any control that writes to hardware — *which file constructs its decision,
+and is anything else allowed to?* Then: does its tracker put a value on the cycle state, or keep it
+in a method? A control whose decision type is built in exactly one place cannot grow a second track.
+**Scope note:** SEM does NOT have a universal "every write goes through a decide layer" rule —
+`charge_pacing` and `load_management` call services directly, and a review refuted that broader
+framing. The class is about a control gaining a second producer of a decision that already has one.
+Refs #955 #921 #864 #855 #908 #936 #531 #538.

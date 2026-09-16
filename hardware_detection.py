@@ -986,6 +986,367 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     _reject_capability_sensor(result, entities)
 
 
+# ============================================================
+# (#964) One physical unit, one bucket — the grouping every registry
+# discovery path shares. ``device_id`` is the registry's own answer and
+# is OPTIONAL; using it as the whole key makes "no device" an identity,
+# and every device-less box of a platform lands in the same bucket.
+# ============================================================
+
+def _object_id(entity_id: str) -> str:
+    return entity_id.split(".", 1)[1] if "." in entity_id else entity_id
+
+
+def _entity_id_prefix(entity_id: str, tokens: int = 2) -> str:
+    """The first ``tokens`` object-id tokens — ``sensor.keba_p30_power`` → ``keba_p30``.
+
+    A NAME, not an identity: it is one of the axes ``group_entities_by_unit``
+    tries, and a split it proposes is only ever adopted with evidence.
+    """
+    return "_".join(_object_id(entity_id).split("_")[:tokens])
+
+
+def _entity_id_through_number(entity_id: str) -> str:
+    """The name up to and including its first purely numeric token —
+    ``sensor.garage_2_charging_power`` → ``garage_2``, and ``garage``'s own
+    ``sensor.garage_charging_power`` → ``garage``. When Home Assistant
+    disambiguates a second box by its DEVICE name rather than by suffixing
+    each entity, the digit sits in the middle of the id, where neither a
+    prefix of fixed width nor the trailing-``_<n>`` axis can see it."""
+    tokens = _name_tokens(entity_id)
+    for i, token in enumerate(tokens):
+        if token.isdigit():
+            return "_".join(tokens[:i + 1])
+    return tokens[0] if tokens else ""
+
+
+def _entity_id_suffix(entity_id: str) -> str:
+    """Home Assistant's OWN disambiguator for a second identically named box:
+    a trailing ``_<n>`` (``sensor.juicebox_power_2``). The one axis a prefix
+    cannot see, and the only thing that separates two boxes on one config
+    entry that their owner named the same."""
+    last = _object_id(entity_id).split("_")[-1]
+    return last if last.isdigit() else ""
+
+
+def _charger_mark(entity) -> Optional[str]:
+    """The two entities only a CHARGER has, by domain + device class: the
+    plug binary that says a car is there, and the current control that
+    steers it (#814's rule). Never a name."""
+    eid = str(getattr(entity, "entity_id", "") or "")
+    dom = eid.split(".", 1)[0]
+    dc = getattr(entity, "original_device_class", None)
+    if dom == "binary_sensor" and dc == "plug":
+        return "plug"
+    if dom == "number" and dc == "current":
+        return "current"
+    return None
+
+
+def _shows_charger_shape(entities, require_plug: bool = False) -> bool:
+    """Does this group of entities describe a charger ON ITS OWN?
+
+    The same structural rule ``probe_charger_candidates`` admits a candidate
+    by (#814): a power READING plus one of the two marks only a charger has
+    — a plug binary or a current control. A power sensor alone is a smart
+    plug, a toaster, or a site total; a plug binary alone is half a box.
+
+    ``require_plug`` narrows that to the plug binary alone, and the grouping
+    below turns it on wherever the platform publishes ANY plug — because a
+    current control is not unique to a box within one box. Three per-phase
+    ``number.*_current`` legs beside three per-phase power sensors each pass
+    the loose rule, so a name axis "found" three chargers in one wallbox and
+    shed the single plug they share (the review of this fix). A plug binary
+    is what a phase leg, a site total and a sub-meter never have.
+
+    Used by the grouping to answer one question and no other: did a name
+    axis find a second BOX, or only a second naming convention?
+    """
+    has_power = False
+    marks = set()
+    for e in entities:
+        eid = str(getattr(e, "entity_id", "") or "")
+        dom = eid.split(".", 1)[0]
+        dc = getattr(e, "original_device_class", None)
+        if dom == "sensor" and dc == "power":
+            has_power = True
+            continue
+        mark = _charger_mark(e)
+        if mark:
+            marks.add(mark)
+    if not has_power:
+        return False
+    return "plug" in marks if require_plug else bool(marks)
+
+
+def _is_ha_numbering(names) -> bool:
+    """Do these names look like Home Assistant numbering a SECOND box?
+
+    HA keeps the first box's name and appends ``_2`` — so every numbered
+    name here must be an unnumbered name of this same set plus its number,
+    and the numbers start at 2. ``garage`` beside ``garage_2`` passes.
+    Numbered SUB-STRUCTURE does not: three legs named ``wb_garage_phase_1``
+    …``_3`` have nothing in the set they were numbered from (the review of
+    this fix split a three-phase wallbox into three chargers that way), and
+    a set that is numbered all the way down never had a first box.
+    """
+    names = set(names)
+    numbered = [n for n in names if n.split("_")[-1].isdigit()]
+    if not numbered or len(numbered) == len(names):
+        return False
+    for name in numbered:
+        tokens = name.split("_")
+        if int(tokens[-1]) < 2 or "_".join(tokens[:-1]) not in names:
+            return False
+    return not any(t.isdigit() for n in names if n not in numbered
+                   for t in n.split("_"))
+
+
+#: The name axes tried on a device-less platform, FINEST FIRST — with the
+#: extra evidence an axis needs before it may be adopted at all, and whether
+#: it can land COARSER than the two-token prefix the prober floors on. Each
+#: is paired with the config entry first (a box is one entry) and then
+#: without it (one box can span several: a rig's template helpers are one
+#: entry per entity). Nothing here is an identity — the evidence rules are
+#: what turn an axis into a boundary.
+_UNIT_NAME_AXES = (
+    (lambda eid: _entity_id_prefix(eid, 3), None, False),
+    (lambda eid: _entity_id_prefix(eid, 2), None, False),
+    (lambda eid: _entity_id_prefix(eid, 1), None, True),
+    (_entity_id_through_number, _is_ha_numbering, True),
+    (lambda eid: "#_" + _entity_id_suffix(eid) if _entity_id_suffix(eid)
+     else "#", _is_ha_numbering, False),
+)
+
+
+def _name_tokens(entity_id: str) -> List[str]:
+    return _object_id(entity_id).split("_")
+
+
+def _shared_leading_tokens(a: List[str], b: List[str]) -> int:
+    shared = 0
+    # strict=False is the point: the shorter name ends the comparison.
+    for left, right in zip(a, b, strict=False):
+        if left != right:
+            break
+        shared += 1
+    return shared
+
+
+def _attach_leftovers(shaped: Dict[Any, List[Any]],
+                      leftovers: List[List[Any]]) -> List[List[Any]]:
+    """Give an unshaped group back to the box it belongs to.
+
+    "Shows no charger shape" is not the same as "belongs to no box": two
+    boxes can shatter the SAME way at the very axis that separated them.
+    Two KEBAs named Garage and Carport publish ``<box>_charging_power`` and
+    ``<box>_charging_current`` under one name and ``<box>_plug_connected``
+    under another — the split is real and evidenced twice over, yet
+    dropping everything it left behind costs BOTH owners their plug binary,
+    and with it the ``keba.set_current`` target. So a leftover joins the
+    shaped group whose entity ids it shares the most leading name tokens
+    with, and only where exactly one group is closest. A leftover equally
+    close to both boxes is what "belongs to neither" actually looks like —
+    openWB's ``openwb_global_*`` site totals sit one token from every
+    loadpoint — and it stays out: returned as unplaced, for the caller to
+    judge and for ``build_detection_report`` to list as ``unattributed``.
+    """
+    tokens: Dict[str, List[str]] = {}
+
+    def _tok(entity) -> List[str]:
+        eid = str(getattr(entity, "entity_id", "") or "")
+        if eid not in tokens:
+            tokens[eid] = _name_tokens(eid)
+        return tokens[eid]
+
+    unplaced: List[List[Any]] = []
+    for group in leftovers:
+        # A group that shows the charger shape on its own is a BOX this axis
+        # could not place, not a spare part of somebody else's: attaching it
+        # by name distance merged a plugless third wallbox into its neighbour
+        # (the review of this fix). It goes back unplaced, and the mark it
+        # carries then refuses the axis.
+        if _shows_charger_shape(group):
+            unplaced.append(group)
+            continue
+        closest, best, tied = None, 0, False
+        for key, members in shaped.items():
+            score = max(_shared_leading_tokens(_tok(left), _tok(member))
+                        for left in group for member in members)
+            if score > best:
+                closest, best, tied = key, score, False
+            elif score == best and best > 0 and key != closest:
+                tied = True
+        if closest is not None and not tied:
+            shaped[closest].extend(group)
+        else:
+            unplaced.append(group)
+    return unplaced
+
+
+def _split_deviceless(platform: str, plat_entities: List[Any],
+                      unproven_split: str) -> Dict[Any, List[Any]]:
+    """The device-less half of ``group_entities_by_unit`` — see its docstring."""
+    def _keyed(name_of, with_entry: bool) -> Dict[Any, List[Any]]:
+        out: Dict[Any, List[Any]] = {}
+        for e in plat_entities:
+            cid = getattr(e, "config_entry_id", None)
+            # A registry entry carries a str or None; anything else (a test
+            # double's auto-attribute) is not an identity to split on.
+            cid = cid if (with_entry and isinstance(cid, str)) else ""
+            out.setdefault(
+                ("unit", platform, cid, name_of(str(e.entity_id))), []
+            ).append(e)
+        return out
+
+    # Which mark makes a group a BOX here. A current control is not unique
+    # to a box WITHIN one box — per-phase legs carry one each — so wherever
+    # this platform publishes any plug binary at all, that is the mark, and
+    # a group without one is a phase, a total or a sub-meter. A platform
+    # that publishes none (a JuiceBox over plain MQTT) keeps the loose rule,
+    # which is the only mark it has left.
+    require_plug = any(_charger_mark(e) == "plug" for e in plat_entities)
+
+    def _floor(groups: Dict[Any, List[Any]]) -> Dict[Any, List[Any]]:
+        """The prober's partition is never COARSER than the two-token prefix
+        it has split on since #814 — a one-token axis, or the terminal merge,
+        is wider than that, and merging a rig's template platform is what
+        offered a garage door as a charger's start/stop. Applied only to
+        those: an axis already finer than the prefix (three tokens, or HA's
+        own numbering) must not be re-cut by it, which would shatter a box
+        the axis had just separated correctly."""
+        if unproven_split != "prefix":
+            return groups
+        refined: Dict[Any, List[Any]] = {}
+        for key, members in groups.items():
+            for e in members:
+                refined.setdefault(
+                    key + (_entity_id_prefix(str(e.entity_id), 2),), []
+                ).append(e)
+        return refined
+
+    for with_entry in (True, False):
+        for name_of, accepts, coarse in _UNIT_NAME_AXES:
+            groups = _keyed(name_of, with_entry)
+            if accepts is not None and not accepts([k[3] for k in groups]):
+                continue
+            shaped = {k: v for k, v in groups.items()
+                      if _shows_charger_shape(v, require_plug)}
+            # TWO boxes or none: a split that finds ONE box is not separating
+            # anything, it is only shedding the entities it left behind.
+            if len(shaped) >= 2:
+                unplaced = _attach_leftovers(
+                    shaped,
+                    [g for k, g in groups.items() if k not in shaped])
+                # A mark left over belongs to a box this axis cut through —
+                # it is the plug or the control of one of them, and no box
+                # may be steered by a cut. Refuse the axis, try the next.
+                if any(_charger_mark(e) for g in unplaced for e in g):
+                    continue
+                return _floor(shaped) if coarse else shaped
+    return _floor({("unit", platform, "", ""): list(plat_entities)})
+
+
+def group_entities_by_unit(entities, *,
+                           unproven_split: str = "merge") -> Dict[Any, List[Any]]:
+    """Partition registry entries into the PHYSICAL units they describe.
+
+    ``device_id`` wins wherever it exists: it is the registry's own answer.
+    But it is optional — KEBA's UDP integration registers no device, and
+    manually configured MQTT entities have none either — and two of the
+    three discovery sites used it as the WHOLE key (#964). ``None`` is not
+    an identity: every device-less box of a platform collapsed into one
+    bucket, so a per-device role pick (and, since #962, a sibling RANKING
+    that searches that whole bucket for the best-named entity) could hand
+    one charger the other charger's power sensor.
+
+    For the device-less remainder there is no identity left, only NAMES —
+    the entity-id prefix at three widths, and the trailing ``_<n>`` Home
+    Assistant itself appends to a second box of the same name — each tried
+    against the config entry first and then without it. Finest first.
+
+    **A name axis becomes a boundary only on evidence: at least TWO of its
+    groups must show the charger shape on their own.** That is the whole
+    safety argument, and the reason this can ride a release with no live
+    device-less box to prove it on. Splitting on a name alone changes the
+    charger COUNT — a KEBA whose device is called "Keba" publishes
+    ``sensor.keba_charging_power``, ``number.keba_charging_current`` and
+    ``binary_sensor.keba_plug``: three prefixes, ONE box, and a split would
+    hand its owner a charger with no plug and a ``keba.set_current`` with no
+    target. A split that finds only ONE box separates nothing, so it is
+    refused; where there is one box the grouping is byte-identical to the
+    pre-#964 one.
+
+    When two boxes ARE found, the groups that show no shape are dropped:
+    they belong to neither box, and a brand function fed one box's leftovers
+    invents a second, partial charger out of them (openWB's per-loadpoint
+    MQTT entities are two real boxes; its ``openwb_global_*`` site totals are
+    neither). ``build_detection_report`` lists them under ``unattributed``,
+    so the drop is visible, never silent.
+
+    ``unproven_split`` is what a device-less platform gets when the names
+    propose a split the evidence does not carry:
+
+    * ``"merge"`` — one bucket, the pre-#964 behaviour, for the paths that
+      BIND: a split nobody proved must never shed a box's entities.
+    * ``"prefix"`` — keep the two-token name split, the prober's behaviour
+      since #814: it binds nothing, an unproven fragment simply fails its
+      own shape test, and merging a rig's template platform into "one
+      device" is what handed a mock charger an SG-Ready switch for
+      start/stop.
+
+    Returns ``{unit_key: [entities]}`` in first-appearance order; a unit key
+    is the ``device_id`` string where there was one, and an opaque tuple
+    otherwise.
+    """
+    entities = list(entities)
+    position: Dict[str, int] = {}
+    for i, e in enumerate(entities):
+        position.setdefault(str(getattr(e, "entity_id", "")), i)
+
+    units: Dict[Any, List[Any]] = {}
+    deviceless: Dict[str, List[Any]] = {}
+    for e in entities:
+        device_id = getattr(e, "device_id", None)
+        if device_id is None or device_id == "":
+            deviceless.setdefault(
+                str(getattr(e, "platform", "") or ""), []).append(e)
+        else:
+            units.setdefault(device_id, []).append(e)
+
+    for platform, plat_entities in deviceless.items():
+        units.update(_split_deviceless(platform, plat_entities, unproven_split))
+
+    # First-appearance order, for the units and inside each of them: a unit's
+    # place is its earliest entity, so which charger is "primary" (the first
+    # entry the config path returns) does not depend on whether a box happens
+    # to carry a device id — and a re-attached leftover takes its registry
+    # place rather than the end of the list, which is what a brand function
+    # that binds first- or last-wins reads.
+    def _place(entity) -> int:
+        return position.get(str(getattr(entity, "entity_id", "")), 0)
+
+    return {key: sorted(members, key=_place)
+            for key, members in sorted(units.items(),
+                                       key=lambda kv: min(_place(e)
+                                                          for e in kv[1]))}
+
+
+def unit_label(unit_key) -> str:
+    """A stable, readable token for a unit — the device id where there is
+    one, else ``platform/entry/name``. Report data: never parsed back."""
+    if isinstance(unit_key, str):
+        return unit_key
+    return "/".join(str(part) for part in tuple(unit_key)[1:])
+
+
+def unit_device_id(unit_key) -> Optional[str]:
+    """The ``device_id`` a unit key carries, or ``None`` for a device-less
+    unit. Report data and migration metadata alike: an opaque grouping key
+    is never written out as if it were a registry device id."""
+    return unit_key if isinstance(unit_key, str) else None
+
+
 def discover_all_ev_chargers_from_registry(
     hass: HomeAssistant,
 ) -> List[Dict[str, str]]:
@@ -1022,13 +1383,14 @@ def discover_all_ev_chargers_from_registry(
         if not entities:
             continue
 
-        # Group entities by device_id to detect multiple chargers
-        # of the same brand (e.g., 2 Wallbox Pulsars)
-        devices: Dict[Optional[str], list] = {}
-        for e in entities:
-            devices.setdefault(e.device_id, []).append(e)
+        # Group entities by the physical unit they belong to: device_id
+        # where the registry has one (e.g., 2 Wallbox Pulsars), and the
+        # evidenced fallback where it has none (#964 — KEBA registers no
+        # device, and one bucket for "no device" mixes two boxes).
+        devices = group_entities_by_unit(entities)
 
-        for device_id, device_entities in devices.items():
+        for unit_key, device_entities in devices.items():
+            device_id = unit_device_id(unit_key)
             result = discover_fn(device_entities)
             if result:
                 # (#886) never drive a charger through its offline fallback
@@ -1093,22 +1455,18 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
                if not e.disabled_by
                and str(e.platform or "") != "solar_energy_management"]
     # Group by device; entities without a device (KEBA's UDP integration
-    # registers none) group per platform instead of being skipped.
-    # Device-less entities cluster by platform + object-id prefix (first two
-    # tokens): keba_p30_* is one box; a rig's template platform is not one
-    # device (live: a mock charger got an SG-Ready switch for "start/stop").
-    def _prefix(eid: str) -> str:
-        obj = eid.split(".", 1)[1] if "." in eid else eid
-        return "_".join(obj.split("_")[:2])
-    devices: Dict[Any, list] = {}
-    for e in entries:
-        key = (e.device_id if e.device_id is not None
-               else ("platform", str(e.platform or ""), _prefix(str(e.entity_id))))
-        devices.setdefault(key, []).append(e)
+    # registers none) group per platform instead of being skipped —
+    # ``group_entities_by_unit`` is the shared rule (#964), the same one the
+    # config path and the diagnostics report now use: keba_p30_* is one box;
+    # a rig's template platform is not one device (live: a mock charger got
+    # an SG-Ready switch for "start/stop").
+    # The prober BINDS nothing, so where the evidence does not carry a split
+    # it keeps the name split rather than merging a platform into one device.
+    devices = group_entities_by_unit(entries, unproven_split="prefix")
 
     out: List[Dict[str, Any]] = []
     for device_key, dev_entities in devices.items():
-        device_id = device_key if not isinstance(device_key, tuple) else None
+        device_id = unit_device_id(device_key)
         roles: Dict[str, str] = {}
         evidence: List[str] = []
         for e in dev_entities:
@@ -1156,6 +1514,10 @@ def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
             out.append({
                 "platform": str(dev_entities[0].platform or ""),
                 "device_id": device_id,
+                # (#964) the grouping key, so two DEVICE-LESS boxes stay two
+                # when the report pairs prober and brand findings — a pair of
+                # ``None`` device ids collapses into one.
+                "unit": unit_label(device_key),
                 "roles": roles,
                 "evidence": evidence,
                 "control_visible": has_control,
@@ -1796,7 +2158,14 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         "chargers": [],
         "near_misses": [],
         "disabled_ignored": [],
+        # (#964) entities of a device-less platform that no unit could claim
+        # — dropped from the role walk on purpose, never silently.
+        "unattributed": [],
     }
+
+    # (#964) the entities behind each charger row — the pairing key the
+    # prober comparison uses, never written into the report itself.
+    brand_units: List[Dict[str, Any]] = []
 
     for platform, discover_fn in _EV_CHARGER_PLATFORMS:
         def _matches(ep: str, _this=platform) -> bool:
@@ -1810,10 +2179,16 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             if e.disabled_by:
                 report["disabled_ignored"].append(str(e.entity_id))
         live = [e for e in plat_entities if not e.disabled_by]
-        devices: Dict[Optional[str], list] = {}
+        # (#964) the same unit grouping as the config path — a device-less
+        # platform is not one charger just because the registry has no
+        # device id for it.
+        devices = group_entities_by_unit(live)
+        attributed = {str(e.entity_id) for g in devices.values() for e in g}
         for e in live:
-            devices.setdefault(e.device_id, []).append(e)
-        for device_id, dev_entities in devices.items():
+            if str(e.entity_id) not in attributed:
+                report["unattributed"].append(_describe(e))
+        for unit_key, dev_entities in devices.items():
+            device_id = unit_device_id(unit_key)
             mapping = discover_fn(dev_entities) or {}
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
@@ -1903,6 +2278,7 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             row = {
                 "platform": str(dev_entities[0].platform or platform),
                 "device_id": device_id,
+                "unit": unit_label(unit_key),
                 "mapped": mapped,
                 "unmapped": [_describe(e) for e in dev_entities
                              if str(e.entity_id) not in used],
@@ -1912,6 +2288,12 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             if mapping.get("_suggested_phase_switch"):
                 row["suggested_phase_switch"] = mapping["_suggested_phase_switch"]
             report["chargers"].append(row)
+            # (#964) what this unit is made of, for the prober pairing below
+            brand_units.append({
+                "platform": row["platform"], "unit": row["unit"],
+                "device_id": device_id,
+                "entities": {str(e.entity_id) for e in dev_entities},
+            })
 
     # (#814 Pillar A) the prober runs beside the brand walk. A candidate on
     # a device no brand function claimed = "prober_only" (a shape we could
@@ -1923,13 +2305,37 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     except Exception:  # noqa: BLE001 — the prober must never cost the report
         cands = []
     report["prober_candidates"] = cands
-    brand_devices = {(c["platform"], c["device_id"]) for c in report["chargers"]}
-    prober_devices = {(c["platform"], c["device_id"]) for c in cands}
+    # (#964) Pair the two findings by the ENTITIES they claim, the way
+    # ``config_flow._charger_already_installed`` fingerprints a charger.
+    # The device id cannot do it — two device-less boxes both report
+    # ``None`` — and neither can the grouping key: the prober and the
+    # binding paths deliberately group an unproven split differently, so
+    # keying on it would report a disagreement on every device-less install
+    # SEM has, which is exactly the population this section is watching.
+    # One to one, largest overlap first: a brand row that happens to span
+    # two boxes must not absorb both candidates and report agreement where
+    # the two sides plainly disagree.
+    overlaps = sorted(
+        ((len({str(v) for v in cand.get("roles", {}).values()}
+              & unit["entities"]), bi, ci)
+         for bi, unit in enumerate(brand_units)
+         for ci, cand in enumerate(cands)),
+        key=lambda t: (-t[0], t[1], t[2]))
+    paired_brand, paired_prober = set(), set()
+    for shared, bi, ci in overlaps:
+        if shared and bi not in paired_brand and ci not in paired_prober:
+            paired_brand.add(bi)
+            paired_prober.add(ci)
     report["disagreements"] = (
-        [{"kind": "prober_only", "platform": p, "device_id": d}
-         for (p, d) in sorted(prober_devices - brand_devices, key=str)]
-        + [{"kind": "brand_only", "platform": p, "device_id": d}
-           for (p, d) in sorted(brand_devices - prober_devices, key=str)]
+        [{"kind": "prober_only", "platform": c["platform"], "unit": c["unit"],
+          "device_id": c["device_id"]}
+         for ci, c in sorted(enumerate(cands), key=lambda t: str(t[1]["unit"]))
+         if ci not in paired_prober]
+        + [{"kind": "brand_only", "platform": u["platform"], "unit": u["unit"],
+            "device_id": u["device_id"]}
+           for bi, u in sorted(enumerate(brand_units),
+                               key=lambda t: str(t[1]["unit"]))
+           if bi not in paired_brand]
     )
     # (#848) the census rides every report — what is installed, what SEM
     # knows, and the two gap lines that turn installs into detection

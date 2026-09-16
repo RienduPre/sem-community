@@ -34,6 +34,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✨ **A morning EV window** (#892) — empty the pack into the car before
   departure, down to a floor, when the forecast refills it. Off by default.
 
+# [2.1.0-beta.27] — 15.09.2026
+
+- 🐛 **Two chargers of one brand could be discovered as one — and its roles
+  crossed between the boxes** (#964, found by the adversarial review of #962).
+  The entity registry's `device_id` answers "which box is this", and it is
+  OPTIONAL: KEBA's UDP integration registers no device, and manually
+  configured MQTT entities have none. Two of the three discovery paths used it
+  as the whole grouping key, so every device-less box of a platform landed in
+  ONE bucket — and the per-charger role pick that reads it (the old
+  first/last-wins scan and #962's sibling ranking alike) could hand one
+  charger the other charger's power sensor. All three paths now share one
+  grouping: `device_id` where the registry has one, and where it has none, a
+  name axis that is only ADOPTED on evidence — at least two of its groups
+  showing a whole charger of their own, plug included wherever the platform
+  publishes plugs. An install with one box is grouped exactly as before,
+  whatever its entities are named: a phase leg, a site total and a sub-meter
+  are not a second charger, and neither is a naming convention.
+
+- 🔍 **Diagnostics name the box, not just the device id** (#964). The
+  detection report carries the grouping for each charger it found, lists
+  under `unattributed` any entity a device-less platform could attribute to
+  no box, and pairs its prober and brand findings by the entities they claim
+  — so two device-less boxes stop reading as one row on both sides.
+
+- 🧪 **The daylight pins no longer fail by the hour of day** (#953). Three
+  tests built a sunset as an offset from "now" and handed it over as
+  `HH:MM`, which reads as a time of TODAY — so after 20:00 local the suite
+  went red on the wall clock rather than on the code.
+
+# [2.1.0-beta.26] — 15.09.2026
+
 - 🐛 **Today's Plan announced one "EV charging starts" per pricing slot**
   (#963, by @HorizonKane). A charge running 14:00–17:00 arrives from the joint
   plan as three hourly blocks, and the plan strip drew a start row for each —

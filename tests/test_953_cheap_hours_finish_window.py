@@ -42,6 +42,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from freezegun import freeze_time
 
 from homeassistant.util import dt as dt_util
 
@@ -470,6 +471,12 @@ def _daylight(tm):
     return SEMCoordinator._daylight_remaining_s_now(shim)
 
 
+# The pins below build their sunsets and sunrises as offsets from "now" and
+# hand them over as ``%H:%M``, which the production side reads as a time of
+# TODAY. Run at 21:40 local, ``now + 4h`` formats as 01:40 — a sunset two
+# decades of hours in the past — and the pin fails on the clock rather than
+# on the code. Freeze it at midday so every offset stays inside the day.
+@freeze_time("2026-01-15 12:00:00")
 @pytest.mark.unit
 class TestDaylightRemaining:
     def test_a_fabricated_sunset_is_not_a_reading(self):
