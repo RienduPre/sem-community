@@ -330,7 +330,7 @@ carry one axis again.
    └─────┬──────────────────────────────────┘  quantity and no battery owns it.
    ┌─────▼──────────────────────────────────┐
    │ 2. SEAM    actuate_export(decision,     │  ONE write. Observer cuts HERE and
-   │            adapter)                     │  publishes under OBSERVER_KEY =
+   │            adapter, standing=...)       │  publishes under OBSERVER_KEY =
    │    → the refusal text, or None          │  "export_guard" — its own key.
    └─────┬──────────────────────────────────┘
    ┌─────▼──────────────────────────────────┐
@@ -350,6 +350,13 @@ Three things worth knowing:
   that overrides the base's refusing verb, then the primary — so on a #531 mixed
   fleet the cut reaches the inverter that owns the grid tie rather than whichever
   adapter was inserted first.
+- **The observer surface is a ROSTER, so a held cut keeps saying so.**
+  `retire_unpublished_observer_decisions` sweeps every cycle: whoever published
+  stays, everyone else is dropped. The seam therefore publishes the COMMAND on
+  the cycle one fires and the STANDING state (`_publish_standing`) on the quiet
+  cycles in between — exactly one publisher per cycle, both under the seam's own
+  key. Without the second, a cut shows for one cycle and vanishes while SEM is
+  still holding the meter shut (.175, twice).
 - **`holds_export_cut()`, not `export_release_recipe()`.** "How would I undo a cut"
   and "am I holding one" are different questions. Huawei can always answer the
   first (the integration owns the reset), so the hand-back paths ask the second —

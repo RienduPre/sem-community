@@ -3799,6 +3799,18 @@ production call site per seam, the seam's observer key named nowhere else (count
 first version of that pin missed `from .actuate_export import OBSERVER_KEY` and was vacuous), every
 decider free of hass/adapter/await/service-call, and the tick proven to run after the verdicts it
 reads. Every pin was mutated to confirm it fails.
+**A second reading, from the same arc (16.09):** the observer surface
+`observer_decisions` is a ROSTER, swept every cycle by
+`retire_unpublished_observer_decisions` — *whoever published this cycle stays;
+everyone else is dropped.* Its docstring's promise that the map "always carries
+the CURRENT would-state" is true BECAUSE every decider re-publishes, not because
+entries persist. Reading that as persistence and removing the per-cycle publish
+made a HELD export cut disappear from the surface while it was still being held —
+the state was right everywhere except the one place a person looks. Cousin of
+#744 from the other side: there an append-only map described history where the
+present tense was needed; here a present-tense roster was mistaken for a ledger.
+Before deleting a "redundant" re-publish, ask what SWEEPS the surface.
+
 **Sweep question:** for any control that writes to hardware — *which file constructs its decision,
 and is anything else allowed to?* Then: does its tracker put a value on the cycle state, or keep it
 in a method? A control whose decision type is built in exactly one place cannot grow a second track.

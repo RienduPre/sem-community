@@ -591,7 +591,7 @@ class TestTheHouseAxisIsHouseLevel:
 
 - [x] **Step 1: Suite + lint.** `semtest tests/ -q -rf` green; `/tmp/venv-ci/bin/ruff check .` clean; push and wait for CI on PR #965.
 
-- [ ] **Step 2: The same live episode, on the new layering.** Deploy (`SRC=/home/sem/sem-arc-921 ~/bin/sem-deploy-175.sh`), stage export through the split-pair override (`grid_import_power_entity` → the 6000 W entity, `grid_export_power_entity` → the 0 W entity, **both**, then reload the entry — see `reference_175_harness.md`), hold the feed-in at −0.05, `export_guard_enabled: true`, `export_guard_engage_s: 60`. Read the rig's own surfaces with `~/bin/sem-sim-compress.sh 10.10.20.175 18.0 20`. Expect exactly what the first build produced, from the new seam:
+- [x] **Step 2: The same live episode, on the new layering.** Deploy (`SRC=/home/sem/sem-arc-921 ~/bin/sem-deploy-175.sh`), stage export through the split-pair override (`grid_import_power_entity` → the 6000 W entity, `grid_export_power_entity` → the 0 W entity, **both**, then reload the entry — see `reference_175_harness.md`), hold the feed-in at −0.05, `export_guard_enabled: true`, `export_guard_engage_s: 60`. Read the rig's own surfaces with `~/bin/sem-sim-compress.sh 10.10.20.175 18.0 20`. Expect exactly what the first build produced, from the new seam:
 
 ```
 WOULD export_guard    limit_export     | export cut holding — the meter is closed
@@ -651,3 +651,34 @@ stays legible; where they disagree, the code is right.
 And one pin in Task 5 was vacuous as written: `symbol_reference_files` does not
 see an import, so the borrowed-key mutation passed. Replaced with a walker that
 counts imports. See the Round 4 section of the challenge record.
+
+
+## The live re-proof (16.09) — and the sixth change
+
+Task 6 Step 2 ran on .175 against the re-layered axis, observer ON, real
+Huawei, nothing written. The full episode held:
+
+```
+holding    0s/22s of 60s          roster ABSENT          would=None
+ENGAGED    four reads over minutes roster limit_export    would=engaged
+                                   beside battery:primary limit_discharge
+releasing  0/30/60/80s of 90s     roster release_export  would=releasing
+idle                              roster ABSENT          would=None
+```
+
+**6. The removal in "What execution changed" item 5 was WRONG, and the rig
+said so.** `observer_decisions` does not persist: it is a ROSTER, swept every
+cycle by `retire_unpublished_observer_decisions`. One publish at the
+transition is retired on the next cycle, so the ENGAGED cut was invisible on
+the surface a case is judged on (#855) while the card read it correctly. The
+standing publish was never a second mechanism — it was the contract. Restored
+inside the seam (`_publish_standing`), which is where Task 5's OBSERVER_KEY
+pin forced it.
+
+Rig lessons worth keeping:
+- `ha core restart` issued right after a deploy's own restart is silently
+  REFUSED ("Another job is running for job group home_assistant_core"), and
+  SEM then runs the pre-patch config. Verify the RUNNING config, not the file.
+- .175 has no `dynamic_feedin_entity` (static export_rate 0.075), so a negative
+  export price has to be staged as a synthetic feed-in entity as well as the
+  split pair.
