@@ -34,12 +34,22 @@ _LOGGER = logging.getLogger(__name__)
 OBSERVER_KEY = "export_guard"
 
 
+#: Guard states that mean "SEM is holding the meter shut RIGHT NOW". A guard
+#: merely counting up to its engage hold has written nothing, so it says
+#: nothing — the surface answers "what would hit the wire", not "what am I
+#: thinking about".
+_STANDING = ("engaged", "releasing", "refused")
+
+
 async def actuate_export(decision: "ExportDecision",
                          adapter: "Optional[BatteryControlAdapter]", *,
                          observer: bool = False,
-                         controller=None) -> Optional[str]:
+                         controller=None,
+                         standing: Optional[str] = None) -> Optional[str]:
     """Apply this cycle's export decision. See the module docstring."""
     if decision.intent is ExportIntent.NONE:
+        if observer and standing in _STANDING:
+            _publish_standing(controller, standing)
         return None
 
     watts = float(decision.watts or 0.0)
@@ -75,3 +85,31 @@ async def actuate_export(decision: "ExportDecision",
         _LOGGER, OBSERVER_KEY, logging.INFO,
         "export %s at %.0f W — %s", decision.intent.value, watts, decision.reason)
     return None
+
+
+def _publish_standing(controller, standing: str) -> None:
+    """(#764) Keep the cut on the observer ROSTER while it is being held.
+
+    ``observer_decisions`` is swept every cycle by
+    ``retire_unpublished_observer_decisions``: *whoever published this cycle
+    stays; everyone else is dropped.* The seam speaks when a COMMAND fires —
+    once, at the transition — so without this the cut appears for one cycle
+    and vanishes while SEM is still holding the meter shut.
+
+    Found live on .175 (16.09) for the second time, from the opposite
+    mistake: the first build published the standing row and I removed it,
+    reading the map's "always carries the CURRENT would-state" as persistence.
+    It is a ROSTER, and that sentence is true only because everyone
+    re-publishes. Exactly one publisher per cycle either way — the seam's
+    command when there is one, this when there is not.
+    """
+    if controller is None:
+        return
+    action = "release_export" if standing == "releasing" else "limit_export"
+    try:
+        controller.publish_observer_decision(
+            key=OBSERVER_KEY, name="grid export", action=action, power_w=0.0,
+            reason=f"export cut {standing} — holding the meter shut",
+            kind="battery")
+    except Exception:  # noqa: BLE001 — the surface never breaks the seam
+        pass

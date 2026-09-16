@@ -10861,14 +10861,16 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         from .charger_types import ExportIntent
         from .decide_export import decide_export
         decision = decide_export(fleet)
+        guard = getattr(self, "_export_guard", None)
         refused = await actuate_export(
             decision, self._export_control_adapter(),
             observer=self._observer_mode,
-            controller=getattr(self, "_surplus_controller", None))
-        if refused:
-            guard = getattr(self, "_export_guard", None)
-            if guard is not None:
-                guard.report_refused(refused)   # a refusal is a state (#925)
+            controller=getattr(self, "_surplus_controller", None),
+            # (#764) the roster is swept every cycle; a held cut has to keep
+            # saying so or it is retired while it is still being held.
+            standing=getattr(guard, "state", None))
+        if refused and guard is not None:
+            guard.report_refused(refused)   # a refusal is a state (#925)
         elif decision.intent is not ExportIntent.NONE and not self._observer_mode:
             # The store remembers the cut across a restart; only a REAL write
             # may claim it (#936: observer leaves the house exactly as found).

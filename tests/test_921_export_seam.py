@@ -71,11 +71,67 @@ class TestObserverCutsHere:
         a.command_release_export.assert_not_awaited()
         assert ctl.publish_observer_decision.call_args.kwargs["action"] == "release_export"
 
-    async def test_nothing_is_recorded_for_no_intent(self):
+    async def test_nothing_is_recorded_for_no_intent_and_no_cut(self):
         ctl = MagicMock()
         await actuate_export(ExportDecision(reason="holding"), _adapter(),
                              observer=True, controller=ctl)
         ctl.publish_observer_decision.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestTheCutStaysOnTheRoster:
+    """(#764) ``observer_decisions`` is swept every cycle — whoever published
+    stays, everyone else is dropped. The seam speaks when a COMMAND fires,
+    once, at the transition; a cut that is still HELD has to keep saying so or
+    it is retired while SEM is still holding the meter shut. Found live on
+    .175 twice, from opposite mistakes: first published only on the intent,
+    then published only on the intent again after I read the map as
+    persistent. It is a roster."""
+
+    @pytest.mark.parametrize("state,action", [("engaged", "limit_export"),
+                                              ("releasing", "release_export"),
+                                              ("refused", "limit_export")])
+    async def test_a_held_cut_republishes_every_quiet_cycle(self, state, action):
+        ctl = MagicMock()
+        await actuate_export(ExportDecision(reason="holding"), _adapter(),
+                             observer=True, controller=ctl, standing=state)
+        kw = ctl.publish_observer_decision.call_args.kwargs
+        assert kw["key"] == OBSERVER_KEY and kw["action"] == action
+        assert kw["kind"] == "battery"
+        assert state in kw["reason"]
+
+    @pytest.mark.parametrize("state", [None, "idle", "holding"])
+    async def test_a_guard_that_has_written_nothing_says_nothing(self, state):
+        """`holding` is the guard counting up to its engage hold — nothing has
+        hit the wire, so nothing belongs on a surface that answers
+        'what would hit the wire'."""
+        ctl = MagicMock()
+        await actuate_export(ExportDecision(reason="waiting it out"), _adapter(),
+                             observer=True, controller=ctl, standing=state)
+        ctl.publish_observer_decision.assert_not_called()
+
+    async def test_a_live_install_publishes_no_roster_row(self):
+        ctl = MagicMock()
+        await actuate_export(ExportDecision(reason="holding"), _adapter(),
+                             observer=False, controller=ctl, standing="engaged")
+        ctl.publish_observer_decision.assert_not_called()
+
+    async def test_the_command_wins_on_the_cycle_it_fires(self):
+        """Exactly ONE publisher per cycle: the seam's command when there is
+        one, the standing row when there is not."""
+        ctl = MagicMock()
+        await actuate_export(ExportDecision(ExportIntent.LIMIT, 0.0, "closed"),
+                             _adapter(), observer=True, controller=ctl,
+                             standing="engaged")
+        assert ctl.publish_observer_decision.call_count == 1
+        assert ctl.publish_observer_decision.call_args.kwargs["reason"] == "closed"
+
+    async def test_a_broken_surface_never_breaks_the_standing_publish(self):
+        ctl = MagicMock()
+        ctl.publish_observer_decision = MagicMock(side_effect=RuntimeError("card gone"))
+        assert await actuate_export(ExportDecision(reason="holding"), _adapter(),
+                                    observer=True, controller=ctl,
+                                    standing="engaged") is None
 
     async def test_a_broken_surface_never_breaks_the_seam(self):
         ctl = MagicMock()
