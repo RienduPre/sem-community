@@ -27,14 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feed-in limit is never touched. Off by default.
 - ✨ **A negative export price is a cost, not a free kWh** (#871). Two
   diagnostics measure what a hostile meter cost today, and while the meter is
-  closed the loads absorb before anything is clipped. (The day-ledger unclamp
-  — the one part of this arc that is not behind a switch — ships separately on
-  `fix/871-export-price-clamp` with its own proof.)
+  closed the loads absorb before anything is clipped.
 - ✨ **Charge pacing holds headroom before the meter closes** (#926).
 - ✨ **The house as a battery sink** (#879) — keep the pack through cheap
   hours, spend it on the house in expensive ones. Off by default.
 - ✨ **A morning EV window** (#892) — empty the pack into the car before
   departure, down to a floor, when the forecast refills it. Off by default.
+- 🐛 **A negative export price was invisible to the planner** (#871). The day
+  ledger clamped the export rate at zero, so an hour you PAY to export and an
+  hour you are paid the same looked identical when deciding where a surplus kWh
+  should go. The sign now survives into the slot; an absent rate still reads 0.
 
 # [2.1.0-beta.27] — 15.09.2026
 
