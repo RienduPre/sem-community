@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.28] — 16.09.2026
+
 - 🐛 **Solar + cheapest hours booked the charge into the peak band** (#967,
   reported by @alexmc1510 in #966). Three things conspired. The EV card's plan
   strip drew the night's charge from the window open — inside the expensive
