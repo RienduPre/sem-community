@@ -1200,6 +1200,46 @@ class, and does the new precondition hold for them?**
 
 ---
 
+### 91. A fail-open fallback layer blind to a dimension the primary layer honours — GUARDED
+**Symptom:** a *Solar + cheapest hours* charger with a 06:00 deadline starts grid-charging at
+20:36 — the night-window open — in the most expensive band of a Spanish 2.0TD tariff, with nine
+cheaper hours still ahead of the deadline and nothing forcing it (#967, @alexmc1510). The
+Energy Plan card is calm, the coverage chip names a doubt, and the reactive layer reports
+"night charging" as if nothing were wrong — because for that layer nothing is: it has no notion
+of price at all.
+**Root shape:** two layers answer one question — WHEN to charge tonight — with the primary
+(the joint plan, #638) honouring a dimension (the tariff) the fallback (the reactive night
+charge) does not know exists. The fail-open direction is right: an UNCOVERED verdict must never
+strand a floor. But the fallback was written before the primary existed and then had its own
+tariff opinion *retired* when the primary took the WHEN (#638 C3), on the assumption the primary
+would always speak. It does not: a `yields` verdict (a 6 A minimum wider than a 3.5 kW peak
+headroom — the reporter's exact install), a stale stamp, a car the plan never saw. Every one of
+those hands the night to a layer that starts at the window open. The tell: the fallback's own
+docstring said "an uncovered night fails open to CHARGING at the deadline/top-up floor" and
+nobody asked *in which hour*.
+**Where it lives:** `ev_tariff_planner.plan_night_charge` (the reactive night plan);
+`energy_plan_actuation.ev_overlay` (returns "nothing changes" on UNCOVERED); the composer's
+daytime preview (`coordinator.py`, the `_np_c is None` branch) — the same blindness one surface
+up, and a second producer of the need on top (class 37/46: `daily_ev_target` at a literal
+4.1 kW where `build_night_target_map` already answered 19.8).
+**Closure:** the fallback keeps the primary's dimension — `affordable_start` walks the tariff's
+own levels (`get_price_level_at`, the classification `price_is_cheap` fires on) and a cheap-hours
+mode holds through an EXPENSIVE hour while the non-expensive hours before the deadline still
+deliver the floor at the peak-managed rate; a forcing deadline or an unreachable floor is never
+held. The preview is drawn from the one producer of the need and says it is an estimate until
+the plan has spoken. The card paints "wait" until a start that sits at the open.
+**Guard:** `tests/test_967_plan_band_strip.py` — the reporter's night rebuilt from his numbers
+through the same pure functions in the same order (ledger → packer → stamped dict → gate →
+overlay → reactive plan → composer → the card's segment rule), reproducing the 20:36–21:41 bar
+before the fix and pinning the wait after it; plus the structural contracts that the preview has
+one call site, reads the one producer, and that the planner is wired with the tariff's levels.
+`dashboard/card/test/ev-strip.test.js` pins the card's rule.
+**Sweep question:** for every fail-open fallback in SEM — *which dimensions does the primary
+honour that the fallback cannot see?* Price is one; the peak slot (#864), a departure time
+(#892), a closed meter (arc #921) are the next candidates. A fallback that fails open into a
+dimension it is blind to is not "safe", it is merely quiet.
+Refs #967 #966 #939 #638 #282 #742 #464.
+
 ## Meta-classes (the coherence audit hunts these too)
 
 - **Duplicated mechanism** — the same debounce/retry/reconcile/swap built in 2+ places (e.g. the

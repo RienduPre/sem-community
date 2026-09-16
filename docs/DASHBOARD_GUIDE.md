@@ -416,6 +416,15 @@ The EV hero card: per-charger state, charge mode, target and deadline, with
 the intelligence readouts (taper, estimated SOC) and settings inline. This is
 the reference card for SEM's UI patterns — see [UI patterns](UI_PATTERNS.md).
 
+Its 12-hour plan strip paints the charger's night as *wait*, *charging*,
+*done* — or *estimate* (a paler wait): by day, before the joint Energy Plan
+has covered the car, the strip is drawn from the charger's real remaining
+need at the rate the night charge will actually run, and it says so rather
+than promising a booked window. A segment only turns *charging* at the
+night-window open when a start actually sits there; a start later in the
+night — a planned block, or a cheap-hours hold through an expensive band —
+reads as *wait* until then (#967).
+
 #### sem-flow-card
 
 **SEM Flow** · *Home tab, when `diagram_style: flow`*

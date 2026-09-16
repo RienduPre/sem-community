@@ -5028,6 +5028,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     _ev_remaining = _np_c.remaining_kwh if _np_c else None
                     _ev_deadline_dt = _np_c.deadline_dt if _np_c else None
                     _ev_rate_kw = None
+                    # (#967) the daytime preview's own three answers: what the
+                    # row is (estimate vs booking), and whether a cheap-hours
+                    # mode would hold through the window open.
+                    _ev_row_detail = None
+                    _ev_wait_preview = False
+                    _ev_next_cheap_preview = None
                     if _np_c and _np_c.hours_to_deadline and _np_c.hours_to_deadline > 0 and _np_c.remaining_kwh:
                         # The planner's reachable=True implies remaining/rate <= hours_left;
                         # this is the rough effective rate (peak-managed unless forcing).
@@ -5047,20 +5053,51 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             _night_on = _cid and self._mode_allows_night_charging(_pcfg)
                             if not _night_on:
                                 raise ValueError("charge mode disables night charging — no EV preview")
-                            _target = (_pcfg.get("daily_ev_target")
-                                       or self.config.get("daily_ev_target", 10))
-                            _daily = (self._charger_daily_kwh(_cid, energy)
-                                      if _cid else (getattr(energy, "daily_ev", 0.0) or 0.0))
-                            _remain = max(0.0, float(_target) - float(_daily))
-                            if _remain > 0.1:
-                                _ev_remaining = _remain
+                            # (#967) ONE producer of the night need. This branch
+                            # used to re-derive it from ``daily_ev_target`` — a
+                            # per-DAY kWh knob that is not even the target type
+                            # of a SOC-target charger — at a literal 4.1 kW.
+                            # @alexmc1510's strip promised a 4.5 kWh / 4.1 kW bar
+                            # (20:36–21:41, inside his punta band) for a 19.8 kWh
+                            # need. ``build_night_target_map`` is the answer the
+                            # planner and the reactive layer both charge on.
+                            from .ev_control import amps_from_headroom
+                            from .ev_night_targets import build_night_target_map
+                            from .ev_tariff_planner import affordable_start
+                            from .today_plan import ev_preview_inputs
+                            _need = float(build_night_target_map(self, energy).get(_cid) or 0.0)
+                            if _need > 0.1:
+                                _wpa_p = self._ev_watts_per_amp(_cid, _pcfg)
+                                _min_a = int(_pcfg.get("ev_min_current") or 6)
+                                _max_a = int(_pcfg.get("ev_max_current")
+                                             or DEFAULT_MAX_CHARGING_CURRENT)
+                                # the rate the reactive night charge will actually
+                                # run at — the same headroom math as _compute_night_plan
+                                _pm_a = amps_from_headroom(
+                                    self._planning_peak_w()
+                                    - self._expected_night_home_w(energy),
+                                    _wpa_p, _min_a, _max_a)
+                                _ev_remaining, _ev_rate_kw, _ev_row_detail = ev_preview_inputs(
+                                    night_need_kwh=_need, peak_managed_amps=_pm_a,
+                                    watts_per_amp=_wpa_p, gate_covered=False)
                                 # Resolve deadline from charger config — same path the
                                 # planner uses, just without the full plan computation.
                                 _tt = self._charger_target_time(_pcfg)
                                 _ev_deadline_dt = resolve_deadline(_now, _tt)
-                                # Rate estimate at 3-phase peak floor; the strip is a
-                                # preview, not the truth — close enough for the visual.
-                                _ev_rate_kw = 4.1  # ~6A x 690 W/A
+                                # (#967) and the preview holds through an expensive
+                                # window open exactly as the night will (D3), so the
+                                # strip never promises a start in the peak band.
+                                _lvl = getattr(getattr(self, "_tariff_provider", None),
+                                               "get_price_level_at", None)
+                                if (self._tariff_optimized_for(_pcfg) and _lvl is not None
+                                        and _night_start and _ev_deadline_dt
+                                        and _ev_rate_kw > 0):
+                                    _afford = affordable_start(
+                                        _night_start, _ev_deadline_dt, _ev_remaining,
+                                        _ev_rate_kw, _lvl)
+                                    if _afford is not None and _afford > _night_start:
+                                        _ev_wait_preview = True
+                                        _ev_next_cheap_preview = _afford
                         except (ValueError, TypeError, AttributeError):
                             pass
                     # #298 — live target ETA while THIS charger's session is in
@@ -5111,17 +5148,20 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         ev_min_remaining_kwh=_ev_remaining,
                         ev_deadline=_ev_deadline_dt,
                         ev_tariff_optimized=self._tariff_optimized_for(_pcfg),
+                        # (#967) by day the preview's own hold stands in for the
+                        # night plan's — the same latest_affordable_start
                         ev_tariff_waiting=bool(
-                            _np_c.should_wait_for_cheap if _np_c else False
+                            _np_c.should_wait_for_cheap if _np_c else _ev_wait_preview
                         ),
                         ev_next_cheap_window=(
                             _np_c.next_cheap_start
-                            if _np_c and _np_c.next_cheap_start else None
+                            if _np_c and _np_c.next_cheap_start else _ev_next_cheap_preview
                         ),
                         # (#742) the joint plan's blocks drive the strip
                         # when covered; None = reactive fallback.
                         ev_plan_blocks=self._ev_blocks_for(_cid) if _cid else None,
                         ev_effective_rate_kw=_ev_rate_kw,
+                        ev_row_detail=_ev_row_detail,
                         ev_target_eta=_ev_target_eta,
                         ev_target_kwh=_ev_target_kwh,
                     )

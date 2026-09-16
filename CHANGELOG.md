@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Solar + cheapest hours booked the charge into the peak band** (#967,
+  reported by @alexmc1510 in #966). Three things conspired. The EV card's plan
+  strip drew the night's charge from the window open — inside the expensive
+  band it painted itself — sized from the per-day kWh knob at a fixed 4.1 kW
+  instead of the car's real need at the rate it will get; the strip painted
+  "charging" at the window open whenever a start row was not the old private
+  cheap-window kind, so even a plan that books the cheap hours read as a
+  charge from dusk; and when the joint plan cannot cover the car at all (a
+  charger whose 6 A minimum is wider than a 3.5 kW peak headroom, for one) the
+  fallback night charge started at the window open with no tariff awareness.
+  Now: the preview is drawn from the one producer of the need and the
+  peak-managed rate, and says it is an estimate until the plan has spoken; the
+  strip paints *wait* until a start that actually sits at the open; and a
+  cheap-hours mode holds through an expensive hour while the cheaper hours
+  before the deadline still deliver the floor — never past the point where
+  waiting would miss it, and never against a forcing deadline.
+- 🔍 **Diagnostics carry the joint energy plan** (#967): the stamped plan, the
+  per-demand coverage verdict, the per-charger strip rows and each charger's
+  night need — the four things a screenshot of the strip cannot show.
+
 # [2.1.0-beta.27] — 15.09.2026
 
 - 🐛 **Two chargers of one brand could be discovered as one — and its roles
