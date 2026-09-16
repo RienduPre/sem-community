@@ -68,6 +68,22 @@ _LOG_MAX_LINES = 80           # return up to 80 matching lines
 _LOG_NEEDLE = "solar_energy_management"
 
 
+def _dict_or_none(value):
+    """(#967) A plain dict, or None — a MagicMock, a stale object, anything
+    else reads as "not there" rather than as a serialisation error."""
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _call_dict_or_none(fn):
+    """(#967) ``fn()`` when it is callable and answers a dict; else None."""
+    if not callable(fn):
+        return None
+    try:
+        return _dict_or_none(fn())
+    except Exception:  # noqa: BLE001 — diagnostics never fail on a surface
+        return None
+
+
 async def _get_recent_sem_logs(hass: HomeAssistant) -> list[str]:
     """Return the most recent SEM-related lines from ``home-assistant.log``.
 
@@ -539,6 +555,25 @@ async def async_get_config_entry_diagnostics(
             "last_update_success": coordinator.last_update_success,
             "update_interval_s": coordinator.update_interval.total_seconds() if coordinator.update_interval else None,
             "observer_mode": getattr(coordinator, "_observer_mode", False),
+            # (#967) The joint energy plan and everything a reporter's
+            # screenshot of the EV strip is drawn from. #967's own diagnosis
+            # asked for "the plan's verdict for ev:<id> and where its blocks
+            # are" — and the download could not answer, because none of this
+            # was in it. The shadow is stored user-shaped already (computed_at,
+            # demands with status/note, blocks, slots); coverage is the
+            # per-demand verdict the card's chip shows; per_charger_plans are
+            # the strip rows themselves; night_targets the need each charger
+            # was planned for. Every one is None-safe: a rig-shaped
+            # coordinator without a plan reports "no plan", never a crash.
+            "energy_plan": _dict_or_none(getattr(coordinator, "_energy_plan_shadow", None)),
+            "plan_coverage": _call_dict_or_none(getattr(coordinator, "_plan_coverage_view", None)),
+            "per_charger_plans": {
+                k[len("charger_"):-len("_today_plan")]: v
+                for k, v in data.items()
+                if isinstance(k, str) and k.startswith("charger_") and k.endswith("_today_plan")
+            },
+            "night_targets": _dict_or_none(
+                getattr(coordinator, "_night_target_per_charger_map", None)),
         },
         "power": {
             "solar_w": data.get("solar_power"),
