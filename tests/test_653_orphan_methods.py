@@ -43,6 +43,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from collections import Counter
 
 import pytest
 
@@ -193,22 +194,46 @@ def _production_text() -> str:
     return "\n".join(parts)
 
 
+def _reference_index(blob: str) -> tuple:
+    """Every way this file asks "is NAME referenced", answered in FOUR passes.
+
+    The scan used to run two regex searches per public method and — worse — a
+    ``re.sub`` over the whole blob per module-level function, which rebuilds a
+    multi-megabyte string ~200 times. That made these three tests roughly four
+    minutes of the suite's runtime and, at 19 % through a quiet run, look
+    exactly like a hang (16.09: killed a full-suite run believing it was one).
+
+    Same questions, same answers, counted once:
+      * ``dotted``  — names used as ``x.NAME``, i.e. the old ``\.NAME\b``
+      * ``quoted``  — names inside quotes, the old ``['"]NAME['"]``
+      * ``words``   — every bare ``\bNAME\b`` occurrence
+      * ``defs``    — occurrences that ARE ``def NAME``, so a function does not
+                      call itself into existence (the old ``re.sub`` step)
+    """
+    dotted = set(re.findall(r"\.([A-Za-z_]\w*)", blob))
+    quoted = set(re.findall(r"""['"]([A-Za-z_]\w*)['"]""", blob))
+    words = Counter(re.findall(r"\b[A-Za-z_]\w*\b", blob))
+    defs = Counter(re.findall(r"\bdef\s+([A-Za-z_]\w*)", blob))
+    return dotted, quoted, words, defs
+
+
 def _orphans() -> dict[str, str]:
     blob = _production_text()
+    dotted, quoted, words, defs = _reference_index(blob)
     out = {}
     methods = _public_methods()
     for name, where in methods.items():
-        if re.search(r"\.%s\b" % re.escape(name), blob):
-            continue
-        if re.search(r"""['"]%s['"]""" % re.escape(name), blob):
+        # reached as ``obj.NAME(...)`` or named as a string (getattr, service
+        # maps, the dashboard's JSON) — either is a caller
+        if name in dotted or name in quoted:
             continue
         out[name] = where
     for name, where in _public_functions().items():
         if name in methods:      # also a method somewhere — judged above
             continue
-        # Strip the definition itself; anything left is a reference.
-        rest = re.sub(r"\bdef\s+%s\b" % re.escape(name), "", blob)
-        if re.search(r"\b%s\b" % re.escape(name), rest):
+        # a function is imported and called bare, so every occurrence counts
+        # EXCEPT its own ``def`` line
+        if words[name] - defs[name] > 0:
             continue
         out[name] = where
     return out
