@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 from ..power_control import async_write_power_setpoint_verbose
 from .base import BatteryControlAdapter
 
@@ -85,7 +85,7 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
                 "huawei_solar", "set_maximum_feed_grid_power",
                 {"device_id": device_id, "power": int(round(w))})
         self._last_export_limit_w = w
-        self._last_intent = BatteryIntent.LIMIT_EXPORT
+        self._last_export_intent = ExportIntent.LIMIT
 
     def export_release_recipe(self):
         device_id = self._export_device_id()
@@ -103,7 +103,7 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         await self._hass.services.async_call(
             "huawei_solar", "reset_maximum_feed_grid_power", {"device_id": device_id})
         self._last_export_limit_w = None
-        self._last_intent = BatteryIntent.RELEASE_EXPORT
+        self._last_export_intent = ExportIntent.RELEASE
 
     @classmethod
     def expected_operating_modes(cls):

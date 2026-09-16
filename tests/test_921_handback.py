@@ -5,6 +5,7 @@ surplus kWh with nothing left on the system that knows why. So the release
 runs on unload and disable, BEFORE observer mode flips (the #949 order), and
 only when the guard is actually holding something.
 """
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -125,14 +126,28 @@ def _live(store, *, observer=False, verdict=CLOSED, export_w=3000.0):
     gen = GenericBatteryAdapter(hass, {"export_limit_entity": "number.inv_export_limit"})
     fake = SimpleNamespace(
         hass=hass, config={"export_guard_enabled": True}, _observer_mode=observer,
-        _export_guard=None, _sink_verdicts={"grid_export": SinkVerdict("grid_export", verdict, "t")},
+        _export_guard=None, _export_guard_adopted=False, _export_command=None,
+        _sink_verdicts={"grid_export": SinkVerdict("grid_export", verdict, "t")},
         _battery_adapters={"b1": gen}, _surplus_controller=MagicMock(),
         _export_guard_store=lambda: store,
-        export_release_recipes=lambda: SEMCoordinator.export_release_recipes(fake),
-        _export_guard_persist=lambda engaged: SEMCoordinator._export_guard_persist(fake, engaged),
-        _export_guard_adopt=lambda g: SEMCoordinator._export_guard_adopt(fake, g),
     )
+    # the real methods, bound — the test drives the cycle's own path, not a
+    # convenience copy of it (#925: never test an instrument you invented).
+    for name in ("export_release_recipes", "_export_guard_persist", "_export_guard_adopt",
+                 "_ensure_export_guard", "_compute_export_command", "_apply_export_decision",
+                 "_export_control_adapter", "_publish_export_guard_state",
+                 "_primary_battery_adapter"):
+        setattr(fake, name, partial(getattr(SEMCoordinator, name), fake))
     return fake, hass, gen
+
+
+async def _cycle(fake, export_w, now):
+    """One cycle of the real chain: ensure → tick → decide → write → persist."""
+    await fake._ensure_export_guard()
+    fake._compute_export_command(
+        SimpleNamespace(grid_export_power=export_w, grid_power_unavailable=False), now=now)
+    await fake._apply_export_decision(
+        SimpleNamespace(export_command=fake._export_command, export_guard_enabled=True))
 
 
 @pytest.mark.asyncio
@@ -140,7 +155,7 @@ class TestTheCutOutlivesALifetime:
     async def test_a_live_engage_writes_the_store_with_a_release_recipe(self):
         store = _Store(); fake, hass, gen = _live(store)
         for t in (0, 60, 130):
-            await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=3000.0, grid_power_unavailable=False), now=float(t))
+            await _cycle(fake, 3000.0, float(t))
         assert fake._export_guard.state == "engaged"
         assert store.saved and store.saved[-1]["engaged"] is True
         rec = store.saved[-1]["recipes"]["b1"]
@@ -150,26 +165,44 @@ class TestTheCutOutlivesALifetime:
     async def test_an_observer_engage_writes_nothing(self):
         store = _Store(); fake, hass, gen = _live(store, observer=True)
         for t in (0, 60, 130):
-            await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=3000.0, grid_power_unavailable=False), now=float(t))
+            await _cycle(fake, 3000.0, float(t))
         assert fake._export_guard.state == "engaged" and store.saved == []
 
     async def test_a_new_lifetime_adopts_an_engaged_cut_and_its_prior(self):
         store = _Store({"engaged": True, "since": "t", "recipes": {"b1": {
             "domain": "number", "service": "set_value",
             "data": {"entity_id": "number.inv_export_limit", "value": 9000.0}}}})
-        fake, hass, gen = _live(store, verdict="open", export_w=0.0)
-        await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=0.0, grid_power_unavailable=False), now=0.0)
+        fake, hass, gen = _live(store, verdict="open")
+        await _cycle(fake, 0.0, 0.0)
         assert fake._export_guard.state in ("engaged", "releasing")   # adopted, now on the open side
         assert gen._export_prior == 9000.0                             # the ORIGINAL prior, not today's read
-        await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=0.0, grid_power_unavailable=False), now=400.0)
+        await _cycle(fake, 0.0, 400.0)
         assert ("number", "set_value", {"entity_id": "number.inv_export_limit", "value": 9000.0}) in \
             [(c.args[0], c.args[1], c.args[2]) for c in hass.services.async_call.await_args_list]
         assert store.saved[-1] == {"engaged": False}
 
     async def test_a_store_that_says_not_engaged_adopts_nothing(self):
-        store = _Store({"engaged": False}); fake, hass, gen = _live(store, verdict="open", export_w=0.0)
-        await SEMCoordinator._run_export_guard(fake, SimpleNamespace(grid_export_power=0.0, grid_power_unavailable=False), now=0.0)
+        store = _Store({"engaged": False}); fake, hass, gen = _live(store, verdict="open")
+        await _cycle(fake, 0.0, 0.0)
         assert fake._export_guard.state == "idle"
+
+    async def test_the_adopt_completes_before_the_first_tick_can_overwrite_it(self):
+        """The regression this ordering exists for: while the adopt was
+        scheduled as a task from inside the tick, it landed a cycle LATE — the
+        first update ran on an idle guard and the restored cut was lost, so a
+        cut made before a restart was never handed back (#908/#949)."""
+        store = _Store({"engaged": True, "since": "t", "recipes": {}})
+        fake, _, _ = _live(store, verdict=CLOSED)
+        await _cycle(fake, 3000.0, 0.0)
+        assert fake._export_guard.state == "engaged", "the first tick overwrote the adopted cut"
+        assert fake._export_guard._applied is True, "an adopted cut can never be handed back"
+
+    async def test_adoption_happens_once_per_lifetime(self):
+        store = _Store({"engaged": True, "since": "t", "recipes": {}})
+        fake, _, _ = _live(store, verdict="open")
+        for t in (0, 60, 120):
+            await _cycle(fake, 0.0, float(t))
+        assert fake._export_guard.state != "engaged", "re-adopting would re-engage forever"
 
 
 class TestRecipes:

@@ -21,7 +21,7 @@ from custom_components.solar_energy_management.coordinator.battery_adapters.gene
 from custom_components.solar_energy_management.coordinator.battery_adapters.huawei import (
     HuaweiBatteryAdapter,
 )
-from custom_components.solar_energy_management.coordinator.charger_types import BatteryIntent
+from custom_components.solar_energy_management.coordinator.charger_types import ExportIntent
 
 
 def _hass(states=None):
@@ -69,13 +69,13 @@ class TestHuawei:
         a, hass = self._adapter({"sensor.inverter_active_power_control": SimpleNamespace(state="Unlimited")})
         await a.command_limit_export(0.0)
         assert ("huawei_solar", "set_zero_power_grid_connection", {"device_id": "dev-huawei"}) in _calls(hass)
-        assert a._last_intent is BatteryIntent.LIMIT_EXPORT
+        assert a._last_export_intent is ExportIntent.LIMIT
 
     async def test_release_is_the_integrations_own_reset(self):
         a, hass = self._adapter()
         await a.command_release_export()
         assert ("huawei_solar", "reset_maximum_feed_grid_power", {"device_id": "dev-huawei"}) in _calls(hass)
-        assert a._last_intent is BatteryIntent.RELEASE_EXPORT
+        assert a._last_export_intent is ExportIntent.RELEASE
 
     async def test_refuses_under_external_scheduling(self):
         a, hass = self._adapter({"sensor.inverter_active_power_control": SimpleNamespace(state="DI Active Scheduling")})

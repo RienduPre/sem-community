@@ -57,7 +57,7 @@ from uuid import uuid4
 
 from homeassistant.util import dt as dt_util
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 from .base import BatteryControlAdapter
 from .deye_schedule import (
     DeyeScheduleError,
@@ -466,7 +466,7 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         if not await self._write_and_verify(ent, target, "select"):
             raise RuntimeError("Deye work mode write did not verify")
         self._last_export_limit_w = 0.0
-        self._last_intent = BatteryIntent.LIMIT_EXPORT
+        self._last_export_intent = ExportIntent.LIMIT
 
     def export_release_recipe(self):
         ent = self._system_work_mode_entity
@@ -490,7 +490,7 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
                 raise RuntimeError("Deye work mode restore did not verify")
         self._export_mode_prior = None
         self._last_export_limit_w = None
-        self._last_intent = BatteryIntent.RELEASE_EXPORT
+        self._last_export_intent = ExportIntent.RELEASE
 
     async def command_stop_force_discharge(self) -> bool:
         """(#827) Restore the pre-spend mode. With no captured prior (a

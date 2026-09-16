@@ -22,7 +22,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -443,6 +443,11 @@ class BatteryControlAdapter(ABC):
     # ── (#955) export control: the dialect is per brand ──────────────────
     #: What the adapter last wrote as an export cap; None = released / never.
     _last_export_limit_w: Optional[float] = None
+    #: The export axis's OWN #538 de-dup marker. Never ``_last_intent``: that
+    #: one belongs to the battery axis, and a shared marker means an export
+    #: write silently un-de-dups the next discharge limit (and vice versa) —
+    #: two axes, two markers, or the register gets rewritten every cycle.
+    _last_export_intent: Optional["ExportIntent"] = None
 
     async def command_limit_export(self, watts: float) -> None:
         """Cap grid feed-in at ``watts`` (0 = zero export). Brands without an

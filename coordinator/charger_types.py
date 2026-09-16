@@ -326,13 +326,6 @@ class BatteryIntent(Enum):
     """End a forced discharge — export no longer profitable or SOC
     hit the reserve floor. Restores the brand default."""
 
-    LIMIT_EXPORT = "limit_export"
-    """(#955) Cap the inverter's grid feed-in at ``export_limit_w`` — 0 W for a
-    closed meter. Issued by the export guard, last not first."""
-
-    RELEASE_EXPORT = "release_export"
-    """(#955) Put the feed-in limit back to what SEM found."""
-
     OFF = "off"
     """#523 (RienduPre) — SEM is fully hands-off this battery. On the
     transition INTO off the adapter does a one-time clean handoff (clear
@@ -388,7 +381,6 @@ class BatteryDecision:
     discharge_power_w: float = 0.0
     """Used iff intent == FORCE_DISCHARGE (#523) — battery→grid power."""
     floor_soc: float = 0.0
-    export_limit_w: float = 0.0   # (#955) the feed-in cap for LIMIT_EXPORT
     """Used iff intent == FORCE_DISCHARGE (#523) — stop discharging at
     this reserve SOC."""
     reason: str = ""
@@ -756,6 +748,15 @@ class FleetContext:
     """(arc #921) the cycle's sink verdicts — ``{sink: SinkVerdict}``. Empty
     until computed, and an empty dict reads as "every sink OPEN" everywhere."""
 
+    export_command: Any = None
+    """(#955) this cycle's ``ExportCommand`` from the tracker, or None. The
+    house's meter limit is decided from THIS by ``decide_export(fleet)`` — no
+    per-battery view owns net export."""
+
+    export_guard_enabled: bool = False
+    """(#955) the user's switch, carried beside the command so the decider
+    needs nothing but the fleet."""
+
     ev_morning_window_open: bool = False
     """(#892) the ev sink verdict is OPEN this cycle — the pack may feed the
     car below the solar gate, down to the drain floor."""
@@ -1022,6 +1023,10 @@ class FleetCycleState:
     #: (arc #921) the cycle's sink verdicts, computed once in
     #: ``_build_fleet_cycle_state`` and read by every consumer from here.
     sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    #: (#955) this cycle's export command from ``ExportGuard`` — what the pure
+    #: ``decide_export`` turns into an intent. ``None`` until the first tick.
+    export_command: Any = None
+    export_guard_enabled: bool = False
     #: (#892) the ev sink verdict is OPEN this cycle — a morning window the
     #: user opened; the charger side may offer the pack below the solar gate.
     morning_window_open: bool = False

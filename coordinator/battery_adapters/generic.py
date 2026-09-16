@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 from ..power_control import async_write_power_setpoint_verbose
 from .base import BatteryControlAdapter
 
@@ -209,7 +209,7 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         await self._hass.services.async_call(
             "number", "set_value", {"entity_id": ent, "value": w})
         self._last_export_limit_w = w
-        self._last_intent = BatteryIntent.LIMIT_EXPORT
+        self._last_export_intent = ExportIntent.LIMIT
 
     def export_release_recipe(self):
         ent = str(self._config.get("export_limit_entity", "") or "")
@@ -234,7 +234,7 @@ class GenericBatteryAdapter(BatteryControlAdapter):
                 "number", "set_value", {"entity_id": ent, "value": float(prior)})
         self._export_prior = None
         self._last_export_limit_w = None
-        self._last_intent = BatteryIntent.RELEASE_EXPORT
+        self._last_export_intent = ExportIntent.RELEASE
 
     async def command_normal(self) -> None:
         await self._write_force_discharge(0.0)  # #523 mutual exclusion

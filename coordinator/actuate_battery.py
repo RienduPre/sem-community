@@ -37,20 +37,11 @@ def _observe(decision: "BatteryDecision", controller=None) -> None:
         BatteryIntent.FORCE_CHARGE: decision.charge_power_w,
         BatteryIntent.FORCE_DISCHARGE: decision.discharge_power_w,
         BatteryIntent.LIMIT_DISCHARGE: decision.discharge_limit_w,
-        BatteryIntent.LIMIT_EXPORT: decision.export_limit_w,
     }.get(decision.intent, 0.0)
-    # (#955, live on .175) The export cut is a DIFFERENT write from the
-    # battery's discharge decision, so it needs its own key: published under
-    # ``battery:<id>`` the two clobbered each other every cycle and the cut was
-    # invisible on the observer surface — the one place a person judges it
-    # before trusting it (#855: judge a case on what would hit the wire).
-    _export = decision.intent in (BatteryIntent.LIMIT_EXPORT,
-                                  BatteryIntent.RELEASE_EXPORT)
     if controller is not None:
         try:
             controller.publish_observer_decision(
-                key=(f"export:{decision.battery_id}" if _export
-                     else f"battery:{decision.battery_id}"),
+                key=f"battery:{decision.battery_id}",
                 name=str(decision.battery_id),
                 action=decision.intent.value,
                 power_w=float(watts or 0.0),
@@ -251,27 +242,6 @@ async def actuate_battery(
         )
         return
 
-    if decision.intent in (BatteryIntent.LIMIT_EXPORT, BatteryIntent.RELEASE_EXPORT):
-        # (#955) A brand without an export control REFUSES here — recorded on
-        # the adapter so the guard can say so — and never raises out of the
-        # cycle. The guard reads ``_last_error`` and reports the refusal.
-        try:
-            if decision.intent is BatteryIntent.LIMIT_EXPORT:
-                await adapter.command_limit_export(float(decision.export_limit_w or 0.0))
-            else:
-                await adapter.command_release_export()
-            adapter._last_error = None
-        except NotImplementedError as exc:
-            adapter._last_error = f"export control not available: {exc}"
-        except Exception as exc:  # noqa: BLE001 — a refused cut is a state, not a crash
-            adapter._last_error = f"export control failed: {exc}"
-        log_on_change(
-            _LOGGER, f"actuate:{decision.battery_id}", logging.INFO,
-            "actuate_battery(%s): %s %.0f W — %s", decision.battery_id,
-            decision.intent.value.upper(), float(decision.export_limit_w or 0.0),
-            decision.reason,
-        )
-        return
     if decision.intent is BatteryIntent.STOP_FORCE_DISCHARGE:
         await adapter.command_stop_force_discharge()
         _LOGGER.debug(

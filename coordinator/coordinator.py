@@ -3279,6 +3279,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 self._vpp_battery_override = None
                 self._vpp_shed_loads = False
 
+            await self._ensure_export_guard()   # (#955) before anything reads it
             charging_context = self._build_charging_context(power, energy)
             charging_state = self._state_machine.update_state(charging_context)
 
@@ -7847,11 +7848,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 and not self.time_manager.is_night_mode()
                 and scheduler.state.value not in ("idle", "not_needed", "not_profitable")):
             scheduler.reset()
-        # (#955) The export guard runs LAST — after every battery had its
-        # say this cycle — and never costs a cycle: a guard that dies must
-        # say so loudly, not vanish (the peak guard's lesson, #864).
+        # (#955) The house's meter limit, after every battery had its say:
+        # ONE decision, ONE seam, ONE adapter — the one that can actually cut,
+        # not whichever was inserted first. Never costs a cycle: a guard that
+        # dies must say so loudly, not vanish (the peak guard's lesson, #864).
         try:
-            await self._run_export_guard(power)
+            await self._apply_export_decision(fleet)
         except Exception:  # noqa: BLE001
             _LOGGER.warning("Export guard FAILED this cycle — no export cap is being "
                             "applied (#955)", exc_info=True)
@@ -10828,81 +10830,148 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         return (f"export guard released on {reason}: "
                 f"{', '.join(released) or 'nothing to release'}")
 
-    async def _run_export_guard(self, power, *, now=None) -> None:
-        """(#955) The limit at the meter, AFTER the batteries ran this cycle.
+    async def _apply_export_decision(self, fleet) -> None:
+        """(#955) Decide the export axis and write it — the whole dispatch.
 
-        Reads the cycle's grid verdict, feeds the guard the export the meter
-        still shows (a blind meter is None, never a number), and dispatches
-        its intent through every battery adapter's export verbs — observer
-        mode records a WOULD through the surplus controller and writes
-        nothing, exactly as ``actuate_battery`` does for every other intent.
-        The guard's own hysteresis (minutes) dominates any ordering nicety
-        inside one 10 s cycle.
+        Deliberately thin, and deliberately a METHOD: the decision is made by
+        the pure ``decide_export`` and the write by the one ``actuate_export``
+        seam, so all this owns is the order. Inline in the cycle it could not
+        be exercised without a whole coordinator, which is how the first build
+        shipped a guard that released a cut it never made.
         """
-        import time as _time
-        from .actuate_battery import actuate_battery
-        from .charger_types import BatteryDecision, BatteryIntent
-        from .export_guard import ExportGuard, LIMIT_EXPORT
-        from .sink_verdicts import OPEN
+        from .actuate_export import actuate_export
+        from .charger_types import ExportIntent
+        from .decide_export import decide_export
+        decision = decide_export(fleet)
+        refused = await actuate_export(
+            decision, self._export_control_adapter(),
+            observer=self._observer_mode,
+            controller=getattr(self, "_surplus_controller", None))
+        if refused:
+            self._export_guard.report_refused(refused)
+        elif decision.intent is not ExportIntent.NONE and not self._observer_mode:
+            # The store remembers the cut across a restart; only a REAL write
+            # may claim it (#936: observer leaves the house exactly as found).
+            persist = getattr(self, "_export_guard_persist", None)
+            if callable(persist):
+                await persist(decision.intent is ExportIntent.LIMIT)
+        self._publish_export_guard_state()
+
+    async def _ensure_export_guard(self) -> None:
+        """(#955) Build the tracker and adopt a prior lifetime's cut, ONCE.
+
+        Awaited by the cycle before anything reads the guard, because a cut
+        restored from the store has to be in place BEFORE the first
+        ``update()`` — the previous build scheduled the adopt as a task from
+        inside the tick, which lands a cycle late and loses the restored cut
+        (#949's lesson: hand back only what SEM commanded — it must first
+        remember that it commanded it).
+        """
+        if getattr(self, "_export_guard_adopted", False):
+            return
+        self._export_guard_adopted = True
+        from .export_guard import ExportGuard
         if getattr(self, "_export_guard", None) is None:
             self._export_guard = ExportGuard(
                 engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
                 release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
-            # (#949 pattern) a rig-shaped stand-in carries no store; the guard
-            # then behaves exactly as it did before the cut was persisted.
-            _adopt = getattr(self, "_export_guard_adopt", None)
-            if callable(_adopt):
+        _adopt = getattr(self, "_export_guard_adopt", None)
+        if callable(_adopt):
+            try:
                 await _adopt(self._export_guard)
-        guard = self._export_guard
+            except Exception:  # noqa: BLE001 — a store that cannot be read is
+                _LOGGER.debug("export guard: no prior cut adopted", exc_info=True)
+
+    def _compute_export_command(self, power, *, now=None) -> None:
+        """(#955) Tick the export tracker and leave its command on the cycle.
+
+        The peak guard's shape (``_compute_peak_slot_allowance`` →
+        ``peak_slot_allowed_w``): no decision here and no write. The pure
+        ``decide_export`` reads the command off the fleet and one seam —
+        ``actuate_export`` — writes it, once, after the battery loop.
+
+        On "last, not first": ``power`` is a fixed per-cycle snapshot and the
+        dispatch still runs after the battery loop, so ticking here changes no
+        input. The guard clips only export the sinks did not absorb in the
+        previous cycle, which under 120 s / 300 s holds is the same statement.
+        """
+        import time as _time
+        from .export_guard import ExportGuard
+        from .sink_verdicts import OPEN
+        if getattr(self, "_export_guard", None) is None:
+            # Only a rig-shaped stand-in reaches here un-adopted: on a real
+            # install ``_ensure_export_guard`` has already run, awaited, this
+            # cycle. Never adopt from inside the tick — a task scheduled here
+            # lands AFTER the update it was supposed to precede, so a restored
+            # cut would be overwritten by an idle first tick.
+            self._export_guard = ExportGuard(
+                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
+                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
         enabled = bool(self.config.get("export_guard_enabled", False))
         verdict = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
         state = getattr(verdict, "state", OPEN) if enabled else OPEN
+        # (#906) an unreadable meter is a BLIND sample (None), never a 0.
         export_w = (None if getattr(power, "grid_power_unavailable", False)
                     else float(getattr(power, "grid_export_power", 0.0) or 0.0))
-        cmd = guard.update(_time.monotonic() if now is None else now, state, export_w)
-        would = None
-        if cmd.intent:
-            intent = (BatteryIntent.LIMIT_EXPORT if cmd.intent == LIMIT_EXPORT
-                      else BatteryIntent.RELEASE_EXPORT)
-            refused = []
-            for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
-                decision = BatteryDecision(battery_id=str(bid), intent=intent,
-                                           export_limit_w=cmd.watts, reason=cmd.reason)
-                await actuate_battery(decision, adapter, observer=bool(self._observer_mode),
-                                      controller=getattr(self, "_surplus_controller", None))
-                if getattr(adapter, "_last_error", None):
-                    refused.append(f"{bid}: {adapter._last_error}")
-            if self._observer_mode:
-                would = cmd.intent
-            elif refused and intent is BatteryIntent.LIMIT_EXPORT:
-                guard.report_refused("; ".join(refused))
-            else:
-                # a LIVE cut (or release) outlives this lifetime — write it down
-                _persist = getattr(self, "_export_guard_persist", None)
-                if callable(_persist):
-                    await _persist(intent is BatteryIntent.LIMIT_EXPORT)
-        # (live on .175) While the cut is ON, say so EVERY cycle — on the
-        # published state and on the observer surface. The first build set
-        # ``would`` only on the cycle the intent was issued, so a person
-        # watching the rig saw one flash and then nothing, for a feature whose
-        # whole promise is that it is holding the meter shut.
-        if self._observer_mode and guard.state in ("engaged", "releasing", "refused"):
-            would = would or ("limit_export" if guard.state == "engaged" else guard.state)
-            _ctl = getattr(self, "_surplus_controller", None)
-            if _ctl is not None:
-                try:
-                    _ctl.publish_observer_decision(
-                        key="export_guard", name="grid export",
-                        action=("limit_export" if guard.state == "engaged"
-                                else guard.state),
-                        power_w=0.0, reason=guard.reason, kind="battery")
-                except Exception:  # noqa: BLE001 — the surface never breaks the seam
-                    pass
+        self._export_command = self._export_guard.update(
+            _time.monotonic() if now is None else now, state, export_w)
+
+    def _publish_export_guard_state(self) -> None:
+        """(#955) What the card and ``sensor.sem_export_guard_state`` read.
+
+        A different surface from the observer map, not a second mechanism for
+        the same one: ``actuate_export`` publishes the COMMAND under its own
+        key (and ``observer_decisions`` keeps the current would-state until
+        something overwrites it), while this is the guard's LIVE state,
+        refreshed every cycle — which is what makes "it is holding the meter
+        shut right now" readable rather than a one-cycle flash (.175, 16.09).
+        """
+        g = getattr(self, "_export_guard", None)
+        if g is None:
+            return
         self._export_guard_state = {
-            "enabled": enabled, "state": guard.state, "reason": guard.reason,
-            "would": would, "repair_wanted": guard.repair_wanted,
-            "verdict": getattr(verdict, "reason", "no verdict"),
+            "enabled": bool(self.config.get("export_guard_enabled", False)),
+            "state": g.state,
+            "reason": g.reason,
+            "would": (g.state if self._observer_mode
+                      and g.state in ("engaged", "releasing", "refused") else None),
+            "repair_wanted": g.repair_wanted,
+            "verdict": getattr(
+                (getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
+                "reason", "no verdict"),
         }
+
+    def _export_control_adapter(self):
+        """(#955) The adapter that can actually cut this house's export.
+
+        NOT ``_primary_battery_adapter()``: that one is positional
+        (``next(iter(adapters.values()))``) and says nothing about who owns the
+        grid tie. On a #531 mixed fleet — a Sessy AC battery beside a Huawei
+        inverter — the first-inserted adapter may have no export control at
+        all, and offering it the cut would leave the guard ``refused`` forever
+        while the inverter that CAN cut is never asked (#874's shape, for
+        batteries).
+
+        Capability first: an adapter that produces a release recipe knows how
+        to undo its own cut, which is the strongest evidence it can make one.
+        Then any adapter that OVERRIDES the base's refusing verb. The primary
+        last, so a single-battery install behaves exactly as before.
+        """
+        adapters = getattr(self, "_battery_adapters", None) or {}
+        if not adapters:
+            return None
+        for adapter in adapters.values():
+            try:
+                if adapter.export_release_recipe() is not None:
+                    return adapter
+            except Exception:  # noqa: BLE001 — a brand that cannot answer is not the one
+                continue
+        for adapter in adapters.values():
+            fn = getattr(type(adapter), "command_limit_export", None)
+            owner = getattr(fn, "__qualname__", "").split(".")[0] if fn else ""
+            if owner and owner != "BatteryControlAdapter":
+                return adapter
+        return self._primary_battery_adapter()
 
     def _compute_peak_slot_allowance(self, power) -> None:
         """(#864) The slot-budget allowance — the PREVENTIVE peak bound.
@@ -11088,6 +11157,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             "OPEN until it recovers (arc #921)", exc_info=True)
             _verdicts = {}
         self._sink_verdicts = _verdicts
+        # (#955) The guard reads THIS cycle's grid verdict, so it ticks after
+        # the verdicts exist — not beside `_compute_peak_slot_allowance`,
+        # where symmetry with the peak guard would have fed it yesterday's
+        # answer. Still only a tick: no decision, no write.
+        self._compute_export_command(power)
         return FleetCycleState(
             power=power,
             config=self.config,
@@ -11114,6 +11188,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             battery_commanded=self._battery_commanded(),
             curtailment_grant_w=self._curtailment_grant_w(power),
             sink_verdicts=_verdicts,
+            export_command=getattr(self, "_export_command", None),
+            export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
             morning_window_open=bool(
                 getattr(_verdicts.get("ev"), "state", "") == "open"
                 and self.config.get("ev_morning_window_enabled", False)),
