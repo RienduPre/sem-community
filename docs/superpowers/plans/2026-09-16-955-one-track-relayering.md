@@ -1,10 +1,14 @@
-# #955 — put the export cut back on SEM's one track
+# #955 — the export axis stops duplicating the battery axis
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The export cut decides in a pure decider beside `decide_battery`, dispatches through one seam beside `actuate_battery`, and is issued ONCE per cycle to ONE house-level adapter — so SEM's three layers hold for the export axis and no second `BatteryDecision` producer exists.
+**Goal:** The export cut decides in a pure decider beside `decide_battery`, dispatches through its own seam beside `actuate_battery`, and is issued ONCE per cycle to the adapter that can actually cut — so there is no second producer of `BatteryDecision` and no second `actuate_battery` call site.
 
-**Architecture:** Exactly the peak guard's shape, which #955 always claimed to mirror. A stateful tracker ticks in the coordinator and puts a value on the fleet state; a PURE function turns that value into an intent; one seam writes it and observer cuts there. Today the tracker, the decision and the dispatch all live in one 76-line coordinator method.
+**What this does NOT claim (corrected by the 16.09 review).** It does not put SEM "on one track". SEM's decide/adapter/seam model holds for exactly TWO device axes — the charger offer (`decide.py`) and the battery intent (`decide_battery.py`). Three other paths decide and write outside it today and are **out of scope**: `coordinator/surplus_controller.py:2098` calls `peak_guard.clamp_import_command` directly inside its 750-line `update()`; `coordinator/charge_pacing.py:248/276/308` writes `number.set_value` raw with its own `if observer` branch; `features/load_management.py` has 9 raw `hass.services.async_call` sites with the shed decision in the same method as the write. Those are pre-existing, larger than this arc, and untouched here. Claiming otherwise is what the first draft of this plan did.
+
+**Architecture:** A stateful tracker ticks in the coordinator and puts a value on the fleet state; a PURE function turns that value into an intent; one seam writes it. Today the tracker, the decision and the dispatch all live in one 76-line coordinator method.
+
+**Not "the peak guard's shape" — a cousin, and the difference matters.** `clamp_to_peak_slot` NARROWS a command the same decider is already computing for the same device. Net house export is owned by no per-device decider — it is solar, battery, EV and loads together. So this produces an independent decision through an independent seam to a handle `actuate_battery` may have written moments earlier in the same cycle. That divergence is justified (there is no existing decider to fold a house-level limit into) and is defended on its own terms, not by claiming parity.
 
 **Tech Stack:** Python 3.13/3.14, HA custom integration, pytest. Tests from the CI layout — abbreviated below as `semtest <file>`:
 `rsync -a --delete --exclude=.git --exclude=node_modules /home/sem/sem-arc-921/ /tmp/ha-config-arc/custom_components/solar_energy_management/ && cd /tmp/ha-config-arc && PYTHONPATH=/tmp/ha-config-arc python3.12 -m pytest custom_components/solar_energy_management/tests/<file> -q -p no:warnings`
@@ -23,11 +27,14 @@ Lint: `/tmp/venv-ci/bin/ruff check <files>` (0.16.3, the CI pin).
 | decision | **in the coordinator** — builds `BatteryDecision`s itself | `decide.py:1150` `clamp_to_peak_slot(result, view)` — **in the decide layer** |
 | dispatch | **its own** `await actuate_battery(...)` at `coordinator.py:10871` | the charger's existing seam |
 
+⚠️ The right-hand column is the peak guard at its BEST: `surplus_controller.py:2098` calls its clamp directly, so even this precedent is not uniformly clean — see the scope note above.
+
 Consequences, all present in the tree right now:
 
 - **Two producers of `BatteryDecision`**: `decide_battery.py` and `coordinator.py`. Two `actuate_battery` call sites: `:7836` (the battery loop) and `:10871` (the guard).
 - **The observer-key collision was a symptom, not a bug.** Both producers published under `battery:<id>` and clobbered each other; the fix in `1bfcc1e0` patched the key instead of removing the second producer.
-- **Category error:** the export cut is HOUSE-level (one inverter) but rides the PER-BATTERY path — the guard loops every adapter, so a two-battery single-inverter install issues the same service call twice. Huawei's #538 de-dup hides it. `_primary_battery_adapter()` already exists for exactly this, and its own docstring is the lesson: *"One accessor now, and it is the only way in."*
+- **Category error:** the export cut is HOUSE-level (one inverter) but rides the PER-BATTERY path — the guard loops every adapter, so a two-battery single-inverter install issues the same service call twice. Huawei's #538 de-dup hides it.
+- **But `_primary_battery_adapter()` is NOT the fix** (review, 16.09). It is positional — `adapters.get("primary") or next(iter(adapters.values()))` (`coordinator.py:10418`) — and its docstring only ever fixed a singular-vs-plural attribute bug; it makes no claim about which adapter owns the grid tie. On a #531 mixed fleet (a Sessy AC battery beside a Huawei inverter) it can hand the cut to the adapter that *cannot* cut while the inverter that can is never asked, and the guard then reports `refused` forever — the #874 shape, for batteries. Task 4 introduces a capability-based selector instead.
 
 **Why it happened, so it is not repeated:** `decide_battery` returns ONE intent per battery per cycle, and a battery can need `LIMIT_DISCHARGE` *and* an export cut in the same cycle. That is a real constraint. The answer is a separate axis with its own decider — not a coordinator that decides for itself.
 
@@ -38,7 +45,7 @@ Consequences, all present in the tree right now:
 | File | Responsibility after this plan |
 |---|---|
 | `coordinator/export_guard.py` | unchanged — the pure hysteresis tracker + `ExportCommand` |
-| `coordinator/decide_export.py` (new) | `decide_export(view) → ExportDecision` — pure, brand-blind |
+| `coordinator/decide_export.py` (new) | `decide_export(fleet) → ExportDecision` — pure, brand-blind; takes the FLEET, never the battery loop's last-assigned `view` |
 | `coordinator/actuate_export.py` (new) | `actuate_export(decision, adapter, *, observer, controller)` — one write, observer cuts here, publishes the observer decision |
 | `coordinator/charger_types.py` | `ExportDecision`; `export_command` on `FleetCycleState` / `FleetContext`; `BatteryIntent.LIMIT_EXPORT/RELEASE_EXPORT` **removed** |
 | `coordinator/actuate_battery.py` | the export branch and the `export:<id>` key **removed** — batteries go back to one axis |
@@ -50,6 +57,8 @@ Consequences, all present in the tree right now:
 ---
 
 ### Task 1: `ExportDecision` + a pure `decide_export`
+
+> **Review correction:** the decider takes the **fleet context**, not a `BatteryView`. The first draft wrote `decide_export(view)` and relied on `view` being whatever the per-battery loop last assigned — which survives only because `battery_items` always gets a synthetic `"primary"` entry. `fleet` is a plain local (`coordinator.py:7605`) shared by every view built this cycle; take it directly.
 
 **Files:** Create `coordinator/decide_export.py`; modify `coordinator/charger_types.py`; test `tests/test_921_export_decide.py`.
 
@@ -75,36 +84,35 @@ from custom_components.solar_energy_management.coordinator.export_guard import (
 )
 
 
-def _view(cmd=None, enabled=True):
-    return SimpleNamespace(fleet=SimpleNamespace(export_command=cmd,
-                                                 export_guard_enabled=enabled))
+def _fleet(cmd=None, enabled=True):
+    return SimpleNamespace(export_command=cmd, export_guard_enabled=enabled)
 
 
 class TestTheDecision:
     def test_a_limit_command_becomes_a_limit_intent(self):
-        d = decide_export(_view(ExportCommand(LIMIT_EXPORT, 0.0, "closed + 3 kW export")))
+        d = decide_export(_fleet(ExportCommand(LIMIT_EXPORT, 0.0, "closed + 3 kW export")))
         assert d.intent is ExportIntent.LIMIT and d.watts == 0.0
         assert "closed" in d.reason
 
     def test_a_release_command_becomes_a_release_intent(self):
-        d = decide_export(_view(ExportCommand(RELEASE_EXPORT, 0.0, "meter open")))
+        d = decide_export(_fleet(ExportCommand(RELEASE_EXPORT, 0.0, "meter open")))
         assert d.intent is ExportIntent.RELEASE
 
     def test_no_command_is_no_intent(self):
-        assert decide_export(_view(ExportCommand(None, 0.0, "holding"))).intent is ExportIntent.NONE
+        assert decide_export(_fleet(ExportCommand(None, 0.0, "holding"))).intent is ExportIntent.NONE
 
     def test_an_absent_command_is_no_intent(self):
         """Every install before the first tick, and every rig-shaped stub."""
-        assert decide_export(_view(None)).intent is ExportIntent.NONE
+        assert decide_export(_fleet(None)).intent is ExportIntent.NONE
 
     def test_the_switch_off_is_no_intent_whatever_the_command_says(self):
-        d = decide_export(_view(ExportCommand(LIMIT_EXPORT, 0.0, "closed"), enabled=False))
+        d = decide_export(_fleet(ExportCommand(LIMIT_EXPORT, 0.0, "closed"), enabled=False))
         assert d.intent is ExportIntent.NONE
 
     def test_it_is_pure(self):
         """Called twice on the same view, it answers the same — no state."""
-        v = _view(ExportCommand(LIMIT_EXPORT, 0.0, "closed"))
-        assert decide_export(v) == decide_export(v)
+        f = _fleet(ExportCommand(LIMIT_EXPORT, 0.0, "closed"))
+        assert decide_export(f) == decide_export(f)
 ```
 
 - [ ] **Step 2: Run it and watch it fail** — `semtest tests/test_921_export_decide.py` → `ModuleNotFoundError: decide_export`.
@@ -153,15 +161,18 @@ from .charger_types import ExportDecision, ExportIntent
 from .export_guard import LIMIT_EXPORT, RELEASE_EXPORT
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .charger_types import BatteryView
+    from .charger_types import FleetContext
 
 _BY_COMMAND = {LIMIT_EXPORT: ExportIntent.LIMIT, RELEASE_EXPORT: ExportIntent.RELEASE}
 
 
-def decide_export(view: "BatteryView") -> ExportDecision:
+def decide_export(fleet: "FleetContext") -> ExportDecision:
     """This cycle's export intent. ``NONE`` whenever the guard is off, has no
-    command, or is merely holding — the overwhelmingly common case."""
-    fleet = getattr(view, "fleet", None)
+    command, or is merely holding — the overwhelmingly common case.
+
+    Takes the FLEET, not a per-battery view: the meter is a house quantity and
+    no battery owns it (review, 16.09 — the first draft leaned on the battery
+    loop's last-assigned ``view``)."""
     if not bool(getattr(fleet, "export_guard_enabled", False)):
         return ExportDecision(reason="export guard off")
     cmd = getattr(fleet, "export_command", None)
@@ -350,23 +361,28 @@ async def actuate_export(decision: "ExportDecision",
 
 ### Task 4: The coordinator ticks, and nothing more
 
+> **Review corrections (16.09), all load-bearing:**
+> 1. **The wobble is DROPPED.** The first draft hedged: *"if that reads as two mechanisms, have the tracker re-issue its command while engaged."* That would be a #538 write storm — `battery_adapters/generic.py:command_limit_export` calls `hass.services.async_call("number","set_value",…)` **unconditionally** and only then records the value, so any brand on a plain number entity would get a write every ~10 s for the whole time the meter stays closed. The shipped design (one-shot dispatch + a separately maintained `_export_guard_state` dict for the card) is correct; keep it.
+> 2. **Persistence stays IDENTITY-keyed.** Only the DISPATCH narrows to one adapter. `export_release_recipes()` keeps looping `_battery_adapters` and keying by real `battery_id`, because the reader — `_export_guard_adopt()` — looks recipes up by real id. Collapsing the store to a single `"primary"` key would make every adoption lookup miss on a multi-battery install and silently lose the captured prior, re-introducing exactly what `92e8b7d0` was built to prevent.
+> 3. **A capability selector, not `_primary_battery_adapter()`** — see Step 4a.
+
 **Files:** `coordinator/coordinator.py`, `coordinator/build_view.py`; test `tests/test_921_guard_wiring.py` (rewritten around the tick).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 class TestTheCoordinatorOnlyTicks:
-    """After the re-layering the coordinator computes a COMMAND (like the peak
-    guard computes an allowance) and dispatches one decision through one seam.
-    It does not decide, and it does not build a BatteryDecision."""
+    """After the re-layering the coordinator computes a COMMAND and dispatches
+    one decision through one seam. It does not decide, and it does not build a
+    BatteryDecision."""
 
-    def test_the_tick_puts_a_command_on_the_fleet_state(self):
+    def test_the_tick_puts_a_command_on_the_cycle(self):
         fake, power, _, _ = _fake(verdict=CLOSED, export_w=3000.0)
         for t in (0, 130):
             SEMCoordinator._compute_export_command(fake, power, now=float(t))
         assert fake._export_command.intent == "limit_export"
 
-    def test_the_guard_is_off_no_command(self):
+    def test_the_guard_off_means_no_command(self):
         fake, power, _, _ = _fake(verdict=CLOSED, export_w=3000.0, enabled=False)
         SEMCoordinator._compute_export_command(fake, power, now=0.0)
         assert fake._export_command.intent is None
@@ -379,63 +395,68 @@ class TestTheCoordinatorOnlyTicks:
         assert fake._export_command.intent is None
 
     def test_the_command_rides_the_view(self):
-        from tests.ast_contracts import call_kwargs
+        from .ast_contracts import call_kwargs
         from custom_components.solar_energy_management.coordinator import build_view
         kwargs = call_kwargs(build_view.build_charger_view, "FleetContext")
         assert kwargs and "export_command" in kwargs[0]
 ```
 
-(Use `from .ast_contracts import …` — the package-relative form the other tests use.)
-
 - [ ] **Step 2: Run and watch it fail.**
 
-- [ ] **Step 3: The tick**, beside `_compute_peak_slot_allowance` (`coordinator.py:10675`) and called from the same place in the cycle:
+- [ ] **Step 3: The tick**, beside `_compute_peak_slot_allowance` (`coordinator.py:10675`), called from the same place in the cycle. Body as in the first draft: lazily build `ExportGuard` from the two hold numbers, adopt a stored cut if the hook exists, read the verdict, pass `None` for a blind meter, and store `self._export_command = self._export_guard.update(...)`. **No decision, no write.**
+
+  On "last, not first": `power` is a fixed per-cycle snapshot (`grid_export_power` is never mutated between the top of the cycle and the battery loop — grepped clean), and the dispatch still runs after the battery loop, so moving the tick changes no input. The 120 s / 300 s holds dwarf the distinction either way.
+
+- [ ] **Step 4: Thread it.** `_build_fleet_cycle_state` passes `export_command=getattr(self, "_export_command", None)` and `export_guard_enabled=bool(self.config.get("export_guard_enabled", False))`; `build_view.py` copies both onto `FleetContext` beside `sink_verdicts`.
+
+- [ ] **Step 4a: The capability selector** — new, replacing the plan's earlier use of `_primary_battery_adapter()`:
 
 ```python
-    def _compute_export_command(self, power, *, now=None) -> None:
-        """(#955) Tick the export tracker and put its command on the cycle —
-        the peak guard's shape exactly (``_compute_peak_slot_allowance`` →
-        ``peak_slot_allowed_w``). No decision here and no write: the pure
-        ``decide_export`` reads the command off the view and one seam writes it.
+    def _export_control_adapter(self):
+        """(#955) The adapter that can actually cut this house's export.
 
-        On ordering: the tracker reads the meter at the TOP of the cycle, so
-        "last, not first" means it clips only export the sinks did not absorb
-        in the previous cycle. Over a 10 s loop with minute-scale holds that is
-        the same statement — the review accepted the identical one-cycle lag
-        for the #743 probe.
+        NOT ``_primary_battery_adapter()``: that one is positional
+        (``next(iter(adapters.values()))``) and says nothing about who owns the
+        grid tie. On a #531 mixed fleet — a Sessy AC battery beside a Huawei
+        inverter — the first-inserted adapter may have no export control at
+        all, and offering it the cut would leave the guard `refused` forever
+        while the inverter that CAN cut is never asked.
+
+        Capability first: prefer an adapter that produces a release recipe
+        (i.e. it knows how to undo its own cut), then any that implements the
+        verb, then the primary as a last resort so a single-battery install
+        behaves exactly as before.
         """
-        import time as _time
-        from .export_guard import ExportGuard
-        from .sink_verdicts import OPEN
-        if getattr(self, "_export_guard", None) is None:
-            self._export_guard = ExportGuard(
-                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
-                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
-            _adopt = getattr(self, "_export_guard_adopt", None)
-            if callable(_adopt):
-                self.hass.async_create_task(_adopt(self._export_guard))
-        enabled = bool(self.config.get("export_guard_enabled", False))
-        verdict = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
-        state = getattr(verdict, "state", OPEN) if enabled else OPEN
-        export_w = (None if getattr(power, "grid_power_unavailable", False)
-                    else float(getattr(power, "grid_export_power", 0.0) or 0.0))
-        self._export_command = self._export_guard.update(
-            _time.monotonic() if now is None else now, state, export_w)
+        adapters = getattr(self, "_battery_adapters", None) or {}
+        if not adapters:
+            return None
+        for adapter in adapters.values():
+            try:
+                if adapter.export_release_recipe() is not None:
+                    return adapter
+            except Exception:  # noqa: BLE001 — a brand that cannot answer is not the one
+                continue
+        base = type(self).__mro__ and None          # readability: the base's verb is the sentinel
+        for adapter in adapters.values():
+            fn = getattr(type(adapter), "command_limit_export", None)
+            if fn is not None and getattr(fn, "__qualname__", "").split(".")[0] != "BatteryControlAdapter":
+                return adapter                       # overrides the base = implements the verb
+        return self._primary_battery_adapter()
 ```
 
-`_build_fleet_cycle_state` passes `export_command=getattr(self, "_export_command", None)` and `export_guard_enabled=bool(self.config.get("export_guard_enabled", False))`; `build_view.py` copies both onto `FleetContext` beside `sink_verdicts`.
+  (Drop the `base = …` line when writing it — it is noise; the qualname test is the check. Confirm the base class name with `grep -n "^class BatteryControlAdapter" coordinator/battery_adapters/base.py`.)
 
-- [ ] **Step 4: The one dispatch**, replacing the whole of `_run_export_guard` (delete it), placed immediately after the per-battery loop in the battery pipeline:
+- [ ] **Step 5: The one dispatch**, after the per-battery loop, replacing `_run_export_guard` (delete all 76 lines):
 
 ```python
-        # (#955) The house's meter limit: ONE decision, ONE seam, ONE adapter.
-        # Not per battery — the meter is one meter, and _primary_battery_adapter
-        # is "the only way in" for house-level adapter work (its own docstring).
+        # (#955) The house's meter limit: ONE decision, ONE seam, ONE adapter
+        # — the one that can actually cut, not whichever was inserted first.
         from .actuate_export import actuate_export
+        from .charger_types import ExportIntent
         from .decide_export import decide_export
-        _xd = decide_export(view)                     # the last view built this cycle
+        _xd = decide_export(fleet)                   # the cycle's fleet, not a per-battery view
         _refused = await actuate_export(
-            _xd, self._primary_battery_adapter(),
+            _xd, self._export_control_adapter(),
             observer=self._observer_mode, controller=self._surplus_controller)
         if _refused:
             self._export_guard.report_refused(_refused)
@@ -443,25 +464,14 @@ class TestTheCoordinatorOnlyTicks:
             _persist = getattr(self, "_export_guard_persist", None)
             if callable(_persist):
                 await _persist(_xd.intent is ExportIntent.LIMIT)
-        self._export_guard_state = {
-            "enabled": bool(self.config.get("export_guard_enabled", False)),
-            "state": self._export_guard.state, "reason": self._export_guard.reason,
-            "would": (self._export_guard.state if self._observer_mode
-                      and self._export_guard.state in ("engaged", "releasing", "refused")
-                      else None),
-            "repair_wanted": self._export_guard.repair_wanted,
-            "verdict": getattr((getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
-                               "reason", "no verdict"),
-        }
+        self._export_guard_state = { ... }           # unchanged from today
 ```
 
-The standing observer entry now comes from the seam (Task 2) on the cycles a command exists; keep publishing the *state* every cycle while engaged by calling `actuate_export` with a `LIMIT` decision only when the guard commands one, and letting the `_export_guard_state` dict carry `would` for the card. **If that reads as two mechanisms again, prefer the seam:** have the tracker re-issue its command while engaged (a one-line change in `ExportGuard.update`'s `engaged` branch) so the seam publishes every cycle and the coordinator publishes nothing.
+- [ ] **Step 6: Persistence and hand-back keep identity.** `export_release_recipes()` is UNCHANGED (loops `_battery_adapters`, keys by real `battery_id`) so `_export_guard_adopt()` keeps finding its recipe. `async_release_export_guard()` is UNCHANGED for the same reason: a previous lifetime may have engaged through a different adapter, and releasing every adapter that has a recipe is both correct and idempotent (#538 de-dup on Huawei, a live-state check on Deye, and generic only writes when it captured a prior).
 
-- [ ] **Step 5:** `export_release_recipes` and `async_release_export_guard` take `_primary_battery_adapter()` instead of looping `_battery_adapters` — one recipe, keyed `"primary"`, so unload/removal hand back once.
+- [ ] **Step 7: Run** `semtest tests/test_921_guard_wiring.py tests/test_921_handback.py tests/test_921_sink_scenario.py tests/test_873_cycle_executes.py tests/test_864*.py tests/test_743*.py` → all pass.
 
-- [ ] **Step 6: Run** `semtest tests/test_921_guard_wiring.py tests/test_921_handback.py tests/test_921_sink_scenario.py tests/test_873_cycle_executes.py tests/test_864*.py tests/test_743*.py` → all pass.
-
-- [ ] **Step 7: Commit** `git commit -m "refactor(#955): the coordinator ticks the tracker; decide_export decides; actuate_export writes once"`
+- [ ] **Step 8: Commit** `git commit -m "refactor(#955): the coordinator ticks; decide_export decides; actuate_export writes once, to the adapter that can cut"`
 
 ---
 
@@ -518,17 +528,55 @@ class TestTheDecidersArePure:
 
 
 class TestTheHouseAxisIsHouseLevel:
-    def test_the_cut_goes_to_one_adapter_not_every_battery(self):
-        """A two-battery single-inverter install must not issue the cut twice."""
+    """The DISPATCH narrows to one adapter; PERSISTENCE keeps identity.
+    (Review 16.09: the first draft narrowed both, which would have made every
+    `_export_guard_adopt` lookup miss on a multi-battery install.)"""
+
+    def test_the_cut_is_dispatched_to_the_capable_adapter_not_every_battery(self):
+        import inspect
+        from custom_components.solar_energy_management.coordinator.coordinator import (
+            SEMCoordinator,
+        )
+        src = inspect.getsource(SEMCoordinator._async_update_data)
+        assert "_export_control_adapter" in src
+        assert "actuate_export" in src
+
+    def test_the_selector_prefers_an_adapter_that_can_actually_cut(self):
+        """#531 shape: a Sessy that cannot cut inserted before the Huawei that can."""
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from custom_components.solar_energy_management.coordinator.coordinator import (
+            SEMCoordinator,
+        )
+        cannot = MagicMock(); cannot.export_release_recipe = MagicMock(return_value=None)
+        can = MagicMock(); can.export_release_recipe = MagicMock(
+            return_value={"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
+                          "data": {"device_id": "dev"}})
+        fake = SimpleNamespace(_battery_adapters={"sessy": cannot, "huawei": can})
+        assert SEMCoordinator._export_control_adapter(fake) is can
+
+    def test_persistence_still_loops_every_adapter_by_real_id(self):
+        """The reader looks recipes up by battery_id; a single "primary" key
+        would make every adoption miss (92e8b7d0's failure, reintroduced)."""
         import inspect
         from custom_components.solar_energy_management.coordinator.coordinator import (
             SEMCoordinator,
         )
         for fn in (SEMCoordinator.export_release_recipes,
-                   SEMCoordinator.async_release_export_guard):
+                   SEMCoordinator.async_release_export_guard,
+                   SEMCoordinator._export_guard_adopt):
             src = inspect.getsource(fn)
-            assert "_primary_battery_adapter" in src, fn.__name__
-            assert "_battery_adapters" not in src, f"{fn.__name__} still loops every battery"
+            assert "_battery_adapters" in src, f"{fn.__name__} lost identity-keyed recipes"
+
+    def test_the_recipe_keys_round_trip(self):
+        """What export_release_recipes writes, _export_guard_adopt must find."""
+        import inspect
+        from custom_components.solar_energy_management.coordinator.coordinator import (
+            SEMCoordinator,
+        )
+        writer = inspect.getsource(SEMCoordinator.export_release_recipes)
+        reader = inspect.getsource(SEMCoordinator._export_guard_adopt)
+        assert "str(bid)" in writer and "str(bid)" in reader
 ```
 
 `call_sites` returns `(relative_path, lineno, [kwargs])` and skips `tests/`; confirm the tuple shape before relying on it (`grep -n "def call_sites" -A 12 tests/ast_contracts.py`). If `symbol_reference_files` takes different arguments, read its signature — do not guess.
