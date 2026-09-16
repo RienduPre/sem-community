@@ -343,6 +343,34 @@ class BatteryIntent(Enum):
     ``decide_battery`` (highest precedence)."""
 
 
+class ExportIntent(Enum):
+    """(#955) What ``actuate_export`` should ask the inverter to do.
+
+    A HOUSE axis, not a per-battery one: the meter is one meter, and no
+    per-device decider owns net export — it is solar, battery, EV and loads
+    together. That is why this is its own intent rather than a field on
+    :class:`BatteryDecision`.
+    """
+
+    NONE = "none"
+    """Nothing to write this cycle — the guard is idle, holding, or off."""
+
+    LIMIT = "limit_export"
+    """Cap grid feed-in at ``watts`` (0.0 for a closed meter)."""
+
+    RELEASE = "release_export"
+    """Put the feed-in limit back to what SEM found."""
+
+
+@dataclass(frozen=True)
+class ExportDecision:
+    """One cycle's export intent — the output of ``decide_export(fleet)``."""
+
+    intent: ExportIntent = ExportIntent.NONE
+    watts: float = 0.0
+    reason: str = ""
+
+
 @dataclass(frozen=True)
 class BatteryDecision:
     """The output of ``decide_battery(view)`` for ONE battery this
