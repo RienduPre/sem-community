@@ -10750,6 +10750,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         out = {}
         for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
             try:
+                if not adapter.holds_export_cut():
+                    continue   # (#908) SEM never cut this one — nothing of ours to undo
                 rec = adapter.export_release_recipe()
             except Exception:  # noqa: BLE001
                 rec = None
@@ -10792,8 +10794,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         guard.reason = f"adopted an export cut from a previous lifetime (since {rec.get('since')})"
         recipes = rec.get("recipes") or {}
         for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            prior = recipes.get(str(bid))
+            if not prior:
+                continue   # the previous lifetime held nothing on this one
             try:
-                adapter.adopt_export_prior(recipes.get(str(bid)))
+                adapter.adopt_export_prior(prior)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -10817,6 +10822,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         released = []
         for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
             try:
+                if not adapter.holds_export_cut():
+                    # (#908/#936) The cut was made through ONE adapter. On a
+                    # mixed fleet (#531) a blanket release would reset a
+                    # feed-in limit its owner set and SEM never touched —
+                    # Huawei's reset needs no prior, so it would have gone
+                    # through silently.
+                    continue
                 await adapter.command_release_export()
                 released.append(str(bid))
             except Exception as exc:  # noqa: BLE001 — teardown must finish
@@ -10952,17 +10964,23 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         while the inverter that CAN cut is never asked (#874's shape, for
         batteries).
 
-        Capability first: an adapter that produces a release recipe knows how
-        to undo its own cut, which is the strongest evidence it can make one.
-        Then any adapter that OVERRIDES the base's refusing verb. The primary
-        last, so a single-battery install behaves exactly as before.
+        Continuity first: if one adapter is already holding SEM's cut, that
+        is the one — you release what you cut. Then capability: any adapter
+        that OVERRIDES the base's refusing verb. The primary last, so a
+        single-battery install behaves exactly as before and a house whose
+        brand has no export control still gets a REFUSAL with a brand in it
+        rather than "no adapter".
+
+        Not "has a release recipe": Huawei can always produce one (the
+        integration owns the reset), so that test named an inverter SEM had
+        never cut.
         """
         adapters = getattr(self, "_battery_adapters", None) or {}
         if not adapters:
             return None
         for adapter in adapters.values():
             try:
-                if adapter.export_release_recipe() is not None:
+                if adapter.holds_export_cut():
                     return adapter
             except Exception:  # noqa: BLE001 — a brand that cannot answer is not the one
                 continue

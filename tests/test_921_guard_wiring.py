@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 
+from custom_components.solar_energy_management.coordinator.charger_types import ExportIntent
 from custom_components.solar_energy_management.coordinator.coordinator import SEMCoordinator
 from custom_components.solar_energy_management.coordinator.export_guard import ExportGuard
 from custom_components.solar_energy_management.coordinator.sink_verdicts import (
@@ -105,30 +106,58 @@ class TestTheTick:
 class TestTheCapabilitySelector:
     """#531 shape: the adapter that can cut is not always the first one."""
 
-    def _adapters(self, *recipes):
+    def _adapters(self, *holding, capable=()):
+        """``holding[i]`` = is b<i> holding SEM's cut; ``capable`` = which
+        indices are a brand that can actually write an export limit.
+
+        REAL adapter classes, not mocks: a MagicMock answers every attribute,
+        so ``type(a).command_limit_export`` exists on it and every mock looks
+        capable — the first version of this test passed while pinning nothing.
+        """
         from unittest.mock import MagicMock
+        from custom_components.solar_energy_management.coordinator.battery_adapters.generic import (
+            GenericBatteryAdapter,
+        )
+        from custom_components.solar_energy_management.coordinator.battery_adapters.goodwe import (
+            GoodWeBatteryAdapter,
+        )
         out = {}
-        for i, rec in enumerate(recipes):
-            a = MagicMock(); a.export_release_recipe = MagicMock(return_value=rec)
+        for i, held in enumerate(holding):
+            cls = GenericBatteryAdapter if i in capable else GoodWeBatteryAdapter
+            a = cls(MagicMock(), {"export_limit_entity": "number.x"})
+            a._last_export_intent = ExportIntent.LIMIT if held else None
             out[f"b{i}"] = a
         return out
 
-    def test_it_prefers_the_adapter_that_can_undo_its_own_cut(self):
-        ads = self._adapters(None, {"domain": "huawei_solar", "service": "reset", "data": {}})
+    def test_it_prefers_the_adapter_already_holding_the_cut(self):
+        """Continuity: you release what you cut. Not 'has a release recipe' —
+        Huawei can always produce one, so that test named an inverter SEM had
+        never touched (found while gating the teardown on #908)."""
+        ads = self._adapters(False, True)
         fake = SimpleNamespace(_battery_adapters=ads)
         assert SEMCoordinator._export_control_adapter(fake) is ads["b1"]
 
     def test_an_adapter_that_raises_is_skipped_not_fatal(self):
-        ads = self._adapters(None, {"domain": "d", "service": "s", "data": {}})
-        ads["b0"].export_release_recipe = MagicMock(side_effect=RuntimeError("no"))
+        ads = self._adapters(False, True)
+        ads["b0"].holds_export_cut = MagicMock(side_effect=RuntimeError("no"))  # noqa: E501
         fake = SimpleNamespace(_battery_adapters=ads)
+        assert SEMCoordinator._export_control_adapter(fake) is ads["b1"]
+
+    def test_with_nothing_held_it_takes_the_one_that_can_write(self):
+        """The first engage of a lifetime: nobody holds anything yet, so the
+        only evidence left is which brand OVERRIDES the base's refusing verb."""
+        ads = self._adapters(False, False, capable=(1,))
+        fake = SimpleNamespace(_battery_adapters=ads,
+                               _primary_battery_adapter=lambda: ads["b0"])
         assert SEMCoordinator._export_control_adapter(fake) is ads["b1"]
 
     def test_no_adapters_is_none(self):
         assert SEMCoordinator._export_control_adapter(SimpleNamespace(_battery_adapters={})) is None
 
     def test_a_single_battery_install_falls_back_to_the_primary(self):
-        ads = self._adapters(None)
+        """A brand with no export control still yields a REFUSAL naming it,
+        never the blank 'no adapter can write the export limit'."""
+        ads = self._adapters(False)
         fake = SimpleNamespace(
             _battery_adapters=ads,
             _primary_battery_adapter=lambda: ads["b0"])

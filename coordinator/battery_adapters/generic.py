@@ -225,6 +225,7 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         except (TypeError, ValueError):
             self._export_prior = None
         self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
 
     async def command_release_export(self) -> None:
         ent = str(self._config.get("export_limit_entity", "") or "")

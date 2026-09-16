@@ -13,6 +13,7 @@ import pytest
 
 from custom_components.solar_energy_management import cleanup
 from custom_components.solar_energy_management.coordinator.coordinator import SEMCoordinator
+from custom_components.solar_energy_management.coordinator.charger_types import ExportIntent
 from custom_components.solar_energy_management.coordinator.export_guard import ExportGuard
 
 
@@ -219,11 +220,27 @@ class TestRecipes:
 
     def test_recipes_are_empty_in_observer_mode_or_when_idle(self):
         g = ExportGuard(); g.state = "engaged"; g._applied = True
-        a = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"}); a._export_prior = 1.0
+        a = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"})
+        a._export_prior = 1.0; a._last_export_intent = ExportIntent.LIMIT
         assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g, _battery_adapters={"b1": a}, _observer_mode=True)) == {}
         g2 = ExportGuard()
         assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g2, _battery_adapters={"b1": a}, _observer_mode=False)) == {}
         assert SEMCoordinator.export_release_recipes(SimpleNamespace(_export_guard=g, _battery_adapters={"b1": a}, _observer_mode=False)) == {"b1": a.export_release_recipe()}
+
+    def test_an_adapter_sem_never_cut_contributes_nothing(self):
+        """#531/#908: Huawei's reset needs no prior, so its RECIPE is always
+        available — on a mixed fleet that put an untouched inverter into the
+        stash a removal replays, and into the teardown that resets it."""
+        g = ExportGuard(); g.state = "engaged"; g._applied = True
+        cut = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"})
+        cut._export_prior = 1.0; cut._last_export_intent = ExportIntent.LIMIT
+        untouched = HuaweiBatteryAdapter(MagicMock(), {}); untouched._inverter_device_id = "dev"
+        assert untouched.export_release_recipe() is not None      # it CAN undo one
+        assert untouched.holds_export_cut() is False              # but holds none
+        out = SEMCoordinator.export_release_recipes(SimpleNamespace(
+            _export_guard=g, _battery_adapters={"b1": cut, "b2": untouched},
+            _observer_mode=False))
+        assert list(out) == ["b1"]
 
 
 class TestUnloadSemantics:

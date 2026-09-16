@@ -469,6 +469,19 @@ class BatteryControlAdapter(ABC):
         """(#955) A previous lifetime engaged the cut; take over its prior so
         ``command_release_export`` restores what SEM originally found."""
         self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
+
+    def holds_export_cut(self) -> bool:
+        """(#908) Is THIS adapter holding a cut SEM itself made?
+
+        Not the same question as :meth:`export_release_recipe`, which answers
+        "how would I undo one" — Huawei can always answer that (the
+        integration owns the reset), so on a mixed fleet the recipe said yes
+        for an inverter SEM had never touched, and a teardown would have
+        reset a feed-in limit the OWNER set. One cut is made through one
+        adapter; only that one may be handed back.
+        """
+        return self._last_export_intent is ExportIntent.LIMIT
 
     async def command_off(self) -> None:
         """#523 (RienduPre): SEM hands-off this battery.
