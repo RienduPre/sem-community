@@ -10860,7 +10860,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             observer=self._observer_mode,
             controller=getattr(self, "_surplus_controller", None))
         if refused:
-            self._export_guard.report_refused(refused)
+            guard = getattr(self, "_export_guard", None)
+            if guard is not None:
+                guard.report_refused(refused)   # a refusal is a state (#925)
         elif decision.intent is not ExportIntent.NONE and not self._observer_mode:
             # The store remembers the cut across a restart; only a REAL write
             # may claim it (#936: observer leaves the house exactly as found).

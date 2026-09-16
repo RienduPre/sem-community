@@ -21,7 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feed-in at zero at the inverter — after the battery, the car and the loads
   had their turn, with hysteresis both ways, a refusal that says so, and a
   hand-back on unload. Huawei via `huawei_solar` services, Deye via the work
-  mode select, anything else via a writable export-limit number. Off by default.
+  mode select, anything else via a writable export-limit number. The cut is
+  made through the one adapter that owns the grid tie, survives a restart, and
+  is handed back only to the inverter SEM actually cut — a second brand's
+  feed-in limit is never touched. Off by default.
 - ✨ **A negative export price is a cost, not a free kWh** (#871). Two
   diagnostics measure what a hostile meter cost today; the planner no longer
   clamps the price to zero; the loads absorb before anything is clipped.

@@ -1200,6 +1200,46 @@ class, and does the new precondition hold for them?**
 
 ---
 
+### 90. A new control decides in the orchestrator instead of the decide layer — two producers of one decision — GUARDED
+**Symptom:** on the rig, a feature whose whole promise is *"I am holding the meter shut"* is
+invisible. The observer surface shows the battery's own verdict where the export cut should be, or
+shows the cut for exactly one cycle and then nothing. Nothing errors, the cut is genuinely applied,
+and every unit test passes — the two decisions simply overwrite each other under one key, so the
+one surface a person judges the feature by (#855: a case is judged on what would hit the wire)
+cannot show both.
+**Root shape:** a new control axis is built where it is easiest to reach the inputs — inside the
+coordinator's cycle — rather than in the layer that already decides. The tracker ticks, decides and
+writes in one method, so the codebase gains a SECOND producer of a decision type and a second call
+site for a seam built to be the only one. The collision on the observer key is the visible tip; the
+cause is that the axis never entered the decide layer. Everything downstream inherits it: the cut
+loops every adapter because no decider chose one (a house-level quantity riding a per-device path,
+so a two-battery single-inverter install issues the same service call twice — de-duplication at the
+brand hides it, cf. class 38); the hand-back asks the adapter *"could you undo a cut"* instead of
+*"are you holding one"*, which on a mixed fleet (#531) resets a limit the OWNER set; and the
+decision cannot be unit-tested without building a whole coordinator, which is how the same arc
+shipped a guard that released a cut it never made.
+**Why it survives review:** the layering is obeyed *downward* — there IS an adapter per brand and
+there IS a seam — so the diff looks like the neighbouring feature it claims to mirror. Only the
+question "where is the decision made?" separates them, and that question is invisible in a diff
+that adds files rather than changing them. The tell in SEM's own history: `#864`'s peak guard puts
+its tracker's value on the fleet state and clamps in `decide.py`; the export guard put nothing on
+the fleet state at all.
+**Cure:** the tracker leaves a VALUE on the cycle state; a pure function turns it into an intent;
+one seam writes it; one adapter is chosen by capability, not by insertion order. Three named
+methods instead of one long one, each exercisable alone.
+**Guard:** `tests/test_921_one_track.py` — one producing file per decision type, exactly one
+production call site per seam, the seam's observer key named nowhere else (counting IMPORTS: the
+first version of that pin missed `from .actuate_export import OBSERVER_KEY` and was vacuous), every
+decider free of hass/adapter/await/service-call, and the tick proven to run after the verdicts it
+reads. Every pin was mutated to confirm it fails.
+**Sweep question:** for any control that writes to hardware — *which file constructs its decision,
+and is anything else allowed to?* Then: does its tracker put a value on the cycle state, or keep it
+in a method? A control whose decision type is built in exactly one place cannot grow a second track.
+**Scope note:** SEM does NOT have a universal "every write goes through a decide layer" rule —
+`charge_pacing` and `load_management` call services directly, and a review refuted that broader
+framing. The class is about a control gaining a second producer of a decision that already has one.
+Refs #955 #921 #864 #855 #908 #936 #531 #538.
+
 ## Meta-classes (the coherence audit hunts these too)
 
 - **Duplicated mechanism** — the same debounce/retry/reconcile/swap built in 2+ places (e.g. the

@@ -308,6 +308,57 @@ intents (`NORMAL`, `LIMIT_DISCHARGE`, `FORCE_CHARGE`,
 that pre-v1.7.0 lived alongside is preserved verbatim — it
 produces the `SchedulerDecision` that feeds `BatteryView.scheduler_decision`.
 
+### Decide → actuate → adapter (export side, #955)
+
+The house's grid tie is its own control axis, not a battery intent. A
+battery can need `LIMIT_DISCHARGE` *and* an export cut in the same cycle —
+one intent per battery per cycle cannot carry both — so the meter limit gets
+its own decision, its own seam and its own observer key, and the batteries
+carry one axis again.
+
+```
+   PowerReadings + the cycle's grid verdict (arc #921)
+         │
+   ┌─────▼──────────────────────────────────┐
+   │ 0. TRACK   ExportGuard.update()         │  stateful — hysteresis, "last not
+   │    _compute_export_command(power)       │  first", refusal as a state. Leaves
+   │    → FleetCycleState.export_command     │  a VALUE on the cycle, never a write.
+   └─────┬──────────────────────────────────┘
+   ┌─────▼──────────────────────────────────┐
+   │ 1. DECIDE  decide_export(fleet)         │  pure — no hass, no adapter, no clock
+   │    → ExportDecision(LIMIT|RELEASE|NONE) │  Takes the FLEET: the meter is a house
+   └─────┬──────────────────────────────────┘  quantity and no battery owns it.
+   ┌─────▼──────────────────────────────────┐
+   │ 2. SEAM    actuate_export(decision,     │  ONE write. Observer cuts HERE and
+   │            adapter)                     │  publishes under OBSERVER_KEY =
+   │    → the refusal text, or None          │  "export_guard" — its own key.
+   └─────┬──────────────────────────────────┘
+   ┌─────▼──────────────────────────────────┐
+   │ 3. ADAPTER command_limit_export(w) /    │  brand dialect: Huawei's
+   │            command_release_export()     │  set_zero_power_grid_connection,
+   │    _export_control_adapter() picks it   │  Deye's register, Generic's number.
+   └─────────────────────────────────────────┘
+```
+
+Three things worth knowing:
+
+- **The tick runs after the sink verdicts**, not beside `_compute_peak_slot_allowance`.
+  Symmetry with the peak guard would put it 60 lines before `self._sink_verdicts`
+  is assigned, and the guard would key on the previous cycle's verdict.
+- **One adapter, chosen by capability.** `_export_control_adapter()` prefers the
+  adapter already holding SEM's cut (you release what you cut), then any brand
+  that overrides the base's refusing verb, then the primary — so on a #531 mixed
+  fleet the cut reaches the inverter that owns the grid tie rather than whichever
+  adapter was inserted first.
+- **`holds_export_cut()`, not `export_release_recipe()`.** "How would I undo a cut"
+  and "am I holding one" are different questions. Huawei can always answer the
+  first (the integration owns the reset), so the hand-back paths ask the second —
+  otherwise a teardown resets a feed-in limit the owner set and SEM never touched
+  (#908/#936).
+
+Structurally pinned by `tests/test_921_one_track.py`; the shape it prevents is
+bug class 90.
+
 ### Compute intent → reconcile (load side)
 
 Surplus loads (switches, climate, heat pump, hot water) follow the **same
@@ -411,8 +462,14 @@ coordinator/
 ├── battery_adapters/       — Per-brand battery control surface (Huawei, GoodWe, Generic)
 ├── decide.py               — Pure decide(view) → ChargerDecision (5 ModeStrategy classes)
 ├── decide_battery.py       — Pure decide_battery(view) → BatteryDecision
+├── decide_export.py        — Pure decide_export(fleet) → ExportDecision (#955)
 ├── actuate.py              — Thin delegation of ChargerDecision to ChargerReconciler
 ├── actuate_battery.py      — Intent dispatch onto BatteryControlAdapter
+├── actuate_export.py       — The house's meter limit: one write, one observer key
+├── export_guard.py         — ExportGuard tracker: hysteresis both ways, refusal
+│                             as a state, "last, not first" (#955)
+├── sink_verdicts.py        — One OPEN/HELD/CLOSED verdict per sink, per cycle;
+│                             never a price in the balance layer (arc #921)
 ├── power_control.py        — Unit-safe battery power setpoint writes (#702):
 │                             fail-closed validation + W↔kW conversion; rejects
 │                             current/percent/unitless-unknown/out-of-range controls

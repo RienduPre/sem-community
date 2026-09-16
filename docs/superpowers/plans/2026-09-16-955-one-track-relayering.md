@@ -62,7 +62,7 @@ Consequences, all present in the tree right now:
 
 **Files:** Create `coordinator/decide_export.py`; modify `coordinator/charger_types.py`; test `tests/test_921_export_decide.py`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """#955 — the export cut decides in the DECIDE layer, like everything else.
@@ -115,9 +115,9 @@ class TestTheDecision:
         assert decide_export(f) == decide_export(f)
 ```
 
-- [ ] **Step 2: Run it and watch it fail** — `semtest tests/test_921_export_decide.py` → `ModuleNotFoundError: decide_export`.
+- [x] **Step 2: Run it and watch it fail** — `semtest tests/test_921_export_decide.py` → `ModuleNotFoundError: decide_export`.
 
-- [ ] **Step 3: The types** (`coordinator/charger_types.py`, beside `BatteryDecision`):
+- [x] **Step 3: The types** (`coordinator/charger_types.py`, beside `BatteryDecision`):
 
 ```python
 class ExportIntent(Enum):
@@ -138,7 +138,7 @@ class ExportDecision:
 
 and `export_command: "Any" = None` + `export_guard_enabled: bool = False` on **`FleetCycleState`** and **`FleetContext`**, beside `peak_slot_allowed_w` (which is the field this one is modelled on).
 
-- [ ] **Step 4: The decider** (`coordinator/decide_export.py`):
+- [x] **Step 4: The decider** (`coordinator/decide_export.py`):
 
 ```python
 """Pure ``decide_export(view) → ExportDecision`` (#955).
@@ -184,7 +184,7 @@ def decide_export(fleet: "FleetContext") -> ExportDecision:
                           reason=str(getattr(cmd, "reason", "")))
 ```
 
-- [ ] **Step 5: Run** → 6 passed. **Step 6: Commit** `git commit -m "feat(#955): decide_export — the meter limit decides in the decide layer"`
+- [x] **Step 5: Run** → 6 passed. **Step 6: Commit** `git commit -m "feat(#955): decide_export — the meter limit decides in the decide layer"`
 
 ---
 
@@ -192,7 +192,7 @@ def decide_export(fleet: "FleetContext") -> ExportDecision:
 
 **Files:** Create `coordinator/actuate_export.py`; test `tests/test_921_export_seam.py`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 """#955 — one write, observer cuts here, and the key belongs to the seam.
@@ -270,9 +270,9 @@ class TestTheSeam:
             ExportDecision(ExportIntent.LIMIT, 0.0, "c"), None) or "")
 ```
 
-- [ ] **Step 2: Run and watch it fail.**
+- [x] **Step 2: Run and watch it fail.**
 
-- [ ] **Step 3: The seam** (`coordinator/actuate_export.py`) — returns the refusal string (or `None`), so the caller can feed `ExportGuard.report_refused` without the seam knowing about the tracker:
+- [x] **Step 3: The seam** (`coordinator/actuate_export.py`) — returns the refusal string (or `None`), so the caller can feed `ExportGuard.report_refused` without the seam knowing about the tracker:
 
 ```python
 """Pure-dispatch ``actuate_export(decision, adapter)`` (#955).
@@ -341,7 +341,7 @@ async def actuate_export(decision: "ExportDecision",
     return None
 ```
 
-- [ ] **Step 4: Run** → 8 passed. **Step 5: Commit** `git commit -m "feat(#955): actuate_export — one write for the house's meter limit, and the seam owns its observer key"`
+- [x] **Step 4: Run** → 8 passed. **Step 5: Commit** `git commit -m "feat(#955): actuate_export — one write for the house's meter limit, and the seam owns its observer key"`
 
 ---
 
@@ -349,13 +349,13 @@ async def actuate_export(decision: "ExportDecision",
 
 **Files:** `coordinator/actuate_battery.py`, `coordinator/charger_types.py`; tests `tests/test_921_export_guard.py`, `tests/test_921_guard_wiring.py`.
 
-- [ ] **Step 1:** Delete from `actuate_battery.py` the `LIMIT_EXPORT/RELEASE_EXPORT` branch, the `_export` key selection added in `1bfcc1e0`, and the `BatteryIntent.LIMIT_EXPORT: decision.export_limit_w` entry in `_observe`'s watts map. Delete `BatteryIntent.LIMIT_EXPORT` / `RELEASE_EXPORT` and `BatteryDecision.export_limit_w` from `charger_types.py`.
+- [x] **Step 1:** Delete from `actuate_battery.py` the `LIMIT_EXPORT/RELEASE_EXPORT` branch, the `_export` key selection added in `1bfcc1e0`, and the `BatteryIntent.LIMIT_EXPORT: decision.export_limit_w` entry in `_observe`'s watts map. Delete `BatteryIntent.LIMIT_EXPORT` / `RELEASE_EXPORT` and `BatteryDecision.export_limit_w` from `charger_types.py`.
 
-- [ ] **Step 2:** Move the affected tests rather than rewriting them: the `TestTheIntentsDispatch` class in `test_921_export_guard.py` and `TestTheCutIsVisibleInObserverMode` in `test_921_guard_wiring.py` are now Task 2's seam tests — delete the duplicates, keeping `test_921_export_seam.py` as the one home. **If a moved test needs its ASSERTION changed (not just its import), stop:** the refactor changed behaviour and that is not the goal.
+- [x] **Step 2:** Move the affected tests rather than rewriting them: the `TestTheIntentsDispatch` class in `test_921_export_guard.py` and `TestTheCutIsVisibleInObserverMode` in `test_921_guard_wiring.py` are now Task 2's seam tests — delete the duplicates, keeping `test_921_export_seam.py` as the one home. **If a moved test needs its ASSERTION changed (not just its import), stop:** the refactor changed behaviour and that is not the goal.
 
-- [ ] **Step 3: Run** `semtest tests/test_921_export_guard.py tests/test_921_export_seam.py tests/test_actuate_battery*.py tests/test_818*.py tests/test_battery_modes_523.py` → all pass.
+- [x] **Step 3: Run** `semtest tests/test_921_export_guard.py tests/test_921_export_seam.py tests/test_actuate_battery*.py tests/test_818*.py tests/test_battery_modes_523.py` → all pass.
 
-- [ ] **Step 4: Commit** `git commit -m "refactor(#955): the battery decision carries one axis again — the export cut has its own"`
+- [x] **Step 4: Commit** `git commit -m "refactor(#955): the battery decision carries one axis again — the export cut has its own"`
 
 ---
 
@@ -368,7 +368,7 @@ async def actuate_export(decision: "ExportDecision",
 
 **Files:** `coordinator/coordinator.py`, `coordinator/build_view.py`; test `tests/test_921_guard_wiring.py` (rewritten around the tick).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 class TestTheCoordinatorOnlyTicks:
@@ -401,15 +401,15 @@ class TestTheCoordinatorOnlyTicks:
         assert kwargs and "export_command" in kwargs[0]
 ```
 
-- [ ] **Step 2: Run and watch it fail.**
+- [x] **Step 2: Run and watch it fail.**
 
-- [ ] **Step 3: The tick**, beside `_compute_peak_slot_allowance` (`coordinator.py:10675`), called from the same place in the cycle. Body as in the first draft: lazily build `ExportGuard` from the two hold numbers, adopt a stored cut if the hook exists, read the verdict, pass `None` for a blind meter, and store `self._export_command = self._export_guard.update(...)`. **No decision, no write.**
+- [x] **Step 3: The tick**, beside `_compute_peak_slot_allowance` (`coordinator.py:10675`), called from the same place in the cycle. Body as in the first draft: lazily build `ExportGuard` from the two hold numbers, adopt a stored cut if the hook exists, read the verdict, pass `None` for a blind meter, and store `self._export_command = self._export_guard.update(...)`. **No decision, no write.**
 
   On "last, not first": `power` is a fixed per-cycle snapshot (`grid_export_power` is never mutated between the top of the cycle and the battery loop — grepped clean), and the dispatch still runs after the battery loop, so moving the tick changes no input. The 120 s / 300 s holds dwarf the distinction either way.
 
-- [ ] **Step 4: Thread it.** `_build_fleet_cycle_state` passes `export_command=getattr(self, "_export_command", None)` and `export_guard_enabled=bool(self.config.get("export_guard_enabled", False))`; `build_view.py` copies both onto `FleetContext` beside `sink_verdicts`.
+- [x] **Step 4: Thread it.** `_build_fleet_cycle_state` passes `export_command=getattr(self, "_export_command", None)` and `export_guard_enabled=bool(self.config.get("export_guard_enabled", False))`; `build_view.py` copies both onto `FleetContext` beside `sink_verdicts`.
 
-- [ ] **Step 4a: The capability selector** — new, replacing the plan's earlier use of `_primary_battery_adapter()`:
+- [x] **Step 4a: The capability selector** — new, replacing the plan's earlier use of `_primary_battery_adapter()`:
 
 ```python
     def _export_control_adapter(self):
@@ -446,7 +446,7 @@ class TestTheCoordinatorOnlyTicks:
 
   (Drop the `base = …` line when writing it — it is noise; the qualname test is the check. Confirm the base class name with `grep -n "^class BatteryControlAdapter" coordinator/battery_adapters/base.py`.)
 
-- [ ] **Step 5: The one dispatch**, after the per-battery loop, replacing `_run_export_guard` (delete all 76 lines):
+- [x] **Step 5: The one dispatch**, after the per-battery loop, replacing `_run_export_guard` (delete all 76 lines):
 
 ```python
         # (#955) The house's meter limit: ONE decision, ONE seam, ONE adapter
@@ -467,11 +467,11 @@ class TestTheCoordinatorOnlyTicks:
         self._export_guard_state = { ... }           # unchanged from today
 ```
 
-- [ ] **Step 6: Persistence and hand-back keep identity.** `export_release_recipes()` is UNCHANGED (loops `_battery_adapters`, keys by real `battery_id`) so `_export_guard_adopt()` keeps finding its recipe. `async_release_export_guard()` is UNCHANGED for the same reason: a previous lifetime may have engaged through a different adapter, and releasing every adapter that has a recipe is both correct and idempotent (#538 de-dup on Huawei, a live-state check on Deye, and generic only writes when it captured a prior).
+- [x] **Step 6: Persistence and hand-back keep identity.** `export_release_recipes()` is UNCHANGED (loops `_battery_adapters`, keys by real `battery_id`) so `_export_guard_adopt()` keeps finding its recipe. `async_release_export_guard()` is UNCHANGED for the same reason: a previous lifetime may have engaged through a different adapter, and releasing every adapter that has a recipe is both correct and idempotent (#538 de-dup on Huawei, a live-state check on Deye, and generic only writes when it captured a prior).
 
-- [ ] **Step 7: Run** `semtest tests/test_921_guard_wiring.py tests/test_921_handback.py tests/test_921_sink_scenario.py tests/test_873_cycle_executes.py tests/test_864*.py tests/test_743*.py` → all pass.
+- [x] **Step 7: Run** `semtest tests/test_921_guard_wiring.py tests/test_921_handback.py tests/test_921_sink_scenario.py tests/test_873_cycle_executes.py tests/test_864*.py tests/test_743*.py` → all pass.
 
-- [ ] **Step 8: Commit** `git commit -m "refactor(#955): the coordinator ticks; decide_export decides; actuate_export writes once, to the adapter that can cut"`
+- [x] **Step 8: Commit** `git commit -m "refactor(#955): the coordinator ticks; decide_export decides; actuate_export writes once, to the adapter that can cut"`
 
 ---
 
@@ -479,7 +479,7 @@ class TestTheCoordinatorOnlyTicks:
 
 **Files:** `tests/test_921_one_track.py` (new).
 
-- [ ] **Step 1: Write the test** (it is the whole task)
+- [x] **Step 1: Write the test** (it is the whole task)
 
 ```python
 """#955 — the structural pins that keep this on one track.
@@ -581,15 +581,15 @@ class TestTheHouseAxisIsHouseLevel:
 
 `call_sites` returns `(relative_path, lineno, [kwargs])` and skips `tests/`; confirm the tuple shape before relying on it (`grep -n "def call_sites" -A 12 tests/ast_contracts.py`). If `symbol_reference_files` takes different arguments, read its signature — do not guess.
 
-- [ ] **Step 2: Run** — expect real failures first (they are the point), then fix what they name until green.
+- [x] **Step 2: Run** — expect real failures first (they are the point), then fix what they name until green.
 
-- [ ] **Step 3: Commit** `git commit -m "test(#955): the second track is now unrepresentable — one producer, one seam, pure deciders, one adapter"`
+- [x] **Step 3: Commit** `git commit -m "test(#955): the second track is now unrepresentable — one producer, one seam, pure deciders, one adapter"`
 
 ---
 
 ### Task 6: Re-prove on .175, and write it down
 
-- [ ] **Step 1: Suite + lint.** `semtest tests/ -q -rf` green; `/tmp/venv-ci/bin/ruff check .` clean; push and wait for CI on PR #965.
+- [x] **Step 1: Suite + lint.** `semtest tests/ -q -rf` green; `/tmp/venv-ci/bin/ruff check .` clean; push and wait for CI on PR #965.
 
 - [ ] **Step 2: The same live episode, on the new layering.** Deploy (`SRC=/home/sem/sem-arc-921 ~/bin/sem-deploy-175.sh`), stage export through the split-pair override (`grid_import_power_entity` → the 6000 W entity, `grid_export_power_entity` → the 0 W entity, **both**, then reload the entry — see `reference_175_harness.md`), hold the feed-in at −0.05, `export_guard_enabled: true`, `export_guard_engage_s: 60`. Read the rig's own surfaces with `~/bin/sem-sim-compress.sh 10.10.20.175 18.0 20`. Expect exactly what the first build produced, from the new seam:
 
@@ -600,9 +600,9 @@ WOULD battery:primary limit_discharge  | …
 
 then flip the feed-in positive and watch `releasing → idle` with the entry absent once idle. **Restore:** clear the four override keys, delete the synthetic entities, reload.
 
-- [ ] **Step 3: Update the record.** Append the outcome to `~/claude-jobs/challenge-feature-921-grid-not-always-a-sink.md`; add one line to `docs/BUG_CLASSES.md` if the second-track shape deserves a class of its own (*"a new control that decides in the orchestrator instead of the decide layer — two producers of one decision, discovered as an observer-surface collision"*); note in `docs/ARCHITECTURE.md` that the export axis has its own decider and seam beside the battery's.
+- [x] **Step 3: Update the record.** Append the outcome to `~/claude-jobs/challenge-feature-921-grid-not-always-a-sink.md`; add one line to `docs/BUG_CLASSES.md` if the second-track shape deserves a class of its own (*"a new control that decides in the orchestrator instead of the decide layer — two producers of one decision, discovered as an observer-surface collision"*); note in `docs/ARCHITECTURE.md` that the export axis has its own decider and seam beside the battery's.
 
-- [ ] **Step 4: Commit** `git commit -m "docs(#955): the export axis has its own decider and seam — the three layers hold"`
+- [x] **Step 4: Commit** `git commit -m "docs(#955): the export axis has its own decider and seam — the three layers hold"`
 
 ---
 
@@ -620,3 +620,34 @@ then flip the feed-in positive and watch `releasing → idle` with the entry abs
 **What does NOT change:** the verdicts, the tracker's hysteresis and "last, not first", the adapters, the persistence and hand-back semantics, the surface, the plan rows, the 16 languages. All of it is already live-proven and carries over.
 
 **If the refactor is not taken:** the arc still works — it is proven on real hardware — but SEM gains a second place where a decision is made, and the next feature that needs the same shape will copy it. That is the cost to weigh, and it is Guido's call, not mine.
+
+
+---
+
+## What execution changed (16.09) — read this before trusting the steps above
+
+Five behaviour changes came out of the build, four of them defects the plan
+introduced. The steps are left as written so the diff between plan and outcome
+stays legible; where they disagree, the code is right.
+
+1. **Task 4 Step 3 is wrong about placement.** "Beside `_compute_peak_slot_allowance`"
+   is 60 lines BEFORE `self._sink_verdicts` is assigned, so the guard read the
+   previous cycle's verdict. The tick goes AFTER the verdicts it reads.
+2. **Task 4 Step 3 is wrong about adoption.** `_build_fleet_cycle_state` is sync,
+   so "adopt a stored cut if the hook exists" became a scheduled task that lands
+   a cycle late — an idle first tick then overwrote the restored cut. Adoption
+   moved to `_ensure_export_guard()`, awaited by the cycle.
+3. **Task 4 Step 6 is wrong about the hand-back being idempotent.** Huawei's
+   release needs no prior, so "releasing every adapter that has a recipe" resets
+   a feed-in limit the OWNER set on a #531 mixed fleet. Adapters answer
+   `holds_export_cut()` from their own `_last_export_intent`; every hand-back
+   path asks that instead of `export_release_recipe()`.
+4. **Task 3 missed the shared de-dup marker.** The export verbs stamped
+   `_last_intent` — the battery axis's #538 marker. The export axis owns
+   `_last_export_intent` now.
+5. **The dispatch is a method, not inline.** `_apply_export_decision(fleet)`, so
+   it can be exercised without a whole coordinator.
+
+And one pin in Task 5 was vacuous as written: `symbol_reference_files` does not
+see an import, so the borrowed-key mutation passed. Replaced with a walker that
+counts imports. See the Round 4 section of the challenge record.
