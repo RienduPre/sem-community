@@ -194,6 +194,28 @@ class TestTheCoordinatorOnlyTicks:
                  for n in ast.walk(tree) if isinstance(n, ast.Call)}
         assert not (names & {"decide_export", "actuate_export", "async_call"}), names
 
+    def test_the_card_is_refreshed_even_when_the_dispatch_fails(self):
+        """A failed store write must not leave the rig reading 'engaged' while
+        the axis is broken — silence looks like health (#925). The publish sits
+        in the dispatch site's ``finally``, not inside the thing that can raise."""
+        import ast
+        import inspect
+        import textwrap
+        from custom_components.solar_energy_management.coordinator.coordinator import (
+            SEMCoordinator,
+        )
+        for meth in (SEMCoordinator._run_battery_pipeline,
+                     SEMCoordinator._apply_export_decision):
+            tree = ast.parse(textwrap.dedent(inspect.getsource(meth)))
+            in_finally = any(
+                isinstance(c, ast.Call)
+                and getattr(c.func, "attr", None) == "_publish_export_guard_state"
+                for t in ast.walk(tree) if isinstance(t, ast.Try)
+                for f in t.finalbody for c in ast.walk(f))
+            if in_finally:
+                return
+        raise AssertionError("_publish_export_guard_state is not in a finally")
+
     def test_the_guard_ticks_after_the_verdicts_it_reads(self):
         """It sat beside ``_compute_peak_slot_allowance`` for symmetry, 60
         lines BEFORE ``self._sink_verdicts`` is assigned — so the guard was

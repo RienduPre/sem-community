@@ -7857,6 +7857,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         except Exception:  # noqa: BLE001
             _LOGGER.warning("Export guard FAILED this cycle — no export cap is being "
                             "applied (#955)", exc_info=True)
+        finally:
+            # The card reads the TRACKER, so it must be refreshed even when the
+            # dispatch blew up — otherwise a failed store write leaves the rig
+            # reading "engaged" while the axis is broken, and silence looks
+            # like health (#925).
+            self._publish_export_guard_state()
 
     async def _maybe_run_scheduler_evaluation(self, power, energy=None) -> None:
         """Trigger the scheduler's ``evaluate()`` at the daily time.
@@ -10869,7 +10875,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             persist = getattr(self, "_export_guard_persist", None)
             if callable(persist):
                 await persist(decision.intent is ExportIntent.LIMIT)
-        self._publish_export_guard_state()
 
     async def _ensure_export_guard(self) -> None:
         """(#955) Build the tracker and adopt a prior lifetime's cut, ONCE.
