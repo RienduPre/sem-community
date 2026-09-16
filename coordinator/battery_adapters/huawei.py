@@ -188,6 +188,12 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
 
     def export_release_recipe(self):
         """How to put the inverter back exactly as SEM found it."""
+        adopted = getattr(self, "_adopted_recipe", None)
+        if adopted:
+            # A previous lifetime's capture beats anything readable now: the
+            # inverter currently reports SEM's own cut, so re-deriving here
+            # would restore "Zero Power" or fall back to "Unlimited".
+            return dict(adopted)
         device_id = self._export_device_id()
         if not device_id:
             return None
@@ -225,6 +231,7 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         await self._hass.services.async_call(
             recipe["domain"], recipe["service"], dict(recipe["data"]))
         self._export_prior_mode = None
+        self._adopted_recipe = None
         self._last_export_limit_w = None
         self._last_export_intent = ExportIntent.RELEASE
 

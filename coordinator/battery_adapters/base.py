@@ -465,11 +465,26 @@ class BatteryControlAdapter(ABC):
         cut and a removal can replay the release. None = nothing to undo."""
         return None
 
+    #: A restore recipe adopted from a previous lifetime's store. It is the
+    #: ONLY record of what that lifetime found, so it outranks anything this
+    #: one can read back — by the time we adopt, the inverter is already
+    #: showing SEM's own cut.
+    _adopted_recipe = None
+
     def adopt_export_prior(self, recipe) -> None:
         """(#955) A previous lifetime engaged the cut; take over its prior so
-        ``command_release_export`` restores what SEM originally found."""
+        ``command_release_export`` restores what SEM originally found.
+
+        KEEP THE RECIPE. It carries the mode the previous lifetime captured,
+        and a brand whose restore is mode-dependent (Huawei) cannot recompute
+        it: reading the inverter now returns SEM's own "Zero Power". Dropping
+        it made the restart path fall back to "Unlimited" — the very defect
+        the capture was added to fix, one lifetime later.
+        """
         self._last_export_limit_w = 0.0
         self._last_export_intent = ExportIntent.LIMIT
+        if isinstance(recipe, dict) and recipe.get("service"):
+            self._adopted_recipe = dict(recipe)
 
     def holds_export_cut(self) -> bool:
         """(#908) Is THIS adapter holding a cut SEM itself made?

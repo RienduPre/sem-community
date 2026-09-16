@@ -211,3 +211,64 @@ class TestTheReleaseRestoresWhatWasFound:
         a, _ = _with_mode(_State("DI Active Scheduling"))
         await a.command_limit_export(0.0)
         assert a.export_release_recipe()["service"] == "set_di_active_power_scheduling"
+
+
+@pytest.mark.asyncio
+class TestTheRestoreSurvivesARestart:
+    """The gap the first version of the capture left open, caught by Guido
+    asking whether the claim was even right.
+
+    `_export_prior_mode` lives in memory. After a restart, `adopt_export_prior`
+    takes over the cut from the store — and the base dropped the recipe on the
+    floor, so `export_release_recipe()` had nothing to go on and fell back to
+    `reset_maximum_feed_grid_power`, i.e. Unlimited. Re-deriving it is not an
+    option either: by then the inverter reports SEM's own "Zero Power".
+    The previous lifetime's capture is the only record of what was found."""
+
+    def _restarted(self, stored_service):
+        a = _adapter(config={"export_device_id": INV})
+        a.adopt_export_prior({"domain": "huawei_solar", "service": stored_service,
+                              "data": {"device_id": INV}})
+        return a
+
+    def test_an_adopted_di_cut_is_released_back_into_di(self):
+        a = self._restarted("set_di_active_power_scheduling")
+        assert a.export_release_recipe()["service"] == "set_di_active_power_scheduling"
+
+    def test_it_does_not_fall_back_to_unlimited(self):
+        """The defect in one line."""
+        a = self._restarted("set_di_active_power_scheduling")
+        assert a.export_release_recipe()["service"] != "reset_maximum_feed_grid_power"
+
+    def test_an_adopted_watt_cap_keeps_its_number(self):
+        a = _adapter(config={"export_device_id": INV})
+        a.adopt_export_prior({"domain": "huawei_solar",
+                              "service": "set_maximum_feed_grid_power",
+                              "data": {"device_id": INV, "power": 7000}})
+        r = a.export_release_recipe()
+        assert r["service"] == "set_maximum_feed_grid_power" and r["data"]["power"] == 7000
+
+    def test_an_adopted_cut_still_counts_as_held(self):
+        a = self._restarted("set_di_active_power_scheduling")
+        assert a.holds_export_cut() is True
+
+    async def test_the_release_writes_the_adopted_mode(self):
+        a = self._restarted("set_di_active_power_scheduling")
+        calls = []
+
+        async def _call(domain, service, data, *args, **kw):
+            calls.append((domain, service, dict(data)))
+        a._hass.services.async_call = MagicMock(side_effect=_call)
+        await a.command_release_export()
+        assert calls[-1][1] == "set_di_active_power_scheduling", calls
+
+    async def test_a_released_adapter_forgets_the_adopted_recipe(self):
+        """Otherwise the NEXT cut would restore a mode from two lifetimes ago."""
+        a = self._restarted("set_di_active_power_scheduling")
+
+        async def _call(*args, **kw):
+            return None
+        a._hass.services.async_call = MagicMock(side_effect=_call)
+        await a.command_release_export()
+        assert a._adopted_recipe is None
+        assert a.holds_export_cut() is False
