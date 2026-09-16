@@ -167,6 +167,26 @@ def _merge_touching(
     return windows
 
 
+def ev_preview_inputs(*, night_need_kwh: float, peak_managed_amps: int,
+                      watts_per_amp: float, gate_covered: bool):
+    """(#967) What the strip's EV preview is allowed to be drawn from.
+
+    ``(kwh, rate_kw, detail)`` for the daytime preview — the hours before the
+    per-charger night plan exists. The kWh is the ONE producer's answer
+    (``build_night_target_map`` → ``_calculate_remaining_need``): for a
+    SOC-target charger that is ``target − the car's own reading``, never the
+    per-day ``daily_ev_target`` knob. The rate is the peak-managed current the
+    reactive night charge will actually run at, never a literal. And until the
+    joint plan's gate covers the car the row is an ESTIMATE and says so —
+    @alexmc1510's strip promised a 4.5 kWh / 4.1 kW bar (20:36–21:41) for a
+    19.8 kWh need, drawn as if booked.
+    """
+    kwh = max(0.0, float(night_need_kwh or 0.0))
+    rate_kw = max(0.0, float(peak_managed_amps or 0) * float(watts_per_amp or 0.0) / 1000.0)
+    detail = "plan_ev_charge_night" if gate_covered else "plan_ev_charge_estimate"
+    return kwh, rate_kw, detail
+
+
 def compose_today_plan(
     *,
     now: datetime,
@@ -203,6 +223,7 @@ def compose_today_plan(
     # next closing, a CLOSED one the reopening. The grid stops being a sink.
     export_closes_at: Optional[datetime] = None,
     export_reopens_at: Optional[datetime] = None,
+    ev_row_detail: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build the forward-looking plan as a list of row dicts.
 
@@ -375,11 +396,14 @@ def compose_today_plan(
                     detail="plan_ev_charge_tariff",
                 ))
         elif night_start and night_start > now:
-            # Will charge from night_start at peak-managed rate
+            # Will charge from night_start at peak-managed rate. (#967) By
+            # day this is a PREVIEW of a night the planner has not seen yet;
+            # the coordinator says so through ``ev_row_detail`` so the card
+            # draws an estimate, not a booking.
             rows.append(PlanRow(
                 when=night_start, kind=KIND_EV_CHARGE_START,
                 label="plan_ev_charge_start",
-                detail="plan_ev_charge_night",
+                detail=ev_row_detail or "plan_ev_charge_night",
             ))
 
         # Min-reached estimate (legacy fallback — with blocks the last

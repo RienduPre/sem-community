@@ -37,6 +37,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ledger clamped the export rate at zero, so an hour you PAY to export and an
   hour you are paid the same looked identical when deciding where a surplus kWh
   should go. The sign now survives into the slot; an absent rate still reads 0.
+# [2.1.0-beta.28] — 16.09.2026
+
+- 🐛 **Solar + cheapest hours booked the charge into the peak band** (#967,
+  reported by @alexmc1510 in #966). Three things conspired. The EV card's plan
+  strip drew the night's charge from the window open — inside the expensive
+  band it painted itself — sized from the per-day kWh knob at a fixed 4.1 kW
+  instead of the car's real need at the rate it will get; the strip painted
+  "charging" at the window open whenever a start row was not the old private
+  cheap-window kind, so even a plan that books the cheap hours read as a
+  charge from dusk; and when the joint plan cannot cover the car at all (a
+  charger whose 6 A minimum is wider than a 3.5 kW peak headroom, for one) the
+  fallback night charge started at the window open with no tariff awareness.
+  Now: the preview is drawn from the one producer of the need and the
+  peak-managed rate, and says it is an estimate until the plan has spoken; the
+  strip paints *wait* until a start that actually sits at the open; and a
+  cheap-hours mode holds through an expensive hour while the cheaper hours
+  before the deadline still deliver the floor — never past the point where
+  waiting would miss it, and never against a forcing deadline.
+- 🔍 **Diagnostics carry the joint energy plan** (#967): the stamped plan, the
+  per-demand coverage verdict, the per-charger strip rows and each charger's
+  night need — the four things a screenshot of the strip cannot show.
+- 🐛 **Charge pacing landed the pack short in the evening** (#820, measured by
+  @ArneGollin1987 on a 2×10 kW install). The pace was solved to land full in
+  the *last* remaining hour exactly — zero slack — so an evening that came in
+  under the model (forecast high, house or EV heavier than modelled) stranded
+  the pack, and the per-cycle re-solve then asked for a cap the remaining sun
+  could not deliver. And the deficit hours before sunset — an afternoon cloud,
+  a midday EV session, when the house draws the pack *down* — counted as zero
+  for the cap while the SOC curve on the card always modelled them. Now the
+  cap covers the whole bill (need plus the modelled drain) and carries a fixed
+  10 % headroom; `sensor.sem_battery_charge_pacing` shows both (`drain_kwh`,
+  `headroom_pct`) so a short evening can be read rather than guessed. No new
+  setting: the option surface only shrinks.
 
 # [2.1.0-beta.27] — 15.09.2026
 

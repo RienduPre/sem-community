@@ -23,6 +23,16 @@ from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
+#: (#820) The margin the solved pace is opened by, in percent. The solver
+#: finds the SMALLEST constant cap that lands the pack full in the last
+#: remaining slot — zero slack by construction. A real evening that comes in
+#: under the model (forecast high, house or EV heavier than modelled) then
+#: strands the pack, and the per-cycle re-solve asks for a cap the remaining
+#: sun cannot deliver. @ArneGollin1987 measured exactly this on a 2×10 kW
+#: install and proposed +10 %. Not user-facing: the option surface only
+#: shrinks (#830), and a margin is a property of the solver, not a preference.
+PACING_HEADROOM_PCT: float = 10.0
+
 
 @dataclass(frozen=True)
 class PacingDecision:
@@ -42,6 +52,18 @@ class PacingDecision:
     number ``weak_day`` is judged on. Published so a "weak day" verdict on a
     bright forecast can be read instead of guessed (.175, 03.09: 27.8 kWh
     forecast, 5.3 kWh need, verdict weak_day)."""
+    drain_kwh: float = 0.0
+    """(#820) kWh the house takes back OUT of the pack in the deficit hours
+    before sunset — an afternoon cloud, a midday EV session. The SOC curve
+    the user sees always modelled it; the cap did not, so a paced day that
+    lost 1 kWh at 15:00 was solved as if it had not. Part of the bill now."""
+    headroom_pct: float = 0.0
+    """(#820) The fixed margin the solved cap is opened by. The bisection
+    lands the pack full in the LAST slot exactly; a real evening that comes
+    in 10 % under the model then strands the pack, and the per-cycle
+    re-solve raises a cap the remaining sun cannot deliver. Not a knob:
+    the option surface only shrinks (#830), and 10 % is what the reporter
+    proposed."""
 
 
 def _fill_kwh(ledger, cap_w: float) -> float:
@@ -53,6 +75,24 @@ def _fill_kwh(ledger, cap_w: float) -> float:
         if s.cap_override_w is not None:
             leftover = max(0.0, s.cap_override_w - s.grid_committed_w)
         total += min(leftover, cap_w) * s.hours / 1000.0
+    return total
+
+
+def _drain_kwh(ledger) -> float:
+    """(#820) kWh the house will draw OUT of the pack before the ledger ends.
+
+    ``build_day_slots`` shapes a DEFICIT hour (solar below the house) as a
+    slot with no ``cap_override_w`` and the net draw in ``home_w``; the
+    battery covers that draw, so it is energy the pace has to earn back.
+    ``provisional_soc_curve`` has always walked it; the cap solver summed
+    surplus only and read those hours as zero. Ledgers without ``home_w``
+    (older shapes, test fixtures) read as a day with no drain.
+    """
+    total = 0.0
+    for s in ledger:
+        if getattr(s, "cap_override_w", None) is not None:
+            continue
+        total += max(0.0, float(getattr(s, "home_w", 0.0) or 0.0)) * s.hours / 1000.0
     return total
 
 
@@ -113,12 +153,21 @@ def paced_charge_cap_w(
         return PacingDecision(None, "target already reached", code="target",
                               need_kwh=round(need_kwh, 2))
 
+    # (#820) The whole bill: what the pack still needs PLUS what the house
+    # will take back out of it in the deficit hours before sunset. The SOC
+    # curve always modelled that drain; the cap was solved without it, so a
+    # paced day that lost a kWh to an afternoon cloud was solved as if it
+    # had not — and the evening "could not reach the pacing watts".
+    drain_kwh = min(_drain_kwh(ledger), max(0.0, capacity_kwh - need_kwh))
+    need_kwh += drain_kwh
+
     fill_kwh = _fill_kwh(ledger, hw_max_charge_w)
     if fill_kwh < need_kwh:
         return PacingDecision(
             None, "the day cannot fill the pack even uncapped — a cap "
                   "only makes it worse", code="weak_day",
-            need_kwh=round(need_kwh, 2), fill_kwh=round(fill_kwh, 2))
+            need_kwh=round(need_kwh, 2), fill_kwh=round(fill_kwh, 2),
+            drain_kwh=round(drain_kwh, 2))
 
     # Binary-search the smallest cap that still lands the target by the
     # end (with the margin) — the inversion of provisional_soc_curve.
@@ -132,11 +181,16 @@ def paced_charge_cap_w(
         else:
             lo = mid
     cap = hi
+    # (#820) The margin. The bisection lands the pack full in the LAST slot
+    # exactly; open the cap by PACING_HEADROOM_PCT so an evening that comes
+    # in under the model still lands it, never past the hardware.
+    cap = min(hw_max_charge_w, cap * (1.0 + PACING_HEADROOM_PCT / 100.0))
 
     # Clipping guard: any slot whose surplus exceeds the AC limit is energy
     # that cannot leave the roof — open the cap far enough to absorb the
     # worst predicted clip on top of the pace.
-    reason = "paced to land full at day's end"
+    reason = (f"paced to land full at day's end, {PACING_HEADROOM_PCT:.0f} % "
+              "in hand for an evening under the model")
     if inverter_ac_limit_w and inverter_ac_limit_w > 0:
         worst_clip = 0.0
         for s in ledger:
@@ -158,7 +212,9 @@ def paced_charge_cap_w(
     full_at = ledger[slot].end.isoformat() if slot is not None else None
     return PacingDecision(round(cap, 0), reason, full_at,
                           code="clip" if "clipping" in reason else "paced",
-                          need_kwh=round(need_kwh, 2), fill_kwh=round(fill_kwh, 2))
+                          need_kwh=round(need_kwh, 2), fill_kwh=round(fill_kwh, 2),
+                          drain_kwh=round(drain_kwh, 2),
+                          headroom_pct=PACING_HEADROOM_PCT)
 
 
 class ChargePacingWriter:

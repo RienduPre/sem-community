@@ -14,6 +14,7 @@ import { SEMLitBase, html, css, svg, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
 import { resolveChargerSoc } from '../util/charger-soc.js';
 import { chargerStatusKey } from '../util/charger-status.js';
+import { evStripSegments } from '../util/ev-strip.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 const CHARGER_COLORS = ['#8DC892', '#64B5F6'];
@@ -268,36 +269,16 @@ class SEMEVStatusCard extends SEMLitBase {
         const evRows = plan.filter(r => ['now','night_open','ev_charge_start',
             'ev_min_reached','ev_deadline'].includes(r.kind));
         evRows.sort((a,b) => new Date(a.when) - new Date(b.when));
-        // Waiting-for-cheap is a per-charger fact: a per-charger plan
-        // marks it on the ev_charge_start row itself (the composer sets
-        // detail=plan_ev_charge_tariff only on the wait path). The fleet
-        // attribute is primary-charger-scoped — only trust it when we're
-        // rendering the fleet fallback plan.
-        const tariffWait = usingPerPlan
-            ? plan.some(r => r.kind === 'ev_charge_start'
-                          && r.detail === 'plan_ev_charge_tariff')
-            : !!cs?.attributes?.ev_tariff_waiting;
-        const segments = [];
-        let cursor = now;
-        let state = 'idle';
-        for (const r of evRows) {
-            const t = new Date(r.when).getTime();
-            // Clamp each transition to the 12h horizon. Without the clamp a
-            // plan whose first EV event is beyond the window (morning view,
-            // night charge scheduled for e.g. 21:35 when now+12h is 19:56)
-            // advanced cursor PAST end, so the idle-fill below was skipped
-            // and the strip rendered EMPTY instead of a full "nothing
-            // scheduled in the next 12h" idle bar. Clamping keeps cursor
-            // inside the window so the fill always covers the visible time.
-            const segEnd = Math.min(t, end);
-            if (segEnd > cursor) segments.push({s: cursor, e: segEnd, state});
-            cursor = Math.max(cursor, segEnd);
-            if (r.kind === 'night_open') state = tariffWait ? 'wait' : 'charging';
-            else if (r.kind === 'ev_charge_start') state = 'charging';
-            else if (r.kind === 'ev_min_reached') state = 'done';
-            else if (r.kind === 'ev_deadline') state = 'done';
-        }
-        if (cursor < end) segments.push({s: cursor, e: end, state});
+        // (#967) The state walk is a pure function with its own unit test —
+        // it used to paint `night_open` as CHARGING unless a start row carried
+        // the private-selector detail, so a joint-plan start at 00:00 (or any
+        // held-back start) still turned the window open into a charging bar
+        // inside the punta band. The fleet attribute is primary-charger-scoped
+        // and only trusted on the fleet fallback plan.
+        const segments = evStripSegments(evRows, {
+            now, end, usingPerPlan,
+            fleetTariffWait: !!cs?.attributes?.ev_tariff_waiting,
+        });
 
         // Tinting overlay: expensive blocks darken the strip + cheap blocks lighten
         const overlays = [];
@@ -328,6 +309,10 @@ class SEMEVStatusCard extends SEMLitBase {
         const stateColor = (s) => ({
             idle:     '#566072',
             wait:     '#8353d1',
+            // (#967) the daytime preview before the plan has covered the
+            // car — a paler wait, never the charging green: an estimate is
+            // a promise the strip has no right to make yet.
+            estimate: '#b8a6e8',
             charging: '#8DC892',
             done:     '#4db6ac',
         })[s] || '#566072';
@@ -371,6 +356,7 @@ class SEMEVStatusCard extends SEMLitBase {
                 <div class="strip-legend">
                     <span><i style="background:${stateColor('idle')}"></i>${this._t('plan_strip_idle')}</span>
                     <span><i style="background:${stateColor('wait')}"></i>${this._t('plan_strip_wait')}</span>
+                    <span><i style="background:${stateColor('estimate')}"></i>${this._t('plan_strip_estimate')}</span>
                     <span><i style="background:${stateColor('charging')}"></i>${this._t('plan_strip_charging')}</span>
                     <span><i style="background:${stateColor('done')}"></i>${this._t('plan_strip_done')}</span>
                     <span><i class="line" style="background:${overlayColor('cheap')}"></i>${this._t('plan_strip_cheap')}</span>

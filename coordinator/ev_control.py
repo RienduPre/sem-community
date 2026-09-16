@@ -241,6 +241,12 @@ class EVControlMixin:
             night_end=night_end,
             tariff_optimized=tariff_optimized,
             peak_managed_amps=peak_managed_amps,
+            # (#967) the tariff's own classification, so an UNCOVERED night in
+            # a cheap-hours mode holds through an expensive hour instead of
+            # starting at the window open. The overlay still wins when the
+            # joint plan covers the car.
+            level_at=getattr(getattr(self, "_tariff_provider", None),
+                             "get_price_level_at", None),
         )
         return plan
 

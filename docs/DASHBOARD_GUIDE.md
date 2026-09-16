@@ -309,7 +309,12 @@ one of three states:
 
 Below the headline sit the terms that produced it — overnight need, expected
 refill, tonight's floor — plus the charge-pacing line (#820) and the sell
-window when one is scheduled. In the **Learning** state the panel also offers
+window when one is scheduled. The pace is solved for the whole bill — what the
+pack still needs plus what the house will draw back out of it in the deficit
+hours before sunset — and carries a fixed 10 % headroom so an evening that
+comes in under the forecast still lands the pack full; the sensor behind the
+line (`sensor.sem_battery_charge_pacing`) shows both terms as `drain_kwh`
+and `headroom_pct`. In the **Learning** state the panel also offers
 **Rebuild from history**, which reconstructs those nights from your battery's
 own recorded discharge instead of waiting a week for them to happen:
 
@@ -415,6 +420,15 @@ Today's EV charging progress against target, plus lifetime charging totals.
 The EV hero card: per-charger state, charge mode, target and deadline, with
 the intelligence readouts (taper, estimated SOC) and settings inline. This is
 the reference card for SEM's UI patterns — see [UI patterns](UI_PATTERNS.md).
+
+Its 12-hour plan strip paints the charger's night as *wait*, *charging*,
+*done* — or *estimate* (a paler wait): by day, before the joint Energy Plan
+has covered the car, the strip is drawn from the charger's real remaining
+need at the rate the night charge will actually run, and it says so rather
+than promising a booked window. A segment only turns *charging* at the
+night-window open when a start actually sits there; a start later in the
+night — a planned block, or a cheap-hours hold through an expensive band —
+reads as *wait* until then (#967).
 
 #### sem-flow-card
 

@@ -107,6 +107,77 @@ def _hours_between(start: datetime, end: datetime) -> float:
     return (end - start).total_seconds() / 3600.0
 
 
+def _is_expensive(level) -> bool:
+    """``PriceLevel`` or its string value → is this an hour to hold through?"""
+    value = str(getattr(level, "value", level) or "").lower()
+    return value in ("expensive", "very_expensive")
+
+
+_LEVEL_RANK = {"negative": 0, "very_cheap": 1, "cheap": 2, "normal": 3,
+               "expensive": 4, "very_expensive": 5}
+
+
+def _rank(level) -> int:
+    return _LEVEL_RANK.get(str(getattr(level, "value", level) or "").lower(), 3)
+
+
+def affordable_start(now: datetime, deadline: datetime, need_kwh: float,
+                     rate_kw: float, level_at) -> Optional[datetime]:
+    """(#967) When a cheap-hours charge that is not yet planned should start.
+
+    Walks the hours between ``now`` and ``deadline`` and keeps the ones that
+    are not EXPENSIVE (``level_at`` is the tariff provider's
+    ``get_price_level_at`` — the same classification ``price_is_cheap`` fires
+    on). Then, in the packer's own order (cheapest level first, earliest
+    first — ``pack_night`` sorts by ``(price, start)``):
+
+    1. the EARLIEST hour of the cheapest level available, if the non-expensive
+       hours from there still deliver ``need_kwh`` at ``rate_kw`` — the start
+       a user reading "cheapest hours" expects, with whatever slack the band
+       leaves (00:00 for a 2.0TD valle, six hours for a five-hour charge);
+    2. otherwise the LATEST start from which they still deliver it — the hold
+       boundary, past which waiting would miss the floor;
+    3. ``None`` when the non-expensive hours cannot deliver the floor at all —
+       the caller then charges now, exactly as before this function existed.
+
+    Never earlier than ``now``; whole minutes, because the plan strip and the
+    card strip both drop seconds and must name the same moment. Pure: no
+    clock, no provider, no config. Hour edges are the tariff's own (2.0TD,
+    Nord Pool and EPEX all change on the hour); the slot holding ``now``
+    contributes only what is left of it.
+    """
+    if need_kwh <= 0.0 or rate_kw <= 0.0 or deadline <= now:
+        return None
+    slots = []
+    t = now.replace(minute=0, second=0, microsecond=0)
+    while t < deadline:
+        s_start, s_end = max(t, now), min(t + timedelta(hours=1), deadline)
+        level = level_at(t)
+        if s_end > s_start and not _is_expensive(level):
+            slots.append((s_start, s_end, _rank(level)))
+        t += timedelta(hours=1)
+    if not slots:
+        return None
+    need_h = need_kwh / rate_kw
+
+    def _hours_from(start: datetime) -> float:
+        return sum((e - max(s, start)).total_seconds() / 3600.0
+                   for s, e, _ in slots if e > start)
+
+    cheapest = min(r for _, _, r in slots)
+    first_cheapest = next(s for s, _, r in slots if r == cheapest)
+    if _hours_from(first_cheapest) + 1e-9 >= need_h:
+        return first_cheapest.replace(second=0, microsecond=0)
+    remaining_h = need_h
+    for s_start, s_end, _ in reversed(slots):
+        span_h = (s_end - s_start).total_seconds() / 3600.0
+        if span_h >= remaining_h:
+            latest = s_end - timedelta(hours=remaining_h)
+            return latest.replace(second=0, microsecond=0)
+        remaining_h -= span_h
+    return None
+
+
 def plan_night_charge(
     *,
     now: datetime,
@@ -118,6 +189,7 @@ def plan_night_charge(
     night_end: Optional[str] = None,
     tariff_optimized: bool = False,
     peak_managed_amps: Optional[int] = None,
+    level_at=None,
 ) -> NightChargePlan:
     """Decide this cycle's night-charging action for one charger.
 
@@ -220,10 +292,33 @@ def plan_night_charge(
             + ("" if is_forcing else " (peak-limited — raise peak limit or set an earlier deadline)")
         )
 
-    # (#638 one-gate C3) The tariff-gating block is RETIRED. The pure
-    # planner keeps only guarantee math; ``should_wait_for_cheap`` /
-    # ``next_cheap_start`` keep their defaults (False / None) and are
-    # written EXCLUSIVELY by the plan-gate overlay in the coordinator.
+    # (#638 one-gate C3) The private cheap-window SELECTOR is retired: the
+    # joint plan's blocks are the night's WHEN, and the plan-gate overlay in
+    # the coordinator overwrites ``should_wait_for_cheap`` / ``next_cheap_start``
+    # whenever the gate covers the car.
+    #
+    # (#967) What C3 also removed, unintentionally, was every tariff opinion
+    # the FALLBACK had. An uncovered night — a verdict of ``yields`` because
+    # the charger's 6 A minimum is wider than a 3.5 kW peak headroom, a stale
+    # stamp, a car the plan never saw — started at the window open. Under a
+    # Spanish 2.0TD that is the most expensive hour of the night, with nine
+    # cheaper ones still ahead of a 06:00 deadline (@alexmc1510, #966). A
+    # cheap-hours mode holds through an EXPENSIVE hour while the non-expensive
+    # hours before the deadline can still deliver the floor at the rate the
+    # charge will actually run. Seniority mirrors ``ev_overlay``: a forcing
+    # deadline or an unreachable floor is never held back, and the overlay
+    # still wins whenever the gate covers the car.
+    if (tariff_optimized and level_at is not None and deadline is not None
+            and plan.reachable and not plan.deadline_active):
+        start = affordable_start(
+            now, deadline, remaining_to_min_kwh, effective_rate_kw, level_at)
+        if start is not None and start > now and _is_expensive(level_at(now)):
+            plan.should_wait_for_cheap = True
+            plan.next_cheap_start = start
+            plan.reason = (
+                "cheap-hours mode: holding through an expensive hour — "
+                f"{remaining_to_min_kwh:.1f} kWh still lands by "
+                f"{deadline:%H:%M} from {start:%H:%M}")
 
     # Only warn the user when they opted into deadline/tariff behaviour (#274/C1):
     # a plain default-deadline night charge that simply can't finish within the
