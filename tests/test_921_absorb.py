@@ -1,10 +1,11 @@
 """#871 step 2 — while the meter is closed, the loads absorb first.
 
-Step 1 (the day-ledger unclamp) lives on ``fix/871-export-price-clamp``: it is
-the one change in this arc that is NOT behind a default-off switch, so it
-rides on its own with its own proof rather than inside an arc that is
-otherwise inert. What is left here is step 2, and it is gated — ``grid_closed``
-is only ever True when the export guard's verdict says so.
+Step 1 (the day-ledger unclamp) has its own file,
+``tests/test_871_export_price_clamp.py``, and its own commit: it is the one
+change in this arc that is NOT behind a default-off switch, so it stays
+separable at merge time even though it rides this branch. What is here is
+step 2, and it IS gated — ``grid_closed`` is only ever True when the export
+guard's verdict says so.
 
 While the grid-export sink is CLOSED, the surplus controller's "always export a
 little" regulation buffer — the one threshold that exists to FEED the meter
