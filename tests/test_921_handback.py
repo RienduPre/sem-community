@@ -198,6 +198,24 @@ class TestTheCutOutlivesALifetime:
         assert fake._export_guard.state == "engaged", "the first tick overwrote the adopted cut"
         assert fake._export_guard._applied is True, "an adopted cut can never be handed back"
 
+    async def test_adoption_skips_an_adapter_the_store_says_held_nothing(self):
+        """#908 at restore time: the store names the adapters a previous
+        lifetime cut. Calling adopt_export_prior on the others would mark
+        them as holding SEM's cut, and the next teardown would hand back an
+        inverter SEM never touched."""
+        store = _Store({"engaged": True, "since": "t", "recipes": {"b1": {
+            "domain": "number", "service": "set_value",
+            "data": {"entity_id": "number.inv_export_limit", "value": 9000.0}}}})
+        fake, _, cut = _live(store, verdict=CLOSED)
+        untouched = HuaweiBatteryAdapter(MagicMock(), {})
+        untouched._inverter_device_id = "dev"
+        untouched.adopt_export_prior = MagicMock()
+        fake._battery_adapters["b2"] = untouched
+        await fake._ensure_export_guard()
+        untouched.adopt_export_prior.assert_not_called()
+        assert untouched.holds_export_cut() is False
+        assert cut._export_prior == 9000.0
+
     async def test_adoption_happens_once_per_lifetime(self):
         store = _Store({"engaged": True, "since": "t", "recipes": {}})
         fake, _, _ = _live(store, verdict="open")

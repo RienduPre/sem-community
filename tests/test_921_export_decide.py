@@ -79,12 +79,8 @@ class TestItIsPure:
             return
         raise AssertionError("ExportDecision must be frozen — a decision is a value")
 
-
-class TestTheModuleStaysInTheDecideLayer:
-    def test_it_reaches_nothing_outside(self):
-        """The same property `decide_battery` and `decide` already hold."""
-        from pathlib import Path
-        src = (Path(__file__).resolve().parent.parent / "coordinator"
-               / "decide_export.py").read_text(encoding="utf-8")
-        for forbidden in ("hass.", "async_call(", "await ", "_battery_adapters"):
-            assert forbidden not in src, f"decide_export reaches outside: {forbidden}"
+# The "decide_export reaches nothing outside" claim used to live here as a
+# substring search over the module's own text. It is made properly — over the
+# parsed tree, for all three deciders at once — in
+# tests/test_921_one_track.py::TestTheDecidersStayInTheDecideLayer. One
+# producer of a claim, here too (#924/#925).

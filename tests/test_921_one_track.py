@@ -151,10 +151,10 @@ class TestTheCutIsIdentityKeyed:
         names = {getattr(n.func, "attr", None) for n in ast.walk(tree)
                  if isinstance(n, ast.Call)}
         if fn == "_export_guard_adopt":
-            # adoption takes over only the adapters the STORE says were holding
+            # adoption takes over only the adapters the STORE says were
+            # holding; that it SKIPS the others is a behaviour, pinned in
+            # test_921_handback.py, not a phrase to grep for.
             assert "adopt_export_prior" in names
-            src = textwrap.dedent(inspect.getsource(SEMCoordinator._export_guard_adopt))
-            assert "if not prior" in src, "adoption must skip an adapter with no stored cut"
         else:
             assert "holds_export_cut" in names, f"{fn} hands back what it never took"
 
