@@ -7248,6 +7248,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # into, per remaining slot. Without these a verdict on a bright
             # forecast cannot be argued with.
             "need_kwh": getattr(decision, "need_kwh", None) if decision else None,
+            # (#820) the two numbers a short evening is argued with
+            "drain_kwh": getattr(decision, "drain_kwh", None) if decision else None,
+            "headroom_pct": getattr(decision, "headroom_pct", None) if decision else None,
             "fill_kwh_at_max": getattr(decision, "fill_kwh", None) if decision else None,
             "hw_max_charge_w": float(self.config.get(
                 "battery_max_charge_power_w", 5000.0) or 5000.0),

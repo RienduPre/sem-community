@@ -32,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🔍 **Diagnostics carry the joint energy plan** (#967): the stamped plan, the
   per-demand coverage verdict, the per-charger strip rows and each charger's
   night need — the four things a screenshot of the strip cannot show.
+- 🐛 **Charge pacing landed the pack short in the evening** (#820, measured by
+  @ArneGollin1987 on a 2×10 kW install). The pace was solved to land full in
+  the *last* remaining hour exactly — zero slack — so an evening that came in
+  under the model (forecast high, house or EV heavier than modelled) stranded
+  the pack, and the per-cycle re-solve then asked for a cap the remaining sun
+  could not deliver. And the deficit hours before sunset — an afternoon cloud,
+  a midday EV session, when the house draws the pack *down* — counted as zero
+  for the cap while the SOC curve on the card always modelled them. Now the
+  cap covers the whole bill (need plus the modelled drain) and carries a fixed
+  10 % headroom; `sensor.sem_battery_charge_pacing` shows both (`drain_kwh`,
+  `headroom_pct`) so a short evening can be read rather than guessed. No new
+  setting: the option surface only shrinks.
 
 # [2.1.0-beta.27] — 15.09.2026
 
