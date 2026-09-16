@@ -488,7 +488,16 @@ class TestTheNightActuallyReachesDisk:
         st._energy_data = {"battery_nights": {"phase": "night"}}
         st._energy_store = MagicMock()
         st._energy_store.async_save = AsyncMock()
-        st._last_energy_save_ts = 0.0
+        # NOT 0.0: the throttle asks `monotonic() - last < INTERVAL`, so a
+        # zero makes this test assert that the machine has been UP for longer
+        # than the interval. It passed for a year and then failed on a fresh
+        # CI container (3.14 rung, 16.09) where monotonic() was still under
+        # 300 s — a pin that depends on the host's uptime, which is the #953
+        # shape one layer down. Anchor it to the clock the code reads.
+        from custom_components.solar_energy_management.coordinator.storage import (
+            ENERGY_SAVE_INTERVAL,
+        )
+        st._last_energy_save_ts = time.monotonic() - ENERGY_SAVE_INTERVAL - 1.0
         asyncio.run(st.async_save_energy_throttled())
         asyncio.run(st.async_save_energy_throttled())   # inside the window
         assert st._energy_store.async_save.await_count == 1
