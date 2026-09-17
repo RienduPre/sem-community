@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.29] — 17.09.2026
+
 - 🐛 **The EV plan strip ended before the night it was describing** (#967,
   reported by @alexmc1510). Reading the card in the morning, the strip's fixed
   12-hour window stopped at 21:37 — so a charge booked for 00:00 against a
