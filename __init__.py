@@ -5537,7 +5537,8 @@ async def _async_register_phase_services(
         grid_flip = bool(opts.get("grid_sign_user_flip", False))
         batt_flip = bool(opts.get("battery_sign_user_flip", False))  # #588 H3
         if grid_flip or batt_flip:
-            cleared = {**opts, "grid_sign_user_flip": False, "battery_sign_user_flip": False}
+            cleared = {**opts, "grid_sign_user_flip": False, "battery_sign_user_flip": False,
+                       "grid_sign_user_flip_source": None}   # (#971) the binding goes with it
             if coordinator is not None:
                 coordinator._skip_options_reload = dict(cleared)
             hass.config_entries.async_update_entry(target, options=cleared)
@@ -5590,7 +5591,13 @@ async def _async_register_phase_services(
 
         current = bool((target.options or {}).get("grid_sign_user_flip", False))
         new_flip = not current
-        new_options = {**(target.options or {}), "grid_sign_user_flip": new_flip}
+        # (#971) the tap is bound to the grid source it corrects; the reader
+        # knows which branch read the meter this cycle.
+        if reader is not None:
+            new_options = reader.user_flip_options(target.options or {}, new_flip)
+        else:
+            new_options = {**(target.options or {}), "grid_sign_user_flip": new_flip,
+                           "grid_sign_user_flip_source": None}
         # Suppress the update-listener reload; we issue one explicit reload
         # so the new sign is live without a double tear-down (set_option
         # pattern).
