@@ -215,3 +215,31 @@ shape — planned in full as Tasks 18–24 of the same plan, so the arc's plan i
 - Amber's sign carve-out (#523) survives untouched.
 - #880 variable loads, #812 Messkonzept 8 — adjacent, judged out (#921, 13.09).
 - #899's accounting is settled first if it changes what "the EV took it" means.
+
+## Post-implementation findings (17.09.2026, added after the live proofs)
+
+Recorded here so the design and what the hardware said stay on one page; the
+evidence is in `~/claude-jobs/challenge-feature-921-grid-not-always-a-sink.md`.
+
+1. **The export dispatch never wrote** until 17.09 21:00. The battery
+   pipeline builds its own `FleetContext` and hands that to the dispatch; the
+   arc had threaded `export_command` / `export_guard_enabled` through
+   `build_view`'s context only. The observer surface could not show the
+   difference (the standing re-publish names the same service). Fixed:
+   both producers read `_cycle_fleet_state`; rows carry `standing`; a
+   cycle-level pin and an AST sibling pin (bug classes 93, 94).
+2. **Huawei, measured on the reference SUN2000:** `Unlimited` (mode 0) is
+   refused — "no cap" is `Limited to 100 %` (`set_maximum_feed_grid_power_percent
+   100`); the mode readback is three-state and the cut refuses on
+   `unavailable`; the prior is captured once and kept across a release
+   (the readback echoes a write for 8–15 min); the repeat check sits above
+   the mode check (bug classes 95, 96).
+3. **Every write blinds the writing host's modbus session for ~60 s**, and
+   the config readback can sit `unavailable` for minutes after a restart;
+   `homeassistant.update_entity` on the mode sensor forces a read.
+4. **Proven twice, end to end, on .175 with observer off** (synthetic
+   grid + price, real inverter): cut → register `Zero Power`, release →
+   `Limited to 100 %`. Car and battery untouched.
+5. **Still open:** the manual split-grid reader inverts the sign under the
+   Huawei platform (the sim used the import slot); .175's readback stall after
+   restarts; PROD runs the 16.09 tip without these fixes (guard off, inert).

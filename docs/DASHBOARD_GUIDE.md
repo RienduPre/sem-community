@@ -359,6 +359,13 @@ The in-dashboard configuration surface. For most users this replaces
 Settings → Devices & Services → SEM → Configure entirely; changes are batched
 and applied together.
 
+The *Battery intelligence* group holds the export guard's four controls
+(2.1, #955): **Export guard** (the switch), **Engage delay (s)** and
+**Release delay (s)** (the hysteresis both ways — spot prices cross zero
+often), and **Override external scheduling** (let it act while a Huawei
+reports an operator's `DI Active Scheduling`). All off / at defaults until
+you turn them on.
+
 #### sem-control-card
 
 **SEM Control** · *Control tab*
@@ -460,6 +467,11 @@ self-consumption, reusable for anything 0–100 %.
 Grid import/export with peak management, load control, tariff, and surplus in
 one consolidated card. Not on the generated dashboard — the System tab is
 health and diagnostics only.
+
+The peak section carries an *Export guard* row (2.1, #955) whenever the guard
+reports a state — idle · holding · engaged · releasing · refused — read from
+`export_guard_state`. The reason behind the state is on
+`sensor.sem_charging_state` → `export_guard`.
 
 #### sem-home-status-card
 

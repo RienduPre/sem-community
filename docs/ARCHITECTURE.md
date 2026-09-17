@@ -363,8 +363,38 @@ Three things worth knowing:
   otherwise a teardown resets a feed-in limit the owner set and SEM never touched
   (#908/#936).
 
-Structurally pinned by `tests/test_921_one_track.py`; the shape it prevents is
-bug class 90.
+- **The fleet the dispatch reads must carry the axis.** There are TWO
+  `FleetContext` producers — `build_view.build_charger_view` for the chargers
+  and `_run_battery_pipeline`'s own for the batteries — and the export dispatch
+  is handed the second. Until 17.09 that one carried neither `export_command`
+  nor `export_guard_enabled`, so `decide_export` read "guard off" on every
+  cycle and the guard *never wrote*, on any rig, while the tracker said
+  "engaged" and the observer surface showed the standing row (bug classes 93
+  and 94). Both producers now read Step 6's `_cycle_fleet_state`; an AST pin
+  asks the sibling question — every `FleetContext` producer passes the axis —
+  and a cycle-level test runs the real pipeline and asserts the adapter was
+  awaited.
+- **The observer rig can read what would hit the wire.** In observer mode the
+  seam appends the adapter's `export_dry_run(intent, watts)` to the cycle's
+  withheld list under `withheld_commands.export_guard`: the exact service +
+  payload (`huawei_solar.set_zero_power_grid_connection` on the INVERTER
+  device; the captured prior's restore) or the refusal in the verb's own words.
+  Each row says `standing: true|false` — a command this cycle, or the roster's
+  re-publish of a held cut — because the two were indistinguishable and that
+  is how a guard that had never written looked proven for two days.
+- **The Huawei adapter's three measured facts** (17.09, the reference
+  SUN2000): the mode readback is three-state — `unavailable` is *unread*, not
+  "free", and the cut refuses on it; the prior is captured once and KEPT across
+  a release, because the integration's readback lags a write by 8–15 min and a
+  cut → release → cut inside that window would otherwise adopt SEM's own
+  `Zero Power` as the baseline and latch the meter shut; and the last-resort
+  hand-back is `set_maximum_feed_grid_power_percent 100`, never
+  `reset_maximum_feed_grid_power` — mode 0 (`Unlimited`) does not land on this
+  inverter, 100 % of nominal is the same intent and does.
+
+Structurally pinned by `tests/test_921_one_track.py`,
+`tests/test_955_dispatch_reads_the_fleet.py` and `tests/test_955_export_dry_run.py`;
+the shapes they prevent are bug classes 92–96.
 
 ### Compute intent → reconcile (load side)
 

@@ -1369,6 +1369,25 @@ Everything below is **off by default** and lives on the Config tab under
 - **Override external scheduling** — a Huawei under the grid operator's
   digital-input schedule reports `DI Active Scheduling`; SEM refuses to
   replace an operator's mode unless you say the operator allows it.
+- **What the guard needs to close the meter** — a *negative export price*.
+  That only exists on a dynamic feed-in tariff (`dynamic_feedin_entity`); on a
+  fixed rate the meter never closes and the guard stays *idle* by design. The
+  guard's state is `sensor.sem_export_guard_state` (idle · holding · engaged ·
+  releasing · refused), shown on the Grid card's peak section and, with its
+  reason, under `export_guard` on `sensor.sem_charging_state`.
+- **Huawei specifics, measured on the reference SUN2000 (17.09.2026).** The
+  inverter's active-power control is *one register with five modes*
+  (Unlimited · Limited to N W · Limited to N % · Zero Power · DI Active
+  Scheduling). SEM reads the mode it finds **once, before the cut**, and the
+  release puts back exactly that — never a generic reset. Two things follow:
+  the reference inverter does **not accept `Unlimited`** (the call returns
+  cleanly and the register lands on the operator's mode instead), so SEM's
+  last resort asks for *100 % of nominal*, which is the same thing in a dialect
+  the hardware takes; and if the mode readback is `unavailable` (it drops for
+  ~60 s after every write, and for minutes after a restart), SEM **refuses to
+  cut** rather than replace a mode it cannot see — the state reads *refused*
+  with that reason, and three refusals raise a Repair. The readback catches up
+  on its own; `homeassistant.update_entity` on the mode sensor forces it.
 - **House as a battery sink** — keep the pack through cheap and negative
   hours (let the house import) and spend it on the house in expensive ones.
 - **Morning EV window** — before the configured departure, empty the pack
@@ -1378,6 +1397,13 @@ Everything below is **off by default** and lives on the Config tab under
   the next closed meter, so the headroom is there when the price turns.
 
 SEM never curtails what the battery, the car and the loads could still take.
+
+Proven end to end on real hardware on 17.09.2026: with the price held negative
+and 2 kW of export on the meter, SEM's guard engaged after its delay, wrote the
+cut, the inverter's register read *Zero Power*, and on the price turning
+positive the guard released and the register read *Limited to 100 %* — the
+mode it had found. Twice, identically. See `docs/SIMULATION.md` for how such
+a proof is run without touching a car or a battery.
 
 ## Tariff Integration
 

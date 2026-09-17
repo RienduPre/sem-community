@@ -3816,7 +3816,7 @@ the fallback is a heuristic: what does adopting it COST when it is wrong, and is
 the user who has one of the thing, or only by the user who has two?
 Refs #964 #962 #886 #814 #3.
 
-### 91. A new control decides in the orchestrator instead of the decide layer — two producers of one decision — GUARDED
+### 92. A new control decides in the orchestrator instead of the decide layer — two producers of one decision — GUARDED
 **Symptom:** on the rig, a feature whose whole promise is *"I am holding the meter shut"* is
 invisible. The observer surface shows the battery's own verdict where the export cut should be, or
 shows the cut for exactly one cycle and then nothing. Nothing errors, the cut is genuinely applied,
@@ -3867,3 +3867,88 @@ in a method? A control whose decision type is built in exactly one place cannot 
 `charge_pacing` and `load_management` call services directly, and a review refuted that broader
 framing. The class is about a control gaining a second producer of a decision that already has one.
 Refs #955 #921 #864 #855 #908 #936 #531 #538.
+
+### 93. Two producers of one context — a field threaded through one and pinned there — GUARDED
+**Symptom:** the arc's new axis is wired, tested and pinned; the tracker engages, the surface says
+"engaged", and the hardware never changes. No error, no refusal, no log line, no store row.
+Found live on .175 with observer OFF (17.09): the guard had never written, on any rig, since its
+first proof two days earlier.
+**Root shape:** a context object is constructed in more than one place (`FleetContext` in
+`build_view.build_charger_view` for the chargers and again inside `_run_battery_pipeline` for the
+batteries). The new fields are threaded through the producer the author was looking at and an AST
+pin is written against THAT call site — while the consumer (`_apply_export_decision`) is handed the
+other one, which still carries the dataclass defaults (`None`, `False`). Every unit test passes
+because each layer is tested with a context it builds itself. Sibling of 92 (two producers of a
+decision) and of the #358 "plumbing asymmetry" the fleet state was invented to end — the state
+ended it for the chargers and the batteries kept their own copy.
+**Cure:** one source — both producers read the cycle's `FleetCycleState`; the battery pipeline's
+context no longer re-derives anything the state already holds.
+**Guard:** `tests/test_955_dispatch_reads_the_fleet.py` — `call_sites("FleetContext")` must show
+EVERY production producer passing `export_command`, `export_guard_enabled`, `sink_verdicts` (the
+#924 sibling question, asked over the whole package), plus a cycle-level test that runs the real
+pipeline with the guard's command on the fleet state and asserts the adapter was awaited — RED on
+the pre-fix coordinator (5 of 8).
+**Sweep question:** for any field added to a context dataclass — *how many call sites construct
+that class, and did the field reach all of them?* `call_sites(ClassName)` answers it in one line.
+Refs #955 #921 #358 #924.
+
+### 94. An observer surface that cannot tell "decided to write" from "still holding" — GUARDED
+**Symptom:** the rig shows a perfect `limit_export` row with the right service and the right device
+every cycle, and the code path that would have produced it as a COMMAND has never run. The
+standing re-publish (#764, the roster) names the same key, the same action and — once the dry-run
+surface existed — the same service. Two rigs, two days, one live proof written up from that row.
+**Root shape:** a surface designed to answer "what would hit the wire" is fed by two branches —
+the command on the cycle it fires, and the roster's re-publish on every quiet cycle — and the two
+emit indistinguishable rows. The re-publish is CORRECT (it exists so a held cut stays visible) and
+it masks the absence of the command completely. Nothing on the surface is false; the missing
+event is simply not representable.
+**Cure:** the row says which branch made it (`standing: true|false`), the roster reason is the
+standing text and the command row carries the decision's own reason, and the LOG is the witness:
+the seam's `OBSERVER · WOULD …` / `export limit_export …` lines exist only on the command branch.
+**Guard:** `tests/test_955_dispatch_reads_the_fleet.py::TestObserverTellsACommandFromTheStandingRow`
+— the command cycle yields `standing: false` with the decision's reason; a quiet engaged cycle
+yields `standing: true` with the holding text.
+**Sweep question:** for any "would" surface — *if the real command never fired, would this surface
+look any different?* If not, the surface proves holding, not acting; go find the log line.
+Refs #955 #764 #855.
+
+### 95. A lagging readback trusted as the baseline — the echo latch — GUARDED
+**Symptom:** the second cut of the day restores the meter SHUT. SEM believes it has let go; the
+house never exports again until someone resets the inverter by hand.
+**Root shape:** the adapter captures "the mode I found" by reading a sensor whose integration polls
+the register on its own slow schedule (Huawei's configuration coordinator: 8–15 minutes behind a
+write, measured 17.09). The capture is cleared on release, so the next cut re-reads — and inside
+the poll window the sensor still echoes SEM's OWN `Zero Power`. The echo is recorded as the
+baseline and faithfully restored. Cousin of #538 (a register read seconds after a write is not the
+register) and of the restart case the arc already handled with `_adopted_recipe`.
+**Cure:** the prior is captured once and KEPT across a release — an operator's mode is a standing
+configuration, not a per-cycle value — so a lagging read is never consulted as ground truth again
+within a lifetime; the restart half of the same rule adopts the persisted recipe.
+**Guard:** `tests/test_955_huawei_export_device.py::TestASecondCutDoesNotAdoptTheFirstOne` — cut,
+release, readback now echoing `Zero Power`, cut, release → the restore is still the first prior;
+the pin was reverted against the old line and failed.
+**Sweep question:** for any "capture before write, restore after" pair — *how stale can the
+capture's source be, and is the write's own echo excluded from it?*
+Refs #955 #908 #538.
+
+### 96. A hand-back that asks the hardware for a mode it will not take — GUARDED
+**Symptom:** the release "succeeds" (HTTP 200, no exception) and the register lands somewhere the
+call never wrote. Three attempts from two starting modes; the inverter chose `DI Active Scheduling`
+every time. The integration's own service — `reset_maximum_feed_grid_power`, documented as *"Set
+Active Power Control to Unlimited"* — was the adapter's last resort.
+**Root shape:** a default chosen for its name ("the integration's own reset — it can only ever
+ALLOW more export") rather than measured. Mode 0 is refused by the reference SUN2000 while modes
+1, 5 and 7 are accepted; 100 % of nominal is the same intent in a dialect that lands. The same
+family as the readback that read `unavailable` as "free": a verb's contract was inferred from its
+label instead of from the hardware's answer, and nothing in SEM reads the hardware's answer back.
+**Cure:** the last-resort hand-back is `set_maximum_feed_grid_power_percent 100`; a prior READ as
+`Unlimited` still gets the plain reset (that is what the inverter itself reported); the mode read
+is three-state and the cut refuses on *unread*.
+**Guard:** `tests/test_955_huawei_export_device.py` (the uncapped recipe; the three states; the
+refusal on `unavailable`) and `tests/test_921_handback.py::TestRecipes`; the measurement itself is
+recorded in the arc's challenge record and in `docs/KNOWN_LIMITATIONS.md`.
+**Sweep question:** for any brand verb SEM relies on — *has this exact call been seen to land on
+the hardware, and what does the register read afterwards?* A service that returns cleanly is not
+a service that worked.
+Refs #955 #921.
+

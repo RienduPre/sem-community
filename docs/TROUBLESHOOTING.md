@@ -968,6 +968,40 @@ give SEM a stop mechanism the box respects. If another controller could
 exist, silence it first: if SEM's stops then hold, that was it. The notice
 clears as soon as the car stops drawing or SEM takes control again.
 
+## The export guard never engages, or reads "refused"
+
+**Symptom:** the export price is negative, `sensor.sem_export_guard_state`
+stays `idle` or `holding`, or reads `refused`, and the inverter's mode never
+changes.
+
+**Read the state before anything else.** `sensor.sem_charging_state` carries
+`export_guard` (state, reason, `would`) and `sink_verdicts.grid_export`. The
+reason is the answer in almost every case:
+
+| reason | meaning |
+|---|---|
+| *export price not negative* | the meter is not closed. On a fixed tariff it never is (see Known limitations). |
+| *meter closed for Ns of Ms — waiting it out* | the engage delay is running. |
+| *meter closed and the sinks absorb everything — nothing to clip* | no export on the meter: there is nothing to cut. The guard only acts on measured export. |
+| *meter closed but unreadable — not cutting on a guess* | the grid sensor is `unavailable`. |
+| *export cut refused: cannot read the inverter's active-power mode* | the Huawei mode readback is `unavailable` — it drops ~60 s after every write and for minutes after a restart. Wait, or call `homeassistant.update_entity` on `sensor.<inverter>_active_power_control`. |
+| *export cut refused: inverter is under external scheduling* | `DI Active Scheduling` — an operator's mode. Turn on *Override external scheduling* only if the operator allows it. |
+| *export control not available: …* | the brand has no export control on this install (no Deye work-mode consent, no writable export-limit number). |
+
+Three refusals in a row raise a Repair; the state clears on the open side once
+the release delay has passed.
+
+**In observer mode** nothing is written, but the exact call is visible:
+`switch.sem_observer_mode` → `withheld_commands.export_guard` names the
+service and payload the guard would send (`standing: false`) or keeps naming
+the held cut every cycle (`standing: true`). If that row shows a refusal, the
+live rig would refuse too.
+
+**Verifying the register.** The mode sensor on the writing host refreshes
+right after a successful write and then blinds itself for ~60 s; a second HA
+host reading the same inverter lags by up to ~15 minutes. Force either with
+`homeassistant.update_entity` — that read is the truth.
+
 ## The inverter refuses forced discharge
 
 SEM asked your inverter/battery to force-discharge (battery-to-grid export)

@@ -24,6 +24,31 @@ The EV charger must be controllable via a supported HA integration (KEBA, Easee,
 
 Battery discharge protection requires a Huawei Solar inverter (or compatible) that exposes a `number` entity for the battery discharge power limit. Other inverters without this entity cannot have their discharge actively clamped.
 
+## Export guard: what the inverter allows (2.1, #955)
+
+The export guard works with what the brand integration exposes, and the
+hardware has the last word:
+
+- **Huawei.** Active-power control is one register with five modes. The
+  reference SUN2000 does **not accept `Unlimited`** (mode 0) — the service call
+  returns cleanly and the register lands on the operator's mode instead — so
+  "no cap" is expressed as *Limited to 100 %*. `DI Active Scheduling` is an
+  operator's mode and is not replaced unless *Override external scheduling*
+  is on. The mode readback (`sensor.<inverter>_active_power_control`) is polled
+  slowly: it lags a write by up to ~15 minutes on a second reader, goes
+  `unavailable` for ~60 s on the host that wrote, and can sit `unavailable`
+  for minutes after a restart. While it is unreadable the guard refuses to cut.
+- **Two HA hosts on one Huawei inverter** contend for the modbus session: the
+  second host's polls time out around the first host's writes. Run the guard
+  from one host only.
+- **A fixed feed-in tariff never closes the meter.** The guard engages on a
+  negative export price, which only a dynamic feed-in entity can report. On a
+  static tariff the guard is inert (the GUI export-rate number cannot go below
+  0).
+- **Deye** cuts through the System Work Mode select and needs that control
+  enabled; **any other inverter** needs a writable `number` export-limit entity.
+  A brand with neither refuses and says so.
+
 ## The car's drain floor is only as good as the night estimate (#878)
 
 When forecast-led spending is on, the battery→EV assist stops at whichever is
