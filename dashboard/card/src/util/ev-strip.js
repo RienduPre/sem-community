@@ -69,3 +69,48 @@ export function evStripSegments(evRows, { now, end }) {
     if (cursor < end) segments.push({ s: cursor, e: end, state });
     return segments;
 }
+
+
+/**
+ * (#967, second round) How far the strip must look.
+ *
+ * The strip was a FIXED 12 hours, but what it draws is a NIGHT plan.
+ * @alexmc1510 read his at 09:37: the window ended at 21:37, his charge was
+ * booked 00:00 → 05:39 against a 06:00 deadline, and all that fitted on the
+ * bar was a wait band starting at the window open and running off the right
+ * edge — "wait status start around 9pm, not 00:00". The plan was right; the
+ * window could not show it.
+ *
+ * So the window ends where the EV's own plan ends: the last EV row, rounded
+ * up to the next whole hour so the axis reads in clean times. Never shorter
+ * than the 12 h it has always been, never longer than the 24 h the composer
+ * itself looks ahead (``compose_today_plan(horizon_hours=24)``) — a row
+ * beyond that cannot exist.
+ *
+ * @param {Array<{kind:string, when:string}>} evRows the plan's EV rows
+ * @param {number} now epoch ms
+ * @returns {{end:number, hours:number}} the window end and its whole hours
+ */
+export const STRIP_MIN_HOURS = 12;
+export const STRIP_MAX_HOURS = 24;      // == compose_today_plan(horizon_hours)
+
+const HOUR_MS = 3600 * 1000;
+//: the kinds that are the PLAN's own end; `night_open` is a window opening,
+//: not a charge, so it never stretches the strip on its own.
+const EV_PLAN_KINDS = ['ev_charge_start', 'ev_min_reached', 'ev_deadline'];
+
+export function evStripWindow(evRows, now) {
+    const floor = now + STRIP_MIN_HOURS * HOUR_MS;
+    const cap = now + STRIP_MAX_HOURS * HOUR_MS;
+    let last = 0;
+    for (const r of evRows || []) {
+        if (!r || !EV_PLAN_KINDS.includes(r.kind)) continue;
+        const t = new Date(r.when).getTime();
+        if (Number.isFinite(t) && t > last) last = t;
+    }
+    // Round UP past the last row: a deadline sitting exactly on the right
+    // edge is a deadline the eye cannot find.
+    const wanted = last > now ? Math.ceil((last + 1) / HOUR_MS) * HOUR_MS : 0;
+    const end = Math.min(cap, Math.max(floor, wanted));
+    return { end, hours: Math.max(1, Math.round((end - now) / HOUR_MS)) };
+}

@@ -14,7 +14,7 @@ import { SEMLitBase, html, css, svg, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
 import { resolveChargerSoc } from '../util/charger-soc.js';
 import { chargerStatusKey } from '../util/charger-status.js';
-import { evStripSegments } from '../util/ev-strip.js';
+import { evStripSegments, evStripWindow } from '../util/ev-strip.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 const CHARGER_COLORS = ['#8DC892', '#64B5F6'];
@@ -255,11 +255,6 @@ class SEMEVStatusCard extends SEMLitBase {
         if (!plan.some(r => evKinds.has(r.kind))) return nothing;
 
         const now = Date.now();
-        const horizon = 12 * 3600 * 1000;  // 12h window
-        const end = now + horizon;
-        const w = 100;  // viewBox units (percent-like)
-        const xOf = (ts) => Math.max(0, Math.min(w, ((ts - now) / horizon) * w));
-
         // Build EV state segments by walking the plan. State machine:
         //   start         → idle
         //   night_open    → wait (if tariff_waiting) else charging
@@ -269,6 +264,14 @@ class SEMEVStatusCard extends SEMLitBase {
         const evRows = plan.filter(r => ['now','night_open','ev_charge_start',
             'ev_min_reached','ev_deadline'].includes(r.kind));
         evRows.sort((a,b) => new Date(a.when) - new Date(b.when));
+        // (#967) The window ends where the EV's plan ends, not at a fixed
+        // 12 h — read at 09:37, a fixed window showed @alexmc1510 a wait
+        // band running off the right edge and never the 00:00 charge it
+        // was waiting for. Still 12 h whenever the plan fits inside it.
+        const { end, hours } = evStripWindow(evRows, now);
+        const horizon = end - now;
+        const w = 100;  // viewBox units (percent-like)
+        const xOf = (ts) => Math.max(0, Math.min(w, ((ts - now) / horizon) * w));
         // (#967) The state walk is a pure function with its own unit test —
         // it used to paint `night_open` as CHARGING unless a start row carried
         // the private-selector detail, so a joint-plan start at 00:00 (or any
@@ -320,22 +323,26 @@ class SEMEVStatusCard extends SEMLitBase {
         // palette — cheap is a deeper leaf-green so it can't be mistaken for
         // the 'charging' sea-green it used to share (#464 legend feedback).
         const overlayColor = (k) => k === 'cheap' ? '#43a047' : '#f06292';
+        // the window's length is part of the sentence, not a fixed word
+        const _hrs = (key) => (this._t(key) || '').split('{hours}').join(hours);
 
-        // Hourly ticks for time labels (every 3h)
+        // Five evenly spaced time labels — quarters of whatever the window
+        // turned out to be, so the last one always names its END (a 12 h
+        // window still reads 3-hourly, exactly as before).
         const _tz = this._hass?.config?.time_zone || undefined;
         const ticks = [];
-        for (let h = 0; h <= 12; h += 3) {
-            const t = now + h * 3600 * 1000;
+        for (let i = 0; i <= 4; i++) {
+            const t = now + (horizon * i) / 4;
             const label = new Date(t).toLocaleTimeString([],
                 { hour: '2-digit', minute: '2-digit', timeZone: _tz });
             ticks.push({x: xOf(t), label});
         }
 
         return html`
-            <div class="plan-strip" title="${this._t('today_plan_title')} (12h)">
+            <div class="plan-strip" title="${this._t('today_plan_title')} (${hours}h)">
                 <div class="strip-title">
                     <ha-icon icon="mdi:chart-timeline" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
-                    <span>${this._t('plan_strip_title')}</span>
+                    <span>${_hrs('plan_strip_title')}</span>
                 </div>
                 <svg viewBox="0 0 ${w} 16" preserveAspectRatio="none" class="strip-svg">
                     ${segments.map(s => svg`
@@ -363,7 +370,7 @@ class SEMEVStatusCard extends SEMLitBase {
                     <span><i class="line" style="background:${overlayColor('expensive')}"></i>${this._t('plan_strip_expensive')}</span>
                 </div>
                 ${this._showHelp ? html`
-                    <div class="setting-help strip-help">${this._t('plan_strip_help')}</div>
+                    <div class="setting-help strip-help">${_hrs('plan_strip_help')}</div>
                 ` : nothing}
             </div>
         `;
