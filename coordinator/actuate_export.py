@@ -59,9 +59,15 @@ async def actuate_export(decision: "ExportDecision",
         if observer and standing in _STANDING:
             _publish_standing(controller, standing)
             if withheld is not None:
-                withheld.append(_dry_run(
+                # (live on .175, 17.09) SAY that this is the roster's
+                # re-publish, not a command: the standing row and a command
+                # row were indistinguishable, and a dispatch that never saw
+                # a command still produced a perfect-looking withheld row.
+                row = _dry_run(
                     adapter, ExportIntent.RELEASE if standing == "releasing"
-                    else ExportIntent.LIMIT, 0.0))
+                    else ExportIntent.LIMIT, 0.0)
+                row["standing"] = True
+                withheld.append(row)
         return None
 
     watts = float(decision.watts or 0.0)
@@ -77,7 +83,9 @@ async def actuate_export(decision: "ExportDecision",
             except Exception:  # noqa: BLE001 — the surface never breaks the seam
                 pass
         if withheld is not None:
-            withheld.append(_dry_run(adapter, decision.intent, watts))
+            row = _dry_run(adapter, decision.intent, watts)
+            row["standing"] = False          # the command itself, this cycle
+            withheld.append(row)
         log_on_change(   # (#762) transition-gated
             _LOGGER, OBSERVER_KEY, logging.INFO,
             "OBSERVER · WOULD %s at %.0f W — %s",

@@ -7651,6 +7651,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             self._forecast_sell_status = None
 
         # Shared fleet context — same for every battery this cycle.
+        _fs = getattr(self, "_cycle_fleet_state", None)   # Step 6's answer (#955)
         fleet = FleetContext(
             solar_w=float(getattr(power, "solar_power", 0.0) or 0.0),
             home_w=float(getattr(power, "home_consumption_power", 0.0) or 0.0),
@@ -7675,6 +7676,23 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # #533: arbitrage market signals, computed once above (None unless
             # arbitrage is being evaluated → dormant until v1.7.4).
             arbitrage=arb_signals,
+            # (#955, found LIVE on .175, 17.09 21:00) The export axis rides the
+            # ONE fleet-state Step 6 computed (`_cycle_fleet_state`, built at
+            # 3288, before this pipeline at 4157). This context is the fleet
+            # `_apply_export_decision` reads, and it carried NEITHER field: the
+            # arc threaded them through build_view's FleetContext — the
+            # charger view — and pinned that site, while this second producer
+            # went on saying "guard off" to decide_export on every cycle. The
+            # seam then only ever re-published the STANDING row, which is
+            # indistinguishable from a command on the observer surface — so
+            # an engaged guard that had written nothing looked proven on two
+            # rigs since 15.09. With observer OFF the log had no "WOULD" line
+            # and no service call, the store no row, the inverter no change.
+            # Bug class: two producers of one context.
+            export_command=getattr(_fs, "export_command", None),
+            export_guard_enabled=bool(getattr(_fs, "export_guard_enabled", False)),
+            sink_verdicts=dict(getattr(_fs, "sink_verdicts", None) or {}),
+            ev_morning_window_open=bool(getattr(_fs, "morning_window_open", False)),
         )
 
         # 2. Source per-battery iteration. Multi-battery installs

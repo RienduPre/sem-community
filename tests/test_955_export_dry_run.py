@@ -233,7 +233,8 @@ class TestTheSeamPublishesTheRow:
         await actuate_export(ExportDecision(ExportIntent.LIMIT, 0.0, "closed"), _adapter(),
                              observer=True, controller=MagicMock(), withheld=rows)
         assert rows == [{"service": "huawei_solar.set_zero_power_grid_connection",
-                         "data": {"device_id": INV}, "why": None, "intent": "limit_export"}]
+                         "data": {"device_id": INV}, "why": None, "intent": "limit_export",
+                         "standing": False}]
 
     async def test_a_held_cut_keeps_the_row_on_every_quiet_cycle(self):
         """#764 for the payload: the withheld log is rebuilt each cycle, so a
@@ -242,12 +243,12 @@ class TestTheSeamPublishesTheRow:
         await actuate_export(ExportDecision(reason="holding"), _adapter(),
                              observer=True, controller=MagicMock(), standing="engaged",
                              withheld=rows)
-        assert rows and rows[0]["intent"] == "limit_export"
+        assert rows and rows[0]["intent"] == "limit_export" and rows[0]["standing"] is True
         rows = []
         await actuate_export(ExportDecision(reason="open"), _adapter(),
                              observer=True, controller=MagicMock(), standing="releasing",
                              withheld=rows)
-        assert rows and rows[0]["intent"] == "release_export"
+        assert rows and rows[0]["intent"] == "release_export" and rows[0]["standing"] is True
 
     async def test_a_guard_that_wrote_nothing_appends_nothing(self):
         rows = []

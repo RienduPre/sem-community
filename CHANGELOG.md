@@ -45,6 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be — or the refusal in the verb's own words — so the inverter device, the
   mode check and the restore recipe are proven on the real readback without a
   single write.
+- 🐛 **The export guard never wrote** (#955, found live on .175 with observer
+  off, 17.09). The battery pipeline builds its own fleet context and hands
+  that one to the export dispatch — and it never carried the guard's command
+  or its enabled flag, so the dispatch read "guard off" every cycle while the
+  tracker said "engaged". The observer surface could not tell: the standing
+  re-publish names the same service as a command. The pipeline's context now
+  rides Step 6's fleet state like the charger view does, a withheld row says
+  whether it is a command or a re-publish, and a cycle-level test runs the
+  real pipeline and asks whether the adapter was called.
 - ✨ **Charge pacing holds headroom before the meter closes** (#926).
 - ✨ **The house as a battery sink** (#879) — keep the pack through cheap
   hours, spend it on the house in expensive ones. Off by default.
