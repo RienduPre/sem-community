@@ -226,6 +226,15 @@ read-only by design — SEM can't suppress it), but the cards will load.
 
 ## Grid import/export values are swapped
 
+> **The one-tap flip is bound to the meter it was tapped against (2.1, #971).**
+> *Fix grid sign* records which grid source it corrected (the combined sensor,
+> a declared import/export pair, an auto-discovered pair). If you later change
+> how SEM reads the grid — for instance from a combined meter to explicit
+> `grid_import_power_entity` / `grid_export_power_entity` — the old tap is not
+> applied to the new source; the sign diagnostics show `user_flip_applies:
+> false` and the log says so once. Tap again on the new source if it really is
+> inverted, or run `reset_sign_detection` to start clean.
+
 **Symptom:** SEM shows grid import when the house is actually exporting (or vice versa). The `sensor.sem_grid_power` sign is the opposite of the hardware power meter.
 
 **How SEM detects grid direction:** SEM reads the grid power sensor from your HA Energy Dashboard configuration. It then compares the power sensor's sign against the import/export energy counters (also from the Energy Dashboard) to automatically detect the sign convention. This works because the energy counters always increase in the correct direction — if the import counter is growing while the power sensor is positive, SEM knows positive means import and will correct accordingly.

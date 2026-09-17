@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ahead; it stays 12 h whenever the plan fits inside it. The strip's title and
   help say how far it actually looks, and a daytime start drawn from the
   preview is labelled an estimate wherever its hour came from.
+- 🐛 **A grid-sign tap followed the install onto a different meter** (#971). The
+  one-tap *Fix grid sign* flip is persisted and was applied on top of whatever
+  read the meter — including a declared import/export pair, whose convention
+  is fixed and has no auto-lock to correct. On the test rig a tap made months
+  ago against the combined Huawei meter inverted a declared pair (export
+  2 kW read as 2 kW import), the house balance clamped, and the export guard
+  saw import where there was export. The tap is now bound to the grid source
+  it was made against: it applies only while that source is in use, a flip
+  from before the binding applies only to auto-detected sources, and a flip
+  that no longer applies says so in the log and in the sign diagnostics.
 
 # [2.1.0-beta.29] — 17.09.2026
 

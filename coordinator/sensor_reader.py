@@ -395,6 +395,10 @@ class SensorReader:
         self._pv_string_names: Dict[str, str] = {}  # (#566) slot -> custom name
         self._grid_sign_inverted = False
         self._grid_sign_detected = False  # True once sign is reliably determined
+        #: (#971) Which branch produced this cycle's grid_power — the key a
+        #: one-tap user flip is bound to. ``None`` until the first read.
+        self._grid_source_key = None
+        self._flip_ignored_logged = False
         # #461: accumulated sign-of-correlation evidence. The old ±1 vote
         # locked after three *consecutive* instantaneous matches — and a
         # contradicting sample only reset the run counter to ±1, never the
@@ -902,7 +906,13 @@ class SensorReader:
         # one tap regardless of how it was derived — without touching the
         # ``grid_sign_invert`` semantics that Enphase/Powerwall installs rely
         # on. Persisted as a config option, so it survives restart.
-        if bool(self._raw_config.get("grid_sign_user_flip", False)):
+        # (#971) …but bound to the grid SOURCE it was tapped against. A tap
+        # that corrected the combined meter's auto-lock must not follow the
+        # install onto a declared import/export pair, whose convention is
+        # fixed by declaration and has no lock to correct: on .175 exactly
+        # that inverted a synthetic pair (export 2000 → −2000) under a flip
+        # tapped months earlier against `sensor.power_meter_wirkleistung`.
+        if self.user_flip_applies():
             readings.grid_power = -readings.grid_power
             readings.calculate_derived()
 
@@ -1093,6 +1103,11 @@ class SensorReader:
                 self._raw_config.get("grid_sign_invert", False)
             ),
             "user_flip": bool(self._raw_config.get("grid_sign_user_flip", False)),
+            # (#971) the tap is bound to a source; both halves are shown so a
+            # flip that no longer applies is visible, never silent.
+            "user_flip_source": self._raw_config.get("grid_sign_user_flip_source"),
+            "grid_source": self._grid_source_key,
+            "user_flip_applies": self.user_flip_applies(),
             "auto_detected": self._grid_sign_detected,
             "auto_inverted": self._grid_sign_inverted,
             "evidence": round(self._grid_sign_evidence, 1),
@@ -1633,6 +1648,48 @@ class SensorReader:
             )
             self._grid_sign_inverted = implied_inverted
 
+    #: Grid sources whose sign comes from a LOCK (brand seed, counter or
+    #: solar vote) — what the #461 one-tap flip exists to correct. A declared
+    #: pair (manual or the Energy Dashboard's from/to) has no lock.
+    _AUTO_GRID_SOURCES = ("combined", "sum", "discovered")
+
+    def user_flip_applies(self) -> bool:
+        """(#971) Does the persisted one-tap flip apply to THIS cycle's source?
+
+        A flip recorded with a source key applies only while the grid is read
+        from that same source. A flip from before the key existed (no source
+        recorded) applies to the auto-derived sources it was designed for, and
+        never to a declared pair — that is the case found live on .175. When a
+        flip is present but does not apply, it is said once in the log and
+        always in the diagnostics (``user_flip_applies``).
+        """
+        if not bool(self._raw_config.get("grid_sign_user_flip", False)):
+            return False
+        recorded = self._raw_config.get("grid_sign_user_flip_source") or None
+        current = self._grid_source_key
+        if recorded is not None:
+            applies = (current == recorded)
+        else:
+            kind = (current or "").split(":", 1)[0]
+            applies = kind in self._AUTO_GRID_SOURCES
+        if not applies and not self._flip_ignored_logged:
+            self._flip_ignored_logged = True
+            _LOGGER.warning(
+                "grid sign: the one-tap user flip is bound to %s and the grid is "
+                "now read from %s — not applying it (#971). Tap 'Fix grid sign' "
+                "again on the new source if it is inverted, or reset_sign_detection.",
+                recorded or "an auto-detected source", current,
+            )
+        return applies
+
+    def user_flip_options(self, options: dict, new_flip: bool) -> dict:
+        """(#971) The options dict the flip service persists: the flip, and —
+        when turning it ON — the grid source it was tapped against. Turning it
+        off drops the binding. The ONE production caller is the service."""
+        out = {**(options or {}), "grid_sign_user_flip": bool(new_flip)}
+        out["grid_sign_user_flip_source"] = self._grid_source_key if new_flip else None
+        return out
+
     def _detect_grid_sign(self, readings: PowerReadings) -> bool:
         """Detect if grid power needs negation using Energy Dashboard counters.
 
@@ -2122,6 +2179,7 @@ class SensorReader:
                     "%s instead, so export is measured rather than assumed 0",
                     manual_import, ed.grid_import_power)
             readings.grid_power = self._read_sensor(ed.grid_import_power, "grid")
+            self._grid_source_key = f"combined:{ed.grid_import_power}"
         elif manual_import or manual_export:
             # Manual override — user explicitly set grid power sensors.
             # NO auto-detection runs on this path, so misconfiguration
@@ -2133,6 +2191,7 @@ class SensorReader:
             export_w = self._read_sensor(manual_export, "grid_export") if manual_export else 0.0
             readings.grid_power = export_w - import_w
             self._grid_sign_detected = True
+            self._grid_source_key = f"manual:{manual_import}|{manual_export}"
             self._audit_manual_grid_sign(readings.grid_power, ed)
             if manual_import and manual_export:
                 self._audit_split_pair(
@@ -2149,6 +2208,7 @@ class SensorReader:
             export_w = self._read_sensor(ed.grid_power_to, "grid_export")
             readings.grid_power = export_w - import_w
             self._grid_sign_detected = True
+            self._grid_source_key = f"ed_pair:{ed.grid_power_from}|{ed.grid_power_to}"
             # (#911) an explicit pair ends any guess — and its Repair.
             if self._split_grid_discovery.get("guess_reported"):
                 self._forget_split_grid_picks(self._split_grid_discovery, keep=(None, None))
@@ -2161,8 +2221,10 @@ class SensorReader:
         elif len(ed.grid_power_list) > 1:
             # Multiple grid power sensors — sum all (e.g. multi-meter setups)
             readings.grid_power = self._read_sensors_sum(ed.grid_power_list, "grid")
+            self._grid_source_key = f"sum:{len(ed.grid_power_list)}"
         elif ed.grid_import_power:
             readings.grid_power = self._read_sensor(ed.grid_import_power, "grid")
+            self._grid_source_key = f"combined:{ed.grid_import_power}"
         elif not ed.grid_import_power and ed.grid_import_energy:
             # No combined power sensor — try to find split import/export power sensors
             # from the same device as the energy sensors.
@@ -2257,6 +2319,7 @@ class SensorReader:
                     # SEM convention: negative = import, positive = export
                     readings.grid_power = export_w - import_w
                     self._grid_sign_detected = True  # No sign correction needed
+                    self._grid_source_key = f"discovered:{disc['import']}|{disc['export']}"
                     if disc["export"]:
                         self._audit_split_pair(
                             "grid", "Grid (auto-discovered split pair)",
