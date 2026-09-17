@@ -379,7 +379,11 @@ def compose_today_plan(
                     when=ev_next_cheap_window,
                     kind=KIND_EV_CHARGE_START,
                     label="plan_ev_charge_start",
-                    detail="plan_ev_charge_tariff",
+                    # (#967) By day this branch is reached by the PREVIEW's
+                    # own affordable start, and a preview is an estimate
+                    # wherever its time came from — the caveat belongs to the
+                    # row, not to the branch that produced the hour.
+                    detail=ev_row_detail or "plan_ev_charge_tariff",
                 ))
         elif night_start and night_start > now:
             # Will charge from night_start at peak-managed rate. (#967) By

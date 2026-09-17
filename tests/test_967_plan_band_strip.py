@@ -156,6 +156,36 @@ def charging_segments(segs):
     return [(s, e) for s, e, st in segs if st == "charging"]
 
 
+def card_segments_fixed(rows, now, end):
+    """The mirror of ``evStripSegments`` AS FIXED (dashboard/card/src/util/
+    ev-strip.js): the open is a charge only when a start sits AT it, and a
+    preview start paints ``estimate`` rather than a booked bar."""
+    ev = [r for r in rows if r["kind"] in
+          ("now", "night_open", "ev_charge_start", "ev_min_reached", "ev_deadline")]
+    ev.sort(key=lambda r: r["when"])
+    starts = [r for r in ev if r["kind"] == "ev_charge_start"]
+    def _state(r):
+        return "estimate" if r.get("detail") == "plan_ev_charge_estimate" else "charging"
+    segs, cursor, state = [], now, "idle"
+    for r in ev:
+        t = min(datetime.fromisoformat(r["when"]), end)
+        if t > cursor:
+            segs.append((cursor, t, state))
+        cursor = max(cursor, t)
+        if r["kind"] == "night_open":
+            at_open = next((s for s in starts if abs(
+                (datetime.fromisoformat(s["when"]) - datetime.fromisoformat(r["when"])
+                 ).total_seconds()) <= 60), None)
+            state = _state(at_open) if at_open else "wait"
+        elif r["kind"] == "ev_charge_start":
+            state = _state(r)
+        elif r["kind"] in ("ev_min_reached", "ev_deadline"):
+            state = "done"
+    if cursor < end:
+        segs.append((cursor, end, state))
+    return segs
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # What SEM actually computes for his night — the missing diagnostics
 # ═══════════════════════════════════════════════════════════════════════
@@ -380,3 +410,97 @@ class TestOneProducerOfTheNeed:
         from custom_components.solar_energy_management.coordinator import ev_control
         kw = call_kwargs(ev_control.EVControlMixin._compute_night_plan, "plan_night_charge")
         assert kw and all("level_at" in k for k in kw), kw
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# His second report: the plan was right, the WINDOW could not show it
+# ═══════════════════════════════════════════════════════════════════════
+
+MORNING = DAY.replace(hour=9, minute=37)         # his 17.09 screenshot
+
+
+def card_window(rows, now):
+    """A Python mirror of ``evStripWindow``: the strip ends where the EV's
+    own plan ends, floored at 12 h and capped at the composer's 24 h."""
+    hour = timedelta(hours=1)
+    last = None
+    for r in rows:
+        if r["kind"] not in ("ev_charge_start", "ev_min_reached", "ev_deadline"):
+            continue
+        t = datetime.fromisoformat(r["when"])
+        if last is None or t > last:
+            last = t
+    end = now + timedelta(hours=12)
+    if last is not None and last > now:
+        wanted = (last + timedelta(seconds=1)).replace(minute=0, second=0, microsecond=0)
+        if wanted <= last:
+            wanted += hour
+        end = max(end, wanted)
+    return min(end, now + timedelta(hours=24))
+
+
+class TestTheWindowReachesTheNight:
+    """17.09, @alexmc1510: *"unfortunately 'wait' status start around 9pm,
+    not 00:00."* By then D3 was holding his charge through punta correctly —
+    the composer books 00:00 → 05:39 for a 06:00 deadline. But he read the
+    card at 09:37 and the strip is a fixed 12 h: it ended at 21:37, so the
+    only thing on it was a wait band opening at 20:26 and running off the
+    right edge. A night plan needs a window that reaches the night."""
+
+    def _his_morning_rows(self):
+        rate_kw = MIN_A * WPA / 1000.0
+        start = affordable_start(NIGHT_OPEN, DEADLINE, NEED_KWH, rate_kw, level_at)
+        return start, compose_today_plan(
+            now=MORNING, horizon_hours=24, night_start=NIGHT_OPEN, night_end=NIGHT_END,
+            ev_min_remaining_kwh=NEED_KWH, ev_deadline=DEADLINE, ev_tariff_optimized=True,
+            ev_tariff_waiting=True, ev_next_cheap_window=start, ev_plan_blocks=None,
+            ev_effective_rate_kw=rate_kw, ev_row_detail="plan_ev_charge_estimate")
+
+    def test_the_plan_itself_is_right_it_books_the_first_valle_hour(self):
+        start, rows = self._his_morning_rows()
+        assert start == (DAY + timedelta(days=1)).replace(hour=0, minute=0)
+        got = next(r for r in rows if r["kind"] == KIND_EV_CHARGE_START)
+        assert datetime.fromisoformat(got["when"]) == start
+        assert any(r["kind"] == "ev_deadline" for r in rows)
+
+    def test_a_fixed_twelve_hour_window_shows_him_only_the_wait(self):
+        """The bug, reproduced: every EV row he cares about is past the edge."""
+        _, rows = self._his_morning_rows()
+        edge = MORNING + timedelta(hours=12)              # 21:37
+        beyond = [r for r in rows if datetime.fromisoformat(r["when"]) >= edge]
+        assert {r["kind"] for r in beyond} == {
+            KIND_EV_CHARGE_START, KIND_EV_MIN_REACHED, "ev_deadline"}
+        segs = card_segments_fixed(rows, MORNING, edge)
+        assert [st for _, _, st in segs] == ["idle", "wait"]
+        assert segs[-1][1] == edge, "the wait runs off the right edge, with no end"
+
+    def test_the_window_now_reaches_past_his_deadline(self):
+        _, rows = self._his_morning_rows()
+        end = card_window(rows, MORNING)
+        assert end > DEADLINE
+        assert end == (DAY + timedelta(days=1)).replace(hour=7, minute=0)
+        assert end - MORNING <= timedelta(hours=24)
+
+    def test_and_then_the_strip_says_wait_until_midnight_then_charge(self):
+        start, rows = self._his_morning_rows()
+        end = card_window(rows, MORNING)
+        segs = card_segments_fixed(rows, MORNING, end)
+        # min-reached and the deadline both say "done", so the tail is two
+        # abutting bands of one colour — collapse the runs to read the story.
+        story = [st for i, (_, _, st) in enumerate(segs)
+                 if i == 0 or st != segs[i - 1][2]]
+        assert story == ["idle", "wait", "estimate", "done"]
+        wait = next((s, e) for s, e, st in segs if st == "wait")
+        assert wait == (NIGHT_OPEN, start), (
+            "the wait he saw — now bounded by the hour it is waiting FOR")
+        booked = next((s, e) for s, e, st in segs if st == "estimate")
+        assert booked[0] == start, "and the charge that was past his right edge"
+
+    def test_a_plan_that_fits_inside_twelve_hours_keeps_the_old_window(self):
+        """No regression for the common evening read: nothing stretches."""
+        evening = DAY.replace(hour=19, minute=0)
+        rows = compose_today_plan(
+            now=evening, horizon_hours=24, night_start=NIGHT_OPEN, night_end=NIGHT_END,
+            ev_min_remaining_kwh=4.0, ev_deadline=DAY.replace(hour=23, minute=0),
+            ev_tariff_optimized=False, ev_effective_rate_kw=MIN_A * WPA / 1000.0)
+        assert card_window(rows, evening) == evening + timedelta(hours=12)
