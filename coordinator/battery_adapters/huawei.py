@@ -153,7 +153,14 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         device_id = self._export_device_id()
         if not device_id:
             raise NotImplementedError("no Huawei battery/inverter device found (inverter_device_id)")
-        external = self._external_scheduling()
+        w = max(0.0, float(watts))
+        if self._last_export_limit_w is not None and abs(self._last_export_limit_w - w) < 1.0:
+            return                       # #538 — a repeat is pure cost
+        # The mode check comes AFTER the repeat check on purpose: a repeat of
+        # what SEM already wrote replaces nothing, and SEM's own write is what
+        # knocks the readback `unavailable` for ~60 s (live, 17.09 — every
+        # write did it). Checked first, the cut would have refused itself.
+        external = self._external_scheduling()          # True / False / None
         if external is not False and not bool(
                 self._config.get("export_guard_override_external", False)):
             raise NotImplementedError(
@@ -162,9 +169,6 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
                 if external
                 else "cannot read the inverter's active-power mode — refusing "
                      "to replace a mode SEM cannot see")
-        w = max(0.0, float(watts))
-        if self._last_export_limit_w is not None and abs(self._last_export_limit_w - w) < 1.0:
-            return                       # #538 — a repeat is pure cost
         # (#908) Capture what SEM is about to replace, BEFORE replacing it.
         self._capture_export_prior()
         if w <= 0.0:

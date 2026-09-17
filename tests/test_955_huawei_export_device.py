@@ -322,6 +322,19 @@ class TestAnUnreadableModeIsNotPermission:
         assert a._hass.services.async_call.call_args.args[1] == (
             "set_zero_power_grid_connection")
 
+    async def test_a_repeat_cut_after_sem_own_write_blinds_the_readback_is_still_a_no_op(self):
+        """Live, 17.09: every write to the SUN2000 knocked the writing host's
+        modbus poll out for ~60 s, readback included. The guard issues LIMIT
+        once per engagement, so this cannot latch through the guard — but the
+        adapter's own repeat check must sit ABOVE the mode check, or a repeat
+        of SEM's own cut refuses itself with 'cannot read'."""
+        a = self._no_override(_State("Unlimited"))
+        with _registry(_prod_shaped()):
+            await a.command_limit_export(0.0)
+            a._hass.states.get = MagicMock(return_value=_State("unavailable"))
+            await a.command_limit_export(0.0)          # must not raise
+        assert a._hass.services.async_call.call_count == 1
+
     async def test_the_override_still_lets_a_deliberate_cut_through(self):
         a = self._no_override(_State("unavailable"))
         a._config["export_guard_override_external"] = True
