@@ -498,6 +498,20 @@ class BatteryControlAdapter(ABC):
         """
         return self._last_export_intent is ExportIntent.LIMIT
 
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) What the export verb WOULD send this cycle, without sending.
+
+        The export axis's half of #855: an observer rig is judged on what
+        would hit the wire, so the wire must be readable. Returns one row in
+        the ``withheld_commands`` shape — ``{"service": "domain.service",
+        "data": {...}, "why": None}`` — or, when the real verb would refuse
+        before writing, ``{"service": None, "data": None, "why": "<the
+        refusal, in the verb's own words>"}``. Pure: no write, no capture, no
+        marker touched. Brands override; the default is the base refusal.
+        """
+        return {"service": None, "data": None,
+                "why": "this battery adapter has no export control"}
+
     async def command_off(self) -> None:
         """#523 (RienduPre): SEM hands-off this battery.
 

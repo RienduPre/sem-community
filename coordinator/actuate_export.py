@@ -45,11 +45,23 @@ async def actuate_export(decision: "ExportDecision",
                          adapter: "Optional[BatteryControlAdapter]", *,
                          observer: bool = False,
                          controller=None,
-                         standing: Optional[str] = None) -> Optional[str]:
-    """Apply this cycle's export decision. See the module docstring."""
+                         standing: Optional[str] = None,
+                         withheld: Optional[list] = None) -> Optional[str]:
+    """Apply this cycle's export decision. See the module docstring.
+
+    ``withheld`` (observer only): a list the caller owns for THIS cycle; the
+    seam appends the adapter's dry-run row — the exact service + payload the
+    write would have been, or the refusal in the verb's own words. #855's
+    contract, extended to the meter: an observer rig is judged on what would
+    hit the wire, and until this the export axis showed only its decision.
+    """
     if decision.intent is ExportIntent.NONE:
         if observer and standing in _STANDING:
             _publish_standing(controller, standing)
+            if withheld is not None:
+                withheld.append(_dry_run(
+                    adapter, ExportIntent.RELEASE if standing == "releasing"
+                    else ExportIntent.LIMIT, 0.0))
         return None
 
     watts = float(decision.watts or 0.0)
@@ -64,6 +76,8 @@ async def actuate_export(decision: "ExportDecision",
                     reason=decision.reason, kind="battery")
             except Exception:  # noqa: BLE001 — the surface never breaks the seam
                 pass
+        if withheld is not None:
+            withheld.append(_dry_run(adapter, decision.intent, watts))
         log_on_change(   # (#762) transition-gated
             _LOGGER, OBSERVER_KEY, logging.INFO,
             "OBSERVER · WOULD %s at %.0f W — %s",
@@ -113,3 +127,20 @@ def _publish_standing(controller, standing: str) -> None:
             kind="battery")
     except Exception:  # noqa: BLE001 — the surface never breaks the seam
         pass
+
+
+def _dry_run(adapter, intent, watts: float) -> dict:
+    """The adapter's dry-run row, or a row that says why there is none. Never
+    raises: the surface never breaks the seam."""
+    if adapter is None:
+        return {"service": None, "data": None,
+                "why": "no adapter can write the export limit on this install"}
+    try:
+        row = adapter.export_dry_run(intent, watts)
+        if not isinstance(row, dict):
+            raise TypeError(f"dry-run returned {type(row).__name__}")
+        return {"service": row.get("service"), "data": row.get("data"),
+                "why": row.get("why"), "intent": intent.value}
+    except Exception as exc:  # noqa: BLE001 — the surface never breaks the seam
+        return {"service": None, "data": None, "why": f"dry-run failed: {exc}",
+                "intent": intent.value}

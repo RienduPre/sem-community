@@ -237,6 +237,25 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         self._last_export_limit_w = None
         self._last_export_intent = ExportIntent.RELEASE
 
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) The number write that WOULD happen — see the base class."""
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        if not ent:
+            return {"service": None, "data": None, "why": "no export limit entity configured"}
+        if not ent.startswith("number."):
+            return {"service": None, "data": None,
+                    "why": f"{ent} is read-only — an export limit SEM can see but not set"}
+        prior = getattr(self, "_export_prior", None)
+        if prior is None:
+            try:
+                prior = float(getattr(self._hass.states.get(ent), "state", None))
+            except (TypeError, ValueError):
+                return {"service": None, "data": None,
+                        "why": f"{ent} is unreadable — nothing to restore to"}
+        value = max(0.0, float(watts)) if intent is ExportIntent.LIMIT else float(prior)
+        return {"service": "number.set_value",
+                "data": {"entity_id": ent, "value": value}, "why": None}
+
     async def command_normal(self) -> None:
         await self._write_force_discharge(0.0)  # #523 mutual exclusion
         # AC-coupled (Sessy): self-consumption is its OWN power strategy

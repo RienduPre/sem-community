@@ -217,6 +217,13 @@ Waiting for the real evening is not a simulation. SEM's day/night clock is
   decision, and `withheld_commands` (#855) for the exact service and payload
   a charger would have received. A charger case is judged on the wire, not
   on the reason string.
+- The meter has the same row (#955): `withheld_commands.export_guard` names the
+  exact call the export guard would make — `huawei_solar.set_zero_power_grid_connection`
+  with the INVERTER device on a cut, the captured prior's restore on a release
+  (`set_maximum_feed_grid_power_percent 100` under a `Limited to 100 %` mode) — or
+  the refusal in the verb's own words (`cannot read the inverter's active-power
+  mode …`, `under external scheduling …`). A held cut keeps its row every cycle.
+  Judge the export guard on this row, never on `would_decisions` alone.
 
 `~/bin/sem-sim-compress.sh <host> <floor-hours> [step] [charger-mode]` does
 all of this with auto-restore, and refuses to run unless observer mode is on.

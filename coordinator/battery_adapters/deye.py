@@ -492,6 +492,28 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         self._last_export_limit_w = None
         self._last_export_intent = ExportIntent.RELEASE
 
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) The work-mode select that WOULD be written — see the base class."""
+        if not self._system_work_mode_control:
+            return {"service": None, "data": None,
+                    "why": "Deye system work mode control is off — SEM may not drive it"}
+        ent = self._system_work_mode_entity
+        target = (self._system_work_mode_options or {}).get("zero_export_to_load")
+        if not ent or not target:
+            return {"service": None, "data": None,
+                    "why": "no Deye system work mode select configured"}
+        if intent is ExportIntent.LIMIT:
+            option = target
+        else:
+            # the prior the real release restores — captured, else what the
+            # select reads now (an observer rig has never cut)
+            option = getattr(self, "_export_mode_prior", None) or self._get_state(ent)
+            if not option:
+                return {"service": None, "data": None,
+                        "why": f"{ent} is unreadable — nothing to restore to"}
+        return {"service": "select.select_option",
+                "data": {"entity_id": ent, "option": str(option)}, "why": None}
+
     async def command_stop_force_discharge(self) -> bool:
         """(#827) Restore the pre-spend mode. With no captured prior (a
         restart mid-spend), fall back to Zero Export To Load — the SAFE

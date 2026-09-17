@@ -2650,6 +2650,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             cmds = getattr(dev, "withheld_commands", None)
             if cmds:
                 out[getattr(dev, "device_id", "?")] = list(cmds)
+        # (#955) the meter's row, under the seam's own key — the exact
+        # huawei_solar / number / select call the export guard would make.
+        rows = getattr(self, "_export_withheld", None)
+        if rows:
+            out["export_guard"] = list(rows)
         return out
 
     def _push_observer_mode_to_devices(self) -> None:
@@ -10905,13 +10910,19 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         from .decide_export import decide_export
         decision = decide_export(fleet)
         guard = getattr(self, "_export_guard", None)
+        # (#855, the meter) THIS cycle's dry-run rows — a fresh list every
+        # cycle, like the chargers' withheld log: it answers "what would SEM
+        # send NOW", never what it once considered.
+        _rows: list = []
         refused = await actuate_export(
             decision, self._export_control_adapter(),
             observer=self._observer_mode,
             controller=getattr(self, "_surplus_controller", None),
             # (#764) the roster is swept every cycle; a held cut has to keep
             # saying so or it is retired while it is still being held.
-            standing=getattr(guard, "state", None))
+            standing=getattr(guard, "state", None),
+            withheld=_rows)
+        self._export_withheld = _rows
         if refused and guard is not None:
             guard.report_refused(refused)   # a refusal is a state (#925)
         elif decision.intent is not ExportIntent.NONE and not self._observer_mode:

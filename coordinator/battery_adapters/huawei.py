@@ -205,20 +205,22 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         """
         if getattr(self, "_export_prior_mode", None) is not None:
             return          # already known — see the note on the release
+        self._export_prior_mode = self._read_export_prior()
+
+    def _read_export_prior(self):
+        """The inverter's mode as ``(mode, {watt, percent})`` — a pure read,
+        shared by the capture (which stores it) and the dry-run (which never
+        does). UNREAD is recorded as UNREAD — never as the literal word
+        "unavailable", which would read like a fifth inverter mode."""
         ent = self._export_readback_entity()
         st = self._hass.states.get(ent) if ent else None
         if st is None:
-            self._export_prior_mode = ("", None)
-            return
+            return ("", None)
         attrs = getattr(st, "attributes", None) or {}
         mode = self._export_mode_read()
-        # UNREAD is recorded as UNREAD — never as the literal word
-        # "unavailable", which would read like a fifth inverter mode.
-        self._export_prior_mode = (
-            mode or "",
-            {"watt": attrs.get("maximum_power_watt"),
-             "percent": attrs.get("maximum_power_percent")},
-        )
+        return (mode or "",
+                {"watt": attrs.get("maximum_power_watt"),
+                 "percent": attrs.get("maximum_power_percent")})
 
     def export_release_recipe(self):
         """How to put the inverter back exactly as SEM found it."""
@@ -232,6 +234,10 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         if not device_id:
             return None
         mode, nums = getattr(self, "_export_prior_mode", None) or ("", None)
+        return self._recipe_for_prior(device_id, mode, nums)
+
+    def _recipe_for_prior(self, device_id: str, mode, nums) -> dict:
+        """The service that puts the inverter back into ``mode``."""
         key = str(mode).strip().lower()
         if key in self._RESTORE:
             service, _ = self._RESTORE[key]
@@ -301,6 +307,42 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         self._adopted_recipe = None
         self._last_export_limit_w = None
         self._last_export_intent = ExportIntent.RELEASE
+
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) The verb's answer without the write — see the base class.
+
+        Walks the SAME checks as ``command_limit_export`` in the same order
+        (device, mode — the repeat check is skipped: a dry-run always shows
+        the recipe), and for a release derives the recipe the way the real
+        release would: the adopted one, else the captured prior, else — an
+        observer rig has never cut — from what the readback says right now.
+        """
+        device_id = self._export_device_id()
+        if not device_id:
+            return {"service": None, "data": None,
+                    "why": "no Huawei battery/inverter device found (inverter_device_id)"}
+        if intent is ExportIntent.LIMIT:
+            external = self._external_scheduling()          # True / False / None
+            if external is not False and not bool(
+                    self._config.get("export_guard_override_external", False)):
+                return {"service": None, "data": None, "why": (
+                    "inverter is under external scheduling — an operator's mode is "
+                    "not SEM's to replace" if external else
+                    "cannot read the inverter's active-power mode — refusing "
+                    "to replace a mode SEM cannot see")}
+            w = max(0.0, float(watts))
+            if w <= 0.0:
+                return {"service": "huawei_solar.set_zero_power_grid_connection",
+                        "data": {"device_id": device_id}, "why": None}
+            return {"service": "huawei_solar.set_maximum_feed_grid_power",
+                    "data": {"device_id": device_id, "power": int(round(w))}, "why": None}
+        recipe = self.export_release_recipe()
+        if recipe is None or getattr(self, "_export_prior_mode", None) is None \
+                and not getattr(self, "_adopted_recipe", None):
+            mode, nums = self._read_export_prior()
+            recipe = self._recipe_for_prior(device_id, mode, nums)
+        return {"service": f"{recipe['domain']}.{recipe['service']}",
+                "data": dict(recipe["data"]), "why": None}
 
     @classmethod
     def expected_operating_modes(cls):

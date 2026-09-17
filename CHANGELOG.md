@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registers minutes behind reality, so re-reading before a second cut used to
   hand back SEM's own zero-export as the inverter's baseline and latch the
   meter shut.
+- 🔬 **The observer rig can read what the export guard would send** (#955,
+  #855 for the meter). `withheld_commands` gains an `export_guard` row with the
+  exact `huawei_solar` / `number` / `select` call the cut or the hand-back would
+  be — or the refusal in the verb's own words — so the inverter device, the
+  mode check and the restore recipe are proven on the real readback without a
+  single write.
 - ✨ **Charge pacing holds headroom before the meter closes** (#926).
 - ✨ **The house as a battery sink** (#879) — keep the pack through cheap
   hours, spend it on the house in expensive ones. Off by default.
