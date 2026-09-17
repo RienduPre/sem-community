@@ -838,6 +838,15 @@
       "daily_grid_export_energy": {
         "name": "Mai betáplálás"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Exportálva negatív áron"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Negatív áron történő export költsége"
+      },
+      "export_guard_state": {
+        "name": "Export-őr"
+      },
       "daily_grid_import_energy": {
         "name": "Mai vételezés"
       },
@@ -1417,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Export-őr"
+      },
+      "export_guard_override_external": {
+        "name": "Export-őr: külső vezérlés felülbírálása"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Ház mint akkumulátor-nyelő"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Reggeli EV-ablak"
       }
     },
     "number": {
@@ -1434,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Akkumulátor-támogatás – min. napenergia-többlet"
+      },
+      "export_guard_engage_s": {
+        "name": "Export-őr: bekapcsolási késleltetés (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Export-őr: feloldási késleltetés (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Reggeli EV-ablak (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Reggeli kisütési alsó határ (%)"
       },
       "regulation_offset": {
         "name": "Szabályozási eltolás"

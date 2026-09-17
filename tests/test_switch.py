@@ -44,7 +44,10 @@ class TestSEMSwitches:
                         # #820 — charge pacing, asleep by default; sits with
                         # the battery family it paces.
                         "battery_charge_pacing_enabled",
-                        "battery_may_export", "battery_may_assist_ev"]
+                        "battery_may_export", "battery_may_assist_ev",
+                        # arc #921 — four switches, all default OFF, after the permissions
+                        "export_guard_enabled", "export_guard_override_external",
+                        "battery_house_sink_enabled", "ev_morning_window_enabled"]
 
     # ``test_night_charging_default_off`` and
     # ``test_night_charging_existing_state_preserved`` removed in

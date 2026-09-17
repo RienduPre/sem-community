@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 from ..power_control import async_write_power_setpoint_verbose
 from .base import BatteryControlAdapter
 
@@ -189,6 +189,72 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         if self._setpoint_bidirectional and self._force_discharge_entity:
             return True
         return bool(self._force_charge_switch and self._target_soc_entity)
+
+    # ── (#955) export control is a writable number, when there is one ────
+    async def command_limit_export(self, watts: float) -> None:
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        if not ent:
+            raise NotImplementedError("no export limit entity configured")
+        if not ent.startswith("number."):
+            raise NotImplementedError(
+                f"{ent} is read-only — an export limit SEM can see but not set")
+        if getattr(self, "_export_prior", None) is None:
+            st = self._hass.states.get(ent)
+            try:
+                self._export_prior = float(getattr(st, "state", None))
+            except (TypeError, ValueError):
+                raise NotImplementedError(
+                    f"{ent} is unreadable — nothing to restore to") from None
+        w = max(0.0, float(watts))
+        await self._hass.services.async_call(
+            "number", "set_value", {"entity_id": ent, "value": w})
+        self._last_export_limit_w = w
+        self._last_export_intent = ExportIntent.LIMIT
+
+    def export_release_recipe(self):
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        prior = getattr(self, "_export_prior", None)
+        if not ent or prior is None:
+            return None
+        return {"domain": "number", "service": "set_value",
+                "data": {"entity_id": ent, "value": float(prior)}}
+
+    def adopt_export_prior(self, recipe) -> None:
+        try:
+            self._export_prior = float((recipe or {}).get("data", {}).get("value"))
+        except (TypeError, ValueError):
+            self._export_prior = None
+        self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
+
+    async def command_release_export(self) -> None:
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        prior = getattr(self, "_export_prior", None)
+        if ent and prior is not None:
+            await self._hass.services.async_call(
+                "number", "set_value", {"entity_id": ent, "value": float(prior)})
+        self._export_prior = None
+        self._last_export_limit_w = None
+        self._last_export_intent = ExportIntent.RELEASE
+
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) The number write that WOULD happen — see the base class."""
+        ent = str(self._config.get("export_limit_entity", "") or "")
+        if not ent:
+            return {"service": None, "data": None, "why": "no export limit entity configured"}
+        if not ent.startswith("number."):
+            return {"service": None, "data": None,
+                    "why": f"{ent} is read-only — an export limit SEM can see but not set"}
+        prior = getattr(self, "_export_prior", None)
+        if prior is None:
+            try:
+                prior = float(getattr(self._hass.states.get(ent), "state", None))
+            except (TypeError, ValueError):
+                return {"service": None, "data": None,
+                        "why": f"{ent} is unreadable — nothing to restore to"}
+        value = max(0.0, float(watts)) if intent is ExportIntent.LIMIT else float(prior)
+        return {"service": "number.set_value",
+                "data": {"entity_id": ent, "value": value}, "why": None}
 
     async def command_normal(self) -> None:
         await self._write_force_discharge(0.0)  # #523 mutual exclusion

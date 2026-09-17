@@ -44,6 +44,8 @@ KIND_BATTERY_FULL = "battery_full"   # #298: home battery charging → full ETA
 KIND_BATTERY_EMPTY = "battery_empty"  # #298: home battery discharging → floor ETA
 KIND_DEVICE_RUN = "device_run"       # #576: a surplus device's expected run window
 KIND_DEVICE_DONE = "device_done"     # #576: a surplus device met its daily goal
+KIND_EXPORT_CLOSED = "export_closed"   # arc #921: the meter closes (export price negative)
+KIND_EXPORT_REOPENS = "export_reopens" # arc #921: the meter reopens
 
 
 @dataclass
@@ -217,6 +219,10 @@ def compose_today_plan(
     # just formats them so it stays unit-testable.
     device_runs: Optional[List[Dict[str, Any]]] = None,
     currency: str = "",
+    # arc #921 — from the grid verdict's ``until``: an OPEN verdict carries the
+    # next closing, a CLOSED one the reopening. The grid stops being a sink.
+    export_closes_at: Optional[datetime] = None,
+    export_reopens_at: Optional[datetime] = None,
     ev_row_detail: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build the forward-looking plan as a list of row dicts.
@@ -312,6 +318,14 @@ def compose_today_plan(
                 values={"end": block["end"].strftime("%H:%M"),
                         "price": f"{avg_price:.2f}", "currency": currency},
             ))
+
+    # === arc #921: the meter closes / reopens (the grid stops being a sink) ===
+    if export_closes_at and now < export_closes_at < horizon:
+        rows.append(PlanRow(when=export_closes_at, kind=KIND_EXPORT_CLOSED,
+                            label="plan_export_closed"))
+    if export_reopens_at and now < export_reopens_at < horizon:
+        rows.append(PlanRow(when=export_reopens_at, kind=KIND_EXPORT_REOPENS,
+                            label="plan_export_reopens"))
 
     # === Night window ===
     if night_start and now < night_start < horizon:

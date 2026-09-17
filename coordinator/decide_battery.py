@@ -338,6 +338,34 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
                 reason=f"scheduler {state_value} → ensure not force-charging",
             )
 
+    # ─── arc #921: the sink verdicts (absent = every sink OPEN) ───
+    _sv = getattr(view, "sink_verdicts", None) or {}
+    _house_v = _sv.get("house")
+
+    # (#892) A morning window before departure: the pack is SPENT into the
+    # car deliberately, down to the drain floor — the EV protection clamp
+    # below must not fight a window the user opened. Bounded by the floor
+    # and by a SOC that was actually read.
+    if bool(getattr(view, "morning_window_open", False)):
+        _floor = float(cfg.get("battery_morning_drain_floor_soc", 50.0) or 50.0)
+        _soc = rt.last_known_soc
+        if rt.available and _soc is not None and _soc > _floor:
+            return BatteryDecision(
+                battery_id=rt.battery_id, intent=BatteryIntent.NORMAL,
+                reason=(f"morning window — the pack feeds the car down to "
+                        f"{_floor:.0f}% (SOC {_soc:.0f}%)"),
+            )
+
+    # (#879) The house as a sink: HELD in a cheap/negative hour means "let the
+    # house import, keep the pack for the expensive hours" — the WHEN is the
+    # tariff level, the HOW MUCH is zero house cover (0 W quantises to 0).
+    if _house_v is not None and getattr(_house_v, "state", "") == "held":
+        return BatteryDecision(
+            battery_id=rt.battery_id, intent=BatteryIntent.LIMIT_DISCHARGE,
+            discharge_limit_w=0.0,
+            reason=f"house sink held — {getattr(_house_v, 'reason', '')}",
+        )
+
     # ─── LIMIT_DISCHARGE branch (unified solar gate) ───
     # The home battery must NEVER be drained to charge the EV when there
     # isn't enough real solar surplus — in ANY charging mode

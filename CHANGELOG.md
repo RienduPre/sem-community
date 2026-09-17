@@ -13,6 +13,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **The grid is not always a sink** (arc #921 — #955 #871 #926 #879 #892).
+  Every destination a kWh can take now gets a per-cycle OPEN / HELD / CLOSED
+  verdict, decided in one place from the tariff level and the export price —
+  never a price in the balance layer. Off by default, all of it.
+- ✨ **Export guard** (#955). While the export price is negative SEM caps
+  feed-in at zero at the inverter — after the battery, the car and the loads
+  had their turn, with hysteresis both ways, a refusal that says so, and a
+  hand-back on unload. Huawei via `huawei_solar` services, Deye via the work
+  mode select, anything else via a writable export-limit number. The cut is
+  made through the one adapter that owns the grid tie, survives a restart, and
+  is handed back only to the inverter SEM actually cut — a second brand's
+  feed-in limit is never touched. Off by default.
+- ✨ **A negative export price is a cost, not a free kWh** (#871). Two
+  diagnostics measure what a hostile meter cost today, and while the meter is
+  closed the loads absorb before anything is clipped.
+- 🔧 **The export guard learned three things from the real inverter** (#955,
+  live writes 17.09). A SUN2000 that reports its active-power mode as
+  `unavailable` is not a SUN2000 that is free to cut: the read is now
+  three-state and the guard refuses to replace a mode it cannot see. The
+  last-resort hand-back stopped asking for `Unlimited` — a mode the reference
+  inverter simply does not accept — and asks for 100 % of nominal instead,
+  which is the same thing in a dialect the hardware takes. And the mode SEM
+  found is captured once and kept: `huawei_solar` polls its configuration
+  registers minutes behind reality, so re-reading before a second cut used to
+  hand back SEM's own zero-export as the inverter's baseline and latch the
+  meter shut.
+- 🔬 **The observer rig can read what the export guard would send** (#955,
+  #855 for the meter). `withheld_commands` gains an `export_guard` row with the
+  exact `huawei_solar` / `number` / `select` call the cut or the hand-back would
+  be — or the refusal in the verb's own words — so the inverter device, the
+  mode check and the restore recipe are proven on the real readback without a
+  single write.
+- 🐛 **The export guard never wrote** (#955, found live on .175 with observer
+  off, 17.09). The battery pipeline builds its own fleet context and hands
+  that one to the export dispatch — and it never carried the guard's command
+  or its enabled flag, so the dispatch read "guard off" every cycle while the
+  tracker said "engaged". The observer surface could not tell: the standing
+  re-publish names the same service as a command. The pipeline's context now
+  rides Step 6's fleet state like the charger view does, a withheld row says
+  whether it is a command or a re-publish, and a cycle-level test runs the
+  real pipeline and asks whether the adapter was called.
+- ✨ **Charge pacing holds headroom before the meter closes** (#926).
+- ✨ **The house as a battery sink** (#879) — keep the pack through cheap
+  hours, spend it on the house in expensive ones. Off by default.
+- ✨ **A morning EV window** (#892) — empty the pack into the car before
+  departure, down to a floor, when the forecast refills it. Off by default.
+- 🐛 **A negative export price was invisible to the planner** (#871). The day
+  ledger clamped the export rate at zero, so an hour you PAY to export and an
+  hour you are paid the same looked identical when deciding where a surplus kWh
+  should go. The sign now survives into the slot; an absent rate still reads 0.
+- 🐛 **The EV plan strip ended before the night it was describing** (#967,
+  reported by @alexmc1510). Reading the card in the morning, the strip's fixed
+  12-hour window stopped at 21:37 — so a charge booked for 00:00 against a
+  06:00 deadline was entirely past its right edge, and all that showed was a
+  wait band opening at dusk and running off the end ("wait status start around
+  9pm, not 00:00"). The window now ends where the EV's own plan ends, rounded
+  up to the next whole hour and capped at the 24 h the planner itself looks
+  ahead; it stays 12 h whenever the plan fits inside it. The strip's title and
+  help say how far it actually looks, and a daytime start drawn from the
+  preview is labelled an estimate wherever its hour came from.
+
 # [2.1.0-beta.29] — 17.09.2026
 
 - 🐛 **The EV plan strip ended before the night it was describing** (#967,

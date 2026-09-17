@@ -838,6 +838,15 @@
       "daily_grid_export_energy": {
         "name": "Heute Export"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Eingespeist bei negativem Preis"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Kosten der Einspeisung bei negativem Preis"
+      },
+      "export_guard_state": {
+        "name": "Einspeise-Wächter"
+      },
       "daily_grid_import_energy": {
         "name": "Heute Import"
       },
@@ -1417,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Batterie-Ladetempo"
+      },
+      "export_guard_enabled": {
+        "name": "Einspeise-Wächter"
+      },
+      "export_guard_override_external": {
+        "name": "Einspeise-Wächter: externe Steuerung übergehen"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Haus als Batterie-Senke"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Morgen-Fenster für das E-Auto"
       }
     },
     "number": {
@@ -1434,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Batterie-Unterstützung Min. Solarüberschuss"
+      },
+      "export_guard_engage_s": {
+        "name": "Einspeise-Wächter Einschaltverzögerung (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Einspeise-Wächter Freigabeverzögerung (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Morgen-Fenster E-Auto (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Morgen-Entladeuntergrenze (%)"
       },
       "regulation_offset": {
         "name": "Regelungsoffset"

@@ -38,11 +38,13 @@ _LOGGER = logging.getLogger(__name__)
 #:   coordinator/storage.py  -> f"{DOMAIN}_{entry_id}_energy" / "_daily"
 #:   __init__.py             -> f"sem_seen_version_{entry_id}"
 #:   coordinator/coordinator.py (#949) -> f"sem.pacing.{entry_id}"
+#:   coordinator/coordinator.py (#955) -> f"sem.export_guard.{entry_id}"
 _PER_ENTRY_STORE_FORMATS: tuple[str, ...] = (
     f"{DOMAIN}_{{entry_id}}_energy",
     f"{DOMAIN}_{{entry_id}}_daily",
     "sem_seen_version_{entry_id}",
     "sem.pacing.{entry_id}",
+    "sem.export_guard.{entry_id}",
 )
 
 #: Per-entry stores whose key carries a SECOND scope (a battery id), so they

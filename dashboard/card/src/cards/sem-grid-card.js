@@ -27,6 +27,7 @@ const WATCHED_SUFFIXES = [
     'monthly_grid_import_energy', 'monthly_grid_export_energy',
     'consecutive_peak_15min', 'monthly_consecutive_peak',
     'current_vs_peak_percentage', 'target_peak_limit', 'peak_margin', 'peak_trend',
+    'export_guard_state',   // arc #921 — the limit at the meter, mirrored from the peak guard
     'load_management_status', 'loads_currently_shed', 'available_load_reduction',
     'controllable_devices_count',
     'tariff_current_import_rate', 'tariff_current_export_rate', 'tariff_price_level',
@@ -141,6 +142,7 @@ class SEMGridCard extends SEMLitBase {
 
         // Peak management
         const peakPct = this._val('current_vs_peak_percentage');
+        const guardState = this._val('export_guard_state');   // arc #921
         const peak15 = this._val('consecutive_peak_15min');
         const monthlyPeak = this._val('monthly_consecutive_peak');
         const peakLimit = this._val('target_peak_limit');
@@ -363,6 +365,8 @@ class SEMGridCard extends SEMLitBase {
                         <div class="metric-row">
                             <span class="metric-label">${this._t('trend')}</span>
                             <span class="metric-val">${peakTrend ? this._t(peakTrend) : '—'}</span>
+                            ${guardState && guardState !== 'unknown' && guardState !== 'unavailable' ? html`
+                                <div class="row" style="opacity:.85"><span>${this._t('export_guard')}</span><span>${guardState}</span></div>` : nothing}
                         </div>
                     </div>
 

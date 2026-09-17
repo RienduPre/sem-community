@@ -838,6 +838,15 @@
       "daily_grid_export_energy": {
         "name": "Dnes dodávka"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Exportováno při záporné ceně"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Náklady na export při záporné ceně"
+      },
+      "export_guard_state": {
+        "name": "Hlídač exportu"
+      },
       "daily_grid_import_energy": {
         "name": "Dnes odběr"
       },
@@ -1417,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Hlídač exportu"
+      },
+      "export_guard_override_external": {
+        "name": "Hlídač exportu: ignorovat externí řízení"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Dům jako odběratel baterie"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Ranní okno pro EV"
       }
     },
     "number": {
@@ -1434,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Podpora baterie – min. solární přebytek"
+      },
+      "export_guard_engage_s": {
+        "name": "Hlídač exportu: zpoždění sepnutí (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Hlídač exportu: zpoždění uvolnění (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Ranní okno EV (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Ranní dno vybíjení (%)"
       },
       "regulation_offset": {
         "name": "Regulační odchylka"

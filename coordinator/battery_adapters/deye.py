@@ -57,7 +57,7 @@ from uuid import uuid4
 
 from homeassistant.util import dt as dt_util
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 from .base import BatteryControlAdapter
 from .deye_schedule import (
     DeyeScheduleError,
@@ -442,6 +442,77 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         ok = await self._write_and_verify(
             self._system_work_mode_entity, selling, "select")
         return bool(ok)
+
+    # ── (#955) export control is the System Work Mode select on Deye ─────
+    async def command_limit_export(self, watts: float) -> None:
+        """Deye's zero-export is a MODE, not a wattage: any cap selects
+        ``zero_export_to_load``. The prior mode is captured exactly as the
+        force-discharge path captures it, and restored on release."""
+        if not self._system_work_mode_control:
+            # (review) the same consent command_force_discharge asks for: the
+            # entity is persisted even when the control checkbox is off, and a
+            # select SEM was never allowed to drive must not be driven here.
+            raise NotImplementedError("Deye system work mode control is off — SEM may not drive it")
+        ent = self._system_work_mode_entity
+        target = (self._system_work_mode_options or {}).get("zero_export_to_load")
+        if not ent or not target:
+            raise NotImplementedError("no Deye system work mode select configured")
+        current = self._get_state(ent)
+        if current == target:
+            self._last_export_limit_w = 0.0
+            return
+        if current and current in self._system_work_mode_options.values():
+            self._export_mode_prior = str(current)
+        if not await self._write_and_verify(ent, target, "select"):
+            raise RuntimeError("Deye work mode write did not verify")
+        self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
+
+    def export_release_recipe(self):
+        ent = self._system_work_mode_entity
+        prior = getattr(self, "_export_mode_prior", None)
+        if not ent or not prior:
+            return None
+        return {"domain": "select", "service": "select_option",
+                "data": {"entity_id": ent, "option": prior}}
+
+    def adopt_export_prior(self, recipe) -> None:
+        self._export_mode_prior = (recipe or {}).get("data", {}).get("option") or None
+        self._last_export_limit_w = 0.0
+
+    async def command_release_export(self) -> None:
+        ent = self._system_work_mode_entity
+        prior = getattr(self, "_export_mode_prior", None)
+        if not ent:
+            raise NotImplementedError("no Deye system work mode select configured")
+        if prior and self._get_state(ent) != prior:
+            if not await self._write_and_verify(ent, prior, "select"):
+                raise RuntimeError("Deye work mode restore did not verify")
+        self._export_mode_prior = None
+        self._last_export_limit_w = None
+        self._last_export_intent = ExportIntent.RELEASE
+
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) The work-mode select that WOULD be written — see the base class."""
+        if not self._system_work_mode_control:
+            return {"service": None, "data": None,
+                    "why": "Deye system work mode control is off — SEM may not drive it"}
+        ent = self._system_work_mode_entity
+        target = (self._system_work_mode_options or {}).get("zero_export_to_load")
+        if not ent or not target:
+            return {"service": None, "data": None,
+                    "why": "no Deye system work mode select configured"}
+        if intent is ExportIntent.LIMIT:
+            option = target
+        else:
+            # the prior the real release restores — captured, else what the
+            # select reads now (an observer rig has never cut)
+            option = getattr(self, "_export_mode_prior", None) or self._get_state(ent)
+            if not option:
+                return {"service": None, "data": None,
+                        "why": f"{ent} is unreadable — nothing to restore to"}
+        return {"service": "select.select_option",
+                "data": {"entity_id": ent, "option": str(option)}, "why": None}
 
     async def command_stop_force_discharge(self) -> bool:
         """(#827) Restore the pre-spend mode. With no captured prior (a

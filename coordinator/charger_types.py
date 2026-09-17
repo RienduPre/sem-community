@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Dict
 
 from .plan_verdict import PlanVerdict
 
@@ -336,6 +336,34 @@ class BatteryIntent(Enum):
     ``decide_battery`` (highest precedence)."""
 
 
+class ExportIntent(Enum):
+    """(#955) What ``actuate_export`` should ask the inverter to do.
+
+    A HOUSE axis, not a per-battery one: the meter is one meter, and no
+    per-device decider owns net export — it is solar, battery, EV and loads
+    together. That is why this is its own intent rather than a field on
+    :class:`BatteryDecision`.
+    """
+
+    NONE = "none"
+    """Nothing to write this cycle — the guard is idle, holding, or off."""
+
+    LIMIT = "limit_export"
+    """Cap grid feed-in at ``watts`` (0.0 for a closed meter)."""
+
+    RELEASE = "release_export"
+    """Put the feed-in limit back to what SEM found."""
+
+
+@dataclass(frozen=True)
+class ExportDecision:
+    """One cycle's export intent — the output of ``decide_export(fleet)``."""
+
+    intent: ExportIntent = ExportIntent.NONE
+    watts: float = 0.0
+    reason: str = ""
+
+
 @dataclass(frozen=True)
 class BatteryDecision:
     """The output of ``decide_battery(view)`` for ONE battery this
@@ -433,6 +461,13 @@ class BatteryView:
     cycle regardless of the live economics verdict."""
 
     forecast_sell: "Any" = None
+    #: (arc #921) the cycle's sink verdicts — {sink: SinkVerdict}; None/{} = every sink OPEN.
+    sink_verdicts: "Any" = None
+    #: (#892) the morning window is genuinely OPEN this cycle: the switch is on
+    #: AND the verdict is open. decide_battery reads THIS, never the raw verdict —
+    #: the disabled sentinel is also "open" (legacy rule) and must not lift the
+    #: EV protection clamp (review of the first cut: it did, on every install).
+    morning_window_open: bool = False
     """(#778) ``(in_block, per_battery_power_w)`` from ``forecast_sell_gate``
     — the SPEND twin of ``arbitrage_sell``, fleet-split by the pipeline.
     decide_battery consults THIS gate when the verdict carries
@@ -709,6 +744,23 @@ class FleetContext:
     production. Added to the surplus exactly like measured solar;
     0.0 whenever the probe is off/idle."""
 
+    sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    """(arc #921) the cycle's sink verdicts — ``{sink: SinkVerdict}``. Empty
+    until computed, and an empty dict reads as "every sink OPEN" everywhere."""
+
+    export_command: Any = None
+    """(#955) this cycle's ``ExportCommand`` from the tracker, or None. The
+    house's meter limit is decided from THIS by ``decide_export(fleet)`` — no
+    per-battery view owns net export."""
+
+    export_guard_enabled: bool = False
+    """(#955) the user's switch, carried beside the command so the decider
+    needs nothing but the fleet."""
+
+    ev_morning_window_open: bool = False
+    """(#892) the ev sink verdict is OPEN this cycle — the pack may feed the
+    car below the solar gate, down to the drain floor."""
+
     home_w: float = 0.0
     """Home consumption (W). Pre-priority-attribution this was
     the slack variable; post-#349 it's a first-class demand."""
@@ -968,6 +1020,16 @@ class FleetCycleState:
     # treats exactly like measured solar (see coordinator/curtailment.py).
     # 0.0 = probe off/idle — the entire feature disappears from the math.
     curtailment_grant_w: float = 0.0
+    #: (arc #921) the cycle's sink verdicts, computed once in
+    #: ``_build_fleet_cycle_state`` and read by every consumer from here.
+    sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    #: (#955) this cycle's export command from ``ExportGuard`` — what the pure
+    #: ``decide_export`` turns into an intent. ``None`` until the first tick.
+    export_command: Any = None
+    export_guard_enabled: bool = False
+    #: (#892) the ev sink verdict is OPEN this cycle — a morning window the
+    #: user opened; the charger side may offer the pack below the solar gate.
+    morning_window_open: bool = False
 
 
 @dataclass(frozen=True)

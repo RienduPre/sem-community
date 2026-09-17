@@ -79,6 +79,29 @@ SWITCH_TYPES = [
         entity_category=EntityCategory.CONFIG,
         icon="mdi:car-electric",
     ),
+    # (arc #921) Four switches, all default OFF — the arc ships asleep like
+    # the spending arc (#778) and charge pacing (#820), and is woken
+    # deliberately per install. Persisted in PERSISTED_FLAG_DEFAULTS.
+    SwitchEntityDescription(
+        key="export_guard_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:transmission-tower-off",
+    ),
+    SwitchEntityDescription(
+        key="export_guard_override_external",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:shield-alert-outline",
+    ),
+    SwitchEntityDescription(
+        key="battery_house_sink_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:home-lightning-bolt-outline",
+    ),
+    SwitchEntityDescription(
+        key="ev_morning_window_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:car-clock",
+    ),
 ]
 
 # (#778 phase 6) Switch key -> its slot in the nested ``battery_permissions``

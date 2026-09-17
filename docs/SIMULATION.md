@@ -217,9 +217,52 @@ Waiting for the real evening is not a simulation. SEM's day/night clock is
   decision, and `withheld_commands` (#855) for the exact service and payload
   a charger would have received. A charger case is judged on the wire, not
   on the reason string.
+- The meter has the same row (#955): `withheld_commands.export_guard` names the
+  exact call the export guard would make — `huawei_solar.set_zero_power_grid_connection`
+  with the INVERTER device on a cut, the captured prior's restore on a release
+  (`set_maximum_feed_grid_power_percent 100` under a `Limited to 100 %` mode) — or
+  the refusal in the verb's own words (`cannot read the inverter's active-power
+  mode …`, `under external scheduling …`). A held cut keeps its row every cycle.
+  Judge the export guard on this row, never on `would_decisions` alone.
 
 `~/bin/sem-sim-compress.sh <host> <floor-hours> [step] [charger-mode]` does
 all of this with auto-restore, and refuses to run unless observer mode is on.
+
+## Proving a hardware write end to end — the export guard, 17.09.2026
+
+Observer mode proves the decision and the exact call; it cannot prove that the
+call lands. When a write must be seen on the hardware, this is the shape that
+worked, on the shared rig, without touching a car or a battery:
+
+1. **Make the inputs synthetic, keep the output real.** Point the grid at two
+   synthetic split-grid sensors (`grid_import_power_entity` /
+   `grid_export_power_entity`) and the price at a synthetic feed-in sensor, and
+   hold them with a bounded re-post. A fake 2 kW of export is enough to engage
+   the guard; nothing physical has to flow, the register is the proof.
+2. **Run it in observer mode first** and read the LOG, not only the surface:
+   the seam logs `OBSERVER · WOULD LIMIT_EXPORT …` when its command branch
+   runs. A `withheld_commands.export_guard` row with `standing: true` is the
+   roster re-publishing a held cut — it looks like a command and is not. The
+   guard that never wrote (bug class 94) was found by the absence of that log
+   line, not by anything on the surface.
+3. **Before observer goes off, judge every other device on what would hit the
+   wire.** Withheld commands for the KEBA must be empty, the next planned
+   charge window must be hours away, the battery decision must be one this
+   host cannot write (no discharge-control entity), loads on hold. The shared
+   KEBA and LUNA are the whole risk; observer off makes this host a second
+   controller on them.
+4. **Then the live pass, bounded.** Observer off with the guard *idle*; close
+   the price; the guard engages after its delay and writes; open the price;
+   it releases after its delay and restores the mode it found. Watch the car's
+   charging sensor every sample and flip observer back on the moment it turns
+   on. The whole window is six minutes.
+5. **Read the register from a second host.** The writing host's mode sensor
+   refreshes on the write and then times out for ~60 s; another HA host on the
+   same inverter lags by up to ~15 minutes. `homeassistant.update_entity` on
+   that sensor forces a read — that is the register truth. Twice on 17.09:
+   cut → *Zero Power*, release → *Limited to 100 %*.
+6. **Put it back.** Observer on, the store restored to the real meter, one
+   restart; and write the timeline into the branch's challenge record.
 
 ## What this cannot test
 

@@ -838,6 +838,15 @@
       "daily_grid_export_energy": {
         "name": "Export idag"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Exporterat vid negativt pris"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Kostnad för export vid negativt pris"
+      },
+      "export_guard_state": {
+        "name": "Exportvakt"
+      },
       "daily_grid_import_energy": {
         "name": "Import idag"
       },
@@ -1417,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Exportvakt"
+      },
+      "export_guard_override_external": {
+        "name": "Exportvakt: åsidosätt extern styrning"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Huset som batterisänka"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Morgonfönster för elbilen"
       }
     },
     "number": {
@@ -1434,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Batteristöd – min. solöverskott"
+      },
+      "export_guard_engage_s": {
+        "name": "Exportvakt: inkopplingsfördröjning (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Exportvakt: frigivningsfördröjning (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Morgonfönster elbil (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Urladdningsgolv på morgonen (%)"
       },
       "regulation_offset": {
         "name": "Regleringsoffset"

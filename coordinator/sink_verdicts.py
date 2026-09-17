@@ -1,0 +1,158 @@
+"""arc #921 — a sink has a STATE, not a price.
+
+SEM's balance layer reasons about energy. Price already decides WHEN in SEM
+(cheap hours, negative-import force charge, the arbitrage floor) through the
+LEVEL the tariff provider classifies; it must not start deciding HOW MUCH.
+So the arc's one model is a per-cycle verdict per destination a kWh can take:
+
+    OPEN   — energy may go there (the sink's own gates still apply)
+    HELD   — it may, but not now: keep the energy where it is
+    CLOSED — it may not; for the grid this is ENFORCED by the export guard
+
+Computed ONCE per cycle here, threaded into ``FleetCycleState``, and consumed
+by the routers (surplus, decide_battery, pacing, the plan). No consumer
+re-derives a verdict from a price. Pure: no hass, no clock of its own.
+
+An UNKNOWN price is OPEN, never CLOSED (#925, class 86): "I could not ask" is
+not "the meter is hostile", and acting on a missing price would push energy
+around for no reason.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional, Tuple
+
+OPEN = "open"
+HELD = "held"
+CLOSED = "closed"
+
+SINKS = ("grid_export", "battery", "house", "ev")
+
+#: Tariff levels under which the pack is KEPT rather than spent on the house.
+_KEEP_LEVELS = ("cheap", "very_cheap", "negative")
+
+
+@dataclass(frozen=True)
+class SinkVerdict:
+    sink: str
+    state: str
+    reason: str
+    until: Optional[datetime] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"sink": self.sink, "state": self.state, "reason": self.reason,
+                "until": self.until.isoformat() if self.until else None}
+
+
+class _Verdicts(dict):
+    """A plain dict with one convenience for readers and tests."""
+
+    def state_of(self, sink: str) -> str:
+        return self[sink].state
+
+
+def _level(p) -> str:
+    lv = getattr(p, "level", None)
+    return str(getattr(lv, "value", lv) or "").lower()
+
+
+def next_closed_window(now: datetime, upcoming) -> Optional[Tuple[datetime, datetime]]:
+    """The first run of NEGATIVE slots at or after ``now`` as ``(start, end)``.
+
+    ``end`` is the closing boundary — the first non-negative slot's start, or
+    the last negative slot plus its cadence when the curve ends negative. A run
+    already in progress starts at ``now``. ``None`` when there is none, when
+    the curve is empty, and when it cannot be read — absence is OPEN.
+    """
+    pts = [p for p in (upcoming or []) if getattr(p, "timestamp", None) is not None]
+    pts.sort(key=lambda p: p.timestamp)
+    if not pts:
+        return None
+    gaps = [b.timestamp - a.timestamp for a, b in zip(pts, pts[1:], strict=False)
+            if b.timestamp > a.timestamp]
+    slot = min(gaps) if gaps else timedelta(hours=1)
+    start = end = None
+    for p in pts:
+        if p.timestamp + slot <= now:
+            continue                                   # already over
+        if _level(p) == "negative":
+            if start is None:
+                start = max(now, p.timestamp)
+            end = p.timestamp + slot
+        elif start is not None:
+            return start, p.timestamp
+    return (start, end) if start is not None else None
+
+
+def sink_verdicts(*, now: datetime, tariff_level: Optional[str], upcoming,
+                  export_rate: Optional[float], export_rate_known: bool,
+                  export_guard_enabled: bool,
+                  house_sink_enabled: bool, morning_window_enabled: bool,
+                  departure: Optional[datetime], morning_hours: float,
+                  forecast_refills_pack: bool,
+                  pacing_horizon_end: Optional[datetime]) -> Dict[str, SinkVerdict]:
+    """One verdict per sink. Unknown is OPEN, never CLOSED."""
+    level = str(tariff_level or "").lower()
+    out: _Verdicts = _Verdicts()
+    readable = export_guard_enabled and export_rate_known and export_rate is not None
+    # The grid closes on the EXPORT price's sign — what the meter pays or
+    # charges for a kWh leaving the house. On a spot feed-in that is the
+    # same curve as the import level; on a static feed-in with a dynamic
+    # import it is not, and a negative IMPORT hour must not close the meter
+    # for a kWh that still earns 7.5 ct. The level still drives the house.
+    try:
+        export_negative = readable and float(export_rate) < 0.0
+    except (TypeError, ValueError):
+        export_negative = False
+    win = next_closed_window(now, upcoming) if readable else None
+
+    # grid export — CLOSED only on a READ negative level with the guard on
+    if not export_guard_enabled:
+        out["grid_export"] = SinkVerdict("grid_export", OPEN, "export guard off")
+    elif not export_rate_known:
+        out["grid_export"] = SinkVerdict(
+            "grid_export", OPEN, "export price unknown — not closing on a guess")
+    elif export_negative:
+        out["grid_export"] = SinkVerdict(
+            "grid_export", CLOSED, "export price negative — the meter is closed",
+            until=win[1] if win else None)
+    else:
+        out["grid_export"] = SinkVerdict(
+            "grid_export", OPEN, "export price not negative",
+            until=win[0] if win else None)
+
+    # battery — HELD headroom when a CLOSED window starts inside the pacing horizon (#926)
+    if win and pacing_horizon_end is not None and win[0] < pacing_horizon_end:
+        out["battery"] = SinkVerdict(
+            "battery", HELD, "hold headroom — the meter closes before the day ends",
+            until=win[0])
+    else:
+        out["battery"] = SinkVerdict("battery", OPEN, "fill as the day model says")
+
+    # house — spent on the house in EXPENSIVE hours, kept in CHEAP/NEGATIVE ones (#879)
+    if not house_sink_enabled:
+        out["house"] = SinkVerdict(
+            "house", OPEN, "house sink off — inverter self-consumption rule")
+    elif level in _KEEP_LEVELS:
+        out["house"] = SinkVerdict(
+            "house", HELD, f"{level} hour — let the house import, keep the pack")
+    else:
+        out["house"] = SinkVerdict(
+            "house", OPEN, f"{level or 'unknown'} hour — the pack may cover the house")
+
+    # ev — a morning window before departure, if the sun refills the pack today (#892)
+    if not morning_window_enabled:
+        out["ev"] = SinkVerdict("ev", OPEN, "legacy assist rule")
+    elif departure is None:
+        out["ev"] = SinkVerdict("ev", HELD, "no departure time configured")
+    elif not forecast_refills_pack:
+        out["ev"] = SinkVerdict("ev", HELD, "forecast will not refill the pack today")
+    else:
+        opens = departure - timedelta(hours=float(morning_hours or 0.0))
+        if now < opens or now >= departure:
+            out["ev"] = SinkVerdict("ev", HELD, "outside the morning window", until=opens)
+        else:
+            out["ev"] = SinkVerdict(
+                "ev", OPEN, "morning window — empty the pack into the car", until=departure)
+    return out

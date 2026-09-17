@@ -838,6 +838,15 @@
       "daily_grid_export_energy": {
         "name": "Today Export"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Exported while price negative"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Cost of exporting at a negative price"
+      },
+      "export_guard_state": {
+        "name": "Export guard"
+      },
       "daily_grid_import_energy": {
         "name": "Today Import"
       },
@@ -1417,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Export guard"
+      },
+      "export_guard_override_external": {
+        "name": "Export guard: override external scheduling"
+      },
+      "battery_house_sink_enabled": {
+        "name": "House as a battery sink"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Morning EV window"
       }
     },
     "number": {
@@ -1434,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Battery Assist Min Solar Surplus"
+      },
+      "export_guard_engage_s": {
+        "name": "Export guard engage delay (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Export guard release delay (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Morning EV window (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Morning EV drain floor (%)"
       },
       "regulation_offset": {
         "name": "Regulation Offset"

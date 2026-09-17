@@ -480,6 +480,26 @@ SENSOR_TYPES = [
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
     ),
+    # (#871, arc #921) What a hostile meter cost today. Both stay at 0.0 on a
+    # fixed feed-in tariff, which is every install until someone opts into spot.
+    SensorEntityDescription(
+        key="daily_grid_export_negative_kwh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="daily_grid_export_negative_cost",
+        state_class=SensorStateClass.TOTAL,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    # (#955) the export guard's state: idle | holding | engaged | releasing | refused
+    SensorEntityDescription(
+        key="export_guard_state",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower-off",
+    ),
     SensorEntityDescription(
         key="daily_battery_charge_energy",
         device_class=SensorDeviceClass.ENERGY,
@@ -2322,6 +2342,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
     # live state (cards still read them) while excluding them from the recorder.
     _unrecorded_attributes = frozenset({
         "devices",
+        # (arc #921) live-card helpers, re-serialised every cycle
+        "sink_verdicts",
+        "export_guard",
         "anti_cycle_bounds",   # (#914) a constant off consts/bounds.py
         "device_list",
         "per_charger_states",
@@ -2847,6 +2870,12 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 # Observed phase model (#804 Phase A) — {cid: {active_phases,
                 # switch_entity, switch_valid}}.
                 "per_charger_phases": _per_charger_phases,
+                # (arc #921) the cycle's sink verdicts — {sink: {state, reason,
+                # until}} — and the export guard's own state. The plan strip and
+                # the grid card read these; the scalar twin is
+                # ``sensor.sem_export_guard_state``.
+                "sink_verdicts": self.coordinator.data.get("sink_verdicts") or {},
+                "export_guard": self.coordinator.data.get("export_guard") or {},
             })
         elif self.entity_description.key in (
             "roi_payback_years", "roi_annual_savings",

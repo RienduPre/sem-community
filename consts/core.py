@@ -167,6 +167,11 @@ DEFAULT_MIN_SOLAR_POWER: Final = 1000  # Watts
 DEFAULT_MIN_EXCESS_POWER: Final = 500  # Watts
 DEFAULT_BATTERY_ASSIST_MAX_POWER: Final = 4500  # Watts — max battery discharge for EV assist
 DEFAULT_BATTERY_ASSIST_MIN_SURPLUS: Final = 1200  # Watts — solar surplus required before battery assists the EV (below this, battery is off-limits to the car)
+# (arc #921) the export guard's two holds, the morning EV window and its drain floor
+DEFAULT_EXPORT_GUARD_ENGAGE_S: Final = 120      # seconds a NEGATIVE level must hold before the cut
+DEFAULT_EXPORT_GUARD_RELEASE_S: Final = 300     # seconds an OPEN meter must hold before the release
+DEFAULT_EV_MORNING_WINDOW_HOURS: Final = 2.0    # hours before departure the pack may feed the car
+DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC: Final = 50  # % the morning window may drain the pack to
 DEFAULT_BATTERY_CAPACITY_KWH: Final = 15  # kWh — total usable battery capacity
 
 # ============================================

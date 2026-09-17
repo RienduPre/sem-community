@@ -838,6 +838,15 @@
       "daily_grid_export_energy": {
         "name": "Aujourd'hui Export"
       },
+      "daily_grid_export_negative_kwh": {
+        "name": "Exporté à prix négatif"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Coût de l'export à prix négatif"
+      },
+      "export_guard_state": {
+        "name": "Garde d'export"
+      },
       "daily_grid_import_energy": {
         "name": "Aujourd'hui Import"
       },
@@ -1417,6 +1426,18 @@
       },
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
+      },
+      "export_guard_enabled": {
+        "name": "Garde d'export"
+      },
+      "export_guard_override_external": {
+        "name": "Garde d'export : ignorer le pilotage externe"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Maison comme puits de batterie"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Fenêtre matinale VE"
       }
     },
     "number": {
@@ -1434,6 +1455,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Assistance batterie – surplus solaire min."
+      },
+      "export_guard_engage_s": {
+        "name": "Garde d'export : délai d'engagement (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Garde d'export : délai de libération (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Fenêtre matinale VE (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Plancher de décharge matinal (%)"
       },
       "regulation_offset": {
         "name": "Offset Régulation"

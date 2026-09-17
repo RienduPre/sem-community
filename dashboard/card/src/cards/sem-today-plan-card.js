@@ -45,6 +45,9 @@ const KINDS = {
     // #576 — other surplus devices in the same timeline
     device_run:         { icon: 'mdi:power-plug',        color: '#5BC8D8' },
     device_done:        { icon: 'mdi:check-circle',      color: '#8DC892' },
+    // arc #921 — the grid stops being a sink while the export price is negative
+    export_closed:      { icon: 'mdi:transmission-tower-off', color: '#f06292' },
+    export_reopens:     { icon: 'mdi:transmission-tower',     color: '#8353d1' },
 };
 
 class SEMTodayPlanCard extends SEMLitBase {

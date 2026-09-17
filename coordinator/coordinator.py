@@ -2650,6 +2650,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             cmds = getattr(dev, "withheld_commands", None)
             if cmds:
                 out[getattr(dev, "device_id", "?")] = list(cmds)
+        # (#955) the meter's row, under the seam's own key — the exact
+        # huawei_solar / number / select call the export guard would make.
+        rows = getattr(self, "_export_withheld", None)
+        if rows:
+            out["export_guard"] = list(rows)
         return out
 
     def _push_observer_mode_to_devices(self) -> None:
@@ -3279,6 +3284,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 self._vpp_battery_override = None
                 self._vpp_shed_loads = False
 
+            await self._ensure_export_guard()   # (#955) before anything reads it
             charging_context = self._build_charging_context(power, energy)
             charging_state = self._state_machine.update_state(charging_context)
 
@@ -4795,6 +4801,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # scalar twin: the sensor's generic value path reads
                 # data[key] directly, and a dict is not a state.
                 result["battery_charge_pacing"] = _cp.get("action") or "idle"
+            _eg = getattr(self, "_export_guard_state", None)
+            if _eg:
+                result["export_guard"] = dict(_eg)
+                result["export_guard_state"] = _eg.get("state") or "idle"
+            _sv = getattr(self, "_sink_verdicts", None) or {}
+            result["sink_verdicts"] = {k: v.to_dict() for k, v in _sv.items()
+                                       if hasattr(v, "to_dict")}
             result["battery_last_night_surplus_kwh"] = _pe.get("battery_last_night_surplus_kwh")
             result["battery_last_night_date"] = _pe.get("battery_last_night_date")
             result["forecast_trust_d1"] = _pe.get("forecast_trust_d1")
@@ -4993,6 +5006,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # same for both chargers?"). Compose one plan per charger;
                 # the fleet ``today_plan`` stays the primary's plan for
                 # sem-today-plan-card and as the card-side legacy fallback.
+                _gv = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
                 _shared_plan_kwargs = dict(
                     now=_now,
                     upcoming_prices=result.get("tariff_upcoming"),
@@ -5004,6 +5018,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     battery_empty_eta=_battery_empty_eta,
                     currency=result.get("tariff_currency", ""),
                     device_runs=self._device_run_rows(_now, _peak_t),
+                    # (arc #921) the grid verdict's until: next closing / reopening
+                    export_closes_at=(
+                        getattr(_gv, "until", None)
+                        if getattr(_gv, "state", "") == "open" else None),
+                    export_reopens_at=(
+                        getattr(_gv, "until", None)
+                        if getattr(_gv, "state", "") == "closed" else None),
                 )
                 _primary_cid = (_dl_pcfg or {}).get("id")
                 # Legacy flat-config installs have no ev_chargers list —
@@ -5816,6 +5837,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # (#953) how long the FREE window still has to run — the
                 # "finish" gate on the cheap-hours grid top-up.
                 daylight_remaining_s=self._daylight_remaining_s_now(),
+                # (#871, arc #921) the loads absorb before anything is clipped
+                grid_closed=bool(getattr(
+                    (getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
+                    "state", "open") == "closed"),
             )
             surplus_data.surplus_total_w = allocation.total_surplus_w
             surplus_data.surplus_distributable_w = allocation.distributable_surplus_w
@@ -6905,6 +6930,41 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         except Exception:  # noqa: BLE001 — no sun frame, no claim
             return None
 
+    # ── arc #921 inputs to the sink verdicts ───────────────────────────
+    def _ev_departure_dt(self):
+        """(#892) The configured departure as a datetime — today, or tomorrow
+        once it has passed — or None when no departure entity is set/readable."""
+        ent = self.config.get("ev_departure_time_entity", "")
+        st = self.hass.states.get(ent) if ent else None
+        if not st or str(getattr(st, "state", "")) in ("unknown", "unavailable", ""):
+            return None
+        try:
+            h, m = (int(x) for x in str(st.state).split(":")[:2])
+        except (TypeError, ValueError):
+            return None
+        now = dt_util.now()
+        dep = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        return dep if dep > now else dep + timedelta(days=1)
+
+    def _forecast_refills_pack(self) -> bool:
+        """(#892) Will today's remaining forecast put back what a morning window
+        takes? Conservative on purpose: an unknown forecast is False."""
+        _fd = getattr(getattr(self, "_forecast_reader", None), "forecast_data", None)
+        remaining = getattr(_fd, "forecast_remaining_today_kwh", None)
+        cap = float(getattr(self, "battery_capacity_kwh", 0.0) or 0.0)
+        if remaining is None or cap <= 0:
+            return False
+        floor = float(self.config.get("battery_morning_drain_floor_soc", 50.0) or 50.0)
+        return float(remaining) >= cap * (1.0 - floor / 100.0)
+
+    def _pacing_horizon_end(self):
+        """(#926) Sunset+10 today as a datetime — the pacer's own horizon."""
+        try:
+            h, m = (int(x) for x in self.time_manager.get_sunset_plus_10_time().split(":"))
+            return dt_util.now().replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:  # noqa: BLE001 — no frame, no horizon
+            return None
+
     def _today_pacing_ledger(self) -> list:
         """(#820) Today's remaining-day slots, or [] outside daylight /
         without a forecast. Same sun frame and home-draw fallback the
@@ -6921,6 +6981,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 return now.replace(hour=h, minute=m, second=0, microsecond=0)
 
             sunrise, sunset = _at(sr_s), _at(ss_s)
+            # (#926) Land full by the EARLIER of sunset and the next closed
+            # meter: every kWh of headroom the pack still has when the export
+            # price turns negative is a kWh the guard does not have to
+            # destroy. The verdict carries the closing time; no price here.
+            _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
+            _until = getattr(_bv, "until", None)
+            if (getattr(_bv, "state", "open") == "held" and _until is not None
+                    and now < _until < sunset):
+                sunset = _until
             _fd = getattr(getattr(self, "_forecast_reader", None),
                           "forecast_data", None)
             day_kwh = getattr(_fd, "forecast_today_kwh", None)
@@ -7209,8 +7278,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                   if soc is None else "none")))
         action = await self._charge_pacing_writer.apply(
             self.hass, entity, cap, observer=self._observer_mode)
+        _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
         self._charge_pacing_state = {
             "enabled": enabled,
+            # (#926) True while the pacer is landing the pack early for a
+            # closing meter — the card can say WHY the cap is tighter.
+            "headroom_for_closed_meter": bool(getattr(_bv, "state", "open") == "held"),
+            "lands_by": (getattr(_bv, "until", None).isoformat()
+                         if getattr(_bv, "state", "open") == "held"
+                         and getattr(_bv, "until", None) is not None else None),
             # The SOC this decision was actually taken on. Published because
             # it is the input that determines the cap, and because it is the
             # value that used to be a cycle stale (and 0.0 on the first cycle
@@ -7575,6 +7651,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             self._forecast_sell_status = None
 
         # Shared fleet context — same for every battery this cycle.
+        _fs = getattr(self, "_cycle_fleet_state", None)   # Step 6's answer (#955)
         fleet = FleetContext(
             solar_w=float(getattr(power, "solar_power", 0.0) or 0.0),
             home_w=float(getattr(power, "home_consumption_power", 0.0) or 0.0),
@@ -7599,6 +7676,23 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # #533: arbitrage market signals, computed once above (None unless
             # arbitrage is being evaluated → dormant until v1.7.4).
             arbitrage=arb_signals,
+            # (#955, found LIVE on .175, 17.09 21:00) The export axis rides the
+            # ONE fleet-state Step 6 computed (`_cycle_fleet_state`, built at
+            # 3288, before this pipeline at 4157). This context is the fleet
+            # `_apply_export_decision` reads, and it carried NEITHER field: the
+            # arc threaded them through build_view's FleetContext — the
+            # charger view — and pinned that site, while this second producer
+            # went on saying "guard off" to decide_export on every cycle. The
+            # seam then only ever re-published the STANDING row, which is
+            # indistinguishable from a command on the observer surface — so
+            # an engaged guard that had written nothing looked proven on two
+            # rigs since 15.09. With observer OFF the log had no "WOULD" line
+            # and no service call, the store no row, the inverter no change.
+            # Bug class: two producers of one context.
+            export_command=getattr(_fs, "export_command", None),
+            export_guard_enabled=bool(getattr(_fs, "export_guard_enabled", False)),
+            sink_verdicts=dict(getattr(_fs, "sink_verdicts", None) or {}),
+            ev_morning_window_open=bool(getattr(_fs, "morning_window_open", False)),
         )
 
         # 2. Source per-battery iteration. Multi-battery installs
@@ -7769,6 +7863,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 plan_gate=self._energy_plan_gate("battery"),
                 # (#638 one-gate C6) the plan's WHEN for the sell, pre-split.
                 arbitrage_sell=_arb_sell,
+                # (arc #921) the cycle's sink verdicts, computed once in the fleet state
+                sink_verdicts=getattr(self, "_sink_verdicts", None) or {},
+                # (#892) pre-gated: the switch AND the verdict, never the raw state
+                morning_window_open=bool(
+                    getattr((getattr(self, "_sink_verdicts", None) or {}).get("ev"),
+                            "state", "") == "open"
+                    and self.config.get("ev_morning_window_enabled", False)),
                 forecast_sell=_fsell,
             )
 
@@ -7813,6 +7914,21 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 and not self.time_manager.is_night_mode()
                 and scheduler.state.value not in ("idle", "not_needed", "not_profitable")):
             scheduler.reset()
+        # (#955) The house's meter limit, after every battery had its say:
+        # ONE decision, ONE seam, ONE adapter — the one that can actually cut,
+        # not whichever was inserted first. Never costs a cycle: a guard that
+        # dies must say so loudly, not vanish (the peak guard's lesson, #864).
+        try:
+            await self._apply_export_decision(fleet)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Export guard FAILED this cycle — no export cap is being "
+                            "applied (#955)", exc_info=True)
+        finally:
+            # The card reads the TRACKER, so it must be refreshed even when the
+            # dispatch blew up — otherwise a failed store write leaves the rig
+            # reading "engaged" while the axis is broken, and silence looks
+            # like health (#925).
+            self._publish_export_guard_state()
 
     async def _maybe_run_scheduler_evaluation(self, power, energy=None) -> None:
         """Trigger the scheduler's ``evaluate()`` at the daily time.
@@ -10680,6 +10796,282 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         )
         return max(0, daily_target - consumed)
 
+    def _export_guard_store(self):
+        """(#955) Where an engaged export cut outlives this lifetime — an HA
+        restart never unloads the entry, and a cut nobody remembers is an
+        inverter stuck at zero feed-in with nothing left that knows why.
+        Scoped to the config entry like every SEM store (cleanup inventories
+        ``sem.export_guard.{entry_id}``)."""
+        entry_id = str(getattr(getattr(self, "config_entry", None), "entry_id", "") or "")
+        if not entry_id:
+            return None
+        try:
+            from homeassistant.helpers.storage import Store
+            return Store(self.hass, 1, f"sem.export_guard.{entry_id}")
+        except Exception:  # noqa: BLE001 — a store never costs a cycle
+            return None
+
+    def export_release_recipes(self) -> dict:
+        """(#955) Per battery, how to undo the cut WITHOUT the adapters —
+        what unload stashes for a removal and what the store carries across
+        a restart. Empty when nothing is engaged or nothing was written."""
+        guard = getattr(self, "_export_guard", None)
+        if (guard is None or not getattr(guard, "_applied", False)
+                or bool(getattr(self, "_observer_mode", False))):
+            return {}
+        out = {}
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                if not adapter.holds_export_cut():
+                    continue   # (#908) SEM never cut this one — nothing of ours to undo
+                rec = adapter.export_release_recipe()
+            except Exception:  # noqa: BLE001
+                rec = None
+            if rec:
+                out[str(bid)] = rec
+        return out
+
+    async def _export_guard_persist(self, engaged: bool) -> None:
+        """Write the cut's existence (and the release recipes) to the store."""
+        store = self._export_guard_store()
+        if store is None:
+            return
+        try:
+            if engaged:
+                await store.async_save({"engaged": True, "since": dt_util.now().isoformat(),
+                                        "recipes": self.export_release_recipes()})
+            else:
+                await store.async_save({"engaged": False})
+        except Exception as exc:  # noqa: BLE001 — a store never costs a cycle
+            _LOGGER.debug("export guard store write failed: %s", exc)
+
+    async def _export_guard_adopt(self, guard) -> None:
+        """First tick of a lifetime: if a previous lifetime engaged the cut,
+        take it over — the guard starts ENGAGED and the adapters get their
+        priors back — so the cut is released when the meter reopens instead
+        of being forgotten."""
+        store = self._export_guard_store()
+        if store is None:
+            return
+        try:
+            rec = await store.async_load() or {}
+        except Exception:  # noqa: BLE001
+            rec = {}
+        if not isinstance(rec, dict) or not rec.get("engaged"):
+            return
+        guard.state = "engaged"
+        # an adopted cut WAS applied — by the previous lifetime — so the
+        # release gate must see it, or the cut could never be handed back.
+        guard._applied = True
+        guard.reason = f"adopted an export cut from a previous lifetime (since {rec.get('since')})"
+        recipes = rec.get("recipes") or {}
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            prior = recipes.get(str(bid))
+            if not prior:
+                continue   # the previous lifetime held nothing on this one
+            try:
+                adapter.adopt_export_prior(prior)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def async_release_export_guard(self, *, reason: str):
+        """(#955, the #908 rule) Put the inverter's feed-in back if — and only
+        if — SEM is the one holding it. Never raises: a teardown that fails
+        half way must still let HA remove the entry. Returns a sentence for
+        the log, or None when there was nothing to release."""
+        guard = getattr(self, "_export_guard", None)
+        if guard is None or not getattr(guard, "_applied", False):
+            # #908 again: a guard that only ever HELD wrote nothing, so a
+            # teardown has nothing to hand back.
+            return None
+        if bool(getattr(self, "_observer_mode", False)):
+            # Observer mode recorded WOULDs and wrote nothing (#936: the rig's
+            # batteries are left exactly as found) — releasing would be the
+            # first real write of the lifetime, on hardware SEM never touched.
+            guard.state = "idle"
+            guard.reason = f"observer — nothing was written, nothing to release ({reason})"
+            return None
+        released = []
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                if not adapter.holds_export_cut():
+                    # (#908/#936) The cut was made through ONE adapter. On a
+                    # mixed fleet (#531) a blanket release would reset a
+                    # feed-in limit its owner set and SEM never touched —
+                    # Huawei's reset needs no prior, so it would have gone
+                    # through silently.
+                    continue
+                await adapter.command_release_export()
+                released.append(str(bid))
+            except Exception as exc:  # noqa: BLE001 — teardown must finish
+                _LOGGER.warning("export guard: could not release %s on %s: %s",
+                                bid, reason, exc)
+        guard.state = "idle"
+        guard.reason = f"released on {reason}"
+        _persist = getattr(self, "_export_guard_persist", None)
+        if callable(_persist):
+            await _persist(False)
+        return (f"export guard released on {reason}: "
+                f"{', '.join(released) or 'nothing to release'}")
+
+    async def _apply_export_decision(self, fleet) -> None:
+        """(#955) Decide the export axis and write it — the whole dispatch.
+
+        Deliberately thin, and deliberately a METHOD: the decision is made by
+        the pure ``decide_export`` and the write by the one ``actuate_export``
+        seam, so all this owns is the order. Inline in the cycle it could not
+        be exercised without a whole coordinator, which is how the first build
+        shipped a guard that released a cut it never made.
+        """
+        from .actuate_export import actuate_export
+        from .charger_types import ExportIntent
+        from .decide_export import decide_export
+        decision = decide_export(fleet)
+        guard = getattr(self, "_export_guard", None)
+        # (#855, the meter) THIS cycle's dry-run rows — a fresh list every
+        # cycle, like the chargers' withheld log: it answers "what would SEM
+        # send NOW", never what it once considered.
+        _rows: list = []
+        refused = await actuate_export(
+            decision, self._export_control_adapter(),
+            observer=self._observer_mode,
+            controller=getattr(self, "_surplus_controller", None),
+            # (#764) the roster is swept every cycle; a held cut has to keep
+            # saying so or it is retired while it is still being held.
+            standing=getattr(guard, "state", None),
+            withheld=_rows)
+        self._export_withheld = _rows
+        if refused and guard is not None:
+            guard.report_refused(refused)   # a refusal is a state (#925)
+        elif decision.intent is not ExportIntent.NONE and not self._observer_mode:
+            # The store remembers the cut across a restart; only a REAL write
+            # may claim it (#936: observer leaves the house exactly as found).
+            persist = getattr(self, "_export_guard_persist", None)
+            if callable(persist):
+                await persist(decision.intent is ExportIntent.LIMIT)
+
+    async def _ensure_export_guard(self) -> None:
+        """(#955) Build the tracker and adopt a prior lifetime's cut, ONCE.
+
+        Awaited by the cycle before anything reads the guard, because a cut
+        restored from the store has to be in place BEFORE the first
+        ``update()`` — the previous build scheduled the adopt as a task from
+        inside the tick, which lands a cycle late and loses the restored cut
+        (#949's lesson: hand back only what SEM commanded — it must first
+        remember that it commanded it).
+        """
+        if getattr(self, "_export_guard_adopted", False):
+            return
+        self._export_guard_adopted = True
+        from .export_guard import ExportGuard
+        if getattr(self, "_export_guard", None) is None:
+            self._export_guard = ExportGuard(
+                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
+                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
+        _adopt = getattr(self, "_export_guard_adopt", None)
+        if callable(_adopt):
+            try:
+                await _adopt(self._export_guard)
+            except Exception:  # noqa: BLE001 — a store that cannot be read is
+                _LOGGER.debug("export guard: no prior cut adopted", exc_info=True)
+
+    def _compute_export_command(self, power, *, now=None) -> None:
+        """(#955) Tick the export tracker and leave its command on the cycle.
+
+        The peak guard's shape (``_compute_peak_slot_allowance`` →
+        ``peak_slot_allowed_w``): no decision here and no write. The pure
+        ``decide_export`` reads the command off the fleet and one seam —
+        ``actuate_export`` — writes it, once, after the battery loop.
+
+        On "last, not first": ``power`` is a fixed per-cycle snapshot and the
+        dispatch still runs after the battery loop, so ticking here changes no
+        input. The guard clips only export the sinks did not absorb in the
+        previous cycle, which under 120 s / 300 s holds is the same statement.
+        """
+        import time as _time
+        from .export_guard import ExportGuard
+        from .sink_verdicts import OPEN
+        if getattr(self, "_export_guard", None) is None:
+            # Only a rig-shaped stand-in reaches here un-adopted: on a real
+            # install ``_ensure_export_guard`` has already run, awaited, this
+            # cycle. Never adopt from inside the tick — a task scheduled here
+            # lands AFTER the update it was supposed to precede, so a restored
+            # cut would be overwritten by an idle first tick.
+            self._export_guard = ExportGuard(
+                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
+                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
+        enabled = bool(self.config.get("export_guard_enabled", False))
+        verdict = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
+        state = getattr(verdict, "state", OPEN) if enabled else OPEN
+        # (#906) an unreadable meter is a BLIND sample (None), never a 0.
+        export_w = (None if getattr(power, "grid_power_unavailable", False)
+                    else float(getattr(power, "grid_export_power", 0.0) or 0.0))
+        self._export_command = self._export_guard.update(
+            _time.monotonic() if now is None else now, state, export_w)
+
+    def _publish_export_guard_state(self) -> None:
+        """(#955) What the card and ``sensor.sem_export_guard_state`` read.
+
+        A different surface from the observer map, not a second mechanism for
+        the same one: ``actuate_export`` publishes the COMMAND under its own
+        key (and ``observer_decisions`` keeps the current would-state until
+        something overwrites it), while this is the guard's LIVE state,
+        refreshed every cycle — which is what makes "it is holding the meter
+        shut right now" readable rather than a one-cycle flash (.175, 16.09).
+        """
+        g = getattr(self, "_export_guard", None)
+        if g is None:
+            return
+        self._export_guard_state = {
+            "enabled": bool(self.config.get("export_guard_enabled", False)),
+            "state": g.state,
+            "reason": g.reason,
+            "would": (g.state if self._observer_mode
+                      and g.state in ("engaged", "releasing", "refused") else None),
+            "repair_wanted": g.repair_wanted,
+            "verdict": getattr(
+                (getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
+                "reason", "no verdict"),
+        }
+
+    def _export_control_adapter(self):
+        """(#955) The adapter that can actually cut this house's export.
+
+        NOT ``_primary_battery_adapter()``: that one is positional
+        (``next(iter(adapters.values()))``) and says nothing about who owns the
+        grid tie. On a #531 mixed fleet — a Sessy AC battery beside a Huawei
+        inverter — the first-inserted adapter may have no export control at
+        all, and offering it the cut would leave the guard ``refused`` forever
+        while the inverter that CAN cut is never asked (#874's shape, for
+        batteries).
+
+        Continuity first: if one adapter is already holding SEM's cut, that
+        is the one — you release what you cut. Then capability: any adapter
+        that OVERRIDES the base's refusing verb. The primary last, so a
+        single-battery install behaves exactly as before and a house whose
+        brand has no export control still gets a REFUSAL with a brand in it
+        rather than "no adapter".
+
+        Not "has a release recipe": Huawei can always produce one (the
+        integration owns the reset), so that test named an inverter SEM had
+        never cut.
+        """
+        adapters = getattr(self, "_battery_adapters", None) or {}
+        if not adapters:
+            return None
+        for adapter in adapters.values():
+            try:
+                if adapter.holds_export_cut():
+                    return adapter
+            except Exception:  # noqa: BLE001 — a brand that cannot answer is not the one
+                continue
+        for adapter in adapters.values():
+            fn = getattr(type(adapter), "command_limit_export", None)
+            owner = getattr(fn, "__qualname__", "").split(".")[0] if fn else ""
+            if owner and owner != "BatteryControlAdapter":
+                return adapter
+        return self._primary_battery_adapter()
+
     def _compute_peak_slot_allowance(self, power) -> None:
         """(#864) The slot-budget allowance — the PREVENTIVE peak bound.
 
@@ -10830,6 +11222,45 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # (#864) The slot-budget allowance — the PREVENTIVE peak bound.
         self._compute_peak_slot_allowance(power)
 
+        # (arc #921) one verdict per sink, computed here and nowhere else. The
+        # export price is read with the SAME tri-state the forecast sell uses:
+        # unreadable is a state, never 0, and never a closed meter.
+        from .sink_verdicts import sink_verdicts
+        _xr, _xr_known = None, False
+        _prov = getattr(self, "_tariff_provider", None)
+        try:
+            if _prov is not None and hasattr(_prov, "get_current_export_rate"):
+                _xr = float(_prov.get_current_export_rate())
+                _xr_known = True
+        except Exception:  # noqa: BLE001 — unreadable is a state, not 0
+            _xr, _xr_known = None, False
+        try:
+            _ups = (getattr(_prov.get_tariff_data(), "upcoming_prices", None)
+                    if _prov is not None else None)
+        except Exception:  # noqa: BLE001
+            _ups = None
+        try:
+            _verdicts = sink_verdicts(
+                now=dt_util.now(), tariff_level=tariff_level, upcoming=_ups,
+                export_rate=_xr, export_rate_known=_xr_known,
+                export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
+                house_sink_enabled=bool(self.config.get("battery_house_sink_enabled", False)),
+                morning_window_enabled=bool(self.config.get("ev_morning_window_enabled", False)),
+                departure=self._ev_departure_dt(),
+                morning_hours=float(self.config.get("ev_morning_window_hours", 2.0) or 2.0),
+                forecast_refills_pack=self._forecast_refills_pack(),
+                pacing_horizon_end=self._pacing_horizon_end(),
+            )
+        except Exception:  # noqa: BLE001 — a verdict bug must not kill a cycle
+            _LOGGER.warning("sink verdicts FAILED this cycle — every sink reads "
+                            "OPEN until it recovers (arc #921)", exc_info=True)
+            _verdicts = {}
+        self._sink_verdicts = _verdicts
+        # (#955) The guard reads THIS cycle's grid verdict, so it ticks after
+        # the verdicts exist — not beside `_compute_peak_slot_allowance`,
+        # where symmetry with the peak guard would have fed it yesterday's
+        # answer. Still only a tick: no decision, no write.
+        self._compute_export_command(power)
         return FleetCycleState(
             power=power,
             config=self.config,
@@ -10855,6 +11286,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             battery_priority=battery_priority,
             battery_commanded=self._battery_commanded(),
             curtailment_grant_w=self._curtailment_grant_w(power),
+            sink_verdicts=_verdicts,
+            export_command=getattr(self, "_export_command", None),
+            export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
+            morning_window_open=bool(
+                getattr(_verdicts.get("ev"), "state", "") == "open"
+                and self.config.get("ev_morning_window_enabled", False)),
         )
 
     def _curtailment_grant_w(self, power) -> float:
@@ -10871,6 +11308,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             if probe is None:
                 probe = CurtailmentProbe()
                 self._curtailment_probe = probe
+            # (#955) While SEM itself limits export, the #743 probe must not go
+            # looking for an inverter "someone else" is limiting: it would
+            # harvest the very energy the guard is deliberately clipping.
+            _eg = getattr(self, "_export_guard", None)
+            if _eg is not None and getattr(_eg, "state", "idle") == "engaged":
+                self._curtailment_last = {"state": "held_by_export_guard", "grant_w": 0.0}
+                return 0.0
             enabled = bool(self.config.get("curtailment_probe_enabled", False))
             if not enabled:
                 # Cheap early-out, but tick once so the state reads 'off'.

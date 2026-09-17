@@ -22,7 +22,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -439,6 +439,78 @@ class BatteryControlAdapter(ABC):
         # command_normal sets _last_intent = NORMAL; override to STOP.
         self._last_error = None
         self._last_intent = BatteryIntent.STOP_FORCE_DISCHARGE
+
+    # ── (#955) export control: the dialect is per brand ──────────────────
+    #: What the adapter last wrote as an export cap; None = released / never.
+    _last_export_limit_w: Optional[float] = None
+    #: The export axis's OWN #538 de-dup marker. Never ``_last_intent``: that
+    #: one belongs to the battery axis, and a shared marker means an export
+    #: write silently un-de-dups the next discharge limit (and vice versa) —
+    #: two axes, two markers, or the register gets rewritten every cycle.
+    _last_export_intent: Optional["ExportIntent"] = None
+
+    async def command_limit_export(self, watts: float) -> None:
+        """Cap grid feed-in at ``watts`` (0 = zero export). Brands without an
+        export control raise ``NotImplementedError`` — the guard records the
+        refusal; it is a state, not a crash."""
+        raise NotImplementedError("this battery adapter has no export control")
+
+    async def command_release_export(self) -> None:
+        """Put the feed-in limit back to what SEM found."""
+        raise NotImplementedError("this battery adapter has no export control")
+
+    def export_release_recipe(self):
+        """(#955) How to undo THIS adapter's export cut without the adapter —
+        ``{"domain","service","data"}`` — persisted so a restart can adopt the
+        cut and a removal can replay the release. None = nothing to undo."""
+        return None
+
+    #: A restore recipe adopted from a previous lifetime's store. It is the
+    #: ONLY record of what that lifetime found, so it outranks anything this
+    #: one can read back — by the time we adopt, the inverter is already
+    #: showing SEM's own cut.
+    _adopted_recipe = None
+
+    def adopt_export_prior(self, recipe) -> None:
+        """(#955) A previous lifetime engaged the cut; take over its prior so
+        ``command_release_export`` restores what SEM originally found.
+
+        KEEP THE RECIPE. It carries the mode the previous lifetime captured,
+        and a brand whose restore is mode-dependent (Huawei) cannot recompute
+        it: reading the inverter now returns SEM's own "Zero Power". Dropping
+        it made the restart path fall back to "Unlimited" — the very defect
+        the capture was added to fix, one lifetime later.
+        """
+        self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
+        if isinstance(recipe, dict) and recipe.get("service"):
+            self._adopted_recipe = dict(recipe)
+
+    def holds_export_cut(self) -> bool:
+        """(#908) Is THIS adapter holding a cut SEM itself made?
+
+        Not the same question as :meth:`export_release_recipe`, which answers
+        "how would I undo one" — Huawei can always answer that (the
+        integration owns the reset), so on a mixed fleet the recipe said yes
+        for an inverter SEM had never touched, and a teardown would have
+        reset a feed-in limit the OWNER set. One cut is made through one
+        adapter; only that one may be handed back.
+        """
+        return self._last_export_intent is ExportIntent.LIMIT
+
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) What the export verb WOULD send this cycle, without sending.
+
+        The export axis's half of #855: an observer rig is judged on what
+        would hit the wire, so the wire must be readable. Returns one row in
+        the ``withheld_commands`` shape — ``{"service": "domain.service",
+        "data": {...}, "why": None}`` — or, when the real verb would refuse
+        before writing, ``{"service": None, "data": None, "why": "<the
+        refusal, in the verb's own words>"}``. Pure: no write, no capture, no
+        marker touched. Brands override; the default is the base refusal.
+        """
+        return {"service": None, "data": None,
+                "why": "this battery adapter has no export control"}
 
     async def command_off(self) -> None:
         """#523 (RienduPre): SEM hands-off this battery.
