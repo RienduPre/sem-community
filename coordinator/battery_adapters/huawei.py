@@ -51,13 +51,36 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
             pass
         return ""
 
-    def _external_scheduling(self) -> bool:
-        """The inverter is under an operator's digital-input / remote schedule:
-        a zero-export write would REPLACE a mode that is not SEM's to replace."""
+    #: States that are the absence of an answer, not an answer.
+    _UNREAD = ("", "unavailable", "unknown", "none")
+
+    def _export_mode_read(self):
+        """The inverter's active-power mode, or ``None`` for UNREAD.
+
+        Three states, never two: a missing entity and an ``unavailable`` one
+        are both "I could not ask", and the caller must not fold that into
+        "no". `.175`'s readback sensor sat ``unavailable`` for two hours on
+        17.09 while the inverter was under DI scheduling the whole time.
+        """
         ent = self._export_readback_entity()
         st = self._hass.states.get(ent) if ent else None
-        mode = str(getattr(st, "state", "") or "").lower()
-        return any(m in mode for m in self._EXTERNAL_MODES)
+        if st is None:
+            return None
+        mode = str(getattr(st, "state", "") or "").strip()
+        return None if mode.lower() in self._UNREAD else mode
+
+    def _external_scheduling(self):
+        """Is the inverter under an operator's digital-input / remote schedule?
+
+        ``True`` / ``False`` / ``None`` — a zero-export write REPLACES this
+        mode rather than sitting beside it, so an unreadable mode is not
+        permission. It used to be: ``unavailable`` matched none of
+        ``_EXTERNAL_MODES`` and the guard cut as if the inverter were free.
+        """
+        mode = self._export_mode_read()
+        if mode is None:
+            return None
+        return any(m in mode.lower() for m in self._EXTERNAL_MODES)
 
     def _export_device_id(self) -> str:
         """The INVERTER device — not the battery one every other call uses.
@@ -130,11 +153,15 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         device_id = self._export_device_id()
         if not device_id:
             raise NotImplementedError("no Huawei battery/inverter device found (inverter_device_id)")
-        if self._external_scheduling() and not bool(
+        external = self._external_scheduling()
+        if external is not False and not bool(
                 self._config.get("export_guard_override_external", False)):
             raise NotImplementedError(
                 "inverter is under external scheduling — an operator's mode is "
-                "not SEM's to replace")
+                "not SEM's to replace"
+                if external
+                else "cannot read the inverter's active-power mode — refusing "
+                     "to replace a mode SEM cannot see")
         w = max(0.0, float(watts))
         if self._last_export_limit_w is not None and abs(self._last_export_limit_w - w) < 1.0:
             return                       # #538 — a repeat is pure cost
@@ -173,15 +200,18 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         scheme entirely, with nothing in SEM aware of it.
         """
         if getattr(self, "_export_prior_mode", None) is not None:
-            return
+            return          # already known — see the note on the release
         ent = self._export_readback_entity()
         st = self._hass.states.get(ent) if ent else None
         if st is None:
             self._export_prior_mode = ("", None)
             return
         attrs = getattr(st, "attributes", None) or {}
+        mode = self._export_mode_read()
+        # UNREAD is recorded as UNREAD — never as the literal word
+        # "unavailable", which would read like a fifth inverter mode.
         self._export_prior_mode = (
-            str(getattr(st, "state", "") or ""),
+            mode or "",
             {"watt": attrs.get("maximum_power_watt"),
              "percent": attrs.get("maximum_power_percent")},
         )
@@ -214,10 +244,34 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
                         "service": "set_maximum_feed_grid_power",
                         "data": {"device_id": device_id,
                                  "power": int(nums["watt"])}}
-        # Unknown or unread: 'Unlimited' is the integration's own reset and the
-        # safest thing left — it can only ever ALLOW more export, never less.
-        return {"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
-                "data": {"device_id": device_id}}
+        return self._uncapped_recipe(device_id)
+
+    @staticmethod
+    def _uncapped_recipe(device_id: str) -> dict:
+        """Take the cap off, in a dialect the hardware accepts.
+
+        Measured on the reference SUN2000 (17.09.2026, .175 against the same
+        inverter PROD talks to): ``reset_maximum_feed_grid_power`` — mode 0,
+        ``Unlimited`` — does not land. The service returns cleanly and the
+        register then reads ``DI Active Scheduling``: a value that call never
+        wrote, so the inverter is choosing its own fallback rather than
+        accepting mode 0. Tried from two different starting modes, three
+        times. The same register through the same code path took mode 7
+        (``set_maximum_feed_grid_power_percent(100)``) and mode 1 without
+        complaint, and mode 7 then held untouched for eight minutes. 100 % of
+        nominal IS the inverter's maximum, so the intent is identical to
+        ``Unlimited`` and only the dialect differs.
+
+        (The write itself takes 17-40 s either way — that is ordinary modbus
+        latency on this link, not a symptom. The refusal is the OUTCOME.)
+
+        So the last resort — prior unknown or unreadable — asks for no cap,
+        never for ``Unlimited``. A prior that was READ as ``Unlimited`` still
+        gets the plain reset: that is what the inverter itself reported.
+        """
+        return {"domain": "huawei_solar",
+                "service": "set_maximum_feed_grid_power_percent",
+                "data": {"device_id": device_id, "power_percentage": 100.0}}
 
     async def command_release_export(self) -> None:
         device_id = self._export_device_id()
@@ -225,12 +279,21 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
             raise NotImplementedError("no Huawei battery/inverter device found (inverter_device_id)")
         # Put back the mode SEM found — NOT always 'Unlimited'. One register,
         # five mutually exclusive values (#908).
-        recipe = self.export_release_recipe() or {
-            "domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
-            "data": {"device_id": device_id}}
+        recipe = self.export_release_recipe() or self._uncapped_recipe(device_id)
         await self._hass.services.async_call(
             recipe["domain"], recipe["service"], dict(recipe["data"]))
-        self._export_prior_mode = None
+        # The prior is KEPT, not cleared. `huawei_solar` polls the
+        # configuration registers on its own slow schedule — PROD's view of
+        # this mode lagged a real write by 7m55s and then 14m21s (measured
+        # 17.09.2026). Clearing it here means the NEXT cut re-reads, and a
+        # cut → release → cut inside that window reads back SEM's OWN
+        # `Zero Power` as the inverter's baseline. The release would then
+        # "restore" the meter shut, and keep restoring it: a latch that
+        # never lets the house export again, with SEM believing it had let
+        # go. The operator's mode is a standing configuration, not a
+        # per-cycle value, so the FIRST honest read is the one to keep.
+        # (`export_release_recipe` already refuses to re-derive for exactly
+        # this reason after a restart, via `_adopted_recipe`.)
         self._adopted_recipe = None
         self._last_export_limit_w = None
         self._last_export_intent = ExportIntent.RELEASE

@@ -224,10 +224,17 @@ class TestTheCutOutlivesALifetime:
 
 
 class TestRecipes:
-    def test_huawei_recipe_is_the_integrations_reset(self):
+    def test_huawei_recipe_with_no_prior_takes_the_cap_off(self):
+        """Not `reset_maximum_feed_grid_power`: mode 0 (`Unlimited`) is
+        REFUSED by the reference SUN2000 — measured 17.09.2026: the call
+        returns cleanly and the register then reads DI Active Scheduling, a
+        value it never wrote. Mode 7 at 100 % of nominal is the same intent
+        and lands."""
         a = HuaweiBatteryAdapter(MagicMock(), {"export_device_id": "dev"})
-        assert a.export_release_recipe() == {"domain": "huawei_solar", "service": "reset_maximum_feed_grid_power",
-                                             "data": {"device_id": "dev"}}
+        assert a.export_release_recipe() == {
+            "domain": "huawei_solar",
+            "service": "set_maximum_feed_grid_power_percent",
+            "data": {"device_id": "dev", "power_percentage": 100.0}}
 
     def test_generic_recipe_needs_a_captured_prior(self):
         a = GenericBatteryAdapter(MagicMock(), {"export_limit_entity": "number.x"})

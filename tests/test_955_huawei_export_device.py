@@ -28,6 +28,12 @@ from custom_components.solar_energy_management.coordinator.battery_adapters.huaw
 INV, BATT, OPT = "inv-dev-id", "batt-dev-id", "opt-dev-id"
 
 
+class _State:
+    def __init__(self, state, watt=None, percent=None):
+        self.state = state
+        self.attributes = {"maximum_power_watt": watt, "maximum_power_percent": percent}
+
+
 def _registry(devices):
     reg = SimpleNamespace(devices=devices)
     return patch(
@@ -47,11 +53,16 @@ def _prod_shaped():
     }
 
 
-def _adapter(battery_device=BATT, config=None):
+def _adapter(battery_device=BATT, config=None, mode="Unlimited"):
     a = HuaweiBatteryAdapter.__new__(HuaweiBatteryAdapter)
     a._hass = MagicMock()
-    a._config = config or {}
+    a._config = {"export_control_readback_entity": "sensor.apc", **(config or {})}
     a._inverter_device_id = battery_device
+    # A READABLE mode by default: since the readback became three-state, an
+    # unreadable one REFUSES the cut, so it is a subject of its own tests
+    # rather than an accident of a fixture that never set it.
+    a._hass.states.get = MagicMock(
+        return_value=None if mode is None else _State(mode))
     return a
 
 
@@ -134,12 +145,6 @@ class TestTheWriteUsesIt:
 
 # ── (#908) the release must restore the mode SEM FOUND, not "Unlimited" ──
 
-class _State:
-    def __init__(self, state, watt=None, percent=None):
-        self.state = state
-        self.attributes = {"maximum_power_watt": watt, "maximum_power_percent": percent}
-
-
 def _with_mode(mode_state):
     a = _adapter(config={"export_device_id": INV,
                          "export_control_readback_entity": "sensor.apc",
@@ -190,13 +195,21 @@ class TestTheReleaseRestoresWhatWasFound:
         assert calls[-1][1] == "set_maximum_feed_grid_power_percent"
         assert calls[-1][2]["power_percentage"] == 60.0
 
-    async def test_an_unreadable_mode_falls_back_to_the_reset(self):
-        """Unknown is not a licence to invent: 'Unlimited' can only ever ALLOW
-        more export than SEM's cut, never less."""
+    async def test_an_unreadable_mode_takes_the_cap_off_in_a_dialect_that_lands(self):
+        """Unknown is not a licence to invent — but it is also no excuse to
+        ask for something the hardware refuses. Measured on the reference
+        SUN2000 (17.09.2026): `reset_maximum_feed_grid_power` (mode 0,
+        Unlimited) returns cleanly and the register then reads DI Active
+        Scheduling — a value that call never wrote. Mode 7 at 100 % is the
+        same intent — 100 % of nominal IS the inverter's maximum — and it
+        lands."""
         a, calls = _with_mode(None)
-        await a.command_limit_export(0.0)
-        await a.command_release_export()
-        assert calls[-1][1] == "reset_maximum_feed_grid_power"
+        with _registry(_prod_shaped()):
+            await a.command_limit_export(0.0)
+            await a.command_release_export()
+        assert calls[-1][1] == "set_maximum_feed_grid_power_percent"
+        assert calls[-1][2]["power_percentage"] == 100.0
+        assert calls[-1][1] != "reset_maximum_feed_grid_power"
 
     async def test_the_prior_is_captured_before_the_cut_not_after(self):
         """Capture after the write would record SEM's own 'Zero Power'."""
@@ -272,3 +285,119 @@ class TestTheRestoreSurvivesARestart:
         await a.command_release_export()
         assert a._adopted_recipe is None
         assert a.holds_export_cut() is False
+
+
+# ── (#955) "I could not ask" is its own answer, not "no" ──
+
+@pytest.mark.asyncio
+class TestAnUnreadableModeIsNotPermission:
+    """`.175`'s `sensor.inverter_active_power_control` sat `unavailable` from
+    05:37 to 07:49 on 17.09 while the inverter was under DI Active Scheduling
+    the whole time. The old `_external_scheduling` lower-cased that string,
+    matched none of `_EXTERNAL_MODES`, and returned False — so the guard
+    would have cut, believing the inverter free, and replaced the operator's
+    mode. Three states, and the cut refuses on two of them."""
+
+    def _no_override(self, mode_state):
+        a = _adapter(config={"export_device_id": INV,
+                             "export_control_readback_entity": "sensor.apc"})
+        a._hass.states.get = MagicMock(return_value=mode_state)
+
+        async def _call(*args, **kw):
+            return None
+        a._hass.services.async_call = MagicMock(side_effect=_call)
+        return a
+
+    async def test_an_unavailable_readback_refuses_the_cut(self):
+        a = self._no_override(_State("unavailable"))
+        with _registry(_prod_shaped()):
+            with pytest.raises(NotImplementedError, match="cannot read"):
+                await a.command_limit_export(0.0)
+        a._hass.services.async_call.assert_not_called()
+
+    async def test_a_readable_free_inverter_is_still_cut(self):
+        a = self._no_override(_State("Unlimited"))
+        with _registry(_prod_shaped()):
+            await a.command_limit_export(0.0)
+        assert a._hass.services.async_call.call_args.args[1] == (
+            "set_zero_power_grid_connection")
+
+    async def test_the_override_still_lets_a_deliberate_cut_through(self):
+        a = self._no_override(_State("unavailable"))
+        a._config["export_guard_override_external"] = True
+        with _registry(_prod_shaped()):
+            await a.command_limit_export(0.0)
+        assert a._hass.services.async_call.called
+
+class TestTheModeReadIsThreeState:
+    def _a(self, mode_state):
+        a = _adapter(config={"export_device_id": INV,
+                             "export_control_readback_entity": "sensor.apc"})
+        a._hass.states.get = MagicMock(return_value=mode_state)
+        return a
+
+    def test_the_three_states_are_distinguishable(self):
+        for state, expected in ((_State("DI Active Scheduling"), True),
+                                (_State("Unlimited"), False),
+                                (_State("unavailable"), None),
+                                (_State("unknown"), None),
+                                (_State(""), None),
+                                (None, None)):
+            assert self._a(state)._external_scheduling() is expected, state
+
+    def test_an_unread_prior_is_recorded_as_unread_not_as_a_mode(self):
+        a = self._a(_State("unavailable"))
+        a._capture_export_prior()
+        assert a._export_prior_mode[0] == ""
+
+
+# ── (#955) the readback LAGS, so a baseline is read once and kept ──
+
+@pytest.mark.asyncio
+class TestASecondCutDoesNotAdoptTheFirstOne:
+    """`huawei_solar` polls the configuration registers on its own slow
+    schedule: PROD's view of this mode lagged a real write by 7m55s, then by
+    14m21s (measured 17.09.2026). The guard's engage/release timers are
+    minutes, so a cut → release → cut lands well inside that window. If the
+    second cut re-read the sensor it would see SEM's OWN `Zero Power` and
+    record it as the inverter's baseline — and the release would then put the
+    meter back to shut, and keep doing so. A latch, with SEM believing it had
+    let go."""
+
+    async def test_the_second_cut_keeps_the_first_captured_prior(self):
+        a = _adapter(config={"export_device_id": INV,
+                             "export_control_readback_entity": "sensor.apc",
+                             "export_guard_override_external": True})
+        calls = []
+
+        async def _call(domain, service, data, *args, **kw):
+            calls.append((domain, service, dict(data)))
+        a._hass.services.async_call = MagicMock(side_effect=_call)
+
+        a._hass.states.get = MagicMock(return_value=_State("DI Active Scheduling"))
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "set_di_active_power_scheduling"
+
+        # the register now echoes SEM's own cut back — the lagging read
+        a._hass.states.get = MagicMock(return_value=_State("Zero Power"))
+        await a.command_limit_export(0.0)
+        await a.command_release_export()
+        assert calls[-1][1] == "set_di_active_power_scheduling", (
+            "the second release adopted SEM's own cut as the baseline")
+        assert a._export_prior_mode[0] == "DI Active Scheduling"
+
+    async def test_an_adopted_recipe_still_wins_over_the_kept_prior(self):
+        """A restart's adopted recipe is the more specific answer and keeps
+        precedence — the kept prior is the within-session half of the same
+        rule, not a replacement for it."""
+        a = _adapter(config={"export_device_id": INV,
+                             "export_control_readback_entity": "sensor.apc",
+                             "export_guard_override_external": True})
+        a._hass.states.get = MagicMock(return_value=_State("Unlimited"))
+        a._capture_export_prior()
+        a._adopted_recipe = {"domain": "huawei_solar",
+                             "service": "set_di_active_power_scheduling",
+                             "data": {"device_id": INV}}
+        assert a.export_release_recipe()["service"] == "set_di_active_power_scheduling"
+

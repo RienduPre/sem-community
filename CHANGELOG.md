@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✨ **A negative export price is a cost, not a free kWh** (#871). Two
   diagnostics measure what a hostile meter cost today, and while the meter is
   closed the loads absorb before anything is clipped.
+- 🔧 **The export guard learned three things from the real inverter** (#955,
+  live writes 17.09). A SUN2000 that reports its active-power mode as
+  `unavailable` is not a SUN2000 that is free to cut: the read is now
+  three-state and the guard refuses to replace a mode it cannot see. The
+  last-resort hand-back stopped asking for `Unlimited` — a mode the reference
+  inverter simply does not accept — and asks for 100 % of nominal instead,
+  which is the same thing in a dialect the hardware takes. And the mode SEM
+  found is captured once and kept: `huawei_solar` polls its configuration
+  registers minutes behind reality, so re-reading before a second cut used to
+  hand back SEM's own zero-export as the inverter's baseline and latch the
+  meter shut.
 - ✨ **Charge pacing holds headroom before the meter closes** (#926).
 - ✨ **The house as a battery sink** (#879) — keep the pack through cheap
   hours, spend it on the house in expensive ones. Off by default.

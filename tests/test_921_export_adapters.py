@@ -58,8 +58,14 @@ class TestTheBaseRefuses:
 
 @pytest.mark.asyncio
 class TestHuawei:
+    #: A READABLE, free inverter — what every test that does not care about
+    #: the mode always meant. Since #955 an UNREADABLE mode refuses the cut
+    #: ("I could not ask" is not "no"), so leaving it out is now a subject,
+    #: not a default; TestAnUnreadableModeIsNotPermission is where it belongs.
+    _FREE = {"sensor.inverter_active_power_control": SimpleNamespace(state="Unlimited")}
+
     def _adapter(self, states=None, override=False):
-        hass = _hass(states)
+        hass = _hass(self._FREE if states is None else states)
         # the INVERTER device — the feed-in verbs validate for it and
         # reject the battery one (#955, found on PROD). Auto-resolution has
         # its own file: tests/test_955_huawei_export_device.py
@@ -74,10 +80,14 @@ class TestHuawei:
         assert ("huawei_solar", "set_zero_power_grid_connection", {"device_id": "dev-huawei"}) in _calls(hass)
         assert a._last_export_intent is ExportIntent.LIMIT
 
-    async def test_release_is_the_integrations_own_reset(self):
+    async def test_release_with_no_captured_prior_takes_the_cap_off(self):
+        """Not `Unlimited`: mode 0 is refused by the reference SUN2000
+        (measured 17.09.2026). Mode 7 at 100 % of nominal is the same intent
+        and it lands — see `HuaweiBatteryAdapter._uncapped_recipe`."""
         a, hass = self._adapter()
         await a.command_release_export()
-        assert ("huawei_solar", "reset_maximum_feed_grid_power", {"device_id": "dev-huawei"}) in _calls(hass)
+        assert ("huawei_solar", "set_maximum_feed_grid_power_percent",
+                {"device_id": "dev-huawei", "power_percentage": 100.0}) in _calls(hass)
         assert a._last_export_intent is ExportIntent.RELEASE
 
     async def test_refuses_under_external_scheduling(self):
@@ -120,8 +130,10 @@ class TestHuawei:
         tests/test_955_huawei_export_device.py for the registry shapes.
         """
         from unittest.mock import patch
-        hass = _hass()
-        a = HuaweiBatteryAdapter(hass, {})
+        hass = _hass(self._FREE)
+        a = HuaweiBatteryAdapter(
+            hass, {"export_control_readback_entity":
+                   "sensor.inverter_active_power_control"})
         a._inverter_device_id = "detected-battery"          # what __init__'s autodetect sets
         reg = SimpleNamespace(devices={
             "detected-battery": SimpleNamespace(
