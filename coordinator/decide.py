@@ -465,11 +465,10 @@ def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
       * the sun is effectively gone (``solar_w < min_solar_w``) — deep
         darkness, nothing to bridge to (#461 part 2);
       * a not-cheap tariff window (#524) — holding imports expensive grid;
-      * the battery can't assist (``battery_soc < buffer_soc``) AND the real
-        EV surplus (solar − home − reserved battery) can't sustain even the
-        minimum charge — solar is high but fully consumed by the house /
-        reserved for a below-buffer battery, so the hold imports grid
-        (PROD 2026-06-27).
+      * the battery can't assist — below buffer, never read (#875), or not
+        permitted to (#778/#885); ``_assist_blocked_why`` owns which — AND
+        the real EV surplus (solar − home − reserved battery) can't sustain
+        even the minimum charge, so the hold imports grid (PROD 2026-06-27).
     Otherwise TRANSIENT (real surplus or battery assist, cheap/unknown
     tariff) → the full bridge is worth it.
     """
@@ -501,18 +500,48 @@ def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
     min_charge_w = int(predict_watts(view.wpa_table, min_amps,
                                      max(1, phases) * max(1, voltage)))
     real_surplus_w = self_consumption_surplus_w(view)
-    battery_cannot_assist = (
-        float(f.battery_soc) < float(f.buffer_soc)
-        or not getattr(f, "battery_soc_known", True)  # (#875) never read
-        or not getattr(f, "battery_may_assist_ev", True)
-    )
-    if battery_cannot_assist and real_surplus_w < min_charge_w:
+    # (#983) WHICH of the three reasons the pack is off the table — named,
+    # not assumed. This gate grew a disjunct in #875 (never read) and another
+    # in #893 (the owner's own permission), but the sentence kept quoting the
+    # SOC comparison it was written for. RienduPre's install (#983) then read
+    # "no battery assist (SoC 98% < buffer 70%)" off a pack sitting at 98 %
+    # against a 70 % buffer: a line its own state refutes, naming a cause
+    # nobody checked, and hiding the switch the reader actually has to flip.
+    # Order = usefulness: an unread SOC makes the comparison meaningless, and
+    # a permission holds whatever the SOC says.
+    battery_assist_blocked = _assist_blocked_why(f)
+    if battery_assist_blocked and real_surplus_w < min_charge_w:
         return False, (
-            f"no battery assist (SoC {f.soc_label} < buffer "
-            f"{f.buffer_soc:.0f}%) + EV surplus {_cw(real_surplus_w)}W "
-            f"< min charge {_cw(min_charge_w)}W"
+            f"no battery assist ({battery_assist_blocked}) + EV surplus "
+            f"{_cw(real_surplus_w)}W < min charge {_cw(min_charge_w)}W"
         )
     return True, ""
+
+
+def _assist_blocked_why(f) -> str:
+    """(#983) Why the home battery may not assist the EV this cycle — the
+    disjunct that actually fired, or ``""`` when it may.
+
+    One resolver, so the boolean and the sentence can never disagree: the
+    caller's gate IS this function being non-empty. A further reason adds a
+    branch here and reaches every reader at once.
+
+    KNOWN GAP, deliberately not closed here (#983 review, for Guido): #878 gave
+    ``battery_assist_potential_w`` an effective floor of
+    ``max(buffer_soc, dynamic_floor_pct)``, so a pack at 75 % with a 70 %
+    buffer and an 80 % overnight floor delivers ZERO assist while this resolver
+    — like the ``or``-chain it replaced — still answers "it may assist", and
+    ``_idle_bridgeable`` holds the contactor on grid watts. Adding that arm
+    changes CONTROL (transient idles become structural), which is a different
+    change from #983's; it is pre-existing on both sides of this fix.
+    """
+    if not getattr(f, "battery_soc_known", True):        # (#875) never read
+        return "battery SoC never read"
+    if not getattr(f, "battery_may_assist_ev", True):    # (#778/#885) consent
+        return "battery is not allowed to assist the EV (your setting)"
+    if float(f.battery_soc) < float(f.buffer_soc):
+        return f"SoC {f.soc_label} < buffer {f.buffer_soc:.0f}%"
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -862,13 +891,22 @@ class MinPlusSolarMode(ModeStrategy):
         # Zone 1: battery priority — never charge EV from anywhere
         # when battery is below priority_soc.
         if zone == 1:
+            # (#983) Name the boundary ``soc_zone`` ACTUALLY used. Since #870
+            # the three thresholds are sorted first, so with priority 40 and
+            # buffer 30 the Zone-1 edge is 30 — and a reader told to lower
+            # "priority=40" would change nothing. The relation stays true
+            # either way, which is why only naming the right operand fixes it.
+            _edge = min(float(f.priority_soc), float(f.buffer_soc),
+                        float(f.auto_start_soc))
+            _knob = ("priority" if _edge == float(f.priority_soc)
+                     else "lowest zone threshold")
             return ChargerDecision(
                 charger_id=cid, mode=mode_name,
                 intent=ChargerIntent.IDLE,
                 reason=(
                     f"{mode_name} day: Zone 1 "
-                    f"(SOC={f.battery_soc:.0f}% < priority="
-                    f"{f.priority_soc:.0f}%) — battery priority"
+                    f"(SOC={f.battery_soc:.0f}% < {_knob}="
+                    f"{_edge:.0f}%) — battery priority"
                 ),
             )
         # Zone 2: pure solar (same as solar_only).

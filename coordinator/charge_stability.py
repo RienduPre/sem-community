@@ -125,28 +125,34 @@ START_KICK_STEP_A = 2
 
 # Ceiling for the start escalation. Bounded WELL below the charger max so a
 # car that suddenly accepts a high offer can't spike the grid, and a
-# full/refusing car is never held at 32 A. Known fussy cars latch under
-# this (a Renault Zoe begins at ~9-10 A). The escalation actually climbs to
+# car that keeps declining is never held at 32 A. Known fussy cars latch
+# under this (a Renault Zoe begins at ~9-10 A). The escalation actually climbs to
 # ``max(target_current, START_KICK_MAX_A)`` so a high deadline target is
 # still reachable.
 START_KICK_MAX_A = 10
 
 # After holding the escalation ceiling this long with the car still drawing
-# nothing, conclude it won't latch (full / refusing / needs more than we'll
-# safely offer) and stop offering — let decide()/the stall detector own the
+# nothing, conclude it won't latch (the car is declining, or needs more
+# than we'll safely offer) and stop offering — let decide()/the stall detector own the
 # refusal instead of holding a high current forever.
 START_KICK_GIVEUP_S = 90.0
 
-# #610 — full-car offer backoff. A single give-up re-armed as soon as the
-# surplus persisted again, which against a genuinely-full car produced
-# continuous kick-ladder chatter all afternoon (PROD 2026-07-18: car at
-# 100 %, kWh-target mode, no vehicle SOC sensor — UDP set_current noise
-# against a BMS that kept declining). After this many CONSECUTIVE
+# #610 — declined-start offer backoff. A single give-up re-armed as soon
+# as the surplus persisted again, which against a car that keeps declining
+# produced continuous kick-ladder chatter all afternoon (PROD 2026-07-18:
+# car at 100 %, kWh-target mode, no vehicle SOC sensor — UDP set_current
+# noise against a BMS that kept declining). After this many CONSECUTIVE
 # no-latch give-ups the offers stop for FULL_CAR_BACKOFF_S, ended early
 # by a real draw (car accepts again, e.g. after preconditioning) or by
 # an unplug / mode change / DISABLE. Per the #440 truth model the
 # estimated SOC still never gates charging — this tunes the RETRY
 # CADENCE only.
+#
+# (#983) The CONSTANT keeps #610's name; the SENTENCE no longer does.
+# "Full" was never observable here — a car at its ceiling is stopped by
+# #548 in ``decide`` and never reaches this ladder — so every give-up
+# that got as far as printing it was guessing, and RienduPre's car was
+# at 54 % against an 80 % target while SEM called it full.
 FULL_CAR_GIVEUP_STREAK = 3
 FULL_CAR_BACKOFF_S = 1200.0
 
@@ -156,6 +162,41 @@ FULL_CAR_BACKOFF_S = 1200.0
 # different current — the change that makes a Zoe drop the session. Longer
 # than a couple of cycles, shorter than a real "car finished / unplugged".
 LATCH_HOLD_S = 60.0
+
+
+def _meanwhile(decision: ChargerDecision) -> str:
+    """(#983) What a stand-down COSTS, on the surface that announces it.
+
+    Class 82's sweep question — *for every place SEM decides to stop acting,
+    what is still running while it holds back, and who can see it?* — was
+    answered "nothing" for this give-up, because the car is not drawing. The
+    other half of the answer is RienduPre's #983: the surplus SEM had already
+    sized for that car keeps arriving and SEM stops offering it, for twenty
+    minutes at a time, all afternoon. So the line that announces the hold
+    carries the number the hold is about.
+
+    It reports the OFFER and nothing about its funding — not "surplus", not
+    "exported". ``budget_w`` is what ``decide`` sized for THIS car, and the
+    reviewer's two counterexamples show why the word matters: at night under a
+    peak clamp it is grid headroom (``decide.clamp_to_peak_slot``), and in
+    Zone 3/4 it is solar PLUS the pack's assist share (``assist_w``). Calling
+    either "surplus going to the grid" would be this very class, committed by
+    its own fix. What SEM knows here is that it sized a number and is not
+    offering it; where those watts go is another scope's reading.
+
+    Rounded to 100 W like every other watt in a reason string (``decide._cw``),
+    so a steady hold does not rewrite the sensor every cycle, and non-finite
+    input is swallowed INSIDE the guard — a text helper must never raise into
+    the control path it decorates.
+    """
+    try:
+        watts = float(getattr(decision, "budget_w", 0.0) or 0.0)
+        if watts <= 0.0:
+            return ""
+        rounded = int(round(watts / 100.0) * 100)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    return f"; SEM is withholding the {rounded}W it had sized for this car"
 
 
 class ChargeStability:
@@ -251,7 +292,7 @@ class ChargeStability:
             "start": _elapsed(self._start_since),
             "latched": _elapsed(self._latched),
             "stopped_at": _elapsed(self._stopped_at),
-            # #610 — full-car backoff survives a restart: the streak as-is,
+            # #610 — the declined-start backoff survives a restart: the streak as-is,
             # the deadline as REMAINING seconds (it's a future deadline, not
             # an elapsed timer, so the _elapsed shape doesn't fit).
             "giveup_streak": dict(self._giveup_streak),
@@ -318,7 +359,7 @@ class ChargeStability:
                     continue
                 target[cid] = now_mono - elapsed_f
 
-        # #610 — full-car backoff round-trip. Streak: plain ints. Deadline:
+        # #610 — declined-start backoff round-trip. Streak: plain ints. Deadline:
         # persisted as REMAINING seconds, rebased to now + remaining (same
         # no-downtime-credit philosophy as the elapsed timers — a backoff
         # with 10 min left before restart has 10 min left after). Bounds
@@ -546,7 +587,7 @@ class ChargeStability:
                     reason=f"inputs degraded (sensor unavailable) — holding {held}A",
                 )
 
-        # #610 — full-car backoff gate. MUST sit ABOVE the ``charge_wanted``
+        # #610 — declined-start backoff gate. MUST sit ABOVE the ``charge_wanted``
         # split, not inside it. It has now moved twice, for two different
         # bypasses of the same shape (a guard on one branch, an unguarded
         # passthrough on the other):
@@ -578,11 +619,11 @@ class ChargeStability:
                     intent=ChargerIntent.IDLE,
                     commanded_amps=0,
                     reason=(
-                        f"stability: full-car backoff — car declined "
+                        f"stability: start backoff — car declined "
                         f"{self._giveup_streak.get(cid, 0)} start "
                         f"ladders; next offer in "
-                        f"{max(0.0, backoff_until - now) / 60.0:.0f} min "
-                        f"— {decision.reason}"
+                        f"{max(0.0, backoff_until - now) / 60.0:.0f} min"
+                        f"{_meanwhile(decision)} — {decision.reason}"
                     ),
                 )
             self._giveup_backoff_until.pop(cid, None)
@@ -733,8 +774,8 @@ class ChargeStability:
                 # detector / planner own the refusal.
                 self._reset(cid)
                 # #610 — count consecutive give-ups; enough in a row means
-                # the car is genuinely full/refusing → long backoff before
-                # the next ladder (streak survives expiry, so a still-full
+                # the car keeps declining (why is its own to say, #983) →
+                # long backoff before the next ladder (streak survives expiry, so a still-full
                 # car re-arms after ONE further ladder, not three).
                 streak = self._giveup_streak.get(cid, 0) + 1
                 self._giveup_streak[cid] = streak
@@ -750,9 +791,19 @@ class ChargeStability:
                     intent=ChargerIntent.IDLE,
                     commanded_amps=0,
                     reason=(
+                        # (#983) What SEM SAW, not what SEM guessed. "full/
+                        # refusing" was a hypothesis printed as a finding —
+                        # and one this branch can never have evidence for,
+                        # because a car at its ceiling is stopped by #548
+                        # in ``decide`` and never reaches the ladder at all.
+                        # RienduPre read "full-car backoff" off a car his
+                        # own dashboard showed at 54 % against an 80 %
+                        # target (#983). The offer and the draw are the
+                        # evidence; the cause is the car's to explain.
                         f"stability: no draw at {offer}A after escalation "
-                        f"— car not latching (full/refusing)"
-                        f"{backoff_note} — "
+                        f"— the car did not accept the start (check its own "
+                        f"charge limit / departure timer)"
+                        f"{backoff_note}{_meanwhile(decision)} — "
                         f"{decision.reason}"
                     ),
                 )

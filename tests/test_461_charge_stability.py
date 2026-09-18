@@ -775,6 +775,6 @@ class TestCarLatchFloor:
         st.filter(_charge(amps=6), night_idle, adapter, now_ts=42.0)   # -> 10
         d = st.filter(_charge(amps=6), night_idle, adapter, now_ts=140.0)
         assert d.intent is ChargerIntent.IDLE
-        assert "not latching" in d.reason
+        assert "did not accept the start" in d.reason  # (#983)
         assert "wb" not in st._car_floor_a
         assert "wb" not in st._draw_amps
