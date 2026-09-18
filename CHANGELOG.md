@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **An OCPP charger could be locked by SEM's stop** (#976, reported by @bgthb,
+  Huawei SCharger 22-KT via the OCPP integration). A charger configured with
+  its maximum-current number alone had no stop mechanism, so SEM's generic
+  stop wrote 0 A — which on OCPP is a charging profile the charge point
+  *keeps*: every later start, from the app, the card or HA, was accepted and
+  ended a second later. SEM now never writes 0 A to an OCPP current number,
+  adopts the charge point's charge-control switch as the stop (a RemoteStop)
+  when the user configured the number alone, and — if no switch exists —
+  reports through the existing "cannot be stopped" Repair instead of parking
+  a 0 A profile. Recovery for a locked charge point: set the OCPP maximum
+  current back to its maximum, or call `ocpp.clear_profile`.
+
 - ✨ **The grid is not always a sink** (arc #921 — #955 #871 #926 #879 #892).
   Every destination a kWh can take now gets a per-cycle OPEN / HELD / CLOSED
   verdict, decided in one place from the tariff level and the export price —

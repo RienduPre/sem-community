@@ -186,6 +186,15 @@ was silently off for those installs.
 
 Peak load management requires controllable devices with switch entities for shedding. Devices without a discoverable switch entity must be configured manually. The 15-minute rolling average calculation starts fresh after each HA restart.
 
+## OCPP chargers stop through the charge-control switch (2.1, #976)
+
+On the OCPP integration the maximum-current number is a charging profile the
+charge point keeps, so a 0 A limit is a lockout, not a pause. SEM never writes
+0 A there; it stops through `switch.<charge point>_charge_control` (RemoteStop)
+and needs that switch — adopted from the charge point automatically, or set as
+the charger's *Start/stop entity*. Without it the "EV charger cannot be
+stopped" Repair says so.
+
 ## Charger Limitations
 
 Some EV chargers have limitations that prevent full SEM control:
