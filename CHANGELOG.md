@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.31] — 18.09.2026
+
 - 🐛 **A battery-control report can be answered from the download** (#983,
   reported by @RienduPre). The diagnose payload carried a full per-charger
   `ev_actuation` block and nothing at all about the battery's control surface,
