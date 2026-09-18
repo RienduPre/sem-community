@@ -157,6 +157,30 @@ FULL_CAR_BACKOFF_S = 1200.0
 # than a couple of cycles, shorter than a real "car finished / unplugged".
 LATCH_HOLD_S = 60.0
 
+# (#975) The per-plug-in INTERRUPTION BUDGET. Every guard above bounds how
+# FAST SEM may stop — the median, the deadband, the disable delay, the
+# post-stop settle. None of them bounds how OFTEN, and some chargers count
+# exactly that: @hoyte's Zaptec Go 2 locks itself out with an error after too
+# many session interruptions, and a cloudy day's surplus flicker spends that
+# budget in an afternoon (measured on SEM's own loop: 6-8 stops an hour,
+# ~30 on a charger driven by a current number alone).
+#
+# So the hysteresis GROWS with the churn it has already caused: after this
+# many stops in one plug-in, each further stop widens the enable delay and
+# the TRANSIENT bridge by ``SESSION_CHURN_PER_STOP``, to a ceiling. A
+# charger that flaps once or twice an hour never notices; one that is being
+# interrupted every few minutes ends up bridging through the clouds instead,
+# which is what @hoyte asked for ("allow a bit more slack ... and when
+# turning off leave it off for a longer period").
+#
+# Deliberately NOT applied to the STRUCTURAL stop (#461): when the sun is
+# genuinely gone there is nothing to bridge to, and stretching that hold
+# would import grid to hold a contactor closed — the exact defect #461 fixed
+# on @RienduPre's PROD. Slack is for flicker, never for nightfall.
+SESSION_STOP_BUDGET = 4
+SESSION_CHURN_PER_STOP = 0.5
+SESSION_CHURN_MAX = 4.0
+
 
 class ChargeStability:
     """Per-charger smoothing + enable/disable delay state.
@@ -197,6 +221,11 @@ class ChargeStability:
         # give-up path itself calls _reset, and the whole point is that
         # the streak/backoff survive it. Cleared by a real draw, by the
         # out-of-scope branch (unplug / mode change / DISABLE), or expiry.
+        # (#975) Stops SEM has commanded in THIS plug-in, per charger. Not
+        # cleared by _reset() (a stop calls it) and not by a mode change —
+        # the charger's own interruption counter does not reset for either.
+        # Only a disconnect starts a fresh budget.
+        self._session_stops: Dict[str, int] = {}
         self._giveup_streak: Dict[str, int] = {}
         self._giveup_backoff_until: Dict[str, float] = {}
         # Set when the disable-bridge STOPS. While present, an IDLE decision is
@@ -254,6 +283,9 @@ class ChargeStability:
             # #610 — full-car backoff survives a restart: the streak as-is,
             # the deadline as REMAINING seconds (it's a future deadline, not
             # an elapsed timer, so the _elapsed shape doesn't fit).
+            # (#975) the plug-in's interruption budget — a restart is not a
+            # new plug-in, and the charger's own counter did not reset either.
+            "session_stops": dict(self._session_stops),
             "giveup_streak": dict(self._giveup_streak),
             "giveup_backoff_remaining": {
                 cid: bu - now_mono
@@ -323,6 +355,18 @@ class ChargeStability:
         # no-downtime-credit philosophy as the elapsed timers — a backoff
         # with 10 min left before restart has 10 min left after). Bounds
         # guard against stale/corrupt blobs.
+        # (#975) the plug-in's interruption budget, same shape. A restart is
+        # not a new plug-in: the charger's own counter did not reset, so
+        # neither does ours. Bounded against a stale blob.
+        stops = saved.get("session_stops")
+        if isinstance(stops, dict):
+            for cid, n in stops.items():
+                try:
+                    n_i = int(n)
+                except (TypeError, ValueError):
+                    continue
+                if 0 < n_i <= 1000:
+                    self._session_stops[str(cid)] = n_i
         streaks = saved.get("giveup_streak")
         if isinstance(streaks, dict):
             for cid, n in streaks.items():
@@ -354,6 +398,16 @@ class ChargeStability:
         self._start_offer.pop(cid, None)
         self._latched.pop(cid, None)
         self._sem_session.discard(cid)
+
+    def session_churn_factor(self, cid: str) -> float:
+        """(#975) How much this session's own churn has widened the delays.
+
+        1.0 until the budget is spent, then ``SESSION_CHURN_PER_STOP`` per
+        further stop, capped at ``SESSION_CHURN_MAX``. Public so the observer
+        surface and the tests can read the same number the filter applies.
+        """
+        over = max(0, int(self._session_stops.get(cid, 0)) - SESSION_STOP_BUDGET)
+        return min(SESSION_CHURN_MAX, 1.0 + over * SESSION_CHURN_PER_STOP)
 
     def _median_amps(self, cid: str, raw_amps: int, window: int) -> int:
         """Layer 1 — rolling median of the raw target-amps stream.
@@ -414,6 +468,13 @@ class ChargeStability:
         # 6 A) is handled identically day or night.
         night = bool(view.fleet.is_night)
 
+        # (#975) This session's interruption budget widens the anti-flap
+        # delays — the start delay and the TRANSIENT bridge only. The
+        # structural grace below is untouched on purpose (#461).
+        _churn = self.session_churn_factor(cid)
+        enable_delay_s = float(enable_delay_s) * _churn
+        disable_delay_s = float(disable_delay_s) * _churn
+
         # Out of scope → transparent. DISABLE (user off / self-resume
         # guard) and disconnects also clear all state: the next
         # session starts a fresh window with a cold history.
@@ -431,6 +492,11 @@ class ChargeStability:
             self._giveup_backoff_until.pop(cid, None)
             self._car_floor_a.pop(cid, None)   # (#893) new plug, new floor
             self._draw_amps.pop(cid, None)
+            # (#975) A new PLUG-IN is a new interruption budget — and only a
+            # plug-in. A mode change or a user OFF does not reset the
+            # charger's own session counter, so it must not reset ours.
+            if not view.power.connected:
+                self._session_stops.pop(cid, None)
             return decision
 
         cfg = view.config if isinstance(view.config, dict) else {}
@@ -886,6 +952,10 @@ class ChargeStability:
             # Arm the post-stop settle so actuator lag (car still drawing next
             # cycle) can't re-open the hold before KEBA cuts the contactor.
             self._stopped_at[cid] = now
+            # (#975) …and spend one of this plug-in's interruptions. The count
+            # is what widens the delays above on the next pass, so a charger
+            # SEM keeps interrupting gets bridged instead of cycled.
+            self._session_stops[cid] = self._session_stops.get(cid, 0) + 1
             # #552 — SEM ended this session; ownership ends WITH it. Without
             # this, a stability stop that lands while the car blips 0 W never
             # reaches the adapter (reconciler sees idle+no-draw → no-op), the

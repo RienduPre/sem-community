@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A plug-in has an interruption budget, not just a stop rate** (#975,
+  reported by @hoyte, Zaptec Go 2). Every anti-flap guard SEM had bounds how
+  FAST it may stop a charge — the rolling median, the 2 A deadband, the 30 s
+  cadence, the three-minute disable delay. None bounded how OFTEN, and some
+  chargers count exactly that: the Go 2 locks itself out with an error after
+  too many session interruptions, and a cloudy day's surplus flicker spends
+  that budget in an afternoon. SEM now counts the stops it has commanded in
+  each plug-in: past four, every further stop widens the start delay and the
+  transient bridge (to 4×), so a charger SEM keeps interrupting gets bridged
+  through the clouds instead of cycled. A new plug-in starts a fresh budget;
+  a restart does not (the charge point's own counter did not reset either).
+  The structural stop is deliberately untouched — when the sun is genuinely
+  gone there is nothing to bridge to, and holding the contactor closed would
+  import grid (#461).
+
 - 🐛 **A dropped power-strategy flip silently withdrew battery-to-grid** (#978,
   reported by @RienduPre, 2× Sessy). On an AC-coupled battery the setpoint is
   ignored unless the power-strategy select reads the active value (`api`), so

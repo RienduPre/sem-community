@@ -1300,3 +1300,28 @@ If it ever has to drop something, the entity carries `attributes_trimmed:
 **If you still see the line** on a SEM entity, report the entity id: it means
 a new attribute grew past the cap and the gate could not measure it.
 
+## The charger errors out after a cloudy day of starts and stops (2.1, #975)
+
+**Symptom:** on a broken-cloud day the charger is started and stopped again
+and again and eventually refuses to charge at all until it is power-cycled or
+reset. Reported on a **Zaptec Go 2**, which counts session interruptions
+itself and locks out past its own limit; other charge points have similar
+counters.
+
+**What SEM does now:** it counts the stops it has commanded in the current
+plug-in. The first four are free; after that each further stop widens both the
+start delay and the transient bridge — up to four times their configured
+values — so a flickering surplus increasingly holds the minimum current
+through the cloud instead of cutting the session. Unplugging and plugging in
+again starts a fresh budget.
+
+**What it deliberately does not do:** stretch the *structural* stop. When the
+sun is actually gone (dusk, heavy overcast) SEM still stops promptly — holding
+a contactor closed there would pull the car from the battery and the grid
+(#461).
+
+**If it still churns:** raise **Disable delay** (Configuration → EV charging)
+so the first stops are slower too, and tell us the charger — the budget is
+brand-blind, but a charge point with a tighter limit than the Go 2 is worth
+knowing about.
+
