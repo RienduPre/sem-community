@@ -366,3 +366,12 @@ STATE_UNAVAILABLE: Final = "unavailable"
 # which hung the full #814 detection report — a payload that grows with the
 # install — on a channel with a hard cap nothing in SEM ever checked.
 RECORDER_MAX_STATE_ATTRS_BYTES: Final = 16384
+# HA lays its own attributes over ``extra_state_attributes`` before the
+# recorder measures the set — ``friendly_name``, ``unit_of_measurement``,
+# ``device_class``, ``state_class``, ``icon`` — and excludes only
+# ``attribution``/``restored``/``supported_features``. The budget SEM
+# measures against is the cap minus room for those: 15 000 bytes, the
+# figure the energy-plan sensor has used since #581 (the challenge record
+# refuted a 90 % rule that had moved it by 255 bytes).
+RECORDER_ATTR_HEADROOM_BYTES: Final = 1384
+RECORDER_ATTR_BUDGET_BYTES: Final = RECORDER_MAX_STATE_ATTRS_BYTES - RECORDER_ATTR_HEADROOM_BYTES

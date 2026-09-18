@@ -409,12 +409,21 @@ class TestTheAttributeBudget:
         out = fit_state_attributes(attrs)
         assert out == attrs and TRIMMED_KEY not in out
 
-    def test_the_plan_budget_derives_from_the_one_cap(self):
-        """Class 46: the 16 KiB cap is spelled once, not per site."""
+    def test_the_plan_budget_and_the_gate_share_one_budget(self):
+        """Class 46: the budget is spelled once — and it is the cap MINUS the
+        attributes HA lays over ours, unchanged at 15 000 bytes: the plan
+        sensor's number also decides what the LIVE state carries
+        (``timeline_omitted``), so a rounding rule must not move it
+        (challenge record)."""
+        import inspect
         from custom_components.solar_energy_management import sensor as sensor_mod
-        assert sensor_mod._PLAN_ATTR_BUDGET_BYTES < RECORDER_MAX_STATE_ATTRS_BYTES
-        src = (_ROOT / "sensor.py").read_text()
-        assert "_PLAN_ATTR_BUDGET_BYTES = int(RECORDER_MAX_STATE_ATTRS_BYTES" in src
+        from custom_components.solar_energy_management.consts.core import (
+            RECORDER_ATTR_BUDGET_BYTES,
+        )
+        assert sensor_mod._PLAN_ATTR_BUDGET_BYTES == RECORDER_ATTR_BUDGET_BYTES == 15000
+        assert RECORDER_ATTR_BUDGET_BYTES < RECORDER_MAX_STATE_ATTRS_BYTES
+        gate_limit = inspect.signature(fit_state_attributes).parameters["limit"].default
+        assert gate_limit == RECORDER_ATTR_BUDGET_BYTES
 
     def test_the_cap_matches_the_host(self):
         """The constant is HA's, not ours — read it back from the recorder."""

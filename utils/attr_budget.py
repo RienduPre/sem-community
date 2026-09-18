@@ -28,7 +28,7 @@ import json
 import logging
 from typing import Any, Collection, Dict, Mapping, Optional
 
-from ..consts.core import RECORDER_MAX_STATE_ATTRS_BYTES
+from ..consts.core import RECORDER_ATTR_BUDGET_BYTES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,9 +56,14 @@ def json_size(value: Any) -> Optional[int]:
 def fit_state_attributes(
     attrs: Optional[Mapping[str, Any]],
     unrecorded: Optional[Collection[str]] = None,
-    limit: int = RECORDER_MAX_STATE_ATTRS_BYTES,
+    limit: int = RECORDER_ATTR_BUDGET_BYTES,
 ) -> Optional[Dict[str, Any]]:
     """Keep the recorded half of ``attrs`` inside what the recorder will store.
+
+    ``limit`` is the cap MINUS the attributes HA lays over ours before the
+    recorder measures (``friendly_name``, unit, device class, …): the gate
+    must leave that room, or an entity within a hundred bytes of the cap
+    reproduces the very symptom it exists to stop (challenge record).
 
     Returns the input unchanged when the recorded subset already fits (the
     overwhelmingly common case — one ``json.dumps`` of a small dict) or when

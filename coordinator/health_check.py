@@ -118,11 +118,13 @@ def power_terms(power) -> str:
     pick a sensor to suspect; naming the terms costs one f-string and turns
     the message into "look at this one".
     """
+    # FLEET-READ: the residual is a FLEET quantity — the health check
+    # reports the six terms the balance is built from and controls nothing.
     return (
         f"supply: solar={power.solar_power:.0f}W "
         f"grid_import={power.grid_import_power:.0f}W "
         f"battery_discharge={power.battery_discharge_power:.0f}W | "
-        f"demand: ev={power.ev_power:.0f}W "
+        f"demand: ev={power.ev_power:.0f}W "  # FLEET-READ: fleet demand term
         f"grid_export={power.grid_export_power:.0f}W "
         f"battery_charge={power.battery_charge_power:.0f}W"
     )
@@ -136,8 +138,10 @@ def largest_demand_term(power) -> str:
     does the most damage. Named as a suspect, never as a verdict — a house
     charging a car legitimately has ``ev`` on top.
     """
+    # FLEET-READ: same quantity as power_terms — the fleet's EV draw as one
+    # demand term of the residual, never a per-charger decision.
     terms = {
-        "ev": float(power.ev_power or 0.0),
+        "ev": float(power.ev_power or 0.0),  # FLEET-READ: fleet demand term
         "grid_export": float(power.grid_export_power or 0.0),
         "battery_charge": float(power.battery_charge_power or 0.0),
     }

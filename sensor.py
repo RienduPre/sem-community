@@ -8,7 +8,7 @@ import logging
 import time
 
 from .consts.core import (
-    RECORDER_MAX_STATE_ATTRS_BYTES,
+    RECORDER_ATTR_BUDGET_BYTES,
     SENSOR_DARK_READ_GRACE_S,
 )
 from .utils.attr_budget import fit_state_attributes
@@ -75,10 +75,12 @@ def _energy_plan_state(plan: Any) -> str:
 # HA's recorder refuses to store a state whose attributes serialize above
 # 16 KiB: it logs a warning and records NO attributes at all, so the plan
 # would silently vanish from history. Stay under it with headroom.
-# (#979) The cap has ONE source of truth now — ``RECORDER_MAX_STATE_ATTRS_BYTES``
-# — rather than a literal restating it here (class 46). The 10 % headroom is
-# for the attributes HA adds around ours (friendly_name, unit, device_class).
-_PLAN_ATTR_BUDGET_BYTES = int(RECORDER_MAX_STATE_ATTRS_BYTES * 0.9)
+# (#979) The budget has ONE source of truth — ``RECORDER_ATTR_BUDGET_BYTES``,
+# the cap minus the attributes HA lays over ours — rather than a literal
+# restating it here (class 46). Same 15 000 bytes as before: this number
+# also decides what the LIVE state carries (``timeline_omitted``), so it
+# must not move with a rounding rule.
+_PLAN_ATTR_BUDGET_BYTES = RECORDER_ATTR_BUDGET_BYTES
 
 
 def _merge_plan_blocks(blocks: Any) -> List[Dict[str, Any]]:
