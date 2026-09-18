@@ -1254,3 +1254,34 @@ To clear them, run **Developer tools → Actions → *SEM: Remove leftovers***.
 
 If you are about to uninstall SEM, run that action **first** — afterwards
 there is no SEM left to run it.
+
+## Battery-to-grid never engages on an AC-coupled battery (Sessy) and is then "unsupported" (2.1, #978)
+
+**Symptom:** with a `Power strategy` select configured, SEM's forcible-discharge
+setpoint is refused (`Setting value for Power Setpoint failed: Not supported by
+device`) and after three refusals SEM reports battery-to-grid as unsupported —
+while the select still reads `nom`. Flipping the select to `api` by hand makes
+the same setpoint land immediately. HA's log carries
+`Referenced entities select.sessy_N_power_strategy ... are missing or not
+currently available` from the service call SEM made.
+
+**Cause:** the setpoint is ignored unless the strategy reads `api`, so SEM flips
+the select first. Before 2.1.0-beta.30 a flip that HA could not deliver was
+cached as done and never retried; the setpoint then went into a battery still
+on `nom`.
+
+**What SEM does now:** it believes the select. A flip counts only once the
+select reads it; one that has not landed after 60 s is re-sent and logged
+once — `asked <select> for power strategy 'api' … and it still reads nom` —
+and after three misses the **"A battery control write is not taken"** Repair
+names the select with the wanted and the read value. The setpoint is not
+written, and the device is not blamed, until the strategy is in place.
+
+**What to check when you see that line:** the entity id in *Power strategy
+select* (Configuration card → battery) must be the LIVE select — open
+**Developer Tools → States**, find the select the Sessy integration actually
+provides, and pick that one. HA's "missing or not currently available" means
+the id SEM targets is not served by the `select` integration right now: a
+renamed entity, a restored-but-dead registry entry, or a helper that is not a
+`select`/`input_select`.
+

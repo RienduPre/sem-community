@@ -146,8 +146,30 @@ def test_decide_battery_actuates_arbitrage_verdict():
 # ── adapter / actuator ──────────────────────────────────────────────
 
 def _hass():
+    """A hass whose selects REFLECT ``select_option`` (#978): the adapter
+    now believes the entity, not the service call, so a fake that swallowed
+    the flip would model exactly the dropped write the fix refuses."""
     h = MagicMock()
-    h.services.async_call = AsyncMock()
+    _reflect_selects(h)
+    return h
+
+
+def _reflect_selects(h):
+    from types import SimpleNamespace as _NS
+    selects = {}
+    prior_get = h.states.get
+
+    async def _call(domain, service, data=None, **kw):
+        if service == "select_option" and data:
+            selects[data["entity_id"]] = _NS(state=data["option"], attributes={})
+
+    def _get(eid):
+        if eid in selects:
+            return selects[eid]
+        return prior_get(eid) if callable(prior_get) else None
+
+    h.services.async_call = AsyncMock(side_effect=_call)
+    h.states.get = MagicMock(side_effect=_get)
     return h
 
 
@@ -463,6 +485,7 @@ async def test_normal_sets_self_consume_after_force_charge():
     state = MagicMock()
     state.state = "nom"
     hass.states.get = MagicMock(return_value=state)
+    _reflect_selects(hass)   # (#978) the flip to api is reflected — NORMAL has a real change to make
     gen = _bidir(hass)
     await gen.command_force_charge(target_soc=100.0, charge_power_w=1000, duration_min=60)
     hass.services.async_call.reset_mock()
@@ -602,6 +625,7 @@ def _hass_with_range(entity, lo, hi):
     st = MagicMock()
     st.attributes = {"min": lo, "max": hi}
     h.states.get = MagicMock(return_value=st)
+    _reflect_selects(h)      # (#978) the select still reflects its flip
     return h
 
 

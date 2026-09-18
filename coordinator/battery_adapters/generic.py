@@ -50,7 +50,16 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         self._strategy_self_consume = config.get(
             "battery_strategy_self_consume_value", "nom")
         self._strategy_off = config.get("battery_strategy_off_value", "idle")
+        #: the strategy the select was last SEEN at (#978) — never what SEM
+        #: last sent. A flip is cached only once the entity reads it.
         self._last_strategy = None
+        #: (value, monotonic) of a flip sent and not yet seen — the retry gate
+        self._strategy_pending = None
+        #: (value, seen) of the last miss said aloud — say each once
+        self._strategy_miss_said = None
+        #: a miss / a landing not yet turned into a #915 verdict
+        self._strategy_verdict = None
+        self._setpoint_withheld_said = False
         # #523: AC-coupled batteries (Sessy, …) expose ONE bidirectional power
         # setpoint — the same ``battery_force_discharge_control_entity`` that
         # SEM writes a positive value to for discharge takes a NEGATIVE value
@@ -107,11 +116,102 @@ class GenericBatteryAdapter(BatteryControlAdapter):
                 cur, self._strategy_entity,
             )
 
+    #: (#978) a flip that did not land is re-sent no faster than this
+    STRATEGY_RETRY_S: float = 60.0
+
+    def _read_strategy(self) -> "Optional[str]":
+        """What the strategy select READS now — ``None`` when it cannot be
+        read (no state, unknown/unavailable, not a string). Three states
+        (#925): "unreadable" is not "did not land"."""
+        if not self._strategy_entity:
+            return None
+        try:
+            st = self._hass.states.get(self._strategy_entity)
+        except Exception:  # noqa: BLE001
+            return None
+        cur = getattr(st, "state", None)
+        if not isinstance(cur, str) or cur in ("", "unknown", "unavailable"):
+            return None
+        return cur
+
+    def _strategy_state_text(self) -> str:
+        """The raw state for a message — ``missing`` when there is none."""
+        try:
+            st = self._hass.states.get(self._strategy_entity)
+        except Exception:  # noqa: BLE001
+            st = None
+        cur = getattr(st, "state", None) if st is not None else None
+        return str(cur) if isinstance(cur, str) and cur else "missing"
+
+    def _strategy_landed(self, value: str) -> None:
+        sent = self._strategy_pending is not None
+        self._strategy_pending = None
+        self._strategy_miss_said = None
+        self._setpoint_withheld_said = False
+        if sent or self._last_strategy != value:
+            _LOGGER.info(
+                "Generic battery: power strategy → %s (%s)%s",
+                value, self._strategy_entity, "" if sent else " — read, not sent",
+            )
+        self._last_strategy = value
+        # (#915) the same read-back ledger the setpoint uses: a landing
+        # clears the strikes this select earned and files a True verdict.
+        if self.last_unverified_entity == self._strategy_entity:
+            self.write_not_taken_strikes = 0
+            self.last_unverified_entity = ""
+            self.last_verified_entity = self._strategy_entity
+            self._strategy_verdict = True
+
+    def _strategy_missed(self, value: str, age_s: float) -> None:
+        seen = self._strategy_state_text()
+        self.write_not_taken_strikes += 1
+        self.last_unverified_entity = self._strategy_entity
+        self.last_unverified_wanted = value
+        self.last_unverified_seen = seen
+        self._last_error = (
+            f"power strategy not taken by {self._strategy_entity}: "
+            f"wanted {value}, reads {seen}")
+        self._strategy_verdict = False
+        if self._strategy_miss_said != (value, seen):
+            self._strategy_miss_said = (value, seen)
+            _LOGGER.warning(
+                "Generic battery: asked %s for power strategy '%s' %.0f s ago "
+                "and it still reads %s — the flip did not land. SEM is NOT "
+                "caching it and re-sends every %.0f s; the setpoint stays "
+                "withheld until the select reads '%s'. If HA logs 'Referenced "
+                "entities … missing or not currently available' for it, the "
+                "id SEM targets is not the live select — check "
+                "battery_strategy_control_entity (#978).",
+                self._strategy_entity, value, age_s, seen,
+                self.STRATEGY_RETRY_S, value,
+            )
+
     async def _set_strategy(self, value: str) -> None:
-        """Switch the battery's power-strategy mode (no-op without a strategy
-        entity, de-dup'd on the last value)."""
-        if not self._strategy_entity or value == self._last_strategy:
+        """Switch the battery's power-strategy mode — and believe the ENTITY,
+        not the service call (#978).
+
+        ``select_option`` on a target HA cannot resolve is a WARNING in HA's
+        log and a normal return here; the first cut cached the value on that
+        return and the de-dup then blocked every retry for the life of the
+        process, so one dropped flip withdrew battery-to-grid for good
+        (@RienduPre's Sessy, still on ``nom``). Now: nothing is sent when the
+        select already reads ``value``; a flip is cached only once the
+        select reads it; one that has not landed after ``STRATEGY_RETRY_S``
+        is a MISS on the #915 read-back ledger (a Repair after three) and
+        is re-sent. No-op without a strategy entity."""
+        if not self._strategy_entity:
             return
+        import time as _time
+        if self._read_strategy() == value:
+            self._strategy_landed(value)
+            return
+        now = _time.monotonic()
+        pending = self._strategy_pending
+        if pending and pending[0] == value:
+            age = now - pending[1]
+            if age < self.STRATEGY_RETRY_S:
+                return          # sent recently — the select may be catching up
+            self._strategy_missed(value, age)
         # Domain-aware: real batteries expose a ``select.*`` strategy; a user
         # may also point it at an ``input_select.*`` helper. Both have
         # ``select_option``.
@@ -124,15 +224,54 @@ class GenericBatteryAdapter(BatteryControlAdapter):
                 {"entity_id": self._strategy_entity, "option": value},
                 blocking=True,
             )
-            self._last_strategy = value
-            _LOGGER.info(
-                "Generic battery: power strategy → %s (%s)",
-                value, self._strategy_entity,
-            )
         except Exception as e:  # noqa: BLE001
             _LOGGER.warning("Generic battery: failed to set strategy: %s", e)
+            self._strategy_pending = (value, now)
+            return
+        self._strategy_pending = (value, now)
+        if self._read_strategy() == value:
+            self._strategy_landed(value)
+        else:
+            _LOGGER.debug(
+                "Generic battery: power strategy '%s' sent to %s, not "
+                "reflected yet (reads %s)",
+                value, self._strategy_entity, self._strategy_state_text(),
+            )
 
-    async def _enter_active_strategy(self) -> None:
+    def _strategy_is_active(self) -> bool:
+        """True when the setpoint will be honoured: no strategy select to
+        gate it, or the select reads the active value."""
+        if not self._strategy_entity:
+            return True
+        return self._read_strategy() == self._strategy_active
+
+    def _withhold_setpoint(self, what: str) -> None:
+        """(#978) The setpoint is IGNORED unless the strategy is active, and
+        a refused setpoint would spend a strike against the DEVICE for a
+        fault that is the strategy's. Say so once, write nothing."""
+        seen = self._strategy_state_text()
+        self._last_error = (
+            f"power strategy {self._strategy_entity} reads {seen}, not "
+            f"'{self._strategy_active}' — {what} setpoint withheld")
+        if not self._setpoint_withheld_said:
+            self._setpoint_withheld_said = True
+            _LOGGER.info(
+                "Battery: %s reads %s, not '%s' — the %s setpoint would be "
+                "refused, so SEM is not writing it (and not counting it "
+                "against the device) until the strategy lands (#978)",
+                self._strategy_entity, seen, self._strategy_active, what,
+            )
+
+    def verify_pending_write(self):
+        """(#915) The setpoint's verdict — and, when nothing is pending
+        there, the strategy select's (#978): a miss and a landing each speak
+        once through the same channel, so the same Repair covers both."""
+        v = super().verify_pending_write()
+        if v is None and self._strategy_verdict is not None:
+            v, self._strategy_verdict = self._strategy_verdict, None
+        return v
+
+    async def _enter_active_strategy(self) -> bool:
         """Capture the user's current strategy (once), mark that SEM has taken
         control, then switch to the active (API) value so the setpoint takes
         effect."""
@@ -147,6 +286,7 @@ class GenericBatteryAdapter(BatteryControlAdapter):
                 self._restore_strategy = cur
             self._took_control = True
         await self._set_strategy(self._strategy_active)
+        return self._strategy_is_active()
 
     async def _release_strategy(self) -> None:
         """Hand strategy control back. Only restore a strategy SEM actually
@@ -171,7 +311,12 @@ class GenericBatteryAdapter(BatteryControlAdapter):
     ) -> None:
         # Switch to the active (API) strategy BEFORE writing the setpoint —
         # an AC-coupled battery ignores the setpoint in eco/self-consumption.
-        await self._enter_active_strategy()
+        # (#978) And write NOTHING until the select reads it: a setpoint
+        # into a battery still on ``nom`` is refused by the firmware and
+        # would spend the device's strikes for the strategy's fault.
+        if not await self._enter_active_strategy():
+            self._withhold_setpoint("discharge")
+            return
         await super().command_force_discharge(power_w, floor_soc)
 
     @property
@@ -302,7 +447,9 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         # (the setpoint is ignored in self-consumption mode) then write the
         # negative value — the mirror of command_force_discharge.
         if self._setpoint_bidirectional and self._force_discharge_entity:
-            await self._enter_active_strategy()
+            if not await self._enter_active_strategy():
+                self._withhold_setpoint("charge")           # (#978)
+                return
             watts = max(0.0, min(float(charge_power_w), self.max_charge_power_w))
             ok = await self._write_force_discharge(-watts)
             if ok:

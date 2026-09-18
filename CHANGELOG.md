@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A dropped power-strategy flip silently withdrew battery-to-grid** (#978,
+  reported by @RienduPre, 2× Sessy). On an AC-coupled battery the setpoint is
+  ignored unless the power-strategy select reads the active value (`api`), so
+  SEM flips it first — and cached that flip as done the moment the service
+  call returned. HA answers a `select_option` it cannot deliver with a warning
+  and a normal return, so a flip that never landed was cached, the de-dup then
+  blocked every retry for the life of the process, the setpoint went into a
+  battery still on `nom`, and three refusals withdrew battery-to-grid while
+  blaming the setpoint entity. SEM now believes the select, not the call: a
+  flip counts only once the select reads it, one that has not landed after
+  60 s is re-sent and named (entity, wanted, reads) as a missed write on the
+  same ledger — and Repair — the setpoint uses, and the setpoint is withheld
+  (no strike against the device) until the strategy is in place.
+
 - 🐛 **An OCPP charger could be locked by SEM's stop** (#976, reported by @bgthb,
   Huawei SCharger 22-KT via the OCPP integration). A charger configured with
   its maximum-current number alone had no stop mechanism, so SEM's generic
