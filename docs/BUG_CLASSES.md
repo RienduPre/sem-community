@@ -4012,6 +4012,17 @@ cap constant is asserted equal to `recorder.db_schema.MAX_STATE_ATTRS_BYTES`, so
 it fails loudly rather than silently. Around them: the reason for each of the three unavailable
 branches, the six terms in both balance branches, the named strings, and the member evidence with
 a twin showing the message without it.
+**Measured the wrong side (challenge record):** the first cut budgeted against the raw 16 384-byte
+cap. The recorder measures the entity's WHOLE attribute set — HA lays `friendly_name`, unit, device
+class, state class and icon over `extra_state_attributes` first and excludes only `attribution` /
+`restored` / `supported_features` — so a gate at the raw cap leaves an entity within ~150 bytes of it
+reproducing the symptom. The budget is the cap minus that headroom (`RECORDER_ATTR_BUDGET_BYTES`,
+15 000 bytes), the same figure the plan sensor had used since #581; and that plan figure also decides
+what the LIVE state carries, so a "90 % of the cap" rounding rule that moved it by 255 bytes was a
+behaviour change wearing a tidy-up's face. Trade-off kept on purpose: an internal, coordinator-computed
+key that a future bug silently stops publishing now reports at debug like an idle charger's analytics;
+the per-entity WARNING was that class's only instrument and also the noise — the cycle rig is the
+right home for that guard (follow-up).
 **Sweep question:** for every line SEM emits about something being wrong — what does the reader
 have to do next, and is everything they need to do it already in this scope? And for anything
 published on a host surface: what is that surface's limit, and who measured against it?
