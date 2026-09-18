@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A battery-control report can be answered from the download** (#983,
+  reported by @RienduPre). The diagnose payload carried a full per-charger
+  `ev_actuation` block and nothing at all about the battery's control surface,
+  so the two facts a battery report turns on — what the power-strategy select
+  READS versus what SEM believes it set, and whether the setpoint write was
+  refused and how often — cost a round trip every time. `battery_actuation`
+  now carries them per battery (both of a pair, not just the primary), with
+  the flips SEM has sent and not yet seen, the #915 read-back ledger and the
+  last intent and error. A configured entity with no state reads `<missing>`
+  rather than silently nothing.
+
 - 🐛 **A plug-in has an interruption budget, not just a stop rate** (#975,
   reported by @hoyte, Zaptec Go 2). Every anti-flap guard SEM had bounds how
   FAST it may stop a charge — the rolling median, the 2 A deadband, the 30 s

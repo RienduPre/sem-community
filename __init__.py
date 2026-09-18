@@ -6153,6 +6153,18 @@ async def _async_register_phase_services(
             except Exception as exc:  # noqa: BLE001
                 payload["ev_actuation"] = {"error": str(exc)}
 
+        if section in ("all", "battery_zones", "battery_scheduler"):
+            # (#983) the battery half of the #548 actuation truth: what the
+            # power-strategy select READS versus what SEM believes it set, and
+            # whether the setpoint was refused. Both were needed to answer
+            # #978/#983 and neither was in the download.
+            try:
+                from .coordinator.battery_diag import battery_actuation_diag
+                payload["battery_actuation"] = battery_actuation_diag(
+                    hass, coordinator)
+            except Exception as exc:  # noqa: BLE001
+                payload["battery_actuation"] = {"error": str(exc)}
+
         if section in ("all", "trace", "ev_chargers"):
             # Layered-trace observability (1.7.5) — the recent
             # management→process→integration chain per cycle, plus the current
