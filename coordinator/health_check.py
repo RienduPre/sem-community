@@ -68,6 +68,87 @@ def home_member_totals(devices) -> dict:
     return out
 
 
+def home_member_evidence(devices) -> dict:
+    """(#979) For each home member, WHERE its daily number came from.
+
+    ``home_member_totals`` answers "how much"; when the reconciler below says
+    two ids carry the same energy, the next question is always "which sensor
+    told you that, and what does it read right now?" — and a bucket alone
+    cannot answer it. RienduPre (#979, 2026-09-13) got ``heat_pump=1906.00kWh``
+    against a home row a thousandth of that, and by the time anyone looked
+    the violation had self-resolved with nothing on record: a day's bucket that
+    size is a LIFETIME counter read as a day, which the source and its raw
+    value say in one line and the bucket says not at all.
+
+    Every term is already on the device (``daily_energy_source``,
+    ``energy_entity_id``, the counter's last raw read). A device that has no
+    evidence to give — a rated-power estimate, no source at all — is simply
+    absent from the map; the reconciler then names it without a suffix.
+    """
+    out = {}
+    for dev in devices or []:
+        device_id = getattr(dev, "device_id", None)
+        if not device_id:
+            continue
+        source = getattr(dev, "daily_energy_source", None)
+        if source not in ("counter", "power"):
+            continue
+        entity = (getattr(dev, "energy_entity_id", None)
+                  if source == "counter"
+                  else getattr(dev, "power_entity_id", None))
+        detail = f"{source} {entity}" if entity else str(source)
+        if source == "counter":
+            raw = getattr(dev, "_energy_counter_last_kwh", None)
+            if isinstance(raw, (int, float)):
+                detail += f" reads {float(raw):.2f}kWh"
+        blind = float(getattr(dev, "daily_energy_blind_s", 0.0) or 0.0)
+        if blind > 0:
+            detail += f", blind {blind:.0f}s today"
+        out[str(device_id)] = detail
+    return out
+
+
+def power_terms(power) -> str:
+    """(#979) The six readings the home residual is computed FROM.
+
+    ``PowerReadings.calculate_derived`` builds the residual out of these and
+    nothing else, and every one of them is in hand at each site that reports a
+    disagreement about it. Reporting only the aggregate (``clamped by 2887W``)
+    sends the owner to reverse-engineer SEM's formula before they can even
+    pick a sensor to suspect; naming the terms costs one f-string and turns
+    the message into "look at this one".
+    """
+    # FLEET-READ: the residual is a FLEET quantity — the health check
+    # reports the six terms the balance is built from and controls nothing.
+    return (
+        f"supply: solar={power.solar_power:.0f}W "
+        f"grid_import={power.grid_import_power:.0f}W "
+        f"battery_discharge={power.battery_discharge_power:.0f}W | "
+        f"demand: ev={power.ev_power:.0f}W "  # FLEET-READ: fleet demand term
+        f"grid_export={power.grid_export_power:.0f}W "
+        f"battery_charge={power.battery_charge_power:.0f}W"
+    )
+
+
+def largest_demand_term(power) -> str:
+    """(#979) The demand term to suspect first when the residual goes negative.
+
+    A negative residual means the demand side outweighs everything coming in,
+    so the biggest demand reading is where an inverted sign or a stale value
+    does the most damage. Named as a suspect, never as a verdict — a house
+    charging a car legitimately has ``ev`` on top.
+    """
+    # FLEET-READ: same quantity as power_terms — the fleet's EV draw as one
+    # demand term of the residual, never a per-charger decision.
+    terms = {
+        "ev": float(power.ev_power or 0.0),  # FLEET-READ: fleet demand term
+        "grid_export": float(power.grid_export_power or 0.0),
+        "battery_charge": float(power.battery_charge_power or 0.0),
+    }
+    name, value = max(terms.items(), key=lambda kv: (kv[1], kv[0]))
+    return f"{name}={value:.0f}W"
+
+
 class HealthCheck:
     """Validates energy balance and calculation integrity each cycle."""
 
@@ -145,14 +226,21 @@ class HealthCheck:
             if home_hold_active:
                 _LOGGER.debug(
                     "Home-consumption residual clamped by %.0fW while the "
-                    "hold is bridging — known input inconsistency",
-                    clamped,
+                    "hold is bridging — known input inconsistency (%s)",
+                    clamped, power_terms(power),
                 )
             else:
+                # (#979) The six inputs, and the one to look at first. The
+                # message used to carry the aggregate alone, so the owner had
+                # to reverse-engineer which readings SEM even builds the
+                # residual from before they could suspect a sensor — while
+                # every term was in hand right here.
                 violations.append(
                     f"Home consumption residual clamped by {clamped:.0f}W "
                     f"(inputs produce a NEGATIVE house load — a power sensor "
-                    f"is stale or its sign is inverted)"
+                    f"is stale or its sign is inverted). "
+                    f"{power_terms(power)}. "
+                    f"Largest demand term: {largest_demand_term(power)}"
                 )
         elif imbalance > 50:  # Allow 50 W tolerance for rounding
             if home_hold_active:
@@ -166,7 +254,11 @@ class HealthCheck:
                 violations.append(
                     f"Energy balance: supply={supply:.0f}W, demand={demand:.0f}W, "
                     f"imbalance={imbalance:.0f}W (inputs inconsistent — a power "
-                    f"sensor is likely stale)"
+                    f"sensor is likely stale). "
+                    # (#979) Two aggregates named a disagreement the six terms
+                    # behind them could identify; this branch already had them.
+                    f"{power_terms(power)} "
+                    f"home={power.home_consumption_power:.0f}W"
                 )
 
         # Non-negative checks — RAW reads only.
@@ -265,11 +357,23 @@ class HealthCheck:
             # room to spare.
             tolerance = max(100.0, 0.10 * float(power.solar_power))
             if per_string > float(power.solar_power) + tolerance:
+                # (#979) Name the strings. "The sum is too big" leaves the
+                # owner to open four entities and add them up by hand; the
+                # duplicate is usually obvious the moment the members are
+                # listed (two slots reading the same watts), and the map is
+                # right here.
+                listed = ", ".join(
+                    f"{sid}={float(v or 0.0):.0f}W"
+                    for sid, v in sorted(
+                        flows.solar_per_string.items(),
+                        key=lambda kv: -float(kv[1] or 0.0),
+                    )
+                )
                 violations.append(
                     f"PV strings sum to {per_string:.0f}W but the inverter "
                     f"total reads {power.solar_power:.0f}W — a string is "
                     f"double-counted, or the total covers fewer inverters "
-                    f"than the strings do"
+                    f"than the strings do. Strings: {listed}"
                 )
 
         return violations
@@ -280,6 +384,7 @@ class HealthCheck:
         members: Mapping[str, float],
         fleet_total: float,
         live_ids: Optional[Iterable[str]] = None,
+        member_evidence: Optional[Mapping[str, str]] = None,
     ) -> Optional[str]:
         """(#771) One breakdown against the fleet row it decomposes.
 
@@ -318,9 +423,17 @@ class HealthCheck:
         # Name the members, biggest first, and mark the ones that are no
         # longer configured — a stale member IS the suspect, and saying so is
         # the difference between "something is wrong" and "delete this id".
+        #
+        # (#979) And say where each number CAME FROM where the caller knows.
+        # A bucket alone ("heat_pump=1906.00kWh") names the symptom; the
+        # source sensor and its raw reading name the fault — a lifetime
+        # counter read as a day looks exactly like that, and the violation is
+        # often gone by the time anyone looks.
         live = set(live_ids) if live_ids is not None else None
+        evidence = member_evidence or {}
         listed = ", ".join(
             f"{mid}={float(kwh or 0.0):.2f}kWh"
+            + (f" [{evidence[mid]}]" if mid in evidence else "")
             + (" [no longer configured]" if live is not None and mid not in live else "")
             for mid, kwh in sorted(
                 members.items(), key=lambda kv: -float(kv[1] or 0.0)
@@ -340,6 +453,7 @@ class HealthCheck:
         per_charger_daily: Mapping[str, float] | None = None,
         live_charger_ids: Iterable[str] | None = None,
         per_device_daily: Mapping[str, float] | None = None,
+        per_device_evidence: Mapping[str, str] | None = None,
     ) -> list[str]:
         """(#771) The three published breakdowns vs their fleet rows.
 
@@ -426,6 +540,12 @@ class HealthCheck:
             "Controlled loads vs home residual",
             per_device_daily or {},
             getattr(energy, "daily_home", 0.0),
+            # (#979) This is the check whose members have a NAMEABLE source —
+            # each device knows its counter/power entity and what it last
+            # read. The two charger partitions above are integrated by SEM
+            # itself from the fleet reading, so there is no third-party sensor
+            # to name and nothing is invented for them.
+            member_evidence=per_device_evidence,
         )
         if v:
             violations.append(v)
@@ -597,6 +717,7 @@ class HealthCheck:
         per_charger_daily: Mapping[str, float] | None = None,
         live_charger_ids: Iterable[str] | None = None,
         per_device_daily: Mapping[str, float] | None = None,
+        per_device_evidence: Mapping[str, str] | None = None,
         baseload_history: list | None = None,
     ) -> list[str]:
         """Run all health checks and return violations list.
@@ -625,6 +746,7 @@ class HealthCheck:
                 per_charger_daily=per_charger_daily,
                 live_charger_ids=live_charger_ids,
                 per_device_daily=per_device_daily,
+                per_device_evidence=per_device_evidence,
             )
         if baseload_history:
             violations += self.check_baseload_drift(baseload_history)

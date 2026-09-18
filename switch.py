@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .coordinator import SEMCoordinator
 from .coordinator.install_modules import kept_descriptions, presence_of
 from .persisted_flags import PERSISTED_FLAG_DEFAULTS
+from .utils.attr_budget import fit_state_attributes
 
 type SEMConfigEntry = ConfigEntry[SEMCoordinator]
 
@@ -212,15 +213,39 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
     _attr_has_entity_name = True
     _logged_unavailable: bool = False
 
+    # (#979) The switch's only large attributes — observer mode's WOULD map
+    # and the withheld service calls — grow with the controlled fleet and are
+    # rebuilt every cycle for the live sim surface. Nothing about them charts,
+    # and a recorded set that crosses HA's 16 KB cap costs the entity its
+    # whole history, not just the oversize key. Same rule as the sensors'
+    # ``_unrecorded_attributes`` (#581), which this platform never had.
+    _unrecorded_attributes = frozenset({
+        "would_decisions",
+        "withheld_commands",
+    })
+
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
+        """Return if entity is available.
+
+        (#979) The unavailability line is DEBUG, not WARNING. One failed
+        coordinator update makes every SEM entity unavailable at once, so a
+        per-entity warning is ~200 lines describing one event — and that
+        noise is what buries the warnings that mean something. The
+        coordinator logs its own failed update once for the whole
+        integration; this line only says which entity noticed.
+        """
         is_available = self.coordinator.last_update_success and self.coordinator.data is not None
         if not is_available and not self._logged_unavailable:
-            _LOGGER.warning("Switch %s is unavailable (coordinator update failed)", self.entity_description.key)
+            _LOGGER.debug(
+                "Switch %s is unavailable: %s", self.entity_description.key,
+                "the coordinator's last update failed"
+                if not self.coordinator.last_update_success
+                else "the coordinator has published no cycle yet",
+            )
             self._logged_unavailable = True
         elif is_available and self._logged_unavailable:
-            _LOGGER.info("Switch %s is available again", self.entity_description.key)
+            _LOGGER.debug("Switch %s is available again", self.entity_description.key)
             self._logged_unavailable = False
         return is_available
 
@@ -501,10 +526,15 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
             withheld = {}
         if not self._is_on:
             return {"would_decisions": {}, "withheld_commands": {}}
-        return {"would_decisions": dict(decisions),
-                # (#855) the seam-level half: the exact service calls
-                # withheld this cycle, keyed by device.
-                "withheld_commands": withheld}
+        # (#979) Bounded on the way out, like the sensors': the recorded half
+        # of an entity's attributes has a hard 16 KB cap and crossing it costs
+        # the entity its entire history.
+        return fit_state_attributes(
+            {"would_decisions": dict(decisions),
+             # (#855) the seam-level half: the exact service calls
+             # withheld this cycle, keyed by device.
+             "withheld_commands": withheld},
+            self._unrecorded_attributes)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""

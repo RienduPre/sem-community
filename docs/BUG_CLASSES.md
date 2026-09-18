@@ -3981,3 +3981,83 @@ the entity's answer, or from the call's return?* A de-dup keyed on what was SENT
 write into a permanent one.
 Refs #978 #915 #925.
 
+
+### 98. An observer surface that spends less than it holds — GUARDED
+**Symptom:** three faults on one install (RienduPre, #979, 2.1.0-beta.29), each of which cost the
+reporter a session on a wrong hypothesis before the real cause turned up. `Sensor
+charger_ev_charger_1_flow_solar_to_ev_power is unavailable` at WARNING, ~11 lines per charger per
+flap, on two wallboxes that were merely idle. `Health check violation: Home consumption residual
+clamped by 2887W` — the aggregate, and not one of the six readings it is computed from. `State
+attributes for sensor.sem_diag_charger_control exceed maximum size of 16384 bytes`, every cycle,
+which means that entity was never recorded at all.
+**Root shape:** a diagnostic is written for the moment it is *emitted*, not for the reader who has
+to act on it, and the information that would have made it actionable is already in the same scope.
+Three ways it goes wrong, all present here: (a) a normal state is spent as a FAULT — `available`
+had no notion of a state where "unavailable" is the correct answer (class 86's shape, one layer
+out: absence as evidence), so it called the idle case a fault at a level reserved for faults, and
+the noise is what buries the one warning that matters; (b) an AGGREGATE is reported and its terms
+dropped — `health_check` names `clamped by 2887W` with `power.solar_power`, `grid_import_power`,
+`battery_discharge_power`, `ev_power`, `grid_export_power` and `battery_charge_power` all in hand,
+so the owner must reverse-engineer SEM's residual before they can even pick a sensor to suspect;
+(c) a payload is published on a channel with a HARD CAP nobody measured against — HA's recorder
+refuses an entity whose recorded attributes exceed 16 KB and then stores *nothing*, not just the
+oversize key, so the observer's own surface disappears from history precisely on the installs big
+enough to need it.
+**Where it lives:** (a) every entity `available` property — `sensor.py` (the instance) and
+`switch.py` (**swept**); the other five platforms never logged. (b) every message that reports a
+disagreement about a quantity it computed: the residual clamp and the energy-balance branch beside
+it (**swept** — both now carry the six terms, the clamp also names the largest demand term as the
+first suspect), `check_flows`' per-string over-count (**swept** — it had the per-string map and
+printed only its sum), `_reconcile_partition`'s member list (**swept** — each home member now
+carries its source sensor and that sensor's raw reading, which is the line that identifies
+RienduPre's `heat_pump=1906.00kWh`: a LIFETIME counter read as a day). `check_baseload_drift`
+already named its largest mover — the precedent this row generalises. (c) every
+`extra_state_attributes` whose payload grows with the install: #814's `detection_report` (the
+instance — its sibling `control_entities` on the same entity had been declared unrecorded and it
+had not, class 24), #638's plan timeline (`_PLAN_ATTR_BUDGET_BYTES`, which solved it once locally
+in #758 and restated HA's 16 KiB as a literal — class 46, **rebased** on the shared constant), and
+the observer switch's `would_decisions` / `withheld_commands`, on a platform that had no
+`_unrecorded_attributes` at all (**swept**).
+**Closure:** (a) unavailability is a STATE: `_update_from_coordinator` records WHY it took the
+branch it took (`no cycle yet` / `nothing to compute` / `read empty past the dark-read grace`) and
+the line says the reason at DEBUG. The faults that are real keep their own instruments — the
+coordinator logs its own failed update once for the whole integration rather than once per entity,
+and a source that genuinely died raises `inputs_degraded` and a Repair. (b) `power_terms` and
+`largest_demand_term` are spelled once in `health_check` and used by every site that reports a
+disagreement about the residual; the suspect is named as a suspect, never as a verdict (a house
+charging a car legitimately has `ev` on top). (c) `RECORDER_MAX_STATE_ATTRS_BYTES` is the one
+spelling of HA's cap, and `utils/attr_budget.fit_state_attributes` is the single exit gate on the
+sensor and switch platforms: it measures the RECORDED subset the way
+`recorder.db_schema.shared_attrs_bytes_from_event` does (unrecorded attributes are exempt *before*
+the measurement, which is the whole mechanism), drops the largest recorded non-scalars until the
+set fits, and leaves `attributes_trimmed` naming them. A future author who forgets the exemption
+loses one attribute's history instead of the entity's.
+**Guard:** `tests/test_979_observer_surface.py`. An AST lint over all seven entity platforms
+(`_availability_faults`) fails CI on any `_LOGGER.warning/error/critical/exception` inside an
+`available` property, with the #979 source as its vacuity twin; the recorder oracle builds a
+detection report the size real hardware produces, computes the recorded subset HA measures, and
+asserts it fits — its twin drops the exemption and shows the same payload blowing the cap; the
+cap constant is asserted equal to `recorder.db_schema.MAX_STATE_ATTRS_BYTES`, so a host that moves
+it fails loudly rather than silently. Around them: the reason for each of the three unavailable
+branches, the six terms in both balance branches, the named strings, and the member evidence with
+a twin showing the message without it.
+**Measured the wrong side (challenge record):** the first cut budgeted against the raw 16 384-byte
+cap. The recorder measures the entity's WHOLE attribute set — HA lays `friendly_name`, unit, device
+class, state class and icon over `extra_state_attributes` first and excludes only `attribution` /
+`restored` / `supported_features` — so a gate at the raw cap leaves an entity within ~150 bytes of it
+reproducing the symptom. The budget is the cap minus that headroom (`RECORDER_ATTR_BUDGET_BYTES`,
+15 000 bytes), the same figure the plan sensor had used since #581; and that plan figure also decides
+what the LIVE state carries, so a "90 % of the cap" rounding rule that moved it by 255 bytes was a
+behaviour change wearing a tidy-up's face. Trade-off kept on purpose: an internal, coordinator-computed
+key that a future bug silently stops publishing now reports at debug like an idle charger's analytics;
+the per-entity WARNING was that class's only instrument and also the noise — the cycle rig is the
+right home for that guard (follow-up).
+**Sweep question:** for every line SEM emits about something being wrong — what does the reader
+have to do next, and is everything they need to do it already in this scope? And for anything
+published on a host surface: what is that surface's limit, and who measured against it?
+**Left for Guido:** the HA config-entry `options` API returns only one charger's flat `ev_*`
+fields while the Configuration dashboard shows both (the `ev_chargers` list is canonical and the
+flat keys mirror charger[0]). That is the legacy mirror working as designed, and it is what first
+convinced the reporter that a second charger was unconfigured — a discoverability question, not a
+fault, and not touched here.
+Refs #979 #958 #814 #824 #758 #638 #581 #660 #771 #773 #872 #915.

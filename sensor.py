@@ -7,7 +7,11 @@ import json
 import logging
 import time
 
-from .consts.core import SENSOR_DARK_READ_GRACE_S
+from .consts.core import (
+    RECORDER_ATTR_BUDGET_BYTES,
+    SENSOR_DARK_READ_GRACE_S,
+)
+from .utils.attr_budget import fit_state_attributes
 from typing import Any, Dict, List, Optional
 
 from homeassistant.components.sensor import (
@@ -71,7 +75,12 @@ def _energy_plan_state(plan: Any) -> str:
 # HA's recorder refuses to store a state whose attributes serialize above
 # 16 KiB: it logs a warning and records NO attributes at all, so the plan
 # would silently vanish from history. Stay under it with headroom.
-_PLAN_ATTR_BUDGET_BYTES = 15000
+# (#979) The budget has ONE source of truth — ``RECORDER_ATTR_BUDGET_BYTES``,
+# the cap minus the attributes HA lays over ours — rather than a literal
+# restating it here (class 46). Same 15 000 bytes as before: this number
+# also decides what the LIVE state carries (``timeline_omitted``), so it
+# must not move with a rounding rule.
+_PLAN_ATTR_BUDGET_BYTES = RECORDER_ATTR_BUDGET_BYTES
 
 
 def _merge_plan_blocks(blocks: Any) -> List[Dict[str, Any]]:
@@ -2393,6 +2402,18 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
         "per_charger_stop_war",
         "control_entities",
         "sources_available",
+        # (#979) #814's detection report — the evidence the Config card's
+        # Detected-hardware section draws — rode here RECORDED while its own
+        # sibling ``control_entities`` above did not. Its size is (entities ×
+        # scanned charger platforms): a ``near_misses`` entry per candidate
+        # entity per platform, plus the prober's candidates and the census.
+        # On RienduPre's box that crossed the recorder's 16 KB cap, so
+        # ``diag_charger_control`` was never recorded AT ALL — not this
+        # attribute, not the verdicts beside it — and every cycle logged
+        # "State attributes … exceed maximum size of 16384 bytes". It is a
+        # live-card helper rebuilt from the registry on demand: nothing about
+        # it charts, and the diagnostics download carries the full report.
+        "detection_report",
     })
 
     # Sensors disabled by default (not used by dashboard template)
@@ -2606,6 +2627,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
         if not self.coordinator.data:
             self._attr_available = False
             self._attr_native_value = None
+            # (#979) WHY, not just whether — the log line in ``available``
+            # reads this instead of calling every absence a fault.
+            self._unavailable_reason = "the coordinator has published no cycle yet"
             return
 
         key = self.entity_description.key
@@ -2717,10 +2741,21 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 self._attr_available = True
             else:
                 self._attr_available = value is not None
+            self._unavailable_reason = (
+                None if self._attr_available
+                else "the source read empty past the dark-read grace"
+            )
         else:
             # Data key not found - mark as unavailable
             self._attr_available = False
             self._attr_native_value = None
+            # (#979) The idle-charger case: SEM computes no flow/taper/session
+            # number for a charger with no session behind it, so the key is
+            # absent by design. Not a fault — the expected answer.
+            self._unavailable_reason = (
+                "SEM publishes no value for this key right now "
+                "(nothing to compute)"
+            )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -2739,7 +2774,16 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
         if getattr(self, "_stale_s", 0):
             attrs = dict(attrs or {})
             attrs["stale_s"] = int(self._stale_s)
-        return attrs
+        # (#979) The one exit gate. The RECORDED half of an entity's
+        # attributes is published on a channel with a hard 16 KB cap, and
+        # going over it costs the entity its ENTIRE history — the recorder
+        # stores nothing, not just the oversize one. Every SEM sensor's
+        # attributes leave through here, so a key that a future author
+        # forgets to declare unrecorded (which is exactly what #814's
+        # detection report did, class 24) can no longer take the whole set
+        # down with it.
+        return fit_state_attributes(
+            attrs, getattr(self, "_unrecorded_attributes", None))
 
     def _extra_state_attributes_base(self) -> Dict[str, Any]:
         """Return additional state attributes."""
@@ -3372,15 +3416,41 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
+        """Return if entity is available.
+
+        (#979) An unavailable SEM sensor is a STATE, not a fault, and this
+        line used to call every one of them a fault at WARNING. RienduPre's
+        two wallboxes were simply idle — ``Paused``/``Waiting``, cable in, no
+        session — so the flow/taper/session analytics had nothing to compute,
+        their coordinator key was absent, and ~11 sensors per charger warned
+        on every flap. That is absence spent as evidence (class 86): the
+        surface had no notion of a state where "unavailable" is the correct
+        answer, and the noise is what makes a real warning hard to find.
+
+        What it DOES know is WHY — ``_update_from_coordinator`` took one of
+        three branches to get here — so the line says the reason and drops to
+        debug. The faults that are real have their own instruments: the
+        coordinator logs its own failed update once for the whole integration
+        (a per-entity copy is ~200 lines of one event), and a source that
+        genuinely died raises ``inputs_degraded`` and a Repair.
+        """
         self._update_from_coordinator()
         is_available = self._attr_available and self.coordinator.last_update_success
         # Log unavailability once per sensor, not every cycle
         if not is_available and not getattr(self, '_logged_unavailable', False):
-            _LOGGER.warning("Sensor %s is unavailable", self.entity_description.key)
+            reason = (
+                "the coordinator's last update failed"
+                if not self.coordinator.last_update_success
+                else getattr(self, "_unavailable_reason", None)
+                or "no value published for this key"
+            )
+            _LOGGER.debug(
+                "Sensor %s is unavailable: %s",
+                self.entity_description.key, reason,
+            )
             self._logged_unavailable = True
         elif is_available and getattr(self, '_logged_unavailable', False):
-            _LOGGER.info("Sensor %s is available again", self.entity_description.key)
+            _LOGGER.debug("Sensor %s is available again", self.entity_description.key)
             self._logged_unavailable = False
         return is_available
 
