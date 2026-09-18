@@ -4061,3 +4061,93 @@ flat keys mirror charger[0]). That is the legacy mirror working as designed, and
 convinced the reporter that a second charger was unconfigured — a discoverability question, not a
 fault, and not touched here.
 Refs #979 #958 #814 #824 #758 #638 #581 #660 #771 #773 #872 #915.
+
+### 99. A verdict that names a cause its own scope refutes — GUARDED
+**Symptom:** SEM explains itself with a sentence that is false in the very state it was computed
+from, so the reader debugs the wrong thing. RienduPre, #983, 2.1.0-beta.29, 18.09.2026: 5.8 kW
+exporting for four and a half hours, and both lines SEM gave him were wrong. `no battery assist
+(SoC 98% < buffer 70%)` — 98 % is not below 70 %, and the real cause was his own
+`may_assist_ev: False` permission, a switch he could have flipped in a minute. `stability:
+full-car backoff — car declined 5 start ladders` — on an Audi e-tron his dashboard showed at 54 %
+against an 80 % target. The CONTROL was right in both cases (the pack was full, the car really was
+declining, all fifteen surplus devices were on `control_mode: off`); only the account was wrong,
+which is exactly why it became an issue instead of a self-diagnosis.
+**Root shape:** a gate grows disjuncts; its sentence does not. `_idle_bridgeable`'s
+"battery cannot assist" was one comparison in 2026-06, gained the #875 never-read arm and the
+#893/#778 permission arm, and kept quoting the comparison — so two of three causes reported as the
+third. The second half is the same defect without arithmetic: a branch names a cause it has no
+instrument for. `charge_stability`'s give-up printed `full/refusing` from *no draw after
+escalation*, and can never have had the evidence — a car at its ceiling is stopped by #548 inside
+`decide` and never reaches the ladder at all, so **every** give-up that said "full" was guessing.
+Distinct from class 98 (a surface that says less than it holds): this one says MORE — it spends
+evidence it never had. Adjacent to class 47 (one word, two axes) and class 77 (a derived output
+read back as testimony).
+**Where it lives:** every reason/`why` string built beside a multi-disjunct gate, and every one
+that states a relation rather than a reading. Swept: `decide._idle_bridgeable` (the instance — the
+gate is now `_assist_blocked_why`, one resolver that IS the boolean, so the sentence and the
+decision cannot drift), `decide_battery`'s EV discharge clamp (**swept** — it printed
+`battery SoC unknown < buffer 70%`, a relation nobody evaluated, on the one input that was
+missing), `charge_stability`'s start give-up and #610 backoff (**swept** — both now report the
+offer and the draw), `ev_control`'s stall detector (**swept** — the give-up's own comment hands
+the refusal to it, and it printed `car likely full` off the same setpoint-and-a-zero),
+`decide`'s Zone 1 line (**swept** — it named `priority` when #870's sorting may have used a
+different threshold, so the relation stayed true while the knob it named did nothing) and
+`battery_charge_scheduler`'s at-target line (**swept** — a 1 % tolerance in the gate that the
+sentence did not carry, so 79 % printed as `>= 80%`). Assessed and already true:
+`_idle_bridgeable`'s "sun gone", `solar_only`'s surplus-below-minimum, `battery_charge_scheduler`'s
+export-below-floor, `surplus_controller`'s stop condition, `charging_control`'s battery-priority
+wait — each a single condition whose operands are its own.
+**Closure:** where a gate has more than one reason to fire, ONE resolver returns the reason that
+fired and its emptiness IS the gate (`_assist_blocked_why`); a further arm reaches every reader at
+once. Where a gate carries slack or sorts its thresholds, the sentence names the boundary actually
+used, not the knob it was written for. Where SEM has no instrument for the cause, the line reports the OBSERVATION
+(`no draw at 10A after escalation — the car did not accept the start`) and hands the diagnosis to
+the party that owns it (`check its own charge limit / departure timer`). And — class 82's sweep
+question, answered for a stand-down whose cost is a LOSS rather than an unattended draw — the
+backoff line carries what it is holding back — `SEM is withholding the 7500W it had sized for this
+car`, worded as the OFFER and never as its funding. The first cut called it "surplus going to the
+grid" and the reviewer refuted it in one line: `budget_w` is grid headroom under a night peak clamp
+and solar-plus-pack in Zone 3/4, so the fix would have committed its own class.
+**Guard:** `tests/test_983_reason_names_its_cause.py`, in two halves because the class has two.
+(1) `failing_claims`, a contradiction detector for the arithmetic half: it strips thousands
+separators and INERT brackets (those holding no operator — `(bare=9000W + redirect=0W)` is a
+decoration, `(SoC 98% < buffer 70%)` is the claim), splits on the concatenation seams (` — `, `;`,
+` + `) so no clause borrows the next one's numbers, then adjudicates every `< <= > >=` against the
+operands beside it, allowing the display rounding (`_cw`'s 100 W, whole percents/amps) and skipping
+mismatched units rather than inventing a conversion. A missing operand fails too — `SoC unknown <
+buffer 70%` is the same defect wearing a word. It runs over the full `decide` matrix (6 modes × 5
+pack states × 3 solar shapes × 3 tariffs; 120 of the 270 cases carry an operator, 217 adjudicated
+comparisons). (2) `uninstrumented`, a vocabulary lint for the half with NO arithmetic in it — which
+is the half #983 was reported for, and which the first cut left guarded by two hand-written
+substring asserts. The EV path may report the setpoint SEM wrote and the watts it measured; it may
+conclude nothing about the car from them, so `full` / `refusing` / `asleep` / `faulty` fail CI as
+WHOLE WORDS in a give-up, a backoff, or any message in `charge_stability` / `ev_control` — an AST
+lint over every `_LOGGER` call and every `reason=` in those two modules (including an f-string's
+literal parts), not a source-text search, so it holds the whole module and does not add to #925's
+shrink-only ledger. Vacuity twins: the pre-fix
+`_assist_blocked_why` (31 failures), the reported line, the word-operand line, the decapitated
+aside, an ASCII `->`, a thousands separator, `Wh` against `W`, and a rounding case that must NOT
+fire. Around them: the permission/never-read/below-buffer instances, the gate-matrix equivalence
+(`bool(resolver) == the old disjunction`, brute-forced over 2 700 combinations in review), the
+withheld-offer clause pinned to the backoff gate with a zero-budget and a non-finite twin, and both
+halves of why "full" was never supported: where SEM has the instrument (`soc_ceiling_reached`) it
+idles in `decide` before the ladder exists, and where it has none (#610's own kWh-target,
+no-SOC-sensor PROD case) there was never anything to read.
+**Sweep question:** this sentence names a cause — which line of code checked it, and would the
+same state have produced the same sentence for a different reason?
+**Left for Guido:** (1) the #878 arm `_assist_blocked_why` still does not carry. `battery_assist_
+potential_w` zeroes assist below `max(buffer_soc, dynamic_floor_pct)`, so a pack at 75 % with a 70 %
+buffer and an 80 % overnight floor delivers nothing while the resolver — like the `or`-chain it
+replaced — answers "it may assist", and `_idle_bridgeable` holds the contactor on grid watts (the
+PROD 2026-06-27 case the clause exists to prevent). Pre-existing on both sides of this fix, and
+adding the arm changes CONTROL rather than text, so it is named here rather than smuggled into a
+wording change. (2) the class-82 sibling this exposes. `charge_stability`'s give-up was assessed in
+#944 and dismissed on the axis of an unattended DRAW ("the car is NOT drawing; nothing runs
+unattended") — but a stand-down's cost can be an unattended LOSS, and here it was 5.8 kW for four
+and a half hours with nothing but a strategy-sensor substring to say so. A real surface (the
+`charger_stop_war_stand_down` Repair + notification + card-status pattern, mirrored for a declined
+start) is a product call and 16 translation files, so it is named here rather than guessed at.
+Also unfixed and not SEM's: RienduPre's home-consumption residual swings ~5 kW cycle to cycle
+(662 health violations), which is what made the surplus read 0–3000 W for the quarter-hour before
+the ladder ran.
+Refs #983 #979 #944 #893 #875 #778 #885 #610 #548 #461 #440.
