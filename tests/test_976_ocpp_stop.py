@@ -58,7 +58,7 @@ def _device(platform="ocpp", switch=None, min_a=0.0, hass=None):
         power_entity_id="sensor.ocpp_cp_power_active_import",
         charger_service=None, charger_service_entity_id=None, current_entity_id=NUM,
     )
-    d._current_entity_platform = platform
+    d.zero_amps_parks_a_limit = (platform == "ocpp")
     if switch:
         d.start_stop_entity = switch
     return d, hass

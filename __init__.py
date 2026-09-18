@@ -2559,8 +2559,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             # user configured the number alone.
             if ev_current_entity:
                 from .hardware_detection import entity_platform, ocpp_charge_control_switch
-                ev_device._current_entity_platform = entity_platform(hass, ev_current_entity)
-                if (ev_device._current_entity_platform == "ocpp"
+                _cur_platform = entity_platform(hass, ev_current_entity)
+                # OCPP's maximum-current number is a charging profile the
+                # charge point keeps — 0 A there is a lockout (#976).
+                ev_device.zero_amps_parks_a_limit = (_cur_platform == "ocpp")
+                if (_cur_platform == "ocpp"
                         and not ev_device.start_stop_entity):
                     _sw = ocpp_charge_control_switch(hass, ev_current_entity)
                     if _sw:

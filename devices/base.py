@@ -2111,10 +2111,12 @@ class CurrentControlDevice(ControllableDevice):
         self.phases = phases
         self.voltage = voltage
         self.current_entity_id = current_entity_id
-        #: (#976) the integration owning the current entity, when the builder
-        #: knows it — decides whether a 0 A write is a stop or a lockout.
-        self._current_entity_platform = None
-        self._ocpp_zero_refused_logged = False
+        #: (#976) Whether a 0 A write to the current entity is a PAUSE (most
+        #: number entities) or a PERSISTED LIMIT the charge point keeps until
+        #: it is replaced — a lockout, not a stop. The builder knows which
+        #: integrations do that; this layer only knows the flag.
+        self.zero_amps_parks_a_limit = False
+        self._zero_refused_logged = False
         # #523 (RienduPre): a valid HA service is always ``domain.service``.
         # A junk value with no dot (his Wallbox config carried a stray
         # ``charger_service='0'`` — a leftover that even propagated to a
@@ -2334,10 +2336,10 @@ class CurrentControlDevice(ControllableDevice):
         """
         return any(self._discrete_contactor_surfaces())
 
-    def _current_entity_is_ocpp(self) -> bool:
-        """(#976) Does the current-control number belong to the OCPP integration?
-        The builder records the platform; unset means unknown → not OCPP."""
-        return str(self._current_entity_platform or "").lower() == "ocpp"
+    def _zero_amps_would_lock(self) -> bool:
+        """(#976) A 0 A write here parks a limit the charge point keeps —
+        it is not a pause. Unset means unknown → treated as a pause."""
+        return bool(getattr(self, "zero_amps_parks_a_limit", False))
 
     def can_stop_charging(self) -> bool:
         """Whether SEM has ANY mechanism that can actually open the contactor.
@@ -2368,10 +2370,10 @@ class CurrentControlDevice(ControllableDevice):
         entity = self.current_entity_id or self.charger_service_entity_id
         if not entity:
             return False
-        # (#976) …and never on OCPP, where 0 A is a lockout, not a stop:
-        # without the charge-control switch this charger cannot be stopped,
-        # and the #627 Repair says so — its fix is the switch.
-        if self._current_entity_is_ocpp():
+        # (#976) …and never where 0 A parks a persisted limit: without a
+        # discrete stop surface this charger cannot be stopped, and the #627
+        # Repair says so — its fix is the start/stop switch.
+        if self._zero_amps_would_lock():
             return False
         try:
             _bounded, skip = self._bound_to_entity_range(entity, 0)
@@ -2563,21 +2565,21 @@ class CurrentControlDevice(ControllableDevice):
         # skips the write entirely — the actual stop is the adapter's
         # job (pause switch / stop_session), and the number entity
         # cannot express it.
-        # (#976) On OCPP a 0 A limit is not a pause: the integration turns
-        # the number into a charging profile the charge point KEEPS, so
-        # every later start — app, card, RemoteStart — is accepted and ended
-        # a second later. @bgthb's Huawei SCharger was locked that way. The
-        # stop on OCPP is the charge-control switch (RemoteStop); a 0 A
-        # write never leaves here.
-        if current <= 0 and self._current_entity_is_ocpp():
-            if not self._ocpp_zero_refused_logged:
-                self._ocpp_zero_refused_logged = True
+        # (#976) Some integrations turn the current number into a charging
+        # profile the charge point KEEPS: a 0 A limit written there outlives
+        # the session and ends every later start a second after it is
+        # accepted — a lockout, not a pause (a charge point was left that way
+        # on 18.09). The builder marks such entities; the stop is the
+        # start/stop switch, and a 0 A write never leaves here.
+        if current <= 0 and self._zero_amps_would_lock():
+            if not getattr(self, "_zero_refused_logged", False):
+                self._zero_refused_logged = True
                 _LOGGER.warning(
-                    "%s: refusing to write 0 A to %s — on OCPP that is a "
-                    "persisted charging profile that locks the charge point, "
-                    "not a pause. The stop is the charge-control switch "
-                    "(ev_start_stop_entity); set it if SEM has not adopted it "
-                    "(#976).", self.name, self.current_entity_id)
+                    "%s: refusing to write 0 A to %s — on this integration a "
+                    "0 A limit is a persisted charging profile that locks the "
+                    "charge point, not a pause. The stop is the start/stop "
+                    "switch (ev_start_stop_entity); set it if SEM has not "
+                    "adopted it (#976).", self.name, self.current_entity_id)
             return self._status.current_consumption_w
         _entity_target = None
         if _entity_svc_domain in ("number", "input_number"):
