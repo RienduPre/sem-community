@@ -452,7 +452,15 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
             n = max(1, int(getattr(f, "battery_count", 1) or 1))
             gf_w = max(0.0, float(getattr(view, "grid_funded_load_w", 0.0) or 0.0))
             home_w = max(0.0, view.home_consumption_w - gf_w) / n
-            if below_buffer:
+            if not getattr(f, "battery_soc_known", True):
+                # (#983) ``below_buffer`` is a disjunction, and the unread
+                # arm has no comparison in it: printing "SoC unknown < buffer
+                # 70%" states a relation nobody evaluated, on the one input
+                # that is missing. Name the missing read instead — the
+                # clamp is the #875 protective default, not a measurement.
+                why = ("ev plugged in + battery SoC never read — holding the "
+                       "protective floor (#875)")
+            elif below_buffer:
                 why = (
                     f"ev plugged in + battery SoC {f.soc_label} < "
                     + (f"tonight's floor {floor_soc:.1f}%"

@@ -496,7 +496,12 @@ class BatteryChargeScheduler:
                 state=SchedulerState.NOT_NEEDED,
                 target_soc=target_soc,
                 deficit_kwh=deficit_kwh,
-                reason=f"Already at target SOC ({current_soc:.0f}% >= {target_soc:.0f}%)",
+                # (#983) The gate carries a 1 % tolerance the sentence did
+                # not: at 79 % against an 80 % target it printed "79% >= 80%",
+                # false in its own operands. State the reading and the target,
+                # and the slack that made them equal.
+                reason=(f"Already at target SOC ({current_soc:.0f}% of "
+                        f"{target_soc:.0f}%, within the 1% tolerance)"),
                 evaluated_at=now,
             )
             return self._decision

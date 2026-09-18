@@ -213,8 +213,11 @@ class TestTheReasonSaysUnknownNotZero:
         v = _view("min_plus_solar", soc=0.0, known=False, solar_w=2000.0)
         ok, why = _idle_bridgeable(v)
         assert ok is False
-        assert "SoC unknown" in why, why
+        # (#983) the never-read arm has no comparison in it, so the sentence
+        # names the missing read instead of asserting "unknown < buffer".
+        assert "never read" in why, why
         assert "SoC 0%" not in why, why
+        assert "<" not in why.split(" + ")[0], why
 
     def test_the_known_reason_keeps_its_number(self):
         v = _view("min_plus_solar", soc=40.0, known=True, solar_w=2000.0)
@@ -244,5 +247,5 @@ def test_the_discharge_clamp_protects_an_unknown_pack():
     )
     d = decide_battery(view)
     assert d.intent == BatteryIntent.LIMIT_DISCHARGE, d.reason
-    assert "SoC unknown" in d.reason, d.reason
+    assert "never read" in d.reason, d.reason   # (#983) not "unknown < 70%"
     assert "SoC 95%" not in d.reason and "SoC 0%" not in d.reason, d.reason
