@@ -356,3 +356,13 @@ ENTITY_SOLAR_POWER: Final = "sensor.sem_solar_power"
 # HA state constants (avoid magic strings)
 STATE_UNKNOWN: Final = "unknown"
 STATE_UNAVAILABLE: Final = "unavailable"
+
+# (#979) Home Assistant's recorder refuses an entity whose attributes exceed
+# this — ``homeassistant.components.recorder.db_schema.MAX_STATE_ATTRS_BYTES``.
+# It is all-or-nothing: ONE oversize attribute means the entity's whole
+# attribute set is never stored, so its history is empty forever and the log
+# carries "State attributes for X exceed maximum size of 16384 bytes" every
+# cycle. RienduPre (#979, 2.1.0-beta.29) hit it on ``diag_charger_control``,
+# which hung the full #814 detection report — a payload that grows with the
+# install — on a channel with a hard cap nothing in SEM ever checked.
+RECORDER_MAX_STATE_ATTRS_BYTES: Final = 16384

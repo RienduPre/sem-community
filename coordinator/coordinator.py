@@ -57,7 +57,9 @@ from .types import (
     HeatPumpSensorData, HotWaterSensorData, PVAnalyticsData, EnergyAssistantSensorData,
     SessionData, BatterySessionData,
 )
-from .health_check import home_member_totals, HealthCheck
+from .health_check import (
+    home_member_evidence, home_member_totals, HealthCheck,
+)
 from .units import energy_state_to_kwh, power_state_to_watts
 from .distance_units import distance_to_km
 from .ev_availability import operational_ev_connected, operational_night_target
@@ -4386,6 +4388,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # that no amount of looking could resolve. One helper, so the
                 # rule lives beside the check that depends on it.
                 per_device_daily=home_member_totals(
+                    self._surplus_controller._devices.values()),
+                # (#979) …and where each member's number came from. A bucket
+                # alone names the symptom; its source sensor and raw reading
+                # name the fault, and the violation is usually gone by the
+                # time anyone goes looking.
+                per_device_evidence=home_member_evidence(
                     self._surplus_controller._devices.values()),
                 baseload_history=getattr(
                     self._energy_calculator, "baseload_history", None,

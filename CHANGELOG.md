@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **The observer surface tells you what it already knows** (#979, reported by
+  @RienduPre). Three faults in how SEM reports itself: an idle charger's
+  analytics sensors (flow, taper, session — nothing to compute without a
+  session) warned "unavailable" once per flap, ~11 lines per charger, at the
+  level real warnings use — now a debug line that says WHY (no cycle yet /
+  nothing to compute / the source read empty); the health check's residual
+  clamp and balance violations name the six power readings they are computed
+  from and the largest demand term, a double-counted PV string is listed by
+  name, and a ledger member carries its source sensor and raw reading
+  (`heat_pump=1906.00kWh [counter sensor.x reads 1906.00kWh]`); and
+  `sensor.sem_diag_charger_control` could never be recorded — #814's detection
+  report rode it as a recorded attribute past HA's 16 KB cap, so the recorder
+  stored nothing for the entity every cycle. The report is now unrecorded
+  (the Config card still reads it live), and every SEM entity's attributes
+  leave through one gate that keeps the recorded half under the cap, marking
+  anything it had to drop as `attributes_trimmed`.
+
 - 🐛 **An OCPP charger could be locked by SEM's stop** (#976, reported by @bgthb,
   Huawei SCharger 22-KT via the OCPP integration). A charger configured with
   its maximum-current number alone had no stop mechanism, so SEM's generic

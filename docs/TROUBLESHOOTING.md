@@ -1254,3 +1254,20 @@ To clear them, run **Developer tools → Actions → *SEM: Remove leftovers***.
 
 If you are about to uninstall SEM, run that action **first** — afterwards
 there is no SEM left to run it.
+
+## `State attributes for sensor.sem_… exceed maximum size of 16384 bytes` (2.1, #979)
+
+**Symptom:** HA's log repeats that line for a SEM entity every cycle, and the
+entity's history is empty — the recorder refuses the WHOLE attribute set once
+the recorded part crosses 16 KB.
+
+**What SEM does now:** the large live-card helpers (the detection report on
+`sem_diag_charger_control`, the observer switch's `would_decisions` /
+`withheld_commands`, the device maps) are declared unrecorded, and every SEM
+entity's attributes pass one gate that keeps the recorded half under the cap.
+If it ever has to drop something, the entity carries `attributes_trimmed:
+[<names>]` — the full payload is always in the diagnostics download.
+
+**If you still see the line** on a SEM entity, report the entity id: it means
+a new attribute grew past the cap and the gate could not measure it.
+
