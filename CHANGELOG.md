@@ -24,6 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   last intent and error. A configured entity with no state reads `<missing>`
   rather than silently nothing.
 
+- 🐛 **A plug-in has an interruption budget, not just a stop rate** (#975,
+  reported by @hoyte, Zaptec Go 2). Every anti-flap guard SEM had bounds how
+  FAST it may stop a charge — the rolling median, the 2 A deadband, the 30 s
+  cadence, the three-minute disable delay. None bounded how OFTEN, and some
+  chargers count exactly that: the Go 2 locks itself out with an error after
+  too many session interruptions, and a cloudy day's surplus flicker spends
+  that budget in an afternoon. SEM now counts the stops it has commanded in
+  each plug-in: past four, every further stop widens the start delay and the
+  transient bridge (to 4×), so a charger SEM keeps interrupting gets bridged
+  through the clouds instead of cycled. A new plug-in starts a fresh budget;
+  a restart does not (the charge point's own counter did not reset either).
+  The structural stop is deliberately untouched — when the sun is genuinely
+  gone there is nothing to bridge to, and holding the contactor closed would
+  import grid (#461).
+
+# [2.1.0-beta.30] — 18.09.2026
+
 - 🐛 **A verdict that names a cause its own scope refutes** (#983, reported by
   @RienduPre, Growatt + 2× Wallbox Pulsar). 5.8 kW exported for four and a half
   hours, and both lines SEM gave for it were false in his own diagnostic: *"no
