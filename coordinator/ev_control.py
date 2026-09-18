@@ -570,8 +570,10 @@ class EVControlMixin:
         False-stall guard (#243): a car left plugged in at ~100% SOC never
         draws power despite an offered current, which would otherwise re-enable
         (and log a warning) on every cycle forever. After a few failed
-        re-enables we conclude the car is not accepting charge (likely full),
-        latch ``_ev_charge_refused``, log once, and go quiet. The latch clears
+        re-enables we conclude the car is not accepting charge — (#983) NOT
+        that it is full: the evidence here is a setpoint and a zero, the same
+        evidence ``charge_stability``'s give-up has, and neither can see a
+        BMS. Latch ``_ev_charge_refused``, log once, and go quiet. The latch clears
         the moment the car actually draws power (>=50 W), is unplugged, or SEM
         stops offering current — so genuine stalls still self-heal within the
         first few attempts and a re-plug starts fresh. Charger-agnostic; does
@@ -597,11 +599,13 @@ class EVControlMixin:
                 max_attempts = int(self.config.get("ev_max_reenable_attempts", 3))
                 self._ev_reenable_attempts = getattr(self, "_ev_reenable_attempts", 0) + 1
                 if self._ev_reenable_attempts > max_attempts:
-                    # Car keeps refusing — likely full. Stop re-enabling.
+                    # (#983) Car keeps declining. Why is the car's to say —
+                    # report the offer and the draw. Stop re-enabling.
                     self._ev_charge_refused = True
                     _LOGGER.info(
                         "EV not accepting charge after %d re-enable attempts "
-                        "(setpoint=%.0fA, power=%.0fW) — car likely full; "
+                        "(setpoint=%.0fA, power=%.0fW) — check the car's own "
+                        "charge limit / departure timer; "
                         "pausing re-enable until power resumes or car unplugged",
                         max_attempts, ev._current_setpoint, this_power_w,
                     )

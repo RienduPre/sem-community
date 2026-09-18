@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gone there is nothing to bridge to, and holding the contactor closed would
   import grid (#461).
 
+- 🐛 **A verdict that names a cause its own scope refutes** (#983, reported by
+  @RienduPre, Growatt + 2× Wallbox Pulsar). 5.8 kW exported for four and a half
+  hours, and both lines SEM gave for it were false in his own diagnostic: *"no
+  battery assist (SoC 98% < buffer 70%)"* on a pack sitting at 98 %, where the
+  real cause was his own *battery may assist the EV* switch; and *"full-car
+  backoff"* on a car SEM reads at 54 % against an 80 % target. The control was
+  right — the pack was full, the car really was declining every start — only
+  the account was wrong, which is why it cost a bug report instead of a
+  one-minute self-diagnosis. A gate with three reasons to fire now reports the
+  one that fired, and the start give-up reports the offer it made and the draw
+  it measured, hands the diagnosis to the party that owns it (*check the car's
+  own charge limit / departure timer*), and says how much it is withholding
+  while it stands down. Swept the same shape out of the EV stall detector, the
+  Zone 1 line, the battery charge scheduler and the EV discharge clamp.
+
 - 🐛 **A dropped power-strategy flip silently withdrew battery-to-grid** (#978,
   reported by @RienduPre, 2× Sessy). On an AC-coupled battery the setpoint is
   ignored unless the power-strategy select reads the active value (`api`), so
