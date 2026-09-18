@@ -53,8 +53,12 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         #: the strategy the select was last SEEN at (#978) — never what SEM
         #: last sent. A flip is cached only once the entity reads it.
         self._last_strategy = None
-        #: (value, monotonic) of a flip sent and not yet seen — the retry gate
-        self._strategy_pending = None
+        #: value → monotonic of the last SEND the select has not been seen to
+        #: take. Per value, so an interleaved NORMAL (the select already reads
+        #: ``nom``) cannot erase the evidence that ``api`` never landed — the
+        #: reviewer's repro: a flap every cycle re-sent ``api`` forever and
+        #: counted nothing (#978 challenge record).
+        self._strategy_sent = {}
         #: (value, seen) of the last miss said aloud — say each once
         self._strategy_miss_said = None
         #: a miss / a landing not yet turned into a #915 verdict
@@ -144,19 +148,25 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         return str(cur) if isinstance(cur, str) and cur else "missing"
 
     def _strategy_landed(self, value: str) -> None:
-        sent = self._strategy_pending is not None
-        self._strategy_pending = None
-        self._strategy_miss_said = None
-        self._setpoint_withheld_said = False
+        """The select reads ``value``. Everything cleared here is keyed on
+        THIS value: a NORMAL finding ``nom`` already there says nothing
+        about the ``api`` the select never took (challenge record)."""
+        sent = self._strategy_sent.pop(value, None) is not None
+        if self._strategy_miss_said and self._strategy_miss_said[0] == value:
+            self._strategy_miss_said = None
+        if value == self._strategy_active:
+            self._setpoint_withheld_said = False
         if sent or self._last_strategy != value:
             _LOGGER.info(
                 "Generic battery: power strategy → %s (%s)%s",
                 value, self._strategy_entity, "" if sent else " — read, not sent",
             )
         self._last_strategy = value
-        # (#915) the same read-back ledger the setpoint uses: a landing
-        # clears the strikes this select earned and files a True verdict.
-        if self.last_unverified_entity == self._strategy_entity:
+        # (#915) the same read-back ledger the setpoint uses: the landing of
+        # the value that MISSED clears the strikes it earned and files a
+        # True verdict.
+        if (self.last_unverified_entity == self._strategy_entity
+                and self.last_unverified_wanted == value):
             self.write_not_taken_strikes = 0
             self.last_unverified_entity = ""
             self.last_verified_entity = self._strategy_entity
@@ -206,9 +216,9 @@ class GenericBatteryAdapter(BatteryControlAdapter):
             self._strategy_landed(value)
             return
         now = _time.monotonic()
-        pending = self._strategy_pending
-        if pending and pending[0] == value:
-            age = now - pending[1]
+        sent_at = self._strategy_sent.get(value)
+        if sent_at is not None:
+            age = now - sent_at
             if age < self.STRATEGY_RETRY_S:
                 return          # sent recently — the select may be catching up
             self._strategy_missed(value, age)
@@ -226,9 +236,9 @@ class GenericBatteryAdapter(BatteryControlAdapter):
             )
         except Exception as e:  # noqa: BLE001
             _LOGGER.warning("Generic battery: failed to set strategy: %s", e)
-            self._strategy_pending = (value, now)
+            self._strategy_sent[value] = now
             return
-        self._strategy_pending = (value, now)
+        self._strategy_sent[value] = now
         if self._read_strategy() == value:
             self._strategy_landed(value)
         else:

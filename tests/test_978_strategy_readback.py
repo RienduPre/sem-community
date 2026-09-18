@@ -227,3 +227,30 @@ class TestAStuckFlipIsAMissNotASuccess:
                 await gen.command_force_discharge(1700, 20.0); t[0] += 10.0
         assert gen.write_not_taken_strikes >= 1
         assert gen.last_unverified_seen == "missing"
+
+    async def test_an_interleaved_normal_does_not_erase_the_evidence(self, caplog):
+        """The reviewer's repro (challenge record): the intent flaps
+        FORCE_DISCHARGE / NORMAL every cycle while the select is stuck on
+        ``nom``. NORMAL asks for ``nom`` — already there — and the first cut
+        took that landing as "nothing pending", so ``api`` was re-sent as a
+        fresh attempt every cycle and no miss was ever counted."""
+        hass, st = _rig(lands=False)
+        gen = GenericBatteryAdapter(hass, CFG)
+        t = [1000.0]
+        verdicts = []
+        with patch("time.monotonic", side_effect=lambda: t[0]), caplog.at_level(logging.WARNING):
+            for i in range(22):                       # 220 s of 10 s cycles
+                if i % 2 == 0:
+                    await gen.command_force_discharge(1700, 20.0)
+                else:
+                    await gen.command_normal()
+                verdicts.append(gen.verify_pending_write())
+                t[0] += 10.0
+        api_sends = [c for c in _calls(hass, "select_option") if c[2]["option"] == "api"]
+        assert len(api_sends) <= 4, len(api_sends)     # gated, not every cycle
+        assert gen.write_not_taken_strikes >= 3
+        assert verdicts.count(False) >= 3
+        # NORMAL's #523 mutual-exclusion zero is fine; no DISCHARGE setpoint went out
+        assert all(c[2]["value"] == 0.0 for c in _calls(hass, "set_value"))
+        assert len([m for m in caplog.messages if "did not land" in m]) == 1
+
