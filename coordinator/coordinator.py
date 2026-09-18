@@ -10543,7 +10543,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
     async def _retry_ev_device_setup(self) -> None:
         """Retry EV device setup if KEBA wasn't available at startup."""
-        from ..hardware_detection import discover_ev_charger_from_registry
+        from ..hardware_detection import (
+            discover_ev_charger_from_registry, wire_current_entity,
+        )
         from ..devices.base import CurrentControlDevice, resolve_max_current
 
         ev_auto = discover_ev_charger_from_registry(self.hass)
@@ -10575,6 +10577,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             ev_device.service_device_id = ev_auto["ev_service_device_id"]
         if ev_auto.get("ev_start_stop_entity"):
             ev_device.start_stop_entity = ev_auto["ev_start_stop_entity"]
+        # (#976) what the current entity's platform implies for control —
+        # the same producer the setup-time builder calls, so a late-built
+        # device carries the 0 A refusal flag and the adopted switch too.
+        wire_current_entity(self.hass, ev_device, "ev_charger",
+                            ev_auto.get("ev_current_control_entity"))
         if ev_auto.get("ev_charge_mode_entity"):
             ev_device.charge_mode_entity = ev_auto["ev_charge_mode_entity"]
             ev_device.charge_mode_start = ev_auto.get("ev_charge_mode_start")

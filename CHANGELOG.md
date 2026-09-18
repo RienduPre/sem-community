@@ -22,8 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adopts the charge point's charge-control switch as the stop (a RemoteStop)
   when the user configured the number alone, and — if no switch exists —
   reports through the existing "cannot be stopped" Repair instead of parking
-  a 0 A profile. Recovery for a locked charge point: set the OCPP maximum
-  current back to its maximum, or call `ocpp.clear_profile`.
+  a 0 A profile. The same protection covers a charge point discovered after
+  startup and a generic load whose current control is an OCPP maximum-current
+  number. Recovery for a locked charge point: set the OCPP maximum current
+  back to its maximum, or call `ocpp.clear_profile`.
 
 - ✨ **The grid is not always a sink** (arc #921 — #955 #871 #926 #879 #892).
   Every destination a kWh can take now gets a per-cycle OPEN / HELD / CLOSED

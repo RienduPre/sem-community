@@ -186,3 +186,88 @@ class TestSiblingSwitchAdoption:
             assert entity_platform(MagicMock(), NUM) == "ocpp"
         with _registry([]):
             assert entity_platform(MagicMock(), NUM) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ONE producer — every builder wires the current entity the same way
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestOneProducer:
+    """The first cut set the flag in the setup-time builder only; the
+    coordinator's late retry (``_retry_ev_device_setup``) built a device
+    without it — a second producer missing the field, the shape that hid
+    the export guard's silent no-op (bug class 93). The facts now have one
+    producer, ``hardware_detection.wire_current_entity``, and every
+    construction site is pinned to call it."""
+
+    def test_wire_sets_the_flag_and_adopts_the_switch(self, caplog):
+        from custom_components.solar_energy_management.hardware_detection import wire_current_entity
+        d, _ = _device(platform=None)
+        with _registry([_e(NUM), _e(AVAIL), _e(SW)]), caplog.at_level(logging.INFO):
+            wire_current_entity(MagicMock(), d, "cp", NUM)
+        assert d.zero_amps_parks_a_limit is True and d.start_stop_entity == SW
+        assert any("adopted switch.ocpp_cp_charge_control" in m for m in caplog.messages)
+
+    def test_wire_without_a_switch_warns_and_the_device_cannot_stop(self, caplog):
+        from custom_components.solar_energy_management.hardware_detection import wire_current_entity
+        d, _ = _device(platform=None)
+        with _registry([_e(NUM), _e(AVAIL)]), caplog.at_level(logging.WARNING):
+            wire_current_entity(MagicMock(), d, "cp", NUM)
+        assert d.zero_amps_parks_a_limit is True and d.start_stop_entity is None
+        assert any("cannot stop this charger" in m for m in caplog.messages)
+        assert d.can_stop_charging() is False
+
+    def test_wire_keeps_a_switch_the_user_configured(self):
+        from custom_components.solar_energy_management.hardware_detection import wire_current_entity
+        d, _ = _device(platform=None, switch="switch.my_own_stop")
+        with _registry([_e(NUM), _e(SW)]):
+            wire_current_entity(MagicMock(), d, "cp", NUM)
+        assert d.start_stop_entity == "switch.my_own_stop"
+
+    def test_wire_on_another_platform_changes_nothing(self):
+        from custom_components.solar_energy_management.hardware_detection import wire_current_entity
+        d, _ = _device(platform=None)
+        with _registry([_e(NUM, platform="wallbox"), _e(SW)]):
+            wire_current_entity(MagicMock(), d, "cp", NUM)
+        assert d.zero_amps_parks_a_limit is False and d.start_stop_entity is None
+
+    def test_every_construction_site_calls_the_producer(self):
+        """Structural: each production ``CurrentControlDevice(...)`` — the
+        setup-time builder AND the coordinator's late retry — sits in a
+        function that calls ``wire_current_entity``."""
+        import ast as _ast
+        from pathlib import Path
+        from custom_components.solar_energy_management.tests import ast_contracts
+        sites = ast_contracts.call_sites("CurrentControlDevice")
+        assert {"__init__.py", "coordinator/coordinator.py"} <= {rel for rel, _, _ in sites}, sites
+        root = Path(ast_contracts.__file__).resolve().parent.parent
+        for rel, lineno, _ in sites:
+            tree = _ast.parse((root / rel).read_text(encoding="utf-8"))
+            fns = [n for n in _ast.walk(tree)
+                   if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                   and n.lineno <= lineno <= (n.end_lineno or n.lineno)]
+            fn = max(fns, key=lambda n: n.lineno)
+            assert any(isinstance(c, _ast.Call)
+                       and ast_contracts._callee_name(c) == "wire_current_entity"
+                       for c in _ast.walk(fn)), (
+                f"{rel}:{lineno} builds a CurrentControlDevice in {fn.name}() "
+                f"without wire_current_entity()")
+
+    @pytest.mark.asyncio
+    async def test_the_late_retry_builds_a_wired_device(self):
+        """A charge point discovered AFTER startup carries the same facts as
+        one built at setup: the flag, and the adopted switch."""
+        from custom_components.solar_energy_management.coordinator.coordinator import SEMCoordinator
+        hass = _hass()
+        me = SimpleNamespace(hass=hass, config={"ev_surplus_priority": 3, "ev_phases": 3},
+                             _surplus_controller=MagicMock(),
+                             refresh_detection_report=lambda: None)
+        auto = {"ev_charger_service": "number.set_value",
+                "ev_current_control_entity": NUM,
+                "ev_charging_power_sensor": "sensor.ocpp_cp_power_active_import"}
+        with patch("custom_components.solar_energy_management.hardware_detection"
+                   ".discover_ev_charger_from_registry", return_value=auto), \
+                _registry([_e(NUM), _e(AVAIL), _e(SW)]):
+            await SEMCoordinator._retry_ev_device_setup(me)
+        dev = me._surplus_controller.register_device.call_args.args[0]
+        assert dev.zero_amps_parks_a_limit is True and dev.start_stop_entity == SW

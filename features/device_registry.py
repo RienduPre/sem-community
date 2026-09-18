@@ -1131,6 +1131,12 @@ class UnifiedDeviceRegistry:
             current_entity_id=entity,
             power_entity_id=device.power_sensor,
         )
+        # (#976) what the current entity's platform implies for control —
+        # the same producer every charger builder calls: a load whose
+        # current control is an OCPP maximum-current number would otherwise
+        # be "stopped" with a 0 A profile the charge point keeps.
+        from ..hardware_detection import wire_current_entity
+        wire_current_entity(self.hass, surplus_device, device.device_id, entity)
         self._surplus_controller.register_device(surplus_device)
 
     def control_mode_for(self, device_id: str) -> str:

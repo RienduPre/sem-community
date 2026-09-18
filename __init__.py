@@ -2553,31 +2553,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
                 ev_device.service_device_id = _cfg("ev_service_device_id")
             if _cfg("ev_start_stop_entity"):
                 ev_device.start_stop_entity = _cfg("ev_start_stop_entity")
-            # (#976) OCPP: the current number's stop is a lockout, the switch
-            # is the stop. Record the platform for the device's 0 A refusal,
-            # and adopt the charge point's charge-control switch when the
-            # user configured the number alone.
-            if ev_current_entity:
-                from .hardware_detection import entity_platform, ocpp_charge_control_switch
-                _cur_platform = entity_platform(hass, ev_current_entity)
-                # OCPP's maximum-current number is a charging profile the
-                # charge point keeps — 0 A there is a lockout (#976).
-                ev_device.zero_amps_parks_a_limit = (_cur_platform == "ocpp")
-                if (_cur_platform == "ocpp"
-                        and not ev_device.start_stop_entity):
-                    _sw = ocpp_charge_control_switch(hass, ev_current_entity)
-                    if _sw:
-                        ev_device.start_stop_entity = _sw
-                        _LOGGER.info(
-                            "Charger '%s': OCPP charge point — adopted %s as the "
-                            "start/stop switch (a 0 A limit would lock it, #976)",
-                            charger_id, _sw)
-                    else:
-                        _LOGGER.warning(
-                            "Charger '%s': OCPP current number %s with no "
-                            "charge-control switch found — SEM cannot stop this "
-                            "charger; set ev_start_stop_entity (#976)",
-                            charger_id, ev_current_entity)
+            # (#976) what the current entity's platform implies for control —
+            # ONE producer with the coordinator's late retry (the 0 A refusal
+            # flag, the OCPP charge-control switch adoption).
+            from .hardware_detection import wire_current_entity
+            wire_current_entity(hass, ev_device, charger_id, ev_current_entity)
             if _cfg("ev_charge_mode_entity"):
                 ev_device.charge_mode_entity = _cfg("ev_charge_mode_entity")
                 ev_device.charge_mode_start = _cfg("ev_charge_mode_start")

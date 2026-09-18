@@ -3837,3 +3837,39 @@ def ocpp_charge_control_switch(hass, number_entity_id: str):
     except Exception:  # noqa: BLE001
         return None
     return None
+
+
+def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> None:
+    """(#976) What the current entity's PLATFORM implies for control, applied
+    to a freshly built charger device — the ONE producer, called by every
+    builder (the setup-time builder in ``__init__`` and the coordinator's
+    late retry).
+
+    * ``zero_amps_parks_a_limit`` — on the OCPP integration the maximum-
+      current number is a charging profile the charge point KEEPS, so a
+      0 A write is a lockout, not a pause; the device refuses it.
+    * the charge-control switch is adopted as the start/stop surface when
+      the user configured the number alone, so the stop is a RemoteStop;
+      without one SEM says so, and the #627 Repair follows.
+
+    Two construction sites once carried this unevenly — the retry path had
+    none of it — which is the shape that hid the export guard's silent
+    no-op (bug class 93): a second producer without the field.
+    """
+    if not current_entity_id:
+        return
+    platform = entity_platform(hass, current_entity_id)
+    device.zero_amps_parks_a_limit = (platform == "ocpp")
+    if platform != "ocpp" or getattr(device, "start_stop_entity", None):
+        return
+    sw = ocpp_charge_control_switch(hass, current_entity_id)
+    if sw:
+        device.start_stop_entity = sw
+        _LOGGER.info(
+            "Charger '%s': OCPP charge point — adopted %s as the start/stop "
+            "switch (a 0 A limit would lock it, #976)", charger_id, sw)
+    else:
+        _LOGGER.warning(
+            "Charger '%s': OCPP current number %s with no charge-control "
+            "switch found — SEM cannot stop this charger; set "
+            "ev_start_stop_entity (#976)", charger_id, current_entity_id)
