@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.30] — 18.09.2026
+
 - 🐛 **A verdict that names a cause its own scope refutes** (#983, reported by
   @RienduPre, Growatt + 2× Wallbox Pulsar). 5.8 kW exported for four and a half
   hours, and both lines SEM gave for it were false in his own diagnostic: *"no
