@@ -158,19 +158,42 @@ class TestAbsenceIsSaid:
 @pytest.mark.unit
 class TestItIsWiredIntoTheService:
     def test_the_diagnose_payload_builds_the_block_for_all_and_battery(self):
-        """The wiring, structurally: the service asks this module for the block
-        under the sections a battery report is filed from."""
+        """The wiring, structurally (AST, not source text — #925): the
+        diagnose service assigns ``payload["battery_actuation"]`` from this
+        module, under every section a battery report is filed from."""
         import ast
         from pathlib import Path
-        src = (Path(__file__).resolve().parent.parent / "__init__.py").read_text()
-        tree = ast.parse(src)
-        calls = [n for n in ast.walk(tree)
-                 if isinstance(n, ast.Call)
-                 and getattr(n.func, "id", getattr(n.func, "attr", None))
-                 == "battery_actuation_diag"]
-        assert calls, "the diagnose service never builds the battery block"
-        assert 'payload["battery_actuation"]' in src
-        i = src.index('payload["battery_actuation"]')
-        gate = src.rindex("if section in", 0, i)
-        for want in ("all", "battery_zones", "battery_scheduler"):
-            assert f'"{want}"' in src[gate:i], f"section {want} misses the block"
+
+        tree = ast.parse(
+            (Path(__file__).resolve().parent.parent / "__init__.py")
+            .read_text(encoding="utf-8"))
+
+        def _assigns_the_block(node):
+            for t in getattr(node, "targets", []):
+                if (isinstance(t, ast.Subscript)
+                        and getattr(t.value, "id", None) == "payload"
+                        and getattr(getattr(t, "slice", None), "value", None)
+                        == "battery_actuation"):
+                    return True
+            return False
+
+        sections = set()
+        found = False
+        for gate in (n for n in ast.walk(tree) if isinstance(n, ast.If)):
+            assigns = [n for n in ast.walk(gate)
+                       if isinstance(n, ast.Assign) and _assigns_the_block(n)]
+            if not assigns:
+                continue
+            found = True
+            # the builder, not a literal: the value must CALL this module
+            assert any(
+                isinstance(a.value, ast.Call)
+                and getattr(a.value.func, "id",
+                            getattr(a.value.func, "attr", None))
+                == "battery_actuation_diag"
+                for a in assigns), "the block is assigned without building it"
+            for cmp_ in getattr(gate.test, "comparators", []):
+                sections |= {e.value for e in getattr(cmp_, "elts", [])
+                             if isinstance(e, ast.Constant)}
+        assert found, "the diagnose service never builds the battery block"
+        assert {"all", "battery_zones", "battery_scheduler"} <= sections, sections
