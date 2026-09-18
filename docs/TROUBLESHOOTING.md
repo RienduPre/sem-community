@@ -1011,6 +1011,27 @@ right after a successful write and then blinds itself for ~60 s; a second HA
 host reading the same inverter lags by up to ~15 minutes. Force either with
 `homeassistant.update_entity` — that read is the truth.
 
+## An OCPP charger accepts a start and stops one second later (2.1, #976)
+
+**Symptom:** after SEM stopped a charge, the wallbox refuses every new
+session — the app, the card swipe and the OCPP switch all get
+`RemoteStartTransaction: Accepted` followed by `StopTransaction` a second
+later. On a Huawei SCharger the LED blinks 4 s blue / 1 s off.
+
+**Cause:** SEM's generic stop is "write 0 A to the current number". On the
+OCPP integration that number is a *charging profile* and the charge point
+keeps it, so the 0 A limit outlives the session. Since 2.1 SEM never writes
+0 A to an OCPP current number and stops through the charge-control switch
+instead (adopted automatically from the same charge point when you configured
+the number alone; or set **Start/stop entity** to
+`switch.<charge point>_charge_control` yourself).
+
+**Recovery, in order:** put SEM's hands off (charge mode *Off*, or observer
+mode) → set the OCPP **maximum current** number back to your maximum → if
+that alone does not free it, call the `ocpp.clear_profile` service → then
+`ocpp.reset` (a soft reset) — a factory reset is the last resort, not the
+first.
+
 ## The inverter refuses forced discharge
 
 SEM asked your inverter/battery to force-discharge (battery-to-grid export)

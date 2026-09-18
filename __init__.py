@@ -2553,6 +2553,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
                 ev_device.service_device_id = _cfg("ev_service_device_id")
             if _cfg("ev_start_stop_entity"):
                 ev_device.start_stop_entity = _cfg("ev_start_stop_entity")
+            # (#976) what the current entity's platform implies for control —
+            # ONE producer with the coordinator's late retry (the 0 A refusal
+            # flag, the OCPP charge-control switch adoption).
+            from .hardware_detection import wire_current_entity
+            wire_current_entity(hass, ev_device, charger_id, ev_current_entity)
             if _cfg("ev_charge_mode_entity"):
                 ev_device.charge_mode_entity = _cfg("ev_charge_mode_entity")
                 ev_device.charge_mode_start = _cfg("ev_charge_mode_start")

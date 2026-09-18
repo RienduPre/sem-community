@@ -3795,3 +3795,81 @@ def _bare_temperature_inverter_sensor(hass, sibling_sensors, exclude):
         if dc == "temperature" or is_temperature_unit(state):
             return eid
     return None
+
+
+# ── (#976) OCPP: the charge-control switch is the stop verb ─────────────
+def entity_platform(hass, entity_id: str):
+    """The integration that owns ``entity_id`` (registry platform), or None."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+        entry = er.async_get(hass).async_get(entity_id)
+        return str(entry.platform) if entry is not None and entry.platform else None
+    except Exception:  # noqa: BLE001 — a lookup that fails is "unknown", never a crash
+        return None
+
+
+def ocpp_charge_control_switch(hass, number_entity_id: str):
+    """(#976) The ``switch.<charge point>_charge_control`` sibling of an OCPP
+    maximum-current number — the entity that ends a transaction (RemoteStop).
+
+    A charger configured by hand with the current number alone had no stop
+    mechanism, so SEM's generic stop wrote 0 A — which on OCPP becomes a
+    persisted 0 A charging profile that the charge point keeps: it then
+    accepts every start and ends it a second later (@bgthb's Huawei
+    SCharger, 18.09). Same device, platform ``ocpp``, a switch whose id
+    carries ``charge`` and not ``availability`` — the rule ``_discover_ocpp``
+    already applies on auto-detection, made reachable for the manual path.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(hass)
+        entry = reg.async_get(number_entity_id)
+        if entry is None or str(entry.platform or "") != "ocpp":
+            return None
+        dev = getattr(entry, "device_id", None)
+        for e in reg.entities.values():
+            eid = str(getattr(e, "entity_id", "") or "")
+            if (str(getattr(e, "platform", "") or "") == "ocpp"
+                    and (dev is None or getattr(e, "device_id", None) == dev)
+                    and eid.startswith("switch.") and "charge" in eid
+                    and "availab" not in eid):
+                return eid
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> None:
+    """(#976) What the current entity's PLATFORM implies for control, applied
+    to a freshly built charger device — the ONE producer, called by every
+    builder (the setup-time builder in ``__init__`` and the coordinator's
+    late retry).
+
+    * ``zero_amps_parks_a_limit`` — on the OCPP integration the maximum-
+      current number is a charging profile the charge point KEEPS, so a
+      0 A write is a lockout, not a pause; the device refuses it.
+    * the charge-control switch is adopted as the start/stop surface when
+      the user configured the number alone, so the stop is a RemoteStop;
+      without one SEM says so, and the #627 Repair follows.
+
+    Two construction sites once carried this unevenly — the retry path had
+    none of it — which is the shape that hid the export guard's silent
+    no-op (bug class 93): a second producer without the field.
+    """
+    if not current_entity_id:
+        return
+    platform = entity_platform(hass, current_entity_id)
+    device.zero_amps_parks_a_limit = (platform == "ocpp")
+    if platform != "ocpp" or getattr(device, "start_stop_entity", None):
+        return
+    sw = ocpp_charge_control_switch(hass, current_entity_id)
+    if sw:
+        device.start_stop_entity = sw
+        _LOGGER.info(
+            "Charger '%s': OCPP charge point — adopted %s as the start/stop "
+            "switch (a 0 A limit would lock it, #976)", charger_id, sw)
+    else:
+        _LOGGER.warning(
+            "Charger '%s': OCPP current number %s with no charge-control "
+            "switch found — SEM cannot stop this charger; set "
+            "ev_start_stop_entity (#976)", charger_id, current_entity_id)
