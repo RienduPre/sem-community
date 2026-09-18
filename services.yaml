@@ -514,7 +514,9 @@ diagnose:
     section:
       name: Section
       description: >
-        Which area to report on. "all" returns the overview; "trace" returns
+        Which area to report on. "all" returns the overview (including the
+        per-charger and per-battery actuation blocks — what SEM commanded and
+        what the hardware reads back); "trace" returns
         the layered per-cycle decision chain (management → process →
         integration) plus any layer-boundary mismatch, which is the fastest
         way to explain an unexpected EV or load decision.

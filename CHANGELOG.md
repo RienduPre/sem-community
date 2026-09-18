@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A battery-control report can be answered from the download** (#983,
+  reported by @RienduPre). The diagnose payload carried a full per-charger
+  `ev_actuation` block and nothing at all about the battery's control surface,
+  so the two facts a battery report turns on — what the power-strategy select
+  READS versus what SEM believes it set, and whether the setpoint write was
+  refused and how often — cost a round trip every time. `battery_actuation`
+  now carries them per battery (both of a pair, not just the primary), with
+  the flips SEM has sent and not yet seen, the #915 read-back ledger and the
+  last intent and error. A configured entity with no state reads `<missing>`
+  rather than silently nothing.
+
 - 🐛 **A dropped power-strategy flip silently withdrew battery-to-grid** (#978,
   reported by @RienduPre, 2× Sessy). On an AC-coupled battery the setpoint is
   ignored unless the power-strategy select reads the active value (`api`), so
