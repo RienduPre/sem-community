@@ -3952,3 +3952,32 @@ the hardware, and what does the register read afterwards?* A service that return
 a service that worked.
 Refs #955 #921.
 
+### 97. A write cached as done because the call did not raise — the de-dup then locks the retry out — GUARDED
+**Symptom:** battery-to-grid never engages on an AC-coupled battery, and after three refused
+setpoints SEM withdraws it for good, blaming the setpoint entity. The reporter flips the strategy
+select to `api` by hand and the same setpoint lands at once (@RienduPre, 2× Sessy, #978).
+**Root shape:** `_set_strategy` recorded `_last_strategy = value` on the line after the service
+call — "nothing raised" read as "it landed". HA answers a `select_option` it cannot deliver
+(*"Referenced entities … are missing or not currently available"*) with a WARNING and a normal
+return, so the first dropped flip was cached, and the de-dup — `value == _last_strategy → return`
+— then blocked every later attempt for the life of the process, the 600 s probes included. A
+guard built to stop churn became the mechanism of a permanent self-disable. Class 96's sibling
+from the other side: there the register landed somewhere else, here it did not move at all; in
+both, nothing read the answer back. Differs from #824/#915 (a register that ignores a write) in
+that the *memory* of the write was the fault, not the register.
+**Cure:** believe the entity. Nothing is sent when the select already reads the value; a flip is
+cached only once the select reads it; one that has not landed after `STRATEGY_RETRY_S` is a MISS
+on the #915 read-back ledger (entity, wanted, seen — the same Repair after three), said once and
+re-sent; the setpoint is WITHHELD, with no strike against the device, until the strategy reads
+active. Unreadable is its own state, not "did not land" (#925).
+**Guard:** `tests/test_978_strategy_readback.py` — the dropped flip is not cached; the reporter's
+night (four sends in 200 s, three misses, one warning, three `False` verdicts, no setpoint write,
+strikes on the device 0, `supports_forced_discharge` still True); a laggy select costs one cycle
+and no noise; a landing after misses clears the ledger. The `_hass()` fake in
+`tests/test_battery_arbitrage_523.py` now REFLECTS `select_option` — a fake that swallows the
+flip models the very dropped write the fix refuses.
+**Sweep question:** wherever SEM keeps a "last written" value for de-dup — *is it assigned from
+the entity's answer, or from the call's return?* A de-dup keyed on what was SENT turns one dropped
+write into a permanent one.
+Refs #978 #915 #925.
+
