@@ -4151,3 +4151,28 @@ Also unfixed and not SEM's: RienduPre's home-consumption residual swings ~5 kW c
 (662 health violations), which is what made the surplus read 0–3000 W for the quarter-hour before
 the ladder ran.
 Refs #983 #979 #944 #893 #875 #778 #885 #610 #548 #461 #440.
+
+### 100. A sensor's failure wearing the costume of a valid reading — GUARDED
+**Symptom:** the energy balance needs a clamp to stay non-negative, repeatedly, on a healthy house —
+`residual clamped by 1274W — solar=0W grid_import=0W battery_discharge=0W | battery_charge=1267W`
+(#988, PROD 19.09 08:24). A house does not charge its battery from nothing.
+**Root shape:** the input has TWO failure shapes and only one of them is recognisable as failure.
+`unavailable` is bridged by the dark-read grace — 151 min of it over 24 h cost the published sensor
+2 — while the same dropping inverter's hard `0 W` is indistinguishable from night, so it is accepted
+as a measurement, enters the balance, and reaches `decide()`, where a 29-second false zero reads as
+"no surplus" and can end a charge structurally (#461). The clamp is why it survived so long: it
+repaired the SYMPTOM, so the house-consumption figure looked sane while its inputs were not.
+**Cure:** refute the reading from the rest of the balance, not from a threshold on the sensor. What
+LEAVES the house (battery charge + export) minus what enters it other than the sun (import +
+discharge) is energy only the sun can have supplied; past a margin, a zero is a dark read — counted
+exactly like an unavailable one (#902/#818), so the cycle does not steer on it and the entity
+publishes unavailable instead of a zero it cannot stand behind. One-directional by construction: it
+refuses a zero, never invents a value, because what the input WAS during the gap is not knowable here.
+**Guard:** `tests/test_988_solar_zero_is_not_a_reading.py` — the reporter's morning, the three
+EXPLAINED zeros (night, charging from the grid, exporting from the battery), the margin, the
+untouched non-zero read, and a structural pin that the gate is called beside the battery gate it
+mirrors. Vacuity: neutralising the physics turns five red.
+**Sweep question:** for every input SEM trusts — *what does this sensor look like when it fails?* If
+one of its failure shapes is a value inside the valid range, nothing downstream can tell it from
+data, and the first sign will be a clamp, a hold or a guard firing for no visible reason.
+Refs #988 #902 #818 #461.

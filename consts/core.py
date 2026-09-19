@@ -72,6 +72,16 @@ DEFAULT_BATTERY_DISCHARGE_CONTROL_ENTITY: Final = ""
 BATTERY_SOC_MAX_STEP_PCT: Final = 25.0   # pp between two reads; a LUNA moves single digits per MINUTE
 BATTERY_SOC_STEP_CONFIRM_READS: Final = 3  # a rejected level that persists this many reads IS the truth
 BATTERY_POWER_PLAUSIBLE_MAX_W: Final = 100_000.0  # no home battery; 22.8 MW was 2 000x the hardware
+
+# (#988) How much energy must be leaving the house with no source other than
+# the sun before a solar reading of 0 W is refused as a measurement. The
+# Huawei feed on the reference install drops ~273 times a day and only some
+# of those arrive as `unavailable`; 102 arrive as a hard 0 W, which is also
+# what night looks like. Physics tells the two apart — a battery charging
+# 1 267 W with no import and no discharge (PROD, 19.09 08:24) cannot be
+# happening in the dark — and this is the margin that keeps ordinary
+# rounding and meter skew out of it.
+SOLAR_ZERO_REFUTED_W: Final = 200.0
 # A SEM measurement entity keeps its last good value this long while its
 # source is dark, marked ``stale_s``, before it goes unavailable. PROD's
 # Huawei modbus blinks ~137x/day (p50 29 s, p99 114 s; 238 s the longest

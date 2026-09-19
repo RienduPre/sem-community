@@ -36,6 +36,7 @@ from ..consts.core import (
     BATTERY_POWER_PLAUSIBLE_MAX_W,
     BATTERY_SOC_MAX_STEP_PCT,
     BATTERY_SOC_STEP_CONFIRM_READS,
+    SOLAR_ZERO_REFUTED_W,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -590,6 +591,8 @@ class SensorReader:
         self._soc_step_candidate: Optional[float] = None
         self._soc_step_streak: int = 0
         self._battery_power_implausible: bool = False
+        #: (#988) is the current solar zero refuted by the balance?
+        self._solar_zero_refuted = False
         # EV flap fix (2026-07-10): the KEBA charging-power sensor polls over
         # UDP and blips to ~0 for a cycle while the car is really drawing 10 kW.
         # ``ev_power`` feeds the home energy balance (``home = solar + grid −
@@ -841,6 +844,10 @@ class SensorReader:
             readings = self._read_from_legacy_config()
         # (#902) A value no battery can produce is a dark read, not a number.
         self._gate_battery_power(readings)
+        # (#988) …and a solar ZERO the balance refutes is one too. After the
+        # battery gate, so an implausible battery power is already out of the
+        # terms this one reasons from.
+        self._gate_solar_power(readings)
         # (#758) An unreadable battery power sensor reads as 0.0 W, which is
         # also what an idle battery reads. Say which one this is, once, here.
         readings.battery_power_unavailable = self._battery_power_missing
@@ -2677,6 +2684,59 @@ class SensorReader:
         self._battery_power_missing = True
         self._input_dark["battery"] = self._input_dark.get("battery", 0) + 1
         self._input_reads["battery"] = max(0, self._input_reads.get("battery", 0) - 1)
+
+    def _gate_solar_power(self, readings: PowerReadings) -> None:
+        """(#988) A solar zero the rest of the balance refutes is a dark read.
+
+        A dropping inverter surfaces in two shapes. ``unavailable`` is
+        bridged already — the reference install spent 151 min in it over
+        24 h and SEM's own ``solar_power`` lost only 2 — but the same
+        dropout also arrives as a hard **0 W**, and 0 W is what night looks
+        like, so the grace that catches the first shape never sees the
+        second. The zero is then spent: PROD, 19.09 08:24, ``solar=0W
+        grid_import=0W battery_discharge=0W | battery_charge=1267W``. A
+        house does not charge its battery from nothing; SEM repaired the
+        symptom by clamping the residual and kept the false zero in the
+        inputs every decision is built on.
+
+        The test is physics, not a threshold on the sensor: what LEAVES the
+        house (battery charge + export) minus what enters it other than
+        solar (import + battery discharge) is energy only the sun can have
+        supplied. Past ``SOLAR_ZERO_REFUTED_W`` of it, the zero is not a
+        measurement — counted dark exactly as an unavailable read is
+        (#902), so this cycle does not steer (#818) and the entity says
+        unavailable rather than publishing a zero it cannot stand behind.
+
+        Deliberately one-directional: it can only refuse a zero, never
+        invent a number. What solar WAS during the gap is not knowable
+        here, and a held value would be a second producer of it.
+        """
+        if float(readings.solar_power or 0.0) > 0.0:
+            if self._solar_zero_refuted:
+                self._solar_zero_refuted = False
+                log_on_change(
+                    _LOGGER, "implausible:solar_zero", logging.DEBUG,
+                    "Solar reading is a number again (#988)",
+                )
+            return
+        battery_w = float(readings.battery_power or 0.0)
+        grid_w = float(readings.grid_power or 0.0)
+        charge_w, discharge_w = max(0.0, battery_w), max(0.0, -battery_w)
+        export_w, import_w = max(0.0, grid_w), max(0.0, -grid_w)
+        unexplained_w = (charge_w + export_w) - (import_w + discharge_w)
+        if unexplained_w <= SOLAR_ZERO_REFUTED_W:
+            return                      # a real zero: night, or fully explained
+        log_on_change(
+            _LOGGER, "implausible:solar_zero", logging.WARNING,
+            "Solar reads 0 W while %.0f W leaves the house with no other "
+            "source (battery charge %.0f W + export %.0f W − import %.0f W "
+            "− discharge %.0f W) — treated as a dark read, not a "
+            "measurement (#988)",
+            unexplained_w, charge_w, export_w, import_w, discharge_w,
+        )
+        self._solar_zero_refuted = True
+        self._input_dark["solar"] = self._input_dark.get("solar", 0) + 1
+        self._input_reads["solar"] = max(0, self._input_reads.get("solar", 0) - 1)
 
     def _hold_battery_soc(self, readings: PowerReadings) -> None:
         """The SOC sensor is dark this cycle: hold the last value read so the

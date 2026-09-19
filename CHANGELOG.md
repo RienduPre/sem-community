@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A dropped solar reading arrives as 0 W, and 0 W was spent as a
+  measurement** (#988, found on the reference install). The inverter feed
+  drops in two shapes: `unavailable` — which SEM already bridges, 151 min of
+  it over 24 h costing the published sensor only 2 — and a hard **0 W**,
+  which looks exactly like night and went straight into the balance and the
+  decisions built on it. Live example: the battery charging 1 267 W with no
+  solar, no import and no discharge, a state no house can be in; SEM clamped
+  the residual to hide the impossible sum and kept the zero. A solar zero is
+  now refused when the rest of the balance refutes it — what leaves the house
+  minus what enters it other than sunlight is energy only the sun can have
+  supplied — and counted as a dark read exactly like an unavailable one, so
+  the cycle does not steer on it and the sensor says unavailable instead of
+  publishing a zero it cannot stand behind. It only ever refuses a zero; it
+  never invents a number.
+
 # [2.1.0-beta.31] — 18.09.2026
 
 - 🐛 **A battery-control report can be answered from the download** (#983,
