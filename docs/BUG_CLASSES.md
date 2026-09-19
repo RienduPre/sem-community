@@ -4190,3 +4190,52 @@ pack. The window is the dark-read grace already used everywhere else in the file
 one of its failure shapes is a value inside the valid range, nothing downstream can tell it from
 data, and the first sign will be a clamp, a hold or a guard firing for no visible reason.
 Refs #988 #902 #818 #461.
+
+### 101. An emptied collection read as an unanswered one — the delete that will not take — GUARDED
+**Symptom:** a Remove row that is offered, accepted, logged — and changes nothing. "Cannot remove
+second heatpump using config flow UI" (#990, @RienduPre): pick *Remove: Heat Pump 2*, the menu
+re-renders with the pump still on it. Press it again, same. Add a pump afterwards and the deleted
+one comes back as a phantom sibling, so the install now has **two**.
+**Root shape:** a two-layer resolver written as `draft.get(K) or saved.get(K) or EMPTY`. `or` sorts
+by truthiness, and an empty collection is falsy — so *"this dialog has not touched the list"* and
+*"the user just emptied the list"* are the same value, and the resolver picks the saved copy for
+both. That collapses precisely the one state removal exists to produce. It is silent because it
+fails only on the LAST row: with two pumps configured, removing one leaves a truthy list and the
+delete sticks; the bug is reachable only by the user who wanted none.
+**The distinction that matters:** key PRESENCE, not value truth. Same line class 54 draws between
+`None` ("nobody said") and `0` ("spend it all"), and the same line `_merge_form_input` draws between
+a field left alone and a field emptied (class 30's second half) — one level up, on the container.
+Silence and emptiness are different answers; `or` has no vocabulary for the difference.
+**Cure:** one resolver, `config_flow._draft_list(flow, key)`, that asks `key in flow._data` and
+falls back only on absence — never on emptiness. Its scalar twin `_suggest_discovered` does the same
+for auto-detection.
+**Where it lives — and the sweep was RUN, 19.09.2026.** Four sites carried the shape, and the AST
+lint written to close it found three MORE that reading had not:
+
+| site | key | verdict |
+|---|---|---|
+| `config_flow.py` heat-pump menu ×2 + unit editor | `heat_pumps` | **HAZARD** — #990's instance, fixed |
+| `config_flow.py:1559` EV seed | `ev_chargers` | latent — remove never reaches 0 (primary is unremovable), fixed anyway |
+| `config_flow.py` phase-guard page ×3 | `phase_guard_grid_l{1,2,3}_current_entity` | **HAZARD** — found by the lint, fixed |
+| `config_flow.py` pv-naming | `pv_string_names` | safe — already writes `{}` explicitly and carries forward with `setdefault` |
+| `config_flow.py` deye | `deye_program_groups` | safe — always exactly six rows, no empty state |
+| `__init__.py:889` v2→v3 migration | flat `ev_*` | safe — options-over-data IS the documented #690 semantics, not a draft |
+
+The phase-guard three are the class pointing OUTWARD, at discovery instead of at storage: clearing a
+mis-detected current sensor stores an explicit `None` (#690), the `or` read that deletion as
+silence, `discover_grid_phase_current_entities` re-offered the sensor, HA pre-filled the field with
+the suggestion, and the next Submit re-adopted what the user had just taken out. Reachable exactly
+when all three are cleared — which is the gesture of someone who means it.
+**Why tests miss it:** the #685 removal test seeded the pump into `_data` and left `options` empty,
+so the fallback had nothing stale to find and the delete "worked". A real install has the list in
+`options` — the draft is empty at exactly the moment the fallback fires. *A fixture that never
+saves cannot see a bug about what was saved.*
+**Guard:** `tests/test_990_heat_pump_removal.py` — the reporter's gesture, the phantom-sibling
+consequence, the surviving fallback, the phase-guard trio, and an AST lint over `config_flow.py`
+that rejects ANY `or` chain reading one constant key from two different stores. That is the
+structural half: the shape is now unrepresentable in the flow, so the next list — loads, batteries,
+tariff rows — cannot re-learn it. Vacuity: reverting either fix turns four red.
+**Sweep question:** for every collection or optional the user can shrink — *name the value that
+means "empty on purpose", and show the read that can tell it from "not set yet".* If the read is an
+`or`, there is no such value.
+Refs #990 #685 #690 #627.
