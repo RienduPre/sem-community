@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.32] — 19.09.2026
+
 - 🐛 **A dropped solar reading arrives as 0 W, and 0 W was spent as a
   measurement** (#988, found on the reference install). The inverter feed
   drops in two shapes: `unavailable` — which SEM already bridges, 151 min of
