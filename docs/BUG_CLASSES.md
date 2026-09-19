@@ -3353,7 +3353,7 @@ clock); the next no-surplus cycle sheds it, and the cycle then sits in `heating_
 ever re-heating. A tank adopted at 65 °C after a restart is released the same way.
 Refs #914 #559 #656 #766 #779 #847 #908 #523 #801.
 
-### 86. Absence of evidence spent as evidence — a warm-up read raised as a verdict — GUARDED
+### 86. Absence of evidence spent as evidence — a warm-up read taken for a fact — GUARDED
 **Symptom:** a Repair appears seconds after every HA restart, names a device that is fine, and
 describes something that never happened. alexmc1510 (#945, 2.1.0-beta.14) got "SEM's last 3+ current
 commands to EV Charger were rejected … The charger is NOT under SEM control right now" on a restart —
@@ -3378,7 +3378,14 @@ while a contradicted one still files at once). *Assessed and already safe:* `sen
 Repairs and #824's control-entity pre-flight — both wall-clock `UNAVAILABLE_REPAIR_THRESHOLD_S`, and
 the precedent this row generalises; #840's unsupported-capability count (three RAISED refusals — real
 evidence); #627 `can_stop_charging`, whose input is config, not a live read (`_bound_to_entity_range`
-answers "unknown → don't cry wolf" on an unreadable entity).
+answers "unknown → don't cry wolf" on an unreadable entity). *And the second consumer* (round 3):
+any SETUP-time read that spends an absence on CONFIGURATION rather than on a verdict —
+`register_ev_charger` nulling the configured current entity (#991, the instance) and
+`_warn_missing_charger_entities` (#763, already deferred 120 s). `wire_current_entity` (#976) reads
+the entity REGISTRY, which is persisted across restarts, so it is class 87's question, not this one;
+`_check_charger_control_entities` (#824) is not on this half at all — it runs per-cycle off
+`_async_update_data` and spends its absence on a verdict, which is the half above.
+`ast_contracts.absence_spent_as_config` is the standing sweep of the config half.
 **Closure:** an entity-absence verdict is held on the WALL CLOCK, never on a cycle count, and the hold
 is the one constant `UNAVAILABLE_REPAIR_THRESHOLD_S` (#611's warm-up) rather than a fresh literal
 (class 46). Evidence counters stay for evidence: a command that raised keeps its three-strike
@@ -3506,7 +3513,92 @@ own review: `_apply_actions` defaults `now` to `getattr(self, "_last_apply_at", 
 reconciler instance would stamp the episode at `0.0` and the next real `time.monotonic()` files
 instantly. Unreachable in production (`actuate.py` always passes `now`) and reached today only by
 tests built on bare instances, but it is a zero-valued clock in a tree that measures wall time.
-Refs #945 #611 #824 #915 #462 #536 #548 #840 #627.
+(8) Round 3's ERROR names the CURRENT entity only, because that is the one surface whose fallbacks
+SEM can enumerate (`charger_service`, minus the entity-platform services that write THROUGH the
+missing entity). A charger whose start/stop entity is the thing that vanished, with no stop service
+either, is equally uncommandable and still gets only the generic WARNING — saying it properly means
+enumerating every capability's fallbacks, which is #824's `_CONTROL_CAPABILITIES` table, one layer up
+from a log line. (9) `_shed_device`'s `control_type == "current"` branch is the
+fallback-with-nowhere-to-fall at WRITE time, and it is unreachable today: `_peak_managed_elsewhere`
+excludes every `ev_charger` row from the load manager's shedding (#461-peak), so the branch that
+would notice cannot run. Left as-is rather than given a log line no test could reach non-vacuously.
+That unreachability is also the honest bound on #991's impact, worth stating plainly because the
+issue text does not: NOTHING actuates off this row. Its `switch_entity` is read by the Load Priority
+card and by #748's claimed-entity set — and the claimed set could not have mattered either, since
+`LOAD_MANAGEMENT_DEVICE_PATTERNS` globs only `switch.*` and the entity dropped is a `number.*`. What
+the bug cost was a WARNING that told its reader the opposite of the truth, on the one read most
+likely to be wrong, plus a card row missing its entity. Worth fixing for exactly the reason #763 was:
+the log is a diagnostic instrument, and a false reading in it costs days. (10) That round-3 ERROR
+fires once, from inside the 120 s one-shot `async_call_later`, and nothing retracts it — an
+integration that publishes at 121 s leaves a permanent ERROR with no recovery line. The CARD
+self-corrects (#824 republishes `charger_<cid>_ev_current_control_entity_valid` every cycle and
+clears its Repair), so only the log is stuck. Giving it a recovery line means giving the deferred
+check a second life, which is a scheduler question, not a log question.
+
+**Round 3 (#991, 2.1.0-beta.34) — the other consumer: the absence spent on CONFIGURATION.** Rounds 1
+and 2 asked the question of evidence COUNTERS, whose cost is a false accusation. The same empty read
+has a second buyer, and it is quieter. alexmc1510 again, same charger, `features/load_management.py`
+`register_ev_charger`: `if current_control_entity and not self.hass.states.get(...)` → warn, then
+`current_control_entity = None  # Fall back to service`. Registration runs *inside* SEM's setup,
+where `states.get()` returns None for every entity whose own integration has not finished loading, so
+the Victron EVCS's `number.*` current entity was "not found" for exactly as long as Victron took to
+load — and the fallback it took had nowhere to fall (a `number`-driven brand has no charge service).
+Entity ids are STRUCTURAL: `refresh_runtime_config` re-derives cached scalars, never ids, so the row
+carried `switch_entity: None` for the whole session and only a reload put it back. No Repair, no
+ERROR, one WARNING that told the reader the opposite of the truth. See residual (9) for what that
+did and did not cost — the row drives no actuator, and overstating it would be its own defect.
+
+The sharpest part is the sweep that was there and stopped one function short. Two checks ask this
+charger "are your entities there?", and #763 had already moved the first — the
+`_warn_missing_charger_entities` roll-up — 120 s past warm-up, after a registration-time read
+declared onkelfu's healthy wallbox switch missing. The second ran a few lines later in the same setup
+loop, still at setup, and was the only one that also DISCARDED something — so an instance-local fix
+had left the class's worst site untouched because that site did not look like a Repair. **The
+consumer, not the verdict, is what makes an absence expensive.** A verdict is loud and gets reported;
+a discarded capability is silent and survives.
+
+Closure for this half: an absence is not spent at SETUP at all. The question moves to where an answer
+may be wrong for one cycle and right for the next — `CurrentControlDevice._set_current` re-reads
+`current_entity_id` on every write and falls back to `charger_service` there, and #824's per-cycle
+pre-flight owns the Repair once the absence outlives warm-up — so registration only notes it at
+DEBUG. And a fallback that has nowhere to fall is an ERROR, said in the one place the absence is a
+fact rather than an artefact: past warm-up, in #763's deferred check, which now takes the charger's
+`charger_service` so it can tell "one of several handles is missing" from "there is no handle at
+all". *Having* a service is not the same question as having a FALLBACK: an entity-platform service
+(`number.set_value` and its `input_number` / `select` twins, #462 / #485 K1) writes THROUGH
+`ev_current_control_entity or ev_charger_service_entity_id`, current entity first, so when the
+current entity is what vanished it falls exactly where the entity did and must not buy silence.
+
+**Guard:** `tests/test_991_warmup_absence_not_spent.py` — the reporter's boot driven through the real
+`register_ev_charger` with the entity absent, read back through the card payload
+`get_load_management_data`, the surface a user actually sees; the vacuity twin (the published entity
+registers identically, so the pin cannot pass on a registration that never stores one); a positive
+control on the log pin (a registration that dies inside its own `except` emits no warning either, and
+would otherwise satisfy an absence-only assertion); and the config-shaped absence that IS an answer
+(neither entity nor service still refuses). No pin claims an INDEPENDENT consumer, because there is
+none — every reader of this row reads this row, which is residual (9)'s point.
+
+The structural guard is `ast_contracts.absence_spent_as_config`: any condition asking whether a
+`…states.get()` came back EMPTY, and any `= None` it reaches. Its first cut was the shape the bug
+happened to wear — a top-level `Assign` to a `Name` in an `if` body — and that is the mistake round 2
+already named once, when `invented_evidence_call_sites` turned out blind to `getattr`: a guard
+written to the instance's spelling waves through the class's next one. So the question is asked of
+every spelling a handle is actually written in — a local, an attribute, a DICT SLOT
+(`row["switch_entity"] = None`, the natural form in a tree that keeps device rows in dicts, and so
+the likeliest re-acquisition *in the very file this fixes*), a tuple unpack, an annotated assignment,
+the conditional-expression form that carries its own test, `elif`, and any depth of `try` / `for` /
+`with` / closure nesting inside the branch. Eight bug spellings are caught by probe, the verbatim
+pre-fix body among them; a POSITIVE reading acted on is not caught (that is evidence) and neither is
+a plain `dict.get`. The remaining limit is named and pinned rather than left to be discovered: test
+and assignment must be syntactically connected, so the two-step dataflow form (`st = states.get(e)` …
+`if st is None: e = None`) and a helper predicate (`if self._dead(e): e = None`) are invisible without
+dataflow — which is why the behavioural pin exists.
+
+**Sweep question, round 3:** for every `states.get()` absence, ask not only "is this evidence or
+silence?" but **"what does this absence BUY, and for how long?"** A verdict is bought for a cycle; a
+nulled entity id is bought until the next reload. Anything read at SETUP and kept is the expensive
+kind, and setup is precisely when the read is least trustworthy.
+Refs #945 #611 #824 #915 #462 #536 #548 #840 #627 #991 #763 #461 #485.
 
 ### 87. A register that lists only half the world, asked a yes/no question — GUARDED
 **Symptom:** a reporter is still getting the same false Repair three betas after it was "fixed"
