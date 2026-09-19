@@ -113,14 +113,25 @@ class TestTheHoldDoesNotAssertAnInequalityNobodyEvaluated:
         except Exception:                      # the view shape is richer live
             pytest.skip("decide_battery needs the full view here")
 
-    def test_a_dark_read_is_not_reported_as_a_comparison(self):
-        src = (ROOT / "coordinator" / "decide_battery.py").read_text(encoding="utf-8")
-        i = src.index("mode=force_discharge but")
-        window = src[max(0, i - 1200):i + 200]
-        # the three arms each get their own sentence now
-        assert "SOC unreadable" in window and "not selling blind" in window
-        assert "≤ reserve {reserve:.0f}%" in window      # kept, for the real comparison
-        assert "held from a dark read" not in window.split("_why =")[-1]
+    def test_the_sentence_is_composed_per_arm_not_hard_coded(self):
+        """Structural (AST): the hold's reason interpolates a resolver
+        variable rather than baking the comparison into one f-string — the
+        three arms of the guard can no longer share one claim."""
+        import ast
+        tree = ast.parse((ROOT / "coordinator" / "decide_battery.py")
+                         .read_text(encoding="utf-8"))
+        holds = [n for n in ast.walk(tree) if isinstance(n, ast.JoinedStr)
+                 and any(isinstance(v, ast.Constant)
+                         and "mode=force_discharge but" in str(v.value)
+                         for v in n.values)]
+        assert holds, "the hold's reason is gone — this pin needs rewriting"
+        for node in holds:
+            literal = "".join(str(v.value) for v in node.values
+                              if isinstance(v, ast.Constant))
+            assert "≤ reserve" not in literal, (
+                "the comparison is still hard-coded into the sentence every "
+                "arm of the guard shares")
+            assert any(isinstance(v, ast.FormattedValue) for v in node.values)
 
 
 @pytest.mark.unit
@@ -144,11 +155,19 @@ class TestTheDeyeBlockNamesTheGateThatIsShut:
                      "_readback_attempts", "_readback_delay_s"):
             assert gate in body, f"{gate} can shut the gate but the resolver never names it"
 
-    def test_the_message_cannot_say_ok(self):
-        src = (ROOT / "coordinator" / "battery_adapters" / "deye.py").read_text(encoding="utf-8")
-        i = src.rindex("Deye force charge blocked")
-        assert "force_charge_blocked_why()" in src[i - 200:i + 400]
-        assert "capability.reason" not in src[i - 400:i + 200]
+    def test_the_refusal_is_built_from_the_resolver(self):
+        """Structural (AST): the message comes from the resolver, so the
+        boolean and the sentence are one evaluation — it can no longer quote
+        a capability reason that covers four of the thirteen gates."""
+        from custom_components.solar_energy_management.coordinator.battery_adapters import (
+            deye,
+        )
+        from custom_components.solar_energy_management.tests import ast_contracts
+        cmd = deye.DeyeBatteryAdapter.command_force_charge
+        assert ast_contracts.calls(cmd, "force_charge_blocked_why"), (
+            "command_force_charge does not ask the resolver")
+        assert not ast_contracts.reads_attribute(cmd, "capability", "reason"), (
+            "the refusal still quotes capability.reason")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -165,10 +184,12 @@ class TestTheRepairsHedgeWhereTheyMust:
         assert "{managed_charger_kw}" in it["description"]
         assert "already manages" in it["description"]
         assert "adding it again will not help" in it["description"]
-        lm = (ROOT / "features" / "load_management.py").read_text(encoding="utf-8")
-        assert "managed_charger_w" in lm
-        ri = (ROOT / "coordinator" / "repair_issues.py").read_text(encoding="utf-8")
-        assert "managed_charger_kw" in ri
+        from custom_components.solar_energy_management.tests import ast_contracts
+        sites = ast_contracts.call_sites("raise_load_shed_futile")
+        assert sites, "nothing raises the futile-shed Repair"
+        for rel, line, kwargs in sites:
+            assert "managed_charger_kw" in kwargs, (
+                f"{rel}:{line} files the Repair without the charger figure")
 
     def test_force_discharge_unsupported_does_not_blame_the_firmware_as_fact(self):
         d = _issue("battery_force_discharge_unsupported")["description"]
@@ -199,22 +220,37 @@ class TestTheRepairsHedgeWhereTheyMust:
 @pytest.mark.unit
 class TestTheCardLabelsAnEmergencyShedAsOne:
     """The backend only ever writes EMERGENCY/PROGRESSIVE; the card compared
-    against lowercase, so every emergency shed read "peak protection"."""
+    against lower case, so every emergency shed read "peak protection".
 
-    def test_the_source_compares_case_insensitively(self):
-        src = (ROOT / "dashboard" / "card" / "src" / "cards"
-               / "sem-load-priority-card.js").read_text(encoding="utf-8")
-        assert "=== 'emergency'" not in src
-        assert "toUpperCase() === 'EMERGENCY'" in src
+    The RULE is pinned where it can be executed —
+    ``dashboard/card/test/shed-reason.test.js``, in the card-test job. What
+    is left here is the question Python can answer: does the tracked bundle
+    HA actually loads carry the fix, or is `dist/` stale?"""
 
-    def test_the_backend_still_writes_what_the_card_now_expects(self):
-        lm = (ROOT / "features" / "load_management.py").read_text(encoding="utf-8")
-        assert '"EMERGENCY"' in lm
+    def test_the_backend_still_writes_what_the_helper_expects(self):
+        """Structural (AST): the shed reason the card reads is whatever is
+        passed to ``_shed_toward`` — and every call passes an UPPER-CASE
+        literal. The helper is case-insensitive now, so this pin is about the
+        contract not moving silently rather than about the helper breaking."""
+        import ast
+        lm = ast.parse((ROOT / "features" / "load_management.py").read_text(encoding="utf-8"))
+        passed = {a.value for n in ast.walk(lm)
+                  if isinstance(n, ast.Call)
+                  and getattr(n.func, "attr", None) == "_shed_toward"
+                  for a in n.args
+                  if isinstance(a, ast.Constant) and isinstance(a.value, str)}
+        assert passed, "nothing calls _shed_toward with a literal — pin needs rewriting"
+        assert "EMERGENCY" in passed, f"the emergency reason changed: {passed}"
+        assert all(p == p.upper() for p in passed), (
+            f"a shed reason is no longer upper case: {passed}")
 
-    def test_the_shipped_bundle_carries_the_fix(self):
-        """dist/ is what HA loads, and it is tracked — an unbuilt fix is no fix."""
+    def test_the_shipped_bundle_is_not_stale(self):
+        """dist/ is tracked and is the only thing HA loads; an unbuilt fix is
+        no fix. The helper's own name is the marker."""
         dist = (ROOT / "dashboard" / "card" / "dist" / "sem-cards.js").read_text(encoding="utf-8")
-        assert '"EMERGENCY"===String' in dist.replace(" ", "")
+        assert "shed_emergency" in dist
+        assert '"EMERGENCY"===String' in dist.replace(" ", ""), (
+            "the bundle predates the shed-label fix — run npm run build")
 
 
 @pytest.mark.unit
@@ -229,9 +265,22 @@ class TestThePlanClaimsThePauseOnlyWhenThereIsOne:
             assert "{end}" in plain and "{price}" in plain
             assert len(plain) < len(d[lang]["plan_expensive_detail"])
 
-    def test_the_row_picks_the_claim_from_the_ev_state(self):
-        src = (ROOT / "coordinator" / "today_plan.py").read_text(encoding="utf-8")
-        i = src.rindex("kind=KIND_EXPENSIVE_START")
-        window = src[max(0, i - 900):i + 400]
-        assert "plan_expensive_detail_plain" in window
-        assert "ev_min_remaining_kwh" in window
+    def test_the_row_makes_the_claim_conditional(self):
+        """Structural (AST): the expensive row's ``detail`` is chosen, not
+        fixed — and the plain variant is one of the choices."""
+        import ast
+        tree = ast.parse((ROOT / "coordinator" / "today_plan.py")
+                         .read_text(encoding="utf-8"))
+        rows = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                and getattr(n.func, "id", None) == "PlanRow"
+                and any(k.arg == "kind"
+                        and getattr(k.value, "id", "") == "KIND_EXPENSIVE_START"
+                        for k in n.keywords)]
+        assert rows, "the expensive row is gone — this pin needs rewriting"
+        for row in rows:
+            detail = next(k.value for k in row.keywords if k.arg == "detail")
+            assert isinstance(detail, ast.IfExp), (
+                "the expensive row still asserts the pause unconditionally")
+            names = {c.value for c in ast.walk(detail)
+                     if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+            assert "plan_expensive_detail_plain" in names
