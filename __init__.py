@@ -1740,11 +1740,31 @@ def _heat_pump_rows(full_config: dict) -> list[dict]:
             "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
         ) if full_config.get(k) not in (None, "")},
     }]
+    # (#990) Two rows may carry the SAME id — a config written by a build
+    # that minted ids from the list position survives a removal that
+    # renumbers it. ``register_device`` keys on device_id, so a collision
+    # does not fail: the second unit quietly replaces the first and one
+    # physical pump is never driven again, while the log still counts two.
+    # A duplicate is therefore renamed onto the first free number here —
+    # losing a device is the one outcome that must not be silent.
+    _seen = {"heat_pump"}
     for _i, _row in enumerate(full_config.get("heat_pumps") or []):
-        if isinstance(_row, dict):
-            rows.append({"id": _row.get("id") or f"heat_pump_{_i + 2}",
-                         "name": _row.get("name") or f"Heat Pump {_i + 2}",
-                         **_row})
+        if not isinstance(_row, dict):
+            continue
+        _id = str(_row.get("id") or f"heat_pump_{_i + 2}")
+        if _id in _seen:
+            _n = _i + 2
+            while f"heat_pump_{_n}" in _seen:
+                _n += 1
+            _LOGGER.warning(
+                "Heat pump #%d reuses device id '%s' — registering it as "
+                "'heat_pump_%d' so it is not dropped (#990)",
+                _i + 2, _id, _n,
+            )
+            _id = f"heat_pump_{_n}"
+        _seen.add(_id)
+        rows.append({**_row, "id": _id,
+                     "name": _row.get("name") or f"Heat Pump {_i + 2}"})
     return rows
 
 
