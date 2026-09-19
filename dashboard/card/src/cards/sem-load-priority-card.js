@@ -603,7 +603,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
                 </div>
                 ${device.blockedBy ? html`<div style="font-size:13px;color:#ff9800;padding:2px 0 0 28px">&#9203; Waiting for: ${device.blockedBy}</div>` : nothing}
                 ${device.dependsOn.length ? html`<div style="font-size:13px;opacity:0.55;padding:0 0 0 28px">&#8618; ${this._t('requires')}: ${device.dependsOn.join(', ')}</div>` : nothing}
-                ${device.isShed && device.shedReason ? html`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${device.shedReason === 'emergency' ? this._t('shed_emergency') : this._t('shed_peak')}</div>` : nothing}
+                ${device.isShed && device.shedReason ? html`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${String(device.shedReason || '').toUpperCase() === 'EMERGENCY' ? this._t('shed_emergency') : this._t('shed_peak')}</div>` : nothing}
                 <div class="device-bottom">
                     <div class="status-dot ${onOff ? 'on' : (device.isShed ? 'shed' : '')}" data-field="status-${device.id}"></div>
                     <span class="dim" data-field="onoff-${device.id}">${onOff ? this._t('on') : (device.isShed ? this._t('shed_label') : this._t('off'))}</span>

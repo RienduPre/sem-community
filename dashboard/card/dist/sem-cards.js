@@ -6633,7 +6633,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 </div>
                 ${e.blockedBy?W`<div style="font-size:13px;color:#ff9800;padding:2px 0 0 28px">&#9203; Waiting for: ${e.blockedBy}</div>`:K}
                 ${e.dependsOn.length?W`<div style="font-size:13px;opacity:0.55;padding:0 0 0 28px">&#8618; ${this._t("requires")}: ${e.dependsOn.join(", ")}</div>`:K}
-                ${e.isShed&&e.shedReason?W`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${"emergency"===e.shedReason?this._t("shed_emergency"):this._t("shed_peak")}</div>`:K}
+                ${e.isShed&&e.shedReason?W`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${"EMERGENCY"===String(e.shedReason||"").toUpperCase()?this._t("shed_emergency"):this._t("shed_peak")}</div>`:K}
                 <div class="device-bottom">
                     <div class="status-dot ${i?"on":e.isShed?"shed":""}" data-field="status-${e.id}"></div>
                     <span class="dim" data-field="onoff-${e.id}">${i?this._t("on"):e.isShed?this._t("shed_label"):this._t("off")}</span>

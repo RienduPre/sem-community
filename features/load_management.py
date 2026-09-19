@@ -1087,6 +1087,7 @@ class LoadManagementCoordinator:
 
         sheddable_w = 0.0
         surplus_engine_w = 0.0
+        managed_charger_w = 0.0     # (#992) of the uncontrolled draw, ours
         candidates: List[Tuple[str, Dict, float]] = []
         can_shed_now = {did for did, _ in self._get_devices_for_shedding()}
         for device_id, device_info in self._devices.items():
@@ -1096,6 +1097,13 @@ class LoadManagementCoordinator:
             # from here; a surplus-managed load IS shed on this state, by the
             # surplus controller — its draw is authority, not a candidate.
             if device_info.get("device_type") == "ev_charger":
+                # (#992, class 99) …but it still lands in ``uncontrolled_w``,
+                # and the Repair built from that number told people to "add
+                # the charger" they had already added. Count it separately, so
+                # the message can tell a charger SEM MANAGES (whose peak is
+                # decide()'s) from a load SEM was never given.
+                managed_charger_w += max(
+                    0.0, float(device_info.get("current_power_w", 0.0) or 0.0))
                 continue
             if device_info.get("is_critical", False):
                 continue
@@ -1130,6 +1138,7 @@ class LoadManagementCoordinator:
             "sheddable_w": sheddable_w,
             "surplus_engine_w": surplus_engine_w,
             "uncontrolled_w": uncontrolled_w,
+            "managed_charger_w": managed_charger_w,
             "futile": need_w > 0 and uncontrolled_w > target_w,
             "candidates": candidates,
         }
@@ -1159,6 +1168,7 @@ class LoadManagementCoordinator:
                     grid_import_kw=plan["grid_import_w"] / 1000.0,
                     target_kw=plan["target_w"] / 1000.0,
                     uncontrolled_kw=plan["uncontrolled_w"] / 1000.0,
+                    managed_charger_kw=plan.get("managed_charger_w", 0.0) / 1000.0,
                 )
                 _LOGGER.warning(
                     "Load shedding is futile: %.1f kW at the meter, %.1f kW is "

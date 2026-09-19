@@ -309,12 +309,20 @@ def compose_today_plan(
                 values={"end": block["end"].strftime("%H:%M"),
                         "price": f"{avg_price:.2f}", "currency": currency},
             ))
+        # (#992, class 99) The expensive row used to promise "Min+PV grid
+        # pauses" on every expensive block in the curve — on installs with no
+        # EV at all, on chargers past their Min, on Always-Max and Off. It is
+        # a claim about a charger, so it is made only when there is a charge
+        # still to make: the same gate the EV rows below use. Its cheap-block
+        # sibling never claimed anything of the sort.
+        _pause_claim = bool(ev_min_remaining_kwh and ev_min_remaining_kwh > 0.1)
         for block in _consecutive_blocks(future, expensive_levels, min_block_len=2):
             avg_price = sum(block["prices"]) / len(block["prices"])
             rows.append(PlanRow(
                 when=block["start"], kind=KIND_EXPENSIVE_START,
                 label="plan_expensive_start",
-                detail="plan_expensive_detail",
+                detail=("plan_expensive_detail" if _pause_claim
+                        else "plan_expensive_detail_plain"),
                 values={"end": block["end"].strftime("%H:%M"),
                         "price": f"{avg_price:.2f}", "currency": currency},
             ))

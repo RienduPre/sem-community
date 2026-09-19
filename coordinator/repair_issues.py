@@ -1013,7 +1013,8 @@ def clear_soc_cap_unenforceable(hass: HomeAssistant, device_id: str) -> None:
 
 
 def raise_load_shed_futile(hass: HomeAssistant, *, grid_import_kw: float,
-                           target_kw: float, uncontrolled_kw: float) -> None:
+                           target_kw: float, uncontrolled_kw: float,
+                           managed_charger_kw: float = 0.0) -> None:
     """(#896) Shedding everything SEM may shed would still leave the meter
     above the target: the peak belongs to a load SEM does not control. Filed
     once per episode instead of shedding the house (forum #30)."""
@@ -1031,6 +1032,7 @@ def raise_load_shed_futile(hass: HomeAssistant, *, grid_import_kw: float,
                 "grid_import_kw": f"{grid_import_kw:.1f}",
                 "target_kw": f"{target_kw:.1f}",
                 "uncontrolled_kw": f"{uncontrolled_kw:.1f}",
+                "managed_charger_kw": f"{managed_charger_kw:.1f}",
             },
         )
     except Exception as e:  # noqa: BLE001

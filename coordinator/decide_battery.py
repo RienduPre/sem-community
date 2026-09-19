@@ -128,12 +128,24 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
                 floor_soc=reserve,
                 reason="mode=force_discharge (manual sell to grid)",
             )
-        _soc_txt = (f"{soc:.0f}% (held from a dark read)" if not rt.available
-                    else f"{soc:.0f}%" if soc is not None else "unavailable")
+        # (#992, class 99) The guard above is a three-way OR, and only ONE
+        # of its arms is a comparison. Printing "≤ reserve" for the other
+        # two states a relation nobody evaluated: a pack held at 80 % from
+        # a dark read was told it was at or below a 70 % reserve, sending
+        # the reader to look at a battery that is comfortably charged while
+        # the real fault is the link to it.
+        if not rt.available:
+            _why = (f"SOC unreadable (last seen {soc:.0f}%) — not selling blind"
+                    if soc is not None else
+                    "SOC unreadable and never read — not selling blind")
+        elif soc is None:
+            _why = "SOC unknown — not selling blind"
+        else:
+            _why = f"SOC {soc:.0f}% ≤ reserve {reserve:.0f}%"
         return BatteryDecision(
             battery_id=rt.battery_id,
             intent=BatteryIntent.NORMAL,
-            reason=f"mode=force_discharge but SOC {_soc_txt} ≤ reserve {reserve:.0f}% — hold",
+            reason=f"mode=force_discharge but {_why} — hold",
         )
     if mode == "force_charge":
         return BatteryDecision(

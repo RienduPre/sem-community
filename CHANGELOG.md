@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Nine verdicts that named a cause their own scope refutes** (#992 — a
+  swept bug class 99). Three instances in two days said the class had never
+  been swept, so it was: three reviewers over the decision engines, the
+  battery path and the user-facing surfaces. Fixed — a Repair that told you
+  to *add an EV charger SEM already manages* now says how much of the peak
+  that charger is; `sun gone` is `below the solar minimum` (it was printed at
+  828 W of production while the house exported); `export cut refused` no
+  longer claims to be *holding the meter shut*, on the very surface that
+  proves the export guard; a hold on an unreadable SOC no longer asserts
+  `80% ≤ reserve 70%`; a Deye refusal names the gate that is shut instead of
+  saying `blocked: ok`; the *"the firmware does not implement this register"*
+  Repair says what SEM actually ruled out; the failsafe Repair offers
+  **another controller** as an equal cause, as its sibling always did; and
+  the expensive-hours plan row claims *Min+PV grid pauses* only when there is
+  a charge to make.
+- 🐛 **Every emergency load shed was labelled "peak protection"** (#992). The
+  load-priority card compared the shed reason against `emergency` while the
+  backend has only ever written `EMERGENCY` — so the one label that matters
+  most was wrong 100 % of the time it appeared.
+
 # [2.1.0-beta.32] — 19.09.2026
 
 - 🐛 **A dropped solar reading arrives as 0 W, and 0 W was spent as a
