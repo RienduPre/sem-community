@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.34] — 19.09.2026
+
+- 🐛 **A charger's current entity missing at startup was treated as missing
+  forever** (#991, found by @traktore-org in @alexmc1510's log). Load
+  management pre-flighted the configured current-control entity while SEM was
+  still setting up, and `hass.states.get()` answers `None` for every entity
+  whose own integration has not finished loading. That empty read was spent on
+  the spot and permanently: the entity was discarded, the code fell back to a
+  charge service a `number`-driven brand does not have, and the log said "EV
+  charger current control entity not found" about an entity that worked all
+  day. Registration no longer decides this — the per-write read and the
+  per-cycle pre-flight already do, and they can be wrong for one cycle and
+  right for the next.
+- 🐛 **A fallback with nowhere to fall is now an error** (#991). Past warm-up,
+  where an absent entity is a fact rather than an artefact, SEM says plainly
+  that it has NO way to set a charger's current instead of listing the entity
+  among others. "Has a service" is not the same question as "has a fallback":
+  a `number.set_value`-style service writes *through* the very entity that
+  vanished, so it no longer buys silence.
+
 # [2.1.0-beta.33] — 19.09.2026
 
 - 🐛 **Remove accepted the press and gave the heat pump back** (#990, reported
