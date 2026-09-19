@@ -50,6 +50,10 @@ def _reader():
     r._input_dark = {}
     r._input_reads = {"solar": 1}
     r._solar_zero_refuted = False
+    r._clock = [1000.0]
+    r._now_monotonic = lambda: r._clock[0]
+    # the sun was measurably there a moment ago — i.e. this IS a dropout
+    r._last_solar_seen_mono = 1000.0
     return r
 
 
@@ -158,3 +162,103 @@ class TestTheRefusalTravelsTheUsualRoad:
                        and getattr(c.func, "attr", None) == "_gate_battery_power"
                        for c in ast.walk(fn)), (
                 f"{name}() gates solar but not battery — the two belong together")
+
+
+@pytest.mark.unit
+class TestItRefusesADropoutAndNotAnUnseenProducer:
+    """The merge-gate challenge's third scenario: a house with a producer SEM
+    cannot see — a second array, a generator, an AC-coupled battery fed behind
+    its own meter — charges the pack while ``solar_power`` honestly reads 0.
+    Nothing is broken there, and refuting that zero every time would be the
+    gate inventing a fault."""
+
+    def test_a_zero_that_was_never_a_number_is_left_alone(self):
+        r = _reader()
+        r._last_solar_seen_mono = None            # solar has never read > 0
+        assert _gate(r, _readings(solar=0.0, battery=1267.0)) == 0
+
+    def test_a_zero_older_than_the_dark_read_grace_is_left_alone(self):
+        from custom_components.solar_energy_management.consts.core import (
+            SENSOR_DARK_READ_GRACE_S,
+        )
+        r = _reader()
+        r._clock[0] = 1000.0 + SENSOR_DARK_READ_GRACE_S + 1
+        assert _gate(r, _readings(solar=0.0, battery=1267.0)) == 0
+
+    def test_within_the_grace_it_is_still_a_dropout(self):
+        from custom_components.solar_energy_management.consts.core import (
+            SENSOR_DARK_READ_GRACE_S,
+        )
+        r = _reader()
+        r._clock[0] = 1000.0 + SENSOR_DARK_READ_GRACE_S - 1
+        assert _gate(r, _readings(solar=0.0, battery=1267.0)) == 1
+
+    def test_a_positive_read_restamps_the_clock(self):
+        r = _reader()
+        r._clock[0] = 5000.0
+        _gate(r, _readings(solar=3100.0))          # the sun is measurably back
+        assert r._last_solar_seen_mono == 5000.0
+        r._clock[0] = 5030.0
+        assert _gate(r, _readings(solar=0.0, battery=1267.0)) == 1
+
+
+@pytest.mark.unit
+class TestItRunsWhereItsTermsMeanWhatTheySay:
+    """The challenge's decisive finding. The first cut called the gate beside
+    the battery gate at the top of ``read_power`` — where ``grid_power`` and
+    ``battery_power`` are still in the SENSOR's convention. On a
+    ``grid_sign_invert`` install, or any Pattern-B combined meter (SolarEdge,
+    Fronius, Enphase, Powerwall, Kostal), a 2.5 kW night IMPORT reads there as
+    export, and the gate would have marked solar dark on every night cycle.
+    The tests above cannot catch that — they hand the gate readings that are
+    already in SEM's convention — so the ORDER is pinned structurally."""
+
+    def _read_power_tree(self):
+        import ast
+        import inspect
+        from pathlib import Path
+        tree = ast.parse(Path(inspect.getfile(SensorReader)).read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == "read_power":
+                return fn
+        raise AssertionError("read_power not found")
+
+    def test_the_gate_runs_after_every_sign_correction(self):
+        import ast
+        fn = self._read_power_tree()
+        gate_lines = [n.lineno for n in ast.walk(fn)
+                      if isinstance(n, ast.Call)
+                      and getattr(n.func, "attr", None) == "_gate_solar_power"]
+        assert len(gate_lines) == 1, gate_lines
+        gate = gate_lines[0]
+        # every sign-correcting step this function performs
+        sign_lines = [n.lineno for n in ast.walk(fn)
+                      if isinstance(n, ast.Call)
+                      and getattr(n.func, "attr", None) in (
+                          "_detect_grid_sign", "_detect_battery_sign",
+                          "_detect_battery_sign_for")]
+        sign_lines += [n.lineno for n in ast.walk(fn)
+                       if isinstance(n, ast.Constant)
+                       and n.value in ("grid_sign_invert", "battery_sign_user_flip")]
+        assert sign_lines, "no sign corrections found — the pin would be vacuous"
+        assert gate > max(sign_lines), (
+            f"_gate_solar_power at line {gate} runs before a sign correction at "
+            f"{max(sign_lines)} — its terms are still in the sensor's convention")
+
+    def test_the_flags_it_moves_are_derived_after_it(self):
+        """``inputs_degraded`` and ``solar_power_unavailable`` read the dark map
+        the gate writes, so they must be computed after it, not upstream."""
+        import ast
+        fn = self._read_power_tree()
+        gate = max(n.lineno for n in ast.walk(fn)
+                   if isinstance(n, ast.Call)
+                   and getattr(n.func, "attr", None) == "_gate_solar_power")
+        for attr in ("inputs_degraded", "solar_power_unavailable"):
+            lines = [n.lineno for n in ast.walk(fn)
+                     if isinstance(n, ast.Assign)
+                     for t in n.targets
+                     if getattr(t, "attr", None) == attr]
+            assert lines, f"{attr} is never assigned in read_power"
+            assert max(lines) > gate, (
+                f"{attr} last assigned at {max(lines)}, before the gate at {gate}")
+

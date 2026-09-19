@@ -4172,6 +4172,20 @@ refuses a zero, never invents a value, because what the input WAS during the gap
 EXPLAINED zeros (night, charging from the grid, exporting from the battery), the margin, the
 untouched non-zero read, and a structural pin that the gate is called beside the battery gate it
 mirrors. Vacuity: neutralising the physics turns five red.
+**Where the check runs is part of the check (challenge record, #988).** The first cut put this gate
+beside the battery gate at the top of ``read_power`` — and there ``grid_power`` and ``battery_power``
+are still in the SENSOR's convention. Every sign correction happens further down: the manual
+``grid_sign_invert``, the counter auto-detect, the one-tap user flips, the per-battery detection. On
+a Pattern-B combined meter (SolarEdge, Fronius, Enphase, Powerwall, Kostal) a 2.5 kW night IMPORT
+reads as EXPORT up there, so the gate would have marked solar dark on every night cycle of every
+such install — a physics check reasoning from terms that did not yet mean what they say. The unit
+tests could not see it: they hand the gate readings already in SEM's convention. The ORDER is now
+pinned structurally (the gate's line must follow every sign-correcting call), and that pin turns red
+on the refuted version.
+**And a refutation needs a subject:** only a reading that WAS a number can have stopped being one.
+Without that, a house with a producer SEM cannot see — a second array, a generator, an AC-coupled
+battery behind its own meter — has its honest zero refuted every time that producer charges the
+pack. The window is the dark-read grace already used everywhere else in the file.
 **Sweep question:** for every input SEM trusts — *what does this sensor look like when it fails?* If
 one of its failure shapes is a value inside the valid range, nothing downstream can tell it from
 data, and the first sign will be a clamp, a hold or a guard firing for no visible reason.

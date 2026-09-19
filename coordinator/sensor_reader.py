@@ -37,6 +37,7 @@ from ..consts.core import (
     BATTERY_SOC_MAX_STEP_PCT,
     BATTERY_SOC_STEP_CONFIRM_READS,
     SOLAR_ZERO_REFUTED_W,
+    SENSOR_DARK_READ_GRACE_S,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -593,6 +594,8 @@ class SensorReader:
         self._battery_power_implausible: bool = False
         #: (#988) is the current solar zero refuted by the balance?
         self._solar_zero_refuted = False
+        #: (#988) when solar was last a positive number (monotonic)
+        self._last_solar_seen_mono = None
         # EV flap fix (2026-07-10): the KEBA charging-power sensor polls over
         # UDP and blips to ~0 for a cycle while the car is really drawing 10 kW.
         # ``ev_power`` feeds the home energy balance (``home = solar + grid −
@@ -844,10 +847,6 @@ class SensorReader:
             readings = self._read_from_legacy_config()
         # (#902) A value no battery can produce is a dark read, not a number.
         self._gate_battery_power(readings)
-        # (#988) …and a solar ZERO the balance refutes is one too. After the
-        # battery gate, so an implausible battery power is already out of the
-        # terms this one reasons from.
-        self._gate_solar_power(readings)
         # (#758) An unreadable battery power sensor reads as 0.0 W, which is
         # also what an idle battery reads. Say which one this is, once, here.
         readings.battery_power_unavailable = self._battery_power_missing
@@ -1029,6 +1028,21 @@ class SensorReader:
         # still no-ops until the __fleet__ sign is locked.
         if ed is not None:
             self._audit_battery_sign_lock(readings.battery_power, ed, readings)
+
+        # (#988) A solar ZERO the balance refutes is a dark read — LAST, after
+        # every sign correction above. The first cut ran it beside the battery
+        # gate at the top and the merge-gate challenge refuted it: at that
+        # point ``grid_power`` and ``battery_power`` are still in the SENSOR's
+        # convention, not SEM's. On a ``grid_sign_invert`` install, or any
+        # Pattern-B combined meter (SolarEdge, Fronius, Enphase, Powerwall,
+        # Kostal — negated a few lines above), a 2.5 kW night IMPORT read as
+        # export, and the gate would have marked solar dark every night cycle.
+        # The terms only mean what they say down here.
+        self._gate_solar_power(readings)
+        # …and the two flags it can move are computed from the dark map, so
+        # they are re-derived now rather than upstream of their own input.
+        readings.inputs_degraded = any(self._input_dark.values())
+        readings.solar_power_unavailable = self._all_dark("solar")
 
         return readings
 
@@ -2711,13 +2725,24 @@ class SensorReader:
         invent a number. What solar WAS during the gap is not knowable
         here, and a held value would be a second producer of it.
         """
+        now_mono = float(self._now_monotonic())
         if float(readings.solar_power or 0.0) > 0.0:
+            self._last_solar_seen_mono = now_mono
             if self._solar_zero_refuted:
                 self._solar_zero_refuted = False
                 log_on_change(
                     _LOGGER, "implausible:solar_zero", logging.DEBUG,
                     "Solar reading is a number again (#988)",
                 )
+            return
+        # Only a reading that WAS a number can have stopped being one. Without
+        # this, a house with a producer SEM cannot see — a second array, a
+        # generator, an AC-coupled battery fed behind its own meter — has its
+        # honest zero refuted every time that producer charges the pack. The
+        # window is the dark-read grace: the same "how long may a reading be
+        # missing" this file already answers everywhere else.
+        seen = getattr(self, "_last_solar_seen_mono", None)
+        if seen is None or (now_mono - seen) > SENSOR_DARK_READ_GRACE_S:
             return
         battery_w = float(readings.battery_power or 0.0)
         grid_w = float(readings.grid_power or 0.0)
