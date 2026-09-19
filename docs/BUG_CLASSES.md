@@ -4235,7 +4235,42 @@ consequence, the surviving fallback, the phase-guard trio, and an AST lint over 
 that rejects ANY `or` chain reading one constant key from two different stores. That is the
 structural half: the shape is now unrepresentable in the flow, so the next list — loads, batteries,
 tariff rows — cannot re-learn it. Vacuity: reverting either fix turns four red.
+**The sequel the fix creates, and must carry (#990):** making removal work breaks every id minted
+from a list POSITION, because positional ids are unique only while a list is append-only. Remove
+"Heat Pump 2" from `[2, 3]` and the next Add mints `heat_pump_3` a second time; `register_device`
+keys on `device_id`, so the collision does not fail — the second unit replaces the first, inherits
+its volatile state through the #847 transplant, and one physical pump is never driven again while
+the log still reports two. Ids are now taken from the lowest free number, and `_heat_pump_rows`
+renames a stored duplicate rather than dropping it, because configs written before this already
+carry collisions. *Whenever a delete starts working, ask what was counting on it never working.*
+
+**Aliasing is part of this class, not separate from it.** `list(stored)` copies the list and shares
+the ROWS. `entry.options` is a read-only mapping at the top level and wide open one level down, and
+`full_config = {**entry.data, **entry.options}` hands the LIVE coordinator the same row objects — so
+merging a form into `rows[0]` edited the running charger with no save at all, and a dialog the user
+abandoned still changed the install until the next restart. `_draft_list` copies rows.
+
+**Known trade-off, deliberate (#990).** `_suggest_discovered` cannot tell a field the user CLEARED
+from one that was empty when the page happened to be submitted — `_merge_form_input` writes `None`
+for both. So an install that enabled phase guard *before* its current sensors existed will not be
+offered them by discovery afterwards and must pick them by hand. That is the cheap failure; the
+other direction re-adopts a sensor the user deleted on the next unrelated Configure save (the
+options flow is one linear chain, so every save walks this page), and a wrong current sensor on a
+grid-protection feature is not cheap. Closing it properly means recording the REFUSAL at submit
+time, not inferring it from storage — left for Guido.
+
+**The guard is flow-scoped — say so.** The AST lint parses `config_flow.py` only, and matches
+`X.get("K") or Y.get("K")` with constant keys and inline receivers. It does not see variable keys,
+subscripts, a receiver hoisted into a local, or any other file. Three known live siblings outside
+its reach, **for Guido**: `coordinator.py:5155`/`:8932` read `_cfg.get("daily_ev_target") or
+self.config.get("daily_ev_target", 0)` where `0` is a legal per-charger slider value, so a charger
+told to want nothing is handed the global target instead; `__init__.py:626`/`:5274`/`:5464` carry
+the same shape on `ev_chargers` (documented as deliberate, and `:626` hoists its second store into a
+local, which is exactly the form the lint cannot match); `__init__.py:889`'s v2→v3 migration is safe
+for strings but `or`-merges the bools and ints in `_EV_FLAT_KEYS`, so a stored `False` loses to a
+stale `True`. Lifting the lint into `tests/ast_contracts.py` with an allowlist for the legitimate
+per-charger→global idiom is the real closure.
 **Sweep question:** for every collection or optional the user can shrink — *name the value that
 means "empty on purpose", and show the read that can tell it from "not set yet".* If the read is an
 `or`, there is no such value.
-Refs #990 #685 #690 #627.
+Refs #990 #685 #690 #627 #847.

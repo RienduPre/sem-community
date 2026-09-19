@@ -161,9 +161,18 @@ def _draft_list(flow: Any, key: str) -> list:
     Key PRESENCE is the only thing that separates the two, so that is what
     this tests. Same distinction as ``_merge_form_input``'s cleared-field
     rule one level up: silence and emptiness are different answers.
+
+    The ROWS are copied too, not just the list. ``entry.options`` is a
+    read-only mapping at the top level and wide open one level down, so a
+    step that merges a form into ``rows[0]`` was writing through to the
+    stored dict — and ``full_config = {**entry.data, **entry.options}``
+    shares those same row objects with the LIVE coordinator. Editing page
+    one and then closing the dialog changed the running charger with no
+    save. Every caller re-stores the list into ``flow._data``, so nobody
+    needs the identity.
     """
     raw = flow._data[key] if key in flow._data else flow.config_entry.options.get(key)
-    return list(raw or [])
+    return [dict(row) if isinstance(row, dict) else row for row in (raw or [])]
 
 
 def _suggest_discovered(saved: dict, discovered: dict, key: str):
@@ -3207,8 +3216,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     new_row.setdefault("id", pumps[editing].get("id", f"heat_pump_{editing + 2}"))
                     pumps[editing] = new_row
                 else:
-                    new_row.setdefault("id", f"heat_pump_{len(pumps) + 2}")
-                    new_row.setdefault("name", f"Heat Pump {len(pumps) + 2}")
+                    # (#990) The id must not be derived from the POSITION:
+                    # that is unique only while the list is append-only, and
+                    # removal — the gesture this step now has to survive —
+                    # ends that. Remove "Heat Pump 2" from [2, 3] and the
+                    # next Add mints heat_pump_3 a second time, which
+                    # ``register_device`` resolves by keeping one of the two.
+                    # Take the lowest number nobody is using instead.
+                    used = {str(p.get("id")) for p in pumps if isinstance(p, dict)}
+                    n = 2
+                    while f"heat_pump_{n}" in used:
+                        n += 1
+                    new_row.setdefault("id", f"heat_pump_{n}")
+                    new_row.setdefault("name", f"Heat Pump {n}")
                     pumps.append(new_row)
                 self._data["heat_pumps"] = pumps
                 self._edit_hp_index = None

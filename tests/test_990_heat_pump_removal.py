@@ -121,6 +121,12 @@ def test_draft_list_still_falls_back_and_never_aliases():
     assert got == saved
     got.append({"id": "x"})              # a copy, not the stored list
     assert f.config_entry.options["heat_pumps"] == saved
+    # and the ROWS are copies too — `entry.options` is read-only at the top
+    # and wide open one level down, and the live coordinator shares those
+    # same row objects, so a form merged into row 0 was editing the running
+    # config with no save at all.
+    got[0]["heat_pump_climate_entity"] = "climate.scribbled"
+    assert saved[0] == {"id": "heat_pump_2"}
     assert _draft_list(f, "nothing_here") == []
     # a null sitting in options reads as empty, not as a crash (class 54)
     f.config_entry.options["heat_pumps"] = None
@@ -142,10 +148,7 @@ def test_no_step_resolves_a_draft_against_the_saved_copy_with_or():
     import ast
     import pathlib
 
-    src = pathlib.Path(
-        "custom_components/solar_energy_management/config_flow.py")
-    if not src.exists():                 # running from inside the component
-        src = pathlib.Path(__file__).resolve().parents[1] / "config_flow.py"
+    src = pathlib.Path(__file__).resolve().parents[1] / "config_flow.py"
     tree = ast.parse(src.read_text())
 
     def getter(node):
@@ -190,7 +193,6 @@ def _phase_guard_form(saved, discovered):
         OptionsFlowHandler,
     )
     import asyncio
-
     stub = SimpleNamespace(
         _data={},
         config_entry=SimpleNamespace(data={}, options=dict(saved)),
@@ -212,8 +214,7 @@ def _phase_guard_form(saved, discovered):
         ".phase_current_discovery")
     with patch.object(mod, "discover_grid_phase_current_entities",
                       return_value=dict(discovered)):
-        form = asyncio.get_event_loop().run_until_complete(
-            stub.async_step_settings_phase_guard(None))
+        form = asyncio.run(stub.async_step_settings_phase_guard(None))
     return {str(k.schema): k for k in form["data_schema"].schema}
 
 
@@ -222,7 +223,7 @@ DISCOVERED = {L1: "sensor.auto_l1"}
 
 
 def test_discovery_still_fills_a_phase_guard_sensor_nobody_ever_set():
-    marker = _phase_guard_form({"phase_guard_topology": "grid_current"},
+    marker = _phase_guard_form({"phase_guard_topology": "grid_only"},
                                DISCOVERED)[L1]
     assert marker.description["suggested_value"] == "sensor.auto_l1"
 
@@ -231,12 +232,71 @@ def test_a_cleared_phase_guard_sensor_is_not_re_suggested_by_discovery():
     """#990's shape on a scalar: clearing it wrote None (#690), and the
     `or` read that deletion as silence and handed the sensor back."""
     marker = _phase_guard_form(
-        {"phase_guard_topology": "grid_current", L1: None}, DISCOVERED)[L1]
+        {"phase_guard_topology": "grid_only", L1: None}, DISCOVERED)[L1]
     assert marker.description["suggested_value"] is None
 
 
 def test_a_configured_phase_guard_sensor_still_wins():
     marker = _phase_guard_form(
-        {"phase_guard_topology": "grid_current", L1: "sensor.mine"},
+        {"phase_guard_topology": "grid_only", L1: "sensor.mine"},
         DISCOVERED)[L1]
     assert marker.description["suggested_value"] == "sensor.mine"
+
+
+# ── the sequel: remove, then add, must not mint a duplicate id ──────
+
+@pytest.mark.asyncio
+async def test_add_after_a_remove_does_not_reuse_a_live_id():
+    """Positional ids are unique only while the list is append-only, and
+    removal ends that. [2, 3] minus 2 then +1 used to mint heat_pump_3
+    twice — and `register_device` keys on device_id, so one physical pump
+    stopped being driven while the log still counted two."""
+    f = _flow_self(options={"heat_pumps": [
+        {"id": "heat_pump_2", "name": "Cellar",
+         "heat_pump_climate_entity": "climate.c"},
+        {"id": "heat_pump_3", "name": "Attic",
+         "heat_pump_climate_entity": "climate.a"}]})
+    await f.async_step_heat_pump_menu({"action": "remove_heat_pump:0"})
+    await f.async_step_heat_pump_unit({"heat_pump_climate_entity": "climate.shed"})
+    ids = [p["id"] for p in f._data["heat_pumps"]]
+    assert ids == ["heat_pump_3", "heat_pump_2"]   # the free number, not 3
+    assert len(set(ids)) == len(ids)
+
+
+@pytest.mark.asyncio
+async def test_ids_stay_unique_across_a_remove_add_remove_add_run():
+    f = _flow_self(options={"heat_pumps": [
+        {"id": "heat_pump_2"}, {"id": "heat_pump_3"}, {"id": "heat_pump_4"}]})
+    for action in ("remove_heat_pump:1", "remove_heat_pump:0"):
+        await f.async_step_heat_pump_menu({"action": action})
+    for _ in range(3):
+        await f.async_step_heat_pump_unit(
+            {"heat_pump_climate_entity": "climate.x"})
+    ids = [p["id"] for p in f._data["heat_pumps"]]
+    assert len(set(ids)) == len(ids) == 4
+
+
+def test_a_stored_duplicate_id_is_registered_instead_of_dropped():
+    """Configs written by beta.31 can already hold a collision — the
+    registration layer must not resolve it by losing a pump."""
+    from custom_components.solar_energy_management import _heat_pump_rows
+    rows = _heat_pump_rows({
+        "heat_pump_climate_entity": "climate.main",
+        "heat_pumps": [
+            {"id": "heat_pump_3", "heat_pump_climate_entity": "climate.a"},
+            {"id": "heat_pump_3", "heat_pump_climate_entity": "climate.b"},
+        ],
+    })
+    ids = [r["id"] for r in rows]
+    assert len(set(ids)) == len(ids) == 3
+    assert [r["heat_pump_climate_entity"] for r in rows] == [
+        "climate.main", "climate.a", "climate.b"]
+
+
+def test_a_row_may_not_collide_with_the_primary_either():
+    from custom_components.solar_energy_management import _heat_pump_rows
+    rows = _heat_pump_rows({
+        "heat_pump_climate_entity": "climate.main",
+        "heat_pumps": [{"id": "heat_pump", "heat_pump_climate_entity": "climate.a"}],
+    })
+    assert [r["id"] for r in rows] == ["heat_pump", "heat_pump_2"]
