@@ -33,6 +33,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend has only ever written `EMERGENCY` — so the one label that matters
   most was wrong 100 % of the time it appeared.
 
+# [2.1.0-beta.33] — 19.09.2026
+
+- 🐛 **Remove accepted the press and gave the heat pump back** (#990, reported
+  by @RienduPre). The config dialog resolved its working list as `draft or
+  saved`, and `or` sorts by truthiness — so "this dialog has not touched the
+  list" and "the user just emptied it" were the same value, and the saved copy
+  won both times. That is exactly the state removal exists to produce, so
+  deleting the LAST additional pump could never be shown; adding one
+  afterwards re-read the saved copy and brought the deleted pump back as a
+  phantom sibling, leaving the install with two. The list is now resolved on
+  whether the key is PRESENT, never on whether it is empty.
+- 🐛 **A heat-pump id minted from the list position collided after a removal**
+  (#990). Remove "Heat Pump 2" from [2, 3] and the next Add reused
+  `heat_pump_3`; the device registry keys on that id, so the second unit
+  silently replaced the first and one physical pump stopped being driven while
+  the log still counted two. New units take the lowest free number, and a
+  config that already carries a duplicate has it renamed at registration
+  instead of dropped.
+- 🐛 **A cleared phase-guard current sensor was handed back by auto-discovery**
+  (#990, found by the lint written for it). Clearing the sensor stores an
+  explicit `None`; the same `or` read that deletion as "nobody said",
+  re-offered the detected entity, and the next Configure save re-adopted the
+  sensor the user had just taken out — on every save, since the options flow
+  is one linear chain.
+- 🐛 **An abandoned Configure dialog still changed the running charger**
+  (#990). The working copy of `ev_chargers` shared its row objects with stored
+  options *and* with the live coordinator, so a form merged into charger 0 took
+  effect immediately and survived until the next restart even if the user never
+  finished the dialog. Rows are copied now.
+
 # [2.1.0-beta.32] — 19.09.2026
 
 - 🐛 **A dropped solar reading arrives as 0 W, and 0 W was spent as a
