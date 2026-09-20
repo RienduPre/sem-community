@@ -622,7 +622,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 grid_import_surcharge=config.get("grid_import_surcharge", 0.0),
             )
         elif tariff_mode == "calendar":
-            schedule = {}  # Was config.get("tariff_schedule", {}) — never set via UI
+            # (#994) Read it after all. No UI writes `tariff_schedule` today,
+            # so this is usually still empty — but hardcoding {} meant the
+            # provider could never be told otherwise, and an empty rule set
+            # made it answer CHEAP unconditionally, forever, for every
+            # install that chose this mode. The provider now refuses to
+            # classify without a reachable HT rule; a YAML/storage-set
+            # schedule is honoured instead of discarded.
+            schedule = config.get("tariff_schedule", {}) or {}
             self._tariff_provider = CalendarTariffProvider(
                 hass,
                 peak_rate=config.get("electricity_import_rate", 0.35),
@@ -11196,7 +11203,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         try:
             provider = getattr(self, "_tariff_provider", None)
             if provider is not None and getattr(provider, "available", True):
-                level = provider.get_price_level()
+                # (#994) through the one vocabulary: a level only exists
+                # when a comparison stands behind it, so a flat tariff
+                # threads None and every comparative consumer sees "unknown"
+                # rather than "cheap".
+                from .price_signal import comparative_level
+                level = comparative_level(provider)
                 level = getattr(level, "value", level)  # PriceLevel enum → str
                 if isinstance(level, str):
                     tariff_level = level

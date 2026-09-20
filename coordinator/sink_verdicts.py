@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
+from .price_signal import CHEAP_LEVELS as _CHEAP_LEVELS, is_cheap_name
 
 OPEN = "open"
 HELD = "held"
@@ -30,7 +31,9 @@ CLOSED = "closed"
 SINKS = ("grid_export", "battery", "house", "ev")
 
 #: Tariff levels under which the pack is KEPT rather than spent on the house.
-_KEEP_LEVELS = ("cheap", "very_cheap", "negative")
+#: (#994) the ONE vocabulary — see coordinator/price_signal.py. An unknown
+#: level is not cheap, so a flat tariff never holds the pack.
+_KEEP_LEVELS = tuple(lv.value for lv in _CHEAP_LEVELS)
 
 
 @dataclass(frozen=True)
@@ -134,7 +137,7 @@ def sink_verdicts(*, now: datetime, tariff_level: Optional[str], upcoming,
     if not house_sink_enabled:
         out["house"] = SinkVerdict(
             "house", OPEN, "house sink off — inverter self-consumption rule")
-    elif level in _KEEP_LEVELS:
+    elif is_cheap_name(level):
         out["house"] = SinkVerdict(
             "house", HELD, f"{level} hour — let the house import, keep the pack")
     else:

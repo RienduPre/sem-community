@@ -318,3 +318,27 @@ When the EV is charging in `battery_assist` mode (Zone 4, home battery ≥ `batt
 SEM's proportional flow attribution (`coordinator/flow_calculator.py: calculate_power_flows`) splits the actual grid flow across EV and home loads by demand share, so during the battery-discharge ramp you may briefly see `sensor.sem_flow_grid_to_ev_power` rise to a few hundred watts even though SEM itself never asked the EV to pull from grid. **This is the physics of the ramp, not a bug**: it lasts a handful of cycles (≤ 30 s typically), and the daily integrated grid-to-EV figure usually stays under 5 % of the session total. The live sentinel `tests/live/test_solar_only_no_grid.sh` correctly only checks the strict grid-floor invariant for `solar_only` (where the canonical promise is "no grid at all"), and treats `battery_assist` grid flow as informational.
 
 If you want strict no-grid-ever behaviour, choose `Self-consumption` or `PV` charging mode instead of `Auto`, or lower `battery_buffer_soc` so the assist band ends higher (the former `battery_assist_floor_soc` option was removed — assist potential is already 0 below the buffer).
+
+## Tariff models SEM does not model (2.1, #994)
+
+SEM's price level is a comparison between the hours of a day. Two real
+tariff shapes cannot be expressed that way, and SEM says so rather than
+classifying them silently — see [TARIFF_MODELS.md](TARIFF_MODELS.md).
+
+**Critical peak pricing (CPP).** A handful of announced critical events a
+year, priced far above the normal band. SEM has no concept of an announced
+event: on a dynamic tariff the event hours will simply classify as expensive
+once they appear in the curve, which is late. If your contract has CPP
+events, treat SEM's plan as unaware of them.
+
+**Block / tiered pricing by consumption.** Some utilities charge by
+cumulative monthly kWh — the SCE pattern, where the rate steps from ~31 ct
+to ~42 ct once the monthly baseline allocation is passed. That price depends
+on how much you have used this month, not on the hour, so no per-hour level
+can represent it. SEM will classify such a tariff by whatever time structure
+it also has (or report `unknown` if it has none), and its savings figures
+will use the rate the integration reports at the time.
+
+Neither shape is dangerous — SEM does not act on a level it does not have —
+but neither will be optimised for.
+

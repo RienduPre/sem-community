@@ -166,14 +166,46 @@ class CalendarTariffProvider(TariffProvider):
     def get_current_export_rate(self) -> float:
         return self.export_rate
 
-    def get_price_level(self) -> PriceLevel:
+    def _rates_differ(self) -> bool:
+        """(#994) Is there anything to compare? Relative, so the answer is
+        the same in CHF, in cents and in rupees (#359/#417/#549)."""
+        hi, lo = float(self.peak_rate), float(self.off_peak_rate)
+        mean = (abs(hi) + abs(lo)) / 2.0
+        if mean <= 0.0:
+            return abs(hi - lo) > 1e-9
+        return (abs(hi - lo) / mean) > 0.005
+
+    def _ht_can_occur(self) -> bool:
+        """(#994) …and can this calendar ever BE in high tariff?
+
+        With no rules — which is every install today, because
+        ``coordinator.py`` never passed a schedule, and also the deliberate
+        "Flat Rate (no HT/NT)" preset — ``_get_tariff_at`` always returns
+        the ``off_peak`` default, so this provider answered CHEAP
+        unconditionally, forever, whatever rates the owner configured. A
+        level with no reachable alternative is not a comparison.
+        """
+        if not self._rules:
+            return str(self.default_tariff).lower() in ("ht", "peak")
+        return any(str(t).lower() in ("ht", "peak") for _, _, _, t in self._rules)
+
+    def _comparison_stands(self) -> bool:
+        return self._rates_differ() and self._ht_can_occur()
+
+    def get_price_level(self) -> Optional[PriceLevel]:
+        """(#994) ``None`` when nothing was compared."""
+        if not self._comparison_stands():
+            return None
         return PriceLevel.NORMAL if self._is_high_tariff() else PriceLevel.CHEAP
 
     def get_price_at(self, when: datetime) -> Optional[float]:
         return self.peak_rate if self._is_high_tariff(when) else self.off_peak_rate
 
     def get_price_level_at(self, when: datetime) -> "PriceLevel | None":
-        # Same calendar rule get_price_level applies now: NT = CHEAP (#638).
+        # Same calendar rule get_price_level applies now: NT = CHEAP (#638),
+        # and the same refusal when nothing distinguishes the hours (#994).
+        if not self._comparison_stands():
+            return None
         return (PriceLevel.NORMAL if self._is_high_tariff(when)
                 else PriceLevel.CHEAP)
 
@@ -184,14 +216,22 @@ class CalendarTariffProvider(TariffProvider):
         data = TariffData(
             current_import_rate=self.peak_rate if is_ht else self.off_peak_rate,
             current_export_rate=self.export_rate,
-            price_level=PriceLevel.NORMAL if is_ht else PriceLevel.CHEAP,
+            price_level=self.get_price_level(),
             currency=self.currency,
             provider="calendar",
             is_dynamic=False,
-            classifier_path="calendar_schedule",
-            today_min_price=self.off_peak_rate,
-            today_max_price=self.peak_rate,
-            today_avg_price=(self.peak_rate + self.off_peak_rate) / 2,
+            classifier_path=("calendar_schedule" if self._comparison_stands()
+                             else "calendar_no_comparison"),
+            # (#994) with no HT rule the day has ONE price; reporting the
+            # rate table's two would tell every consumer to wait for an
+            # hour this calendar can never reach.
+            today_min_price=(self.off_peak_rate if self._comparison_stands()
+                             else self.get_current_import_rate()),
+            today_max_price=(self.peak_rate if self._comparison_stands()
+                             else self.get_current_import_rate()),
+            today_avg_price=((self.peak_rate + self.off_peak_rate) / 2
+                             if self._comparison_stands()
+                             else self.get_current_import_rate()),
         )
 
         # Calculate next tariff transition

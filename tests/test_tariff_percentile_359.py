@@ -453,12 +453,26 @@ class TestClassifierPathDiagnostic:
     def test_static_provider_path_is_static_ht_nt(self):
         """StaticTariffProvider hard-codes 'static_ht_nt' — gives users a
         clear indicator that their classification mode never engaged the
-        percentile machinery at all."""
+        percentile machinery at all.
+
+        (#994) …on a day that HAS both rates. This test used to read the
+        real clock, so it passed Monday to Friday and failed at the weekend
+        once the provider started admitting that a Saturday under HT/NT has
+        only one price. Pin the day.
+        """
+        from unittest.mock import patch as _patch
+        from datetime import datetime as _dt
         from custom_components.solar_energy_management.tariff.tariff_provider import (
             StaticTariffProvider,
         )
         sp = StaticTariffProvider(
             peak_rate=0.35, off_peak_rate=0.15, export_rate=0.08,
         )
-        td = sp.get_tariff_data()
-        assert td.classifier_path == "static_ht_nt"
+        path = ("custom_components.solar_energy_management.tariff"
+                ".tariff_provider.dt_util")
+        with _patch(path) as mock_dt:                      # a Monday
+            mock_dt.now.return_value = _dt(2026, 9, 21, 12, 0)
+            assert sp.get_tariff_data().classifier_path == "static_ht_nt"
+        with _patch(path) as mock_dt:                      # a Saturday: one price
+            mock_dt.now.return_value = _dt(2026, 9, 19, 12, 0)
+            assert sp.get_tariff_data().classifier_path == "static_no_comparison"

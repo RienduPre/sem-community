@@ -13,6 +13,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A flat tariff was published as "cheap", and the battery was held for
+  an hour that could not come** (#994). SEM's price level is a *comparison*,
+  but two of its three providers produced one from a **clock**: the static
+  HT/NT provider answered `cheap` every night without ever comparing its two
+  rates — its own shipped defaults are equal — and the calendar provider
+  answered `cheap` **unconditionally, forever**, because the coordinator
+  hardcoded an empty schedule. On a flat 0.36/0.36 tariff that made the
+  *house as a battery sink* hold the pack at a **0 W discharge limit** all
+  night while the house imported 3.66 kWh from a 92–100 % battery.
+  A level now exists only when a comparison stands behind it: equal rates,
+  a weekend under HT/NT (one price all day), an empty calendar, a missing or
+  flat dynamic curve all read **`unknown`**, and everything that would have
+  waited for a better hour acts now instead — the rule the export side has
+  followed since #921. The vocabulary is Tibber's, which defines it against a
+  3-day moving average and carries a "missing data" state; SEM had kept the
+  five words and dropped both. New [TARIFF_MODELS.md](docs/TARIFF_MODELS.md)
+  says what SEM claims per model, and names the two it does not model
+  (critical-peak events, and block rates priced by monthly consumption).
+- 🐛 **`very_expensive` did not damp the surplus pool** (#994). Six places had
+  hand-typed their own list of which levels count as cheap or dear; one had
+  already drifted. There is one list now, and a lint against a seventh.
+- 🐛 **The EV planner could book an hour it had no price for** (#994). An
+  unpriced hour scored as `normal` in the cheapest-slot search, so silence
+  was spent as an answer in the one place that commits money.
+
 # [2.1.0-beta.32] — 19.09.2026
 
 - 🐛 **A dropped solar reading arrives as 0 W, and 0 W was spent as a

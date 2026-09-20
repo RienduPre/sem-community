@@ -138,7 +138,9 @@ class TariffData:
     """Current tariff information."""
     current_import_rate: float = 0.0
     current_export_rate: float = 0.0
-    price_level: PriceLevel = PriceLevel.NORMAL
+    #: (#994) ``None`` when no comparison stands behind a level — the
+    #: state Tibber's own enum has ("missing data") and SEM had dropped.
+    price_level: Optional[PriceLevel] = PriceLevel.NORMAL
     currency: str = "CHF"
     provider: str = "unknown"
     is_dynamic: bool = False
@@ -174,7 +176,9 @@ class TariffData:
         return {
             "tariff_current_import_rate": round(self.current_import_rate, 4),
             "tariff_current_export_rate": round(self.current_export_rate, 4),
-            "tariff_price_level": self.price_level.value,
+            "tariff_price_level": (self.price_level.value
+                                   if self.price_level is not None
+                                   else "unknown"),
             "tariff_currency": self.currency,
             "tariff_provider": self.provider,
             "tariff_is_dynamic": self.is_dynamic,
@@ -280,7 +284,43 @@ class StaticTariffProvider(TariffProvider):
     def get_current_export_rate(self) -> float:
         return self.export_rate
 
-    def get_price_level(self) -> PriceLevel:
+    def _rates_differ(self) -> bool:
+        """(#994) Is there anything to compare?
+
+        HT/NT is a real comparison — when the two rates are different
+        numbers. This provider used to answer CHEAP from the CLOCK alone,
+        and its own shipped defaults are equal (0.3387 = 0.3387), so a flat
+        tariff was told every night that a better hour was coming. On
+        @traktore-org's install (0.36 = 0.36) that held the battery at a 0 W
+        discharge limit while the house imported 3.66 kWh overnight.
+
+        Relative, not absolute: a fixed epsilon in CHF is the #359 defect,
+        re-fixed twice on the config surface for a Slovak tariff (#417) and
+        a Sri Lankan one three orders of magnitude away (#549).
+        """
+        hi, lo = float(self.peak_rate), float(self.off_peak_rate)
+        mean = (abs(hi) + abs(lo)) / 2.0
+        if mean <= 0.0:
+            return abs(hi - lo) > 1e-9
+        return (abs(hi - lo) / mean) > 0.005
+
+    def _both_rates_occur(self, when: Optional[datetime] = None) -> bool:
+        """(#994) …and does the DAY in question actually contain both?
+
+        The rate table says two rates; a Saturday says one. HT never occurs
+        at the weekend, so the day is flat in practice — and a consumer that
+        holds the pack "for the expensive hours" would hold it until Monday.
+        """
+        now = when or dt_util.now()
+        return now.weekday() < 5
+
+    def _comparison_stands(self, when: Optional[datetime] = None) -> bool:
+        return self._rates_differ() and self._both_rates_occur(when)
+
+    def get_price_level(self) -> Optional[PriceLevel]:
+        """(#994) ``None`` when no comparison stands behind the word."""
+        if not self._comparison_stands():
+            return None
         if self._is_high_tariff():
             return PriceLevel.NORMAL
         return PriceLevel.CHEAP
@@ -289,7 +329,11 @@ class StaticTariffProvider(TariffProvider):
         return self.peak_rate if self._is_high_tariff(when) else self.off_peak_rate
 
     def get_price_level_at(self, when: datetime) -> Optional[PriceLevel]:
-        # The same time rule get_price_level applies now: NT = CHEAP.
+        # The same time rule get_price_level applies now: NT = CHEAP — and
+        # the same refusal when the two rates, or the day, offer nothing to
+        # compare (#994).
+        if not self._comparison_stands(when):
+            return None
         return (PriceLevel.NORMAL if self._is_high_tariff(when)
                 else PriceLevel.CHEAP)
 
@@ -302,10 +346,18 @@ class StaticTariffProvider(TariffProvider):
             currency=self.currency,
             provider="static",
             is_dynamic=False,
-            classifier_path="static_ht_nt",
-            today_min_price=self.off_peak_rate,
-            today_max_price=self.peak_rate,
-            today_avg_price=(self.peak_rate + self.off_peak_rate) / 2,
+            classifier_path=("static_ht_nt" if self._comparison_stands()
+                             else "static_no_comparison"),
+            # (#994) THE DAY, not the rate table. At the weekend only NT
+            # occurs, so min == max and nothing downstream waits for an
+            # expensive hour that arrives on Monday.
+            today_min_price=(self.off_peak_rate if self._both_rates_occur()
+                             else self.get_current_import_rate()),
+            today_max_price=(self.peak_rate if self._both_rates_occur()
+                             else self.get_current_import_rate()),
+            today_avg_price=((self.peak_rate + self.off_peak_rate) / 2
+                             if self._both_rates_occur()
+                             else self.get_current_import_rate()),
         )
 
         # Calculate next cheap window (next NT period)
@@ -1579,8 +1631,21 @@ class DynamicTariffProvider(TariffProvider):
                     pass
         return self.export_rate
 
-    def get_price_level(self) -> PriceLevel:
-        return self._classify_price(self._read_current_price())
+    def get_price_level(self) -> Optional[PriceLevel]:
+        """(#994) ``None`` when the classifier had nothing to compare.
+
+        The three documented fallbacks — an empty cache, fewer than four
+        points, a flat day — used to resolve to NORMAL, so "no data" and
+        "confirmed mid-priced" reached every consumer as the same word,
+        while ``get_price_level_at`` answered ``None`` for the same hour.
+        The two accessors disagreed by construction; they no longer do.
+        """
+        price = self._read_current_price()
+        level = self._classify_price(price)
+        path = str(getattr(self, "_last_classifier_path", "") or "")
+        if path.startswith("percentile_fallback_"):
+            return None
+        return level
 
     @staticmethod
     def _detect_interval(prices: List[PricePoint]) -> timedelta:

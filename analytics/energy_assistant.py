@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
+from ..coordinator.price_signal import is_cheap_name, is_expensive_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -296,7 +297,9 @@ class EnergyAssistant:
 
         translated_level = _t(price_level, price_level)
 
-        if price_level in ("cheap", "very_cheap", "negative"):
+        # (#994) one vocabulary; an unknown level is not cheap, so a flat
+        # tariff never advises "charge now, it is cheap".
+        if is_cheap_name(price_level):
             self._tips.append(EnergyTip(
                 category="price",
                 title=_t("tip_cheap_price_title", "Cheap electricity now"),
@@ -307,7 +310,7 @@ class EnergyAssistant:
                 priority=3,
                 created=datetime.now(),
             ))
-        elif price_level in ("expensive", "very_expensive"):
+        elif is_expensive_name(price_level):
             self._tips.append(EnergyTip(
                 category="price",
                 title=_t("tip_expensive_price_title", "Expensive electricity"),

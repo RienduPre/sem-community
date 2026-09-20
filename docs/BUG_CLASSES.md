@@ -4190,3 +4190,31 @@ pack. The window is the dark-read grace already used everywhere else in the file
 one of its failure shapes is a value inside the valid range, nothing downstream can tell it from
 data, and the first sign will be a clamp, a hold or a guard firing for no visible reason.
 Refs #988 #902 #818 #461.
+
+### 102. A word borrowed without its reference — GUARDED
+**Symptom:** a label that reads as an instruction is produced by something that never made the
+comparison the word implies. A flat 0.36/0.36 tariff published `cheap`; the house sink read it as
+"a better hour is coming", and the battery sat at a 0 W discharge limit overnight while the house
+imported 3.66 kWh (#994).
+**Root shape:** SEM's `PriceLevel` is Tibber's vocabulary, which is defined against a **3-day
+moving average** and carries a "missing data" state. SEM kept the five words and dropped both the
+reference and the absence. A CLOCK was then free to produce them — `StaticTariffProvider` answering
+from "not 07:00–20:00 on a weekday" without ever comparing its two rates, `CalendarTariffProvider`
+answering CHEAP unconditionally because the coordinator hardcoded an empty schedule — and eighteen
+consumers across six chains could not tell an asserted level from a measured one. The history is
+the proof that this is structural: #359 took six waves in four days, #728 two, and #524, #953 and
+#879 each rediscovered the trap on first contact with the same word.
+**Cure:** restore what the word lost. A level exists only when a comparison stands behind it
+(rates that differ, on a day that contains both; a curve with spread); otherwise the answer is
+`unknown`, and every consumer that would have waited acts now — the rule `sink_verdicts` already
+followed for export. One vocabulary in one module, so a seventh consumer cannot invent a seventh
+opinion. And the flat test is RELATIVE to the day's own mean, because an absolute cutoff in one
+currency is the #359 defect itself (re-fixed at 1.69/kWh in #417 and in LKR in #549).
+**Guard:** `tests/test_994_a_level_needs_a_reference.py` — the vocabulary, a model matrix on the
+real providers (flat · HT/NT weekday · HT/NT weekend · empty calendar · dynamic fallbacks), and one
+pin per comparative chain naming the harm it prevents. `tests/test_tariff_provider.py` was asserting
+the defect as spec and was rewritten.
+**Sweep question:** for any label SEM publishes or acts on — **what two numbers were compared to
+produce this word, and what does it say when nobody compared any?** If the second answer is "the
+same word", the label is decoration and something downstream is spending it.
+Refs #994 #359 #728 #524 #953 #879 #925.

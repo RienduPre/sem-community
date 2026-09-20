@@ -70,16 +70,43 @@ class TestStaticTariffProvider:
         assert provider.get_current_export_rate() == 0.075
 
     def test_price_level_ht_is_normal(self):
-        provider = StaticTariffProvider()
+        """(#994) …when the two rates actually differ. The default provider
+        ships 0.3387 = 0.3387, and this test used to assert NORMAL/CHEAP for
+        it — pinning a level with no comparison behind it as spec."""
+        provider = StaticTariffProvider(peak_rate=0.3387, off_peak_rate=0.22)
         with patch(DT_UTIL_PATH) as mock_dt:
             mock_dt.now.return_value = _weekday_noon()
             assert provider.get_price_level() == PriceLevel.NORMAL
 
     def test_price_level_nt_is_cheap(self):
-        provider = StaticTariffProvider()
+        provider = StaticTariffProvider(peak_rate=0.3387, off_peak_rate=0.22)
         with patch(DT_UTIL_PATH) as mock_dt:
             mock_dt.now.return_value = _weekday_night()
             assert provider.get_price_level() == PriceLevel.CHEAP
+
+    def test_equal_rates_have_no_level_at_all(self):
+        """(#994) The defect this file used to assert. Both rates the same:
+        there is no cheaper hour, so there is no level — and nothing
+        downstream waits for one. Live cost before the fix: a battery held at
+        a 0 W discharge limit overnight while the house imported 3.66 kWh."""
+        provider = StaticTariffProvider()          # the flat shipped defaults
+        for when in (_weekday_noon(), _weekday_night()):
+            with patch(DT_UTIL_PATH) as mock_dt:
+                mock_dt.now.return_value = when
+                assert provider.get_price_level() is None
+                assert provider.get_tariff_data().price_level is None
+                assert provider.get_tariff_data().classifier_path == \
+                    "static_no_comparison"
+
+    def test_a_weekend_under_ht_nt_is_flat_in_practice(self):
+        """(#994) The rate table has two rates; Saturday has one. Reporting
+        both would hold the pack until Monday."""
+        provider = StaticTariffProvider(peak_rate=0.3387, off_peak_rate=0.22)
+        with patch(DT_UTIL_PATH) as mock_dt:
+            mock_dt.now.return_value = _weekend_noon()
+            assert provider.get_price_level() is None
+            data = provider.get_tariff_data()
+            assert data.today_min_price == data.today_max_price == 0.22
 
     def test_get_price_at_ht_time(self):
         provider = StaticTariffProvider()
@@ -100,7 +127,9 @@ class TestStaticTariffProvider:
             data = provider.get_tariff_data()
             assert data.current_import_rate == 0.3387
             assert data.current_export_rate == 0.075
-            assert data.price_level == PriceLevel.NORMAL
+            # (#994) flat defaults ⇒ no level; the rates and the rest are
+            # unchanged. min == max is exactly WHY there is no level.
+            assert data.price_level is None
             assert data.provider == "static"
             assert data.is_dynamic is False
             assert data.today_min_price == 0.3387
@@ -114,7 +143,7 @@ class TestStaticTariffProvider:
         with patch(DT_UTIL_PATH) as mock_dt:
             mock_dt.now.return_value = _weekday_night()
             data = provider.get_tariff_data()
-            assert data.price_level == PriceLevel.CHEAP
+            assert data.price_level is None          # (#994) flat defaults
             # Already in NT, so no next_cheap_window_start
             assert data.next_cheap_window_start is None
 

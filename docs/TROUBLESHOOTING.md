@@ -1325,3 +1325,27 @@ so the first stops are slower too, and tell us the charger — the budget is
 brand-blind, but a charge point with a tighter limit than the Go 2 is worth
 knowing about.
 
+## The battery never covers the house, and the grid does instead (2.1, #994)
+
+**Symptom:** overnight the house draws from the grid while the battery sits
+nearly full. `sensor.sem_tariff_price_level` reads `cheap`, and the
+inverter's maximum-discharge number has been written to **0 W**.
+
+**Cause (before 2.1.0-beta.35):** the *house as a battery sink* feature holds
+the pack in cheap hours to spend it in expensive ones. On a **flat tariff** —
+both rates configured to the same number, or a calendar with no high-tariff
+rule — SEM still published `cheap`, derived from the clock rather than from
+any comparison, so the hold never lifted. Measured on the reference install:
+3.66 kWh imported in one night from a 92–100 % battery.
+
+**What SEM does now:** a level exists only when a comparison stands behind
+it. On a flat tariff the sensor reads **`unknown`**, the house sink stays
+open, and the discharge limit is never written to 0. The same applies to a
+weekend under HT/NT, which has only one price.
+
+**If you see it on 2.1.0-beta.35 or later:** check
+`sensor.sem_tariff_price_level`. If it shows a real level, your tariff does
+vary and the hold may be correct — turn *House as a battery sink* off if you
+would rather self-consume regardless of price. If it shows `unknown` and the
+pack is still held, that is a bug: send the diagnostics download.
+

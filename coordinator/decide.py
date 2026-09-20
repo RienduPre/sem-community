@@ -46,6 +46,8 @@ from .charger_types import (
     FleetContext,
 )
 from .energy_reclaim import ev_reclaims_battery_charge
+from .price_signal import CHEAP_LEVELS, EXPENSIVE_LEVELS as _EXPENSIVE_LEVELS
+from ..tariff.tariff_provider import PriceLevel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -443,7 +445,10 @@ def effective_min_amps(cfg: dict, fallback: int = 6) -> int:
 # exist to avoid (#524). ``cheap`` / ``very_cheap`` and unknown/static
 # (tariff_level None) are bridgeable. Canonical here (decide owns tariff
 # classification); charge_stability reads the resulting ``bridgeable`` flag.
-_NOT_CHEAP_LEVELS = frozenset({"normal", "expensive", "very_expensive"})
+#: (#994) everything that is NOT one of the cheap words — derived from the
+#: one vocabulary, so a seventh level cannot appear on one side only.
+_NOT_CHEAP_LEVELS = frozenset(
+    lv.value for lv in PriceLevel if lv not in CHEAP_LEVELS)
 
 
 def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
@@ -1066,7 +1071,7 @@ class SolarPlusCheapMode(ModeStrategy):
     cheapest hours only (#247).
     """
 
-    EXPENSIVE_LEVELS = frozenset({"expensive", "very_expensive"})
+    EXPENSIVE_LEVELS = frozenset(lv.value for lv in _EXPENSIVE_LEVELS)
 
     def decide(self, view: ChargerView) -> ChargerDecision:
         f = view.fleet
