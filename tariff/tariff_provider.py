@@ -1024,7 +1024,19 @@ class DynamicTariffProvider(TariffProvider):
         self._last_parsed_gap_seconds: Optional[float] = None
 
         prices = []
-        attrs = state.attributes if state else {}
+        # (#994) Attributes hanging off an UNREADABLE entity are the last
+        # thing it said, not what it says now. The flap guard below exists
+        # to keep a cache we already parsed while the entity blinks
+        # (core#166742) — it never meant "parse a new curve out of an
+        # entity that will not read". Doing so made the two accessors
+        # answer differently for the same instant, and made the answer
+        # depend on which of them ran first in a cycle: a curve read
+        # populated the cache, and the next current-price read then found
+        # a "cached" slot and classified confidently what it had just
+        # refused. Same rule as #991: an entity that has not loaded is not
+        # an entity reporting a price.
+        _readable = bool(state) and state.state not in ("unknown", "unavailable")
+        attrs = state.attributes if (state and _readable) else {}
 
         # Tibber + NL EnergyZero/EasyEnergy + Tibber Grid Reward +
         # Nordpool raw_* + generic. Each item may be a ``{start, value}``
@@ -1682,7 +1694,18 @@ class DynamicTariffProvider(TariffProvider):
         # solar-glut day runs from a few cents negative to a few cents
         # positive and averages nearly nothing, so a mean-relative cutoff
         # loses all traction exactly where this market spends its summer.
-        _scale = max((abs(v) for v in window_prices), default=0.0)
+        #
+        # …and the curve's own magnitude is not enough either, which is the
+        # mirror of the bug this whole series is about. On a day that hovers
+        # around zero, a purely curve-relative cutoff shrinks with it, and
+        # a tenth of a cent of metering noise gets bucketed into the full
+        # five tiers. The floor is the user's OWN configured import rate,
+        # which carries their currency's scale without SEM having to know
+        # what currency it is: spot may be giving energy away today, but
+        # what they pay for a kWh has not changed, and a spread that is
+        # negligible against THAT is not worth moving a load for.
+        _scale = max(max((abs(v) for v in window_prices), default=0.0),
+                     abs(float(getattr(self, "fallback_price", 0.0) or 0.0)))
         _flat_cutoff = (_scale * FLAT_DAY_SPREAD_FRACTION
                         if _scale else 1e-9)
         if (breaks["p90"] - breaks["p10"]) < _flat_cutoff:
@@ -1815,6 +1838,13 @@ class DynamicTariffProvider(TariffProvider):
         answered it instead — the rig showed a ``normal`` shipped beside
         ``negative_price_shortcircuit``. One call, one pair.
         """
+        # (#994) Load the curve BEFORE classifying against it. Without
+        # this the answer depended on what else had run this cycle: called
+        # first, the percentile breaks found an empty cache and refused;
+        # called after any curve read, the same instant classified. The
+        # parse is memoised, so asking costs nothing when the curve is
+        # already in hand.
+        self._read_prices_list()
         price, source = self._read_current_price_with_source()
         if source == "fallback":
             # Nothing was read. Classifying the configured constant is how

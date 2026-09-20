@@ -1120,3 +1120,102 @@ class TestTheAbsenceNamesTheRightRefusal:
         for word in ("flat", "no_prices"):
             assert not ps.is_cheap_name(word)
             assert not ps.is_expensive_name(word)
+
+
+@pytest.mark.unit
+class TestTheTwoAccessorsCannotDisagreeAboutOneInstant:
+    """Third review, findings 3 and 4 — the two that survived the first two
+    rounds of fixes."""
+
+    CURVE = [0.05, 0.20, 0.21, 0.30, 0.15, 0.40]
+
+    def _provider(self, entity_state):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            DynamicTariffProvider,
+        )
+        from homeassistant.util import dt as dt_util
+
+        now = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        curve = [{"start": (now + timedelta(hours=i)).isoformat(), "value": v}
+                 for i, v in enumerate(self.CURVE)]
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.price",
+                                  classification_mode="percentile")
+        p.hass.states.get.return_value = SimpleNamespace(
+            state=entity_state, attributes={"raw_today": curve})
+        return p, now
+
+    @pytest.mark.parametrize("entity_state", ["unavailable", "unknown", "0.05"])
+    @pytest.mark.parametrize("curve_first", [False, True])
+    def test_the_answer_does_not_depend_on_what_ran_first(
+            self, entity_state, curve_first):
+        """A curve read populated the cache, and the next current-price
+        read then found a "cached" slot and classified confidently what it
+        had just refused. The same instant, two answers, decided by call
+        order within one cycle."""
+        p, now = self._provider(entity_state)
+        if curve_first:
+            p.get_price_level_at(now)
+        assert (p.get_price_level() is None) == (p.get_price_level_at(now) is None)
+
+    @pytest.mark.parametrize("entity_state", ["unavailable", "unknown"])
+    def test_a_curve_is_not_parsed_off_an_entity_that_will_not_read(
+            self, entity_state):
+        """Attributes hanging off an unreadable entity are the last thing
+        it said. The flap guard keeps a cache already parsed; it never
+        meant to parse a NEW one. Same rule as #991."""
+        p, now = self._provider(entity_state)
+        assert p.get_price_level_at(now) is None
+        assert p.get_price_level() is None
+
+    def test_a_readable_entity_still_gets_its_curve(self):
+        p, now = self._provider("0.05")
+        assert p.get_price_level_at(now) is not None
+
+
+@pytest.mark.unit
+class TestNoiseAroundZeroIsNotAPriceSignal:
+    """The mirror of #359, and the reason a purely curve-relative cutoff is
+    not enough: on a day hovering at zero it shrinks with the curve, and a
+    tenth of a cent of metering noise gets bucketed into all five tiers.
+    The floor is the user's OWN configured import rate, which carries their
+    currency's scale without SEM knowing what currency it is."""
+
+    @staticmethod
+    def _flat(values, fallback=0.30):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            DynamicTariffProvider, PricePoint,
+        )
+        from homeassistant.util import dt as dt_util
+
+        p = DynamicTariffProvider(MagicMock(), price_entity="s",
+                                  classification_mode="percentile",
+                                  fallback_price=fallback)
+        base = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        p._prices_cache = [
+            PricePoint(timestamp=base + timedelta(hours=i), price=v,
+                       currency="EUR", level=PriceLevel.NORMAL)
+            for i, v in enumerate(values)]
+        p._get_percentile_breaks()
+        return p._last_classifier_path.startswith("percentile_fallback_flat_day")
+
+    @pytest.mark.parametrize("name,values,fallback,flat", [
+        ("sub-cent noise hovering at zero",
+         [-0.0006 + 0.00006 * i for i in range(24)], 0.30, True),
+        ("a Dutch glut day with a real spread",
+         [-0.05, -0.02, 0.0, 0.0, 0.02, 0.05, 0.03, -0.01], 0.30, False),
+        ("an ordinary EUR day", [0.10, 0.18, 0.25, 0.32, 0.40, 0.22], 0.30, False),
+        ("a EUR day that is functionally flat",
+         [0.300, 0.301, 0.302, 0.300, 0.301], 0.30, True),
+        ("a rupee-scale day with a real spread",
+         [100.0, 200.0, 300.0, 400.0, 250.0], 50.0, False),
+        ("a rupee-scale day that is flat",
+         [300.0, 300.1, 300.0, 300.05], 50.0, True),
+        ("a genuine 5-rupee two-tier split",
+         [50.0, 50.0, 55.0, 55.0, 50.0, 55.0], 50.0, False),
+    ])
+    def test_the_cutoff_holds_at_every_scale(self, name, values, fallback, flat):
+        assert self._flat(values, fallback) is flat, name
