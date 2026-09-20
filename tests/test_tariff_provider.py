@@ -1052,7 +1052,14 @@ class TestDynamicTariffSchedule:
         assert schedule[1]["end"] == "24:00"
 
     def test_schedule_negative_prices(self, mock_hass):
-        """Negative prices map to NT (cheap)."""
+        """Negative prices map to NT (cheap) — and two points are not a day.
+
+        (#994) The second slot used to render HT. With a two-point curve the
+        percentile classifier has nothing to bucket against and says so; the
+        old NORMAL default meant the card drew a confident high-tariff block
+        for an hour nobody had priced. NEGATIVE is unaffected: it is read off
+        the sign, not off a distribution.
+        """
         now = datetime(2026, 5, 3, 12, 0, 0)
         prices = [
             {"start": now.isoformat(), "total": -0.05},
@@ -1067,7 +1074,11 @@ class TestDynamicTariffSchedule:
             schedule = provider.get_schedule_for_day(now)
 
         assert schedule[0]["tariff"] == "NT"  # Negative = cheap
-        assert schedule[1]["tariff"] == "HT"
+        assert schedule[0]["level"] == "cheap"
+        assert schedule[1]["tariff"] is None, (
+            "two points cannot place 0.30 in a distribution — and a block "
+            "with no level is neither NT nor HT")
+        assert schedule[1]["level"] == "no_prices"
 
     def test_schedule_all_cheap(self, mock_hass):
         """All prices cheap → single NT block.

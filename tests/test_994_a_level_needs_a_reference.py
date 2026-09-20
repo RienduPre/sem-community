@@ -95,15 +95,46 @@ class TestTheVocabulary:
             assert ps.is_expensive(p) is False
             assert ps.comparative_level(p) is None
 
-    def test_the_sensor_publishes_unknown_rather_than_a_level(self):
+    def test_the_sensor_names_the_absence_rather_than_a_level(self):
         """Publication is ``TariffData.to_dict``'s job — the wire string the
         sensor shows. "No data" and "confirmed mid-priced" used to be the
-        same word there."""
+        same word there; briefly both absences were "unknown", which reads
+        in Home Assistant like a broken sensor and hid the one of the two
+        that is worth a user's attention.
+
+        ``flat`` — the comparison was made and the hours do not differ.
+        ``no_prices`` — it could not be made at all.
+        """
         from custom_components.solar_energy_management.tariff.tariff_provider import (
-            StaticTariffProvider,
+            LEVEL_FLAT, StaticTariffProvider,
         )
         flat = StaticTariffProvider()                    # 0.3387 = 0.3387
-        assert flat.get_tariff_data().to_dict()["tariff_price_level"] == "unknown"
+        published = flat.get_tariff_data().to_dict()["tariff_price_level"]
+        assert published == LEVEL_FLAT == "flat"
+        assert published != "unknown", (
+            "a flat contract is an ANSWER, not a failed read")
+
+    def test_a_dynamic_provider_with_nothing_cached_says_no_prices(self):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            LEVEL_NO_PRICES, DynamicTariffProvider,
+        )
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="percentile")
+        p.hass.states.get.return_value = SimpleNamespace(state="0.30")
+        p._read_prices_list = lambda: []
+        d = p.get_tariff_data()
+        assert d.price_level is None
+        assert d.to_dict()["tariff_price_level"] == LEVEL_NO_PRICES
+
+    def test_neither_absence_is_ever_a_cheap_or_dear_hour(self):
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            LEVEL_FLAT, LEVEL_NO_PRICES,
+        )
+        for word in (LEVEL_FLAT, LEVEL_NO_PRICES):
+            assert not ps.is_cheap_name(word)
+            assert not ps.is_expensive_name(word)
 
     def test_a_provider_that_raises_is_unknown_not_cheap(self):
         class _Boom:
@@ -419,3 +450,219 @@ class TestThePathDescribesTheLevelItShipsWith:
         assert p.get_price_level() is None
         assert p.get_price_level_at(base + timedelta(hours=1)) is None, (
             "the hour-wise accessor still handed out a confident word")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# What the ruflo reviewer refuted (20.09) — the first pass fixed the clock
+# in one provider and left the same question unasked in the other
+# ═══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.unit
+class TestTheCalendarKnowsWhatDayItIs:
+    """``_ht_can_occur`` asked whether an HT rule exists ANYWHERE in the
+    weekly table, never whether one can arrive on the day being classified.
+
+    ``StaticTariffProvider._both_rates_occur(when)`` had asked the right
+    question from the start; the calendar got the rate test and not the day
+    test. Three of the five shipped presets have days with no HT rule — EKZ
+    and ewz stop at Saturday lunchtime, CKW at Friday — so on a Sunday they
+    reproduced this issue's own incident through the calendar instead of
+    the clock, and because ``get_tariff_data`` used the same blind check,
+    today_min/today_max carried the full spread and ``variation_known``
+    was fooled as well. Going through ``comparative_level`` did not save a
+    consumer: the defect was inside the reference.
+    """
+
+    @staticmethod
+    def _cal(preset="ekz", peak=0.36, off_peak=0.22):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.calendar_provider import (
+            TARIFF_PRESETS, CalendarTariffProvider,
+        )
+        return CalendarTariffProvider(
+            MagicMock(), peak_rate=peak, off_peak_rate=off_peak,
+            rules=TARIFF_PRESETS[preset]["rules"])
+
+    SUNDAY = datetime(2026, 9, 20, 9, 0)      # the day the rig ran on
+    MONDAY = datetime(2026, 9, 21, 9, 0)
+
+    @pytest.mark.parametrize("preset", ["ekz", "ckw", "ewz"])
+    def test_a_day_the_schedule_never_marks_ht_has_no_level(self, preset):
+        p = self._cal(preset)
+        assert p.get_price_level_at(self.SUNDAY) is None, (
+            f"{preset} has no HT rule on a Sunday, so nothing distinguishes "
+            "its hours — and CHEAP would hold the pack until Monday")
+
+    @pytest.mark.parametrize("preset", ["ekz", "ckw", "ewz", "bkw"])
+    def test_a_weekday_still_gets_its_answer(self, preset):
+        p = self._cal(preset)
+        assert p.get_price_level_at(self.MONDAY) is not None, preset
+
+    def test_saturday_morning_under_ekz_is_a_real_comparison(self):
+        """EKZ runs HT 07:00–13:00 on Saturday: the day HAS both rates."""
+        p = self._cal("ekz")
+        sat_am = datetime(2026, 9, 19, 9, 0)
+        sat_pm = datetime(2026, 9, 19, 18, 0)
+        assert p.get_price_level_at(sat_am) == PriceLevel.NORMAL
+        assert p.get_price_level_at(sat_pm) == PriceLevel.CHEAP
+
+    def test_an_all_week_schedule_is_unaffected(self):
+        p = self._cal("bkw")          # HT every day 07:00–21:00
+        assert p.get_price_level_at(self.SUNDAY) is not None
+
+    def test_an_nt_carve_out_of_an_ht_default_still_compares(self):
+        """The mirror case: default HT with an NT window named by a rule."""
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.calendar_provider import (
+            CalendarTariffProvider,
+        )
+        p = CalendarTariffProvider(
+            MagicMock(), peak_rate=0.36, off_peak_rate=0.22,
+            rules=[{"days": [6], "start": "00:00", "end": "06:00",
+                    "tariff": "nt"}],
+            default_tariff="peak")
+        assert p.get_price_level_at(self.SUNDAY) is not None
+
+    def test_the_reference_the_second_gate_reads_agrees(self, monkeypatch):
+        """``variation_known`` reads today_min/today_max — on a day with one
+        price those must BE one price, or the vocabulary's own gate passes
+        a level the provider had already refused."""
+        from homeassistant.util import dt as dt_util
+
+        p = self._cal("ekz")
+        monkeypatch.setattr(dt_util, "now", lambda: self.SUNDAY)
+        d = p.get_tariff_data()
+        assert d.price_level is None
+        assert d.today_min_price == d.today_max_price
+        assert ps.comparative_level(p) is None
+
+
+@pytest.mark.unit
+class TestTheScheduleCardIsNotToldNormal:
+    """``_coarse_level(None)`` fell through both membership tests to a
+    confident ``normal`` — for the exact slots ``_apply_levels`` had just
+    marked absent. Sixteen lines from the caller, the sibling diagnostic
+    counted the same slots correctly, so one cycle published both answers
+    about the same hours."""
+
+    def test_an_unclassified_slot_is_not_normal(self):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            LEVEL_FLAT, LEVEL_NO_PRICES, DynamicTariffProvider, PricePoint,
+        )
+        from homeassistant.util import dt as dt_util
+
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="percentile")
+        base = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        pts = [PricePoint(timestamp=base + timedelta(hours=i), price=0.30,
+                          currency="EUR", level=None) for i in range(24)]
+        p._prices_cache = list(pts)
+        p.hass.states.get.return_value = SimpleNamespace(state="0.30")
+
+        def _read():
+            out = list(p._prices_cache)
+            p._apply_levels(out)
+            return out
+        p._read_prices_list = _read
+
+        rows = p.get_schedule_for_day()
+        assert rows, "the day should still render"
+        assert {r["level"] for r in rows} == {LEVEL_FLAT}, rows
+        assert {r["tariff"] for r in rows} == {None}, (
+            "an unclassified block is neither NT nor HT")
+        assert LEVEL_NO_PRICES not in {r["level"] for r in rows}
+
+    def test_the_two_absences_are_told_apart(self):
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            LEVEL_FLAT, LEVEL_NO_PRICES, absence_for_path,
+        )
+        assert absence_for_path("percentile_fallback_flat_day(spread=0.0001)") == LEVEL_FLAT
+        assert absence_for_path("static_no_comparison") == LEVEL_FLAT
+        assert absence_for_path("calendar_no_comparison") == LEVEL_FLAT
+        assert absence_for_path("percentile_fallback_cache_empty") == LEVEL_NO_PRICES
+        assert absence_for_path("percentile_fallback_too_few_prices(n=2)") == LEVEL_NO_PRICES
+        assert absence_for_path("") == LEVEL_NO_PRICES
+
+
+@pytest.mark.unit
+class TestThereIsOneListOfLevels:
+    """The module claimed both tuples lived in one place; a reviewer found
+    four more copies inside the provider after the first pass."""
+
+    def test_the_vocabulary_re_exports_the_definitions(self):
+        from custom_components.solar_energy_management.tariff import (
+            tariff_provider as tp,
+        )
+        assert ps.CHEAP_LEVELS is tp.CHEAP_LEVELS
+        assert ps.EXPENSIVE_LEVELS is tp.EXPENSIVE_LEVELS
+
+    def test_no_module_hand_types_a_level_tuple(self):
+        import ast
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        names = {"CHEAP", "VERY_CHEAP", "NEGATIVE", "EXPENSIVE", "VERY_EXPENSIVE"}
+        offenders = []
+        for f in sorted(root.rglob("*.py")):
+            if set(f.relative_to(root).parts) & {"tests", "scripts", "node_modules"}:
+                continue
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+            for n in ast.walk(tree):
+                if not isinstance(n, (ast.Tuple, ast.Set, ast.List)):
+                    continue
+                attrs = [e for e in n.elts
+                         if isinstance(e, ast.Attribute) and e.attr in names]
+                if len(attrs) >= 2:
+                    offenders.append(
+                        f"{f.relative_to(root)}:{n.lineno}")
+        # The two definitions themselves are the only literals allowed.
+        allowed = {"tariff/tariff_provider.py"}
+        stray = [o for o in offenders if o.rsplit(":", 1)[0] not in allowed]
+        assert not stray, (
+            "hand-typed level tuple(s) — import CHEAP_LEVELS / "
+            f"EXPENSIVE_LEVELS instead: {stray}")
+
+
+@pytest.mark.unit
+class TestOneSituationTellsOneStory:
+    """The sensor published ``flat`` while the sink verdict's reason said
+    "no prices to compare" — the fleet state dropped the absence word and
+    left it None, so the verdict fell to its unreadable branch. Caught live
+    on .175 under the EKZ preset on a Sunday, minutes after the calendar fix
+    landed."""
+
+    @staticmethod
+    def _verdict(level):
+        from custom_components.solar_energy_management.coordinator.sink_verdicts import (
+            sink_verdicts,
+        )
+        return sink_verdicts(
+            now=datetime(2026, 9, 20, 9, 0), tariff_level=level, upcoming=[],
+            export_rate=0.07, export_rate_known=True,
+            export_guard_enabled=False, house_sink_enabled=True,
+            morning_window_enabled=False, departure=None, morning_hours=0.0,
+            forecast_refills_pack=False, pacing_horizon_end=None,
+        )["house"]
+
+    def test_a_flat_tariff_says_flat(self):
+        v = self._verdict("flat")
+        assert v.state == "open"
+        assert "flat tariff" in v.reason
+        assert "no prices" not in v.reason
+
+    def test_an_unreadable_price_says_so(self):
+        v = self._verdict("no_prices")
+        assert v.state == "open"
+        assert "no prices to compare" in v.reason
+
+    def test_a_missing_word_still_opens_the_sink(self):
+        for level in (None, ""):
+            assert self._verdict(level).state == "open"
+
+    def test_neither_absence_holds_the_pack(self):
+        for level in ("flat", "no_prices", None, ""):
+            assert self._verdict(level).state == "open", level

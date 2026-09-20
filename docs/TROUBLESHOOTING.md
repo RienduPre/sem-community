@@ -1339,13 +1339,17 @@ any comparison, so the hold never lifted. Measured on the reference install:
 3.66 kWh imported in one night from a 92–100 % battery.
 
 **What SEM does now:** a level exists only when a comparison stands behind
-it. On a flat tariff the sensor reads **`unknown`**, the house sink stays
-open, and the discharge limit is never written to 0. The same applies to a
-weekend under HT/NT, which has only one price.
+it. On a flat tariff the sensor reads **`flat`** ("No price difference"), the
+house sink stays open, and the discharge limit is never written to 0. The
+same applies to a weekend under HT/NT and to a calendar whose schedule has no
+high-tariff window on today's day — both are one price from midnight to
+midnight, whatever the rate table says.
 
 **If you see it on 2.1.0-beta.35 or later:** check
 `sensor.sem_tariff_price_level`. If it shows a real level, your tariff does
 vary and the hold may be correct — turn *House as a battery sink* off if you
-would rather self-consume regardless of price. If it shows `unknown` and the
-pack is still held, that is a bug: send the diagnostics download.
+would rather self-consume regardless of price. If it shows `flat` or
+`no_prices` and the pack is still held, that is a bug: send the diagnostics
+download. `no_prices` on a dynamic tariff also means your price entity is not
+being read — see the tariff section above before anything else.
 

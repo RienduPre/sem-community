@@ -139,10 +139,18 @@ class SEMScheduleCard extends SEMLitBase {
             return schedule.map(s => ({
                 start: parseTime(s.start) ?? 0,
                 end:   parseTime(s.end)   ?? 1,
+                // (#994) The legacy HT/NT fallback is the CLOCK answering
+                // for the classifier — the defect this issue is named for.
+                // It stays for providers that still send only `tariff`, but
+                // a block whose tariff is explicitly absent keeps its own
+                // word rather than being called normal.
                 level: s.level || (
-                    (s.tariff || s.type || 'HT').toUpperCase() === 'NT' ? 'cheap' : 'normal'
+                    s.tariff === null ? 'no_prices'
+                        : (s.tariff || s.type || 'HT').toUpperCase() === 'NT'
+                            ? 'cheap' : 'normal'
                 ),
-                type:  (s.tariff || s.type || 'HT').toUpperCase(),
+                type:  (s.tariff === null ? ''
+                        : (s.tariff || s.type || 'HT').toUpperCase()),
                 avgPrice: s.avg_price,
             }));
         }

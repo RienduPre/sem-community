@@ -140,9 +140,15 @@ def sink_verdicts(*, now: datetime, tariff_level: Optional[str], upcoming,
     elif is_cheap_name(level):
         out["house"] = SinkVerdict(
             "house", HELD, f"{level} hour — let the house import, keep the pack")
+    elif level == "flat":
+        out["house"] = SinkVerdict(
+            "house", OPEN, "flat tariff — no better hour to save it for")
+    elif level in ("no_prices", "", "unknown"):
+        out["house"] = SinkVerdict(
+            "house", OPEN, "no prices to compare — the pack may cover the house")
     else:
         out["house"] = SinkVerdict(
-            "house", OPEN, f"{level or 'unknown'} hour — the pack may cover the house")
+            "house", OPEN, f"{level} hour — the pack may cover the house")
 
     # ev — a morning window before departure, if the sun refills the pack today (#892)
     if not morning_window_enabled:

@@ -135,6 +135,43 @@ class PricePoint:
     level: Optional[PriceLevel] = PriceLevel.NORMAL
 
 
+#: (#994) What SEM publishes instead of a comparative level, and WHY there
+#: is none. "unknown" used to cover both and reads, in Home Assistant, like a
+#: broken sensor — so the two cases that actually differ now say so.
+#:
+#: ``flat`` — the comparison WAS made and the hours do not differ. A single
+#: rate, two equal rates, a weekend under HT/NT, a day with no spread. This
+#: is an answer, and on a flat contract it is the final one.
+#: ``no_prices`` — the comparison could NOT be made. No curve cached yet,
+#: fewer than four points, a price entity that will not read. This one is
+#: worth a user's attention; the other is just their contract.
+LEVEL_FLAT = "flat"
+LEVEL_NO_PRICES = "no_prices"
+
+
+def absence_for_path(path: str) -> str:
+    """Which absence a classifier path describes. Pure, so it can be tested.
+
+    Only ever applied to the path returned BY the call that produced the
+    level — never to ``_last_classifier_path`` read back off the instance
+    afterwards, which is the staleness this issue also fixed.
+    """
+    p = str(path or "")
+    if p.startswith("percentile_fallback_flat_day"):
+        return LEVEL_FLAT
+    if p.endswith("_no_comparison"):
+        return LEVEL_FLAT
+    return LEVEL_NO_PRICES
+
+#: The levels that mean "better than the other hours", and "worse". They live
+#: beside the enum they are made of so every module can reach them without an
+#: import cycle; ``coordinator.price_signal`` re-exports them as the
+#: vocabulary's public surface. Six hand-typed copies existed before #994 and
+#: one had already drifted — there is one pair now.
+CHEAP_LEVELS = (PriceLevel.CHEAP, PriceLevel.VERY_CHEAP, PriceLevel.NEGATIVE)
+EXPENSIVE_LEVELS = (PriceLevel.EXPENSIVE, PriceLevel.VERY_EXPENSIVE)
+
+
 @dataclass
 class TariffData:
     """Current tariff information."""
@@ -143,6 +180,11 @@ class TariffData:
     #: (#994) ``None`` when no comparison stands behind a level — the
     #: state Tibber's own enum has ("missing data") and SEM had dropped.
     price_level: Optional[PriceLevel] = PriceLevel.NORMAL
+    #: …and which of the two absences it is, set by the provider AT the
+    #: moment it declines. Not re-derived from ``classifier_path`` later:
+    #: reading a side-effect string back to answer a different question is
+    #: bug class 103, found on the rig in this same issue.
+    level_absence: str = LEVEL_NO_PRICES
     currency: str = "CHF"
     provider: str = "unknown"
     is_dynamic: bool = False
@@ -180,7 +222,7 @@ class TariffData:
             "tariff_current_export_rate": round(self.current_export_rate, 4),
             "tariff_price_level": (self.price_level.value
                                    if self.price_level is not None
-                                   else "unknown"),
+                                   else self.level_absence),
             "tariff_currency": self.currency,
             "tariff_provider": self.provider,
             "tariff_is_dynamic": self.is_dynamic,
@@ -350,6 +392,10 @@ class StaticTariffProvider(TariffProvider):
             is_dynamic=False,
             classifier_path=("static_ht_nt" if self._comparison_stands()
                              else "static_no_comparison"),
+            # Static always HAS its two rates; when it declines, it is
+            # because they do not differ or today holds only one of them.
+            # Never "no prices" — the numbers are in the user's own config.
+            level_absence=LEVEL_FLAT,
             # (#994) THE DAY, not the rate table. At the weekend only NT
             # occurs, so min == max and nothing downstream waits for an
             # expensive hour that arrives on Monday.
@@ -519,6 +565,8 @@ class DynamicTariffProvider(TariffProvider):
         # is (especially the cold-start / no-prices_today fallback paths
         # that produce NORMAL silently).
         self._last_classifier_path: str = "unknown"
+        #: (#994) which absence the last curve read ran into, if any.
+        self._last_curve_absence: str = LEVEL_NO_PRICES
 
     # Day-ahead curves don't change once published; re-fetch only to
     # pick up tomorrow's prices when they publish (~13:00 CET).
@@ -1421,7 +1469,13 @@ class DynamicTariffProvider(TariffProvider):
                 # handed every consumer a word while ``get_price_level``
                 # answered None for the very same hour. A slot with no
                 # reference carries none.
-                p.level = None if path.startswith("percentile_fallback_") else lvl
+                if path.startswith("percentile_fallback_"):
+                    p.level = None
+                    # The reason this read could not classify, kept for the
+                    # surfaces that render the slots it declined.
+                    self._last_curve_absence = absence_for_path(path)
+                else:
+                    p.level = lvl
                 self._level_history[ts] = p.level
 
         cutoff = now - timedelta(hours=48)
@@ -1679,6 +1733,20 @@ class DynamicTariffProvider(TariffProvider):
             return None, path
         return level, path
 
+    def _schedule_absence_word(self) -> str:
+        """The word for slots this provider could not classify today.
+
+        Recorded BY the pass that declined them (``_apply_levels``), not
+        re-derived here: the three percentile fallbacks are properties of
+        the CURVE READ — an empty cache, too few points, a day with no
+        spread — so one word describes every unclassified slot in the day,
+        and it is the word that read produced. An earlier version asked
+        ``_current_level_and_path`` instead, which re-read the live price
+        and made rendering a schedule depend on a price entity it had never
+        needed.
+        """
+        return getattr(self, "_last_curve_absence", LEVEL_NO_PRICES)
+
     def get_price_level(self) -> Optional[PriceLevel]:
         """(#994) ``None`` when the classifier had nothing to compare.
 
@@ -1772,6 +1840,7 @@ class DynamicTariffProvider(TariffProvider):
             current_import_rate=self.get_current_import_rate(),
             current_export_rate=self.get_current_export_rate(),
             price_level=price_level,
+            level_absence=absence_for_path(classifier_path),
             currency=self.currency,
             # A user-configured entity never runs autodetection, so the
             # name stayed "unknown" in diagnostics (#359 dump). Report
@@ -1808,18 +1877,18 @@ class DynamicTariffProvider(TariffProvider):
 
             # Find next cheap window
             for p in prices:
-                if p.timestamp > now and p.level in (PriceLevel.CHEAP, PriceLevel.VERY_CHEAP, PriceLevel.NEGATIVE):
+                if p.timestamp > now and p.level in CHEAP_LEVELS:
                     data.next_cheap_window_start = p.timestamp
                     # Find end of cheap window
                     for p2 in prices:
-                        if p2.timestamp > p.timestamp and p2.level not in (PriceLevel.CHEAP, PriceLevel.VERY_CHEAP, PriceLevel.NEGATIVE):
+                        if p2.timestamp > p.timestamp and p2.level not in CHEAP_LEVELS:
                             data.next_cheap_window_end = p2.timestamp
                             break
                     break
 
             # Find next expensive window
             for p in prices:
-                if p.timestamp > now and p.level in (PriceLevel.EXPENSIVE, PriceLevel.VERY_EXPENSIVE):
+                if p.timestamp > now and p.level in EXPENSIVE_LEVELS:
                     data.next_expensive_window_start = p.timestamp
                     break
 
@@ -1971,16 +2040,24 @@ class DynamicTariffProvider(TariffProvider):
         if not today_prices:
             return []
 
-        _CHEAP = (PriceLevel.NEGATIVE, PriceLevel.VERY_CHEAP, PriceLevel.CHEAP)
+        absent_word = self._schedule_absence_word()
 
-        def _coarse_level(level: PriceLevel) -> str:
+        def _coarse_level(level: Optional[PriceLevel]) -> str:
             """Collapse the 5-tier scale into 3 user-facing bands.
 
-            cheap-ish → ``cheap``; expensive-ish → ``expensive``; rest → ``normal``.
+            cheap-ish → ``cheap``; expensive-ish → ``expensive``; rest →
+            ``normal`` — and a slot NOBODY classified is none of the three.
+            (#994) ``level`` is ``Optional`` since the classifier learned to
+            refuse, and ``None`` fell through both membership tests to a
+            confident ``normal``. The sibling diagnostic sixteen lines from
+            the caller counts the same slots as absent, so one cycle
+            published both answers about the same hours.
             """
-            if level in _CHEAP:
+            if level is None:
+                return absent_word
+            if level in CHEAP_LEVELS:
                 return "cheap"
-            if level in (PriceLevel.EXPENSIVE, PriceLevel.VERY_EXPENSIVE):
+            if level in EXPENSIVE_LEVELS:
                 return "expensive"
             return "normal"
 
@@ -1994,7 +2071,12 @@ class DynamicTariffProvider(TariffProvider):
                 avg = sum(block_prices) / len(block_prices)
                 schedule.append({
                     "start": block_start, "end": end_time_str,
-                    "tariff": "NT" if current_level == "cheap" else "HT",
+                    # An unclassified block is neither NT nor HT; saying "HT"
+                    # would be the clock answering for the classifier again.
+                    "tariff": ("NT" if current_level == "cheap"
+                               else None if current_level in (LEVEL_FLAT,
+                                                              LEVEL_NO_PRICES)
+                               else "HT"),
                     "level": current_level,
                     "avg_price": round(avg, 4),
                 })

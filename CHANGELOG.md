@@ -37,6 +37,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🐛 **The EV planner could book an hour it had no price for** (#994). An
   unpriced hour scored as `normal` in the cheapest-slot search, so silence
   was spent as an answer in the one place that commits money.
+- 🐛 **"Unknown" is now two words, because they are two different things**
+  (#994). When SEM has no comparative level, the sensor says **`flat`** ("No
+  price difference") when the comparison WAS made and the hours do not
+  differ, and **`no_prices`** ("No prices available") when it could not be
+  made at all. The first is your contract and needs nothing; the second means
+  your price entity is not being read. One word for both read, in Home
+  Assistant, like a broken sensor.
+- 🐛 **A calendar tariff did not know what day it was** (#994, found by
+  review). The new refusal asked whether a high-tariff rule exists anywhere in
+  the weekly table, never whether one can arrive on the day being classified.
+  Three of the five shipped Swiss presets have days with no HT rule — EKZ and
+  ewz stop at Saturday lunchtime, CKW at Friday — so on a Sunday they
+  reproduced this issue's own incident through the calendar instead of the
+  clock, and reported the full rate spread as the day's range while doing it.
+- 🐛 **The schedule strip called an unpriced hour "normal"** (#994, found by
+  review). The 5-tier scale collapses to three bands for the card, and a slot
+  the classifier had declined fell through both tests to `normal` — while the
+  diagnostic sixteen lines away counted the same slots as absent. Five cards
+  rendered the level and four had no label for the new words at all; they now
+  share one helper.
 - 🐛 **The sensor said why your hour got its word, and named a different
   hour** (#994, found on the test rig). `classifier_path` is set as a
   side-effect and read back later, and the percentile breaks return early

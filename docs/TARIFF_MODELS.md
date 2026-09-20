@@ -49,8 +49,16 @@ was reached (`percentile_active`, `tou_tiers(...)`, `static_ht_nt`,
 `percentile_fallback_flat_day`, `percentile_fallback_cache_empty`,
 `percentile_fallback_too_few_prices`.
 
-If the sensor reads **`unknown`**, that is SEM saying your tariff gives it no
-hour to prefer. On a flat contract that is the correct and final answer.
+When the sensor shows no comparative level it says which of two things
+happened, because they are not the same and only one of them is yours to fix:
+
+| state | card label | meaning |
+|---|---|---|
+| `flat` | No price difference | the comparison WAS made and the hours do not differ — a single rate, two equal rates, a weekend under HT/NT, a day with no spread. On a flat contract this is the correct and final answer. |
+| `no_prices` | No prices available | the comparison could NOT be made — nothing cached yet, fewer than four points, a price entity that will not read. Worth a look at your price entity. |
+
+Neither is the word `unknown`, which in Home Assistant reads as a broken
+sensor and hid the difference between a contract and a fault.
 
 The path always describes the **same** answer the level came from. It did not
 always: the string was set as a side-effect and read back afterwards, and

@@ -4243,3 +4243,27 @@ published path and level come from one answer; and an hour the classifier could 
 `unknown` on the hour-wise accessor too, not a confident `normal`.
 
 Refs #994 #359 #728 #925.
+
+### 104. A rule table asked whether something exists, not whether it can happen TODAY — GUARDED
+**Symptom:** the refusal a fix installs holds everywhere except the one day it was meant for.
+`CalendarTariffProvider` answered CHEAP on a Sunday under the shipped EKZ preset, whose rules
+cover Mon–Fri plus Saturday morning — reproducing #994's own incident through the calendar after
+#994 had fixed it in the clock-based provider (#994, found by review).
+**Root shape:** the sibling provider had the question right — `_both_rates_occur(when)` asks
+whether THIS DAY contains both rates — and the second implementation asked a weaker one:
+`any(rule is HT for rule in the whole week)`. A weekly table is a statement about the week; a
+verdict is about a moment. The two differ on exactly the days a schedule leaves uncovered, and
+three of five shipped presets have such days. Worse, `get_price_level_at(when)` received the day
+and dropped it, and `get_tariff_data` used the same blind check — so `today_min`/`today_max`
+carried the full spread and the SECOND gate (`variation_known`, which reads those two fields) was
+fooled too. Going through the sanctioned accessor did not save a consumer, because the defect was
+inside the reference itself.
+**Cure:** when a sibling already answers a question correctly, port the QUESTION, not the shape of
+the answer. Thread the moment through every accessor that takes one, and make the published
+reference agree with the verdict — a `None` level beside a min/max that still spans two rates is
+two answers to one question. Sweep question: *this guard says something is possible — possible
+WHEN, and did anyone pass in the moment?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestTheCalendarKnowsWhatDayItIs` — every
+shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
+NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
+Refs #994 #638.

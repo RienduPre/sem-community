@@ -14,6 +14,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
+import { priceLevelKey } from '../util/price-level.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -107,7 +108,7 @@ class SEMCostsDetailCard extends SEMLitBase {
         if (id === 'tariff') {
             const imp = this._val('tariff_current_import_rate');
             const level = this._valStr('tariff_price_level');
-            return level ? `${imp.toFixed(4)} ${curr} · ${this._t(level.toLowerCase())}` : `${imp.toFixed(4)} ${curr}`;
+            return level ? `${imp.toFixed(4)} ${curr} · ${this._t(priceLevelKey(level))}` : `${imp.toFixed(4)} ${curr}`;
         }
         return '';
     }

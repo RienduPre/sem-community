@@ -17,6 +17,7 @@
 
 import { SEMLitBase, html, css, svg, nothing } from '../base/sem-lit-base.js';
 import { semDefineCard } from '../base/sem-shared.js';
+import { LEVEL_FLAT, LEVEL_NO_PRICES } from '../util/price-level.js';
 
 const DEFAULT_ENTITY = 'sensor.sem_tariff_current_import_rate';
 const LEVELS = {
@@ -26,6 +27,11 @@ const LEVELS = {
     normal:         { color: '#ff9800', key: 'normal' },
     expensive:      { color: '#f06292', key: 'expensive' },
     very_expensive: { color: '#e53935', key: 'very_expensive' },
+    // (#994) The two ways there is no comparative level. Both used to fall
+    // through the lookup below to a grey badge that still READ "Normal",
+    // which is the one thing SEM had not concluded.
+    [LEVEL_FLAT]:      { color: '#9e9e9e', key: 'price_level_flat' },
+    [LEVEL_NO_PRICES]: { color: '#9e9e9e', key: 'price_level_no_prices' },
 };
 
 class SEMPriceCard extends SEMLitBase {
@@ -81,7 +87,9 @@ class SEMPriceCard extends SEMLitBase {
     }
 
     _levelInfo(level) {
-        return LEVELS[level] || { color: '#9e9e9e', key: 'normal' };
+        // A level the card does not recognise is NOT normal — that default
+        // put a word SEM never chose in front of the user (#994).
+        return LEVELS[level] || LEVELS[LEVEL_NO_PRICES];
     }
 
     render() {

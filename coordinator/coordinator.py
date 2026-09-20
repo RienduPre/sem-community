@@ -4898,6 +4898,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     _prices_for_diag = getattr(
                         self._tariff_provider, "_prices_cache", None,
                     ) or []
+                    _td_absence = getattr(
+                        self._tariff_provider.get_tariff_data(),
+                        "level_absence", "no_prices")
                     _today_for_diag = dt_util.now().date()
                     _today_prices = [
                         p for p in _prices_for_diag
@@ -4907,10 +4910,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         _level_counts: Dict[str, int] = {}
                         for p in _today_prices:
                             # (#994) a slot the classifier could not
-                            # compare carries no level — count it as
-                            # "unknown", never as a confident word.
+                            # compare carries no level — count it under the
+                            # absence the provider named, never as a
+                            # confident word.
                             k = (p.level.value if hasattr(p.level, "value")
-                                 else ("unknown" if p.level is None else str(p.level)))
+                                 else (_td_absence if p.level is None
+                                       else str(p.level)))
                             _level_counts[k] = _level_counts.get(k, 0) + 1
                         result["tariff_today_prices_count"] = len(_today_prices)
                         result["tariff_today_level_counts"] = _level_counts
@@ -4942,7 +4947,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     {"t": p.timestamp.isoformat(), "price": round(p.price, 4),
                      # (#994) None is a value the price card must render,
                      # not an AttributeError that drops the whole curve.
-                     "level": p.level.value if p.level is not None else "unknown"}
+                     "level": (p.level.value if p.level is not None
+                               else _td.level_absence)}
                     for p in (_td.upcoming_prices or [])[:48]
                 ]
                 result["tariff_currency"] = _td.currency
@@ -5679,7 +5685,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # "unknown". Found on the .175 rig within a minute of deploying.
             tariff_data.tariff_price_level = (
                 tariff.price_level.value if tariff.price_level is not None
-                else "unknown")
+                else tariff.level_absence)
             tariff_data.tariff_provider = tariff.provider
             tariff_data.tariff_is_dynamic = tariff.is_dynamic
             tariff_data.tariff_today_min_price = tariff.today_min_price
@@ -11226,6 +11232,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 level = getattr(level, "value", level)  # PriceLevel enum → str
                 if isinstance(level, str):
                     tariff_level = level
+                else:
+                    # (#994) …and when there is none, thread the SAME word
+                    # the sensor publishes. Leaving it None made every
+                    # verdict reason say "no prices to compare" beside a
+                    # sensor reading `flat` — one situation, two stories.
+                    # Neither word is in the cheap or expensive set, so no
+                    # decision changes.
+                    tariff_level = getattr(
+                        provider.get_tariff_data(), "level_absence", None)
         except Exception:
             tariff_level = None
 

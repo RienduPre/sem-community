@@ -41,7 +41,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from ..tariff.tariff_provider import PriceLevel
+from ..tariff.tariff_provider import (
+    CHEAP_LEVELS, EXPENSIVE_LEVELS, LEVEL_FLAT, LEVEL_NO_PRICES, PriceLevel,
+)
+
+__all__ = [
+    "CHEAP_LEVELS", "EXPENSIVE_LEVELS", "LEVEL_FLAT", "LEVEL_NO_PRICES",
+    "FLAT_SPREAD_FRACTION", "FLAT_SPREAD_FLOOR", "spread", "variation_known",
+    "comparative_level", "is_cheap", "is_expensive", "is_cheap_name",
+    "is_expensive_name",
+]
 
 #: Two prices are "the same price" when they differ by less than this
 #: FRACTION of the day's average. RELATIVE on purpose: an absolute cutoff in
@@ -58,13 +67,14 @@ FLAT_SPREAD_FRACTION: float = 0.005
 #: and cannot be fooled by a currency whose unit happens to be tiny.
 FLAT_SPREAD_FLOOR: float = 1e-9
 
-#: The levels that mean "this hour is better than the others".
-CHEAP_LEVELS = (PriceLevel.CHEAP, PriceLevel.VERY_CHEAP, PriceLevel.NEGATIVE)
-#: …and worse. NOTE both tuples live HERE and nowhere else: six
-#: independently hand-typed copies existed before #994 and one had already
-#: drifted (``surplus_controller`` damped the pool on "expensive" while
-#: silently ignoring "very_expensive").
-EXPENSIVE_LEVELS = (PriceLevel.EXPENSIVE, PriceLevel.VERY_EXPENSIVE)
+#: The two level sets are DEFINED beside the enum they are made of, in
+#: ``tariff.tariff_provider``, and re-exported here as the vocabulary's
+#: public surface — importing them the other way round would close a cycle.
+#: They exist in exactly one place either way: six independently hand-typed
+#: copies existed before #994 and one had already drifted
+#: (``surplus_controller`` damped the pool on "expensive" while silently
+#: ignoring "very_expensive"). A reviewer found two more survivors inside
+#: the provider itself after the first pass; those now import these.
 
 _CHEAP_NAMES = frozenset(lv.value for lv in CHEAP_LEVELS)
 _EXPENSIVE_NAMES = frozenset(lv.value for lv in EXPENSIVE_LEVELS)

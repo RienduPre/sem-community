@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .tariff_provider import TariffProvider, TariffData, PriceLevel
+from .tariff_provider import LEVEL_FLAT, TariffProvider, TariffData, PriceLevel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -175,8 +175,8 @@ class CalendarTariffProvider(TariffProvider):
             return abs(hi - lo) > 1e-9
         return (abs(hi - lo) / mean) > 0.005
 
-    def _ht_can_occur(self) -> bool:
-        """(#994) …and can this calendar ever BE in high tariff?
+    def _ht_can_occur(self, when: Optional[datetime] = None) -> bool:
+        """(#994) …and can this calendar be in high tariff ON THAT DAY?
 
         With no rules — which is every install today, because
         ``coordinator.py`` never passed a schedule, and also the deliberate
@@ -184,13 +184,34 @@ class CalendarTariffProvider(TariffProvider):
         the ``off_peak`` default, so this provider answered CHEAP
         unconditionally, forever, whatever rates the owner configured. A
         level with no reachable alternative is not a comparison.
+
+        The DAY matters, and the first version of this check forgot it:
+        asking whether an HT rule exists anywhere in the weekly table is not
+        asking whether one can arrive today. Three of the five shipped
+        presets have days with no HT rule at all — EKZ and ewz cover Mon–Sat
+        morning, CKW only Mon–Fri — so on a Sunday they reproduced exactly
+        the incident this issue is named for, through the calendar instead
+        of the clock. ``StaticTariffProvider._both_rates_occur`` got this
+        right from the start; this is the same question, asked of a rule
+        table instead of a weekday constant.
         """
+        now = when or dt_util.now()
         if not self._rules:
             return str(self.default_tariff).lower() in ("ht", "peak")
-        return any(str(t).lower() in ("ht", "peak") for _, _, _, t in self._rules)
+        dow = now.weekday()
+        if any(str(t).lower() in ("ht", "peak") and dow in (days or [])
+               for days, _, _, t in self._rules):
+            return True
+        # A rule table that names no HT for today still leaves today in
+        # high tariff when the DEFAULT is HT and some rule carves NT out of
+        # it — the mirror case, and just as much a real comparison.
+        return (str(self.default_tariff).lower() in ("ht", "peak")
+                and any(str(t).lower() not in ("ht", "peak")
+                        and dow in (days or [])
+                        for days, _, _, t in self._rules))
 
-    def _comparison_stands(self) -> bool:
-        return self._rates_differ() and self._ht_can_occur()
+    def _comparison_stands(self, when: Optional[datetime] = None) -> bool:
+        return self._rates_differ() and self._ht_can_occur(when)
 
     def get_price_level(self) -> Optional[PriceLevel]:
         """(#994) ``None`` when nothing was compared."""
@@ -203,8 +224,9 @@ class CalendarTariffProvider(TariffProvider):
 
     def get_price_level_at(self, when: datetime) -> "PriceLevel | None":
         # Same calendar rule get_price_level applies now: NT = CHEAP (#638),
-        # and the same refusal when nothing distinguishes the hours (#994).
-        if not self._comparison_stands():
+        # and the same refusal when nothing distinguishes the hours (#994)
+        # — asked of the day BEING classified, not of today.
+        if not self._comparison_stands(when):
             return None
         return (PriceLevel.NORMAL if self._is_high_tariff(when)
                 else PriceLevel.CHEAP)
@@ -222,9 +244,13 @@ class CalendarTariffProvider(TariffProvider):
             is_dynamic=False,
             classifier_path=("calendar_schedule" if self._comparison_stands()
                              else "calendar_no_comparison"),
-            # (#994) with no HT rule the day has ONE price; reporting the
-            # rate table's two would tell every consumer to wait for an
-            # hour this calendar can never reach.
+            # A calendar always HAS its two rates and its rule table; when
+            # it declines, the day simply holds one price.
+            level_absence=LEVEL_FLAT,
+            # (#994) with no HT rule REACHABLE TODAY the day has ONE price;
+            # reporting the rate table's two would tell every consumer —
+            # and ``variation_known``, which reads exactly these two fields
+            # — to wait for an hour this day can never reach.
             today_min_price=(self.off_peak_rate if self._comparison_stands()
                              else self.get_current_import_rate()),
             today_max_price=(self.peak_rate if self._comparison_stands()
