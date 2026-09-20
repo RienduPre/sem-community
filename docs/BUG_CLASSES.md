@@ -4442,3 +4442,29 @@ WHEN, and did anyone pass in the moment?*
 shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
 NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
 Refs #994 #638.
+
+### 105. A sentinel given a name — every "is it missing?" test silently flips — GUARDED
+**Symptom:** a fix that makes absence legible breaks the code that was already handling absence
+correctly. #994 replaced a `None` price level with the words `flat` and `no_prices` so users could
+tell a flat contract from an unreadable one; `decide.py`'s daytime grid-charge gate read
+`tariff_level is not None and tariff_level not in {normal, expensive, very_expensive}`, and a
+truthy string passed BOTH halves — so on a flat tariff SEM would have charged the car from the
+grid believing the hour cheap. The issue's own disease, reintroduced by its own fix, one commit
+later.
+**Root shape:** `None` was carrying two jobs — "no value" and "no comparative signal" — and the
+second job was being read by an `is not None` test standing in for a predicate nobody had written.
+Naming the sentinel is right; it is what lets a user tell two situations apart. But every existing
+test of the form "is this missing?" was implicitly a test of the form "is this a real answer?",
+and only one of those two meanings survives the rename. Membership tests (`x in CHEAP_LEVELS`)
+survive it untouched, which is why the sweep looks clean until you grep for the identity tests
+specifically.
+**Cure:** when a sentinel gains a name, grep for every `is None` / `is not None` / truthiness test
+on that field IN THE SAME CHANGE, and replace each with the predicate it was standing in for —
+here `is_cheap_name` / `is_expensive_name`, which the vocabulary already published. Then pin the
+predicate over the full value set, sentinels included, so a seventh value cannot slip through.
+Sweep question: *this field just gained a new possible value — which existing comparison was
+relying on it NOT existing?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestAnAbsenceIsNotACheapHour` —
+`is_cheap_name` parametrized over all nine values a level can take, plus an AST contract that no
+`is None` test on `tariff_level` returns to the decide layer.
+Refs #994.

@@ -4914,7 +4914,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             # absence the provider named, never as a
                             # confident word.
                             k = (p.level.value if hasattr(p.level, "value")
-                                 else (_td_absence if p.level is None
+                                 else ((getattr(p, "level_absence", None)
+                                        or _td_absence) if p.level is None
                                        else str(p.level)))
                             _level_counts[k] = _level_counts.get(k, 0) + 1
                         result["tariff_today_prices_count"] = len(_today_prices)
@@ -4948,7 +4949,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                      # (#994) None is a value the price card must render,
                      # not an AttributeError that drops the whole curve.
                      "level": (p.level.value if p.level is not None
-                               else _td.level_absence)}
+                               else (getattr(p, "level_absence", None)
+                                     or _td.level_absence))}
                     for p in (_td.upcoming_prices or [])[:48]
                 ]
                 result["tariff_currency"] = _td.currency

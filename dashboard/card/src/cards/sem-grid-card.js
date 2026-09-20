@@ -98,9 +98,11 @@ class SEMGridCard extends SEMLitBase {
         // 'high'/'low' are this card's own legacy load-management words.
         if (level === 'high') return '#f06292';
         if (level === 'low')  return '#8DC892';
-        if (level === '—')    return '#888';
-        // (#994) the absences are grey here, not NORMAL's orange.
-        return priceLevelColor(level, '#ff9800');
+        // (#994) Anything that is not one of the six comparative words —
+        // '—', '', 'unknown', an entity that has not loaded — is grey. The
+        // old fallback handed every one of them NORMAL's orange, which is
+        // pixel-identical to a level SEM had actually concluded.
+        return priceLevelColor(level, '#888');
     }
 
     _metricRow(labelKey, valueHtml) {

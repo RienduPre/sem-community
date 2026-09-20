@@ -55,6 +55,15 @@ TARIFF_PRESETS = {
 }
 
 
+def _tariff_word(value: object) -> str:
+    """A rule's tariff word, normalised: ``ht`` or ``nt``.
+
+    (#994) Readers disagreed about case and about which spellings count,
+    so the table now holds one of two words and nothing downstream guesses.
+    """
+    return "ht" if str(value or "").strip().lower() in ("ht", "peak") else "nt"
+
+
 class CalendarTariffProvider(TariffProvider):
     """Tariff provider with user-defined weekly HT/NT schedule.
 
@@ -81,7 +90,7 @@ class CalendarTariffProvider(TariffProvider):
         self.peak_rate = ht_rate if ht_rate is not None else peak_rate
         self.off_peak_rate = nt_rate if nt_rate is not None else off_peak_rate
         self.export_rate = export_rate
-        self.default_tariff = default_tariff
+        self.default_tariff = _tariff_word(default_tariff)
         self.holiday_entity = holiday_entity
         self.schedule_entity = schedule_entity
         self.currency = currency
@@ -89,10 +98,17 @@ class CalendarTariffProvider(TariffProvider):
         # Parse rules into (days, start_time, end_time, tariff) tuples
         self._rules: List[tuple] = []
         for rule in (rules or []):
-            days = rule.get("days", [])
+            # (#994) Normalise HERE, once. `_get_tariff_at` returned the
+            # rule's word verbatim and `_is_high_tariff` compared it with a
+            # case-SENSITIVE ``== "ht"``, so a rule written ``"HT"`` was
+            # never high tariff at the decision site while every other
+            # reader lower-cased and thought it was — a level of CHEAP,
+            # forever, on a day that does have a peak window. And a
+            # ``"days": null`` raised TypeError out of the update loop.
+            days = list(rule.get("days") or [])
             start = self._parse_time(rule.get("start", "00:00"))
             end = self._parse_time(rule.get("end", "00:00"))
-            tariff = rule.get("tariff", "peak")
+            tariff = _tariff_word(rule.get("tariff", "peak"))
             self._rules.append((days, start, end, tariff))
 
         if self._rules:
@@ -144,6 +160,10 @@ class CalendarTariffProvider(TariffProvider):
         for days, start, end, tariff in self._rules:
             if dow not in days:
                 continue
+            if start == end:
+                # A zero-width window can never contain a moment. It used
+                # to be counted as a reachable HT period all the same.
+                continue
             # Handle same-day windows (start < end)
             if start <= end:
                 if start <= current_time < end:
@@ -158,7 +178,7 @@ class CalendarTariffProvider(TariffProvider):
     def _is_high_tariff(self, when: Optional[datetime] = None) -> bool:
         """Check if given time is in high tariff period."""
         now = when or dt_util.now()
-        return self._get_tariff_at(now) == "ht"
+        return _tariff_word(self._get_tariff_at(now)) == "ht"
 
     def get_current_import_rate(self) -> float:
         return self.peak_rate if self._is_high_tariff() else self.off_peak_rate
@@ -196,19 +216,35 @@ class CalendarTariffProvider(TariffProvider):
         table instead of a weekday constant.
         """
         now = when or dt_util.now()
+        # A holiday is NT from midnight to midnight, whatever the table
+        # says — ``_get_tariff_at`` checks it first and the rule scan never
+        # knew, so a holiday published a peak/off-peak spread it could not
+        # reach.
+        if self.holiday_entity and self._is_holiday():
+            return False
+        # A Schedule helper decides moment by moment and publishes no
+        # timetable anyone can scan. Its existence IS the claim that high
+        # tariff happens; reading the rule table instead silenced this
+        # entire input mode, because a schedule-helper install has no
+        # rules at all.
+        if self.schedule_entity:
+            return self.hass.states.get(self.schedule_entity) is not None
         if not self._rules:
-            return str(self.default_tariff).lower() in ("ht", "peak")
-        dow = now.weekday()
-        if any(str(t).lower() in ("ht", "peak") and dow in (days or [])
-               for days, _, _, t in self._rules):
-            return True
-        # A rule table that names no HT for today still leaves today in
-        # high tariff when the DEFAULT is HT and some rule carves NT out of
-        # it — the mirror case, and just as much a real comparison.
-        return (str(self.default_tariff).lower() in ("ht", "peak")
-                and any(str(t).lower() not in ("ht", "peak")
-                        and dow in (days or [])
-                        for days, _, _, t in self._rules))
+            return self.default_tariff == "ht"
+        # Otherwise: ask the function that DECIDES, at every boundary the
+        # rules name, instead of re-deriving the answer from the table.
+        # Re-deriving is what produced the defect this method exists to
+        # fix (bug class 104), one level down: a mis-cased word, a
+        # zero-width window and a holiday each made the two disagree.
+        # A half-open window always contains its own start, so probing
+        # every rule's start plus midnight is exact, not a sample.
+        day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        probes = {day}
+        for _days, start, end, _t in self._rules:
+            probes.add(day.replace(hour=start.hour, minute=start.minute))
+            probes.add(day.replace(hour=end.hour, minute=end.minute))
+        return any(_tariff_word(self._get_tariff_at(p)) == "ht"
+                   for p in probes)
 
     def _comparison_stands(self, when: Optional[datetime] = None) -> bool:
         return self._rates_differ() and self._ht_can_occur(when)
@@ -294,9 +330,35 @@ class CalendarTariffProvider(TariffProvider):
         Used by the dashboard schedule card for visualization.
         """
         day = date or dt_util.now()
+        # (#994) A day with nothing to compare is ONE block with no level.
+        # This method never asked, so a flat calendar — equal rates, or a
+        # preset with no peak window today — still handed the card a full
+        # day of alternating NT/HT stripes to paint, right beside a sensor
+        # correctly reading `flat`. The strip is the picture users check
+        # first, and it was telling the older story.
+        if not self._comparison_stands(day):
+            return [{
+                "start": "00:00", "end": "24:00", "tariff": None,
+                "level": LEVEL_FLAT,
+                "avg_price": round(self.get_current_import_rate(), 4),
+            }]
+
         blocks = []
         current_tariff = None
         block_start = None
+
+        def _close(end_str: str) -> None:
+            blocks.append({
+                "start": block_start.strftime("%H:%M"),
+                "end": end_str,
+                "tariff": current_tariff,
+                # The card reads `level` first and falls back to the
+                # legacy HT/NT word; give it both so it never has to.
+                "level": "normal" if current_tariff == "ht" else "cheap",
+                "avg_price": round(
+                    self.peak_rate if current_tariff == "ht"
+                    else self.off_peak_rate, 4),
+            })
 
         for hour in range(24):
             for minute in (0, 30):
@@ -304,20 +366,12 @@ class CalendarTariffProvider(TariffProvider):
                 tariff = self._get_tariff_at(check_time)
                 if tariff != current_tariff:
                     if current_tariff is not None:
-                        blocks.append({
-                            "start": block_start.strftime("%H:%M"),
-                            "end": check_time.strftime("%H:%M"),
-                            "tariff": current_tariff,
-                        })
+                        _close(check_time.strftime("%H:%M"))
                     current_tariff = tariff
                     block_start = check_time
 
         # Close last block
         if current_tariff is not None and block_start is not None:
-            blocks.append({
-                "start": block_start.strftime("%H:%M"),
-                "end": "24:00",
-                "tariff": current_tariff,
-            })
+            _close("24:00")
 
         return blocks

@@ -10,8 +10,10 @@ import {
 // through its lookup to NORMAL's label and orange — a word SEM never chose.
 
 test('a comparative level keeps its own key', () => {
+    // `negative` is the exception and has its own test below: its
+    // translation key is `price_negative`, not a bare `negative`.
     for (const l of ['cheap', 'very_cheap', 'normal', 'expensive',
-                     'very_expensive', 'negative']) {
+                     'very_expensive']) {
         assert.equal(priceLevelKey(l), l);
     }
 });
@@ -44,4 +46,40 @@ test('isAbsence answers for exactly the two words', () => {
 test('case and whitespace do not change the key', () => {
     assert.equal(priceLevelKey('FLAT'), 'price_level_flat');
     assert.equal(priceLevelKey('No_Prices'), 'price_level_no_prices');
+});
+
+// Second review: `negative`'s key is `price_negative`, a fact only the price
+// card knew. The other four cards passed the raw state to the translator,
+// which has no bare `negative` key, so they printed the untranslated word.
+
+test('negative keeps the key the translations actually carry', () => {
+    assert.equal(priceLevelKey('negative'), 'price_negative');
+});
+
+test('every comparative level maps to a key the translations define', () => {
+    // The set the sensor can publish, and the keys translations.json has.
+    const defined = new Set([
+        'price_negative', 'very_cheap', 'cheap', 'normal', 'expensive',
+        'very_expensive', 'price_level_flat', 'price_level_no_prices',
+    ]);
+    for (const l of ['negative', 'very_cheap', 'cheap', 'normal', 'expensive',
+                     'very_expensive', LEVEL_FLAT, LEVEL_NO_PRICES]) {
+        assert.ok(defined.has(priceLevelKey(l)), `${l} -> ${priceLevelKey(l)}`);
+    }
+});
+
+test('an absence never takes a comparative colour', () => {
+    const comparative = ['negative', 'very_cheap', 'cheap', 'normal',
+                         'expensive', 'very_expensive'].map(l => priceLevelColor(l));
+    for (const a of [LEVEL_FLAT, LEVEL_NO_PRICES]) {
+        assert.ok(!comparative.includes(priceLevelColor(a)), a);
+    }
+});
+
+test('a state that is not a level at all takes the caller fallback', () => {
+    // '' and 'unknown' are ordinary Home Assistant states for an entity
+    // that has not loaded. They used to take NORMAL's orange on the grid card.
+    for (const s of ['', 'unknown', 'unavailable', '—', undefined, null]) {
+        assert.equal(priceLevelColor(s, '#888'), '#888');
+    }
 });

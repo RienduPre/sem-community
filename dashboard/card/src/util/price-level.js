@@ -23,15 +23,27 @@ export const LEVEL_NO_PRICES = 'no_prices';
 
 /** True for the two words that are not a comparative level. */
 export function isAbsence(level) {
-    return level === LEVEL_FLAT || level === LEVEL_NO_PRICES;
+    const l = String(level || '').toLowerCase();
+    return l === LEVEL_FLAT || l === LEVEL_NO_PRICES;
 }
 
-/** The translation key for any level string, absences included. */
+/**
+ * The translation key for any level string, absences included.
+ *
+ * `negative` is the odd one out and always was: its key is `price_negative`,
+ * because a bare `negative` would collide. Only the price card knew that —
+ * the other four passed the raw state to the translator and would have
+ * printed the untranslated word. One table now, so none of them can differ.
+ */
+const KEYS = {
+    negative: 'price_negative',
+    [LEVEL_FLAT]: 'price_level_flat',
+    [LEVEL_NO_PRICES]: 'price_level_no_prices',
+};
+
 export function priceLevelKey(level) {
     const l = String(level || '').toLowerCase();
-    if (l === LEVEL_FLAT) return 'price_level_flat';
-    if (l === LEVEL_NO_PRICES) return 'price_level_no_prices';
-    return l;
+    return KEYS[l] || l;
 }
 
 /** Badge colour; the absences are grey, never NORMAL's orange. */

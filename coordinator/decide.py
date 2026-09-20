@@ -46,7 +46,9 @@ from .charger_types import (
     FleetContext,
 )
 from .energy_reclaim import ev_reclaims_battery_charge
-from .price_signal import CHEAP_LEVELS, EXPENSIVE_LEVELS as _EXPENSIVE_LEVELS
+from .price_signal import (
+    CHEAP_LEVELS, EXPENSIVE_LEVELS as _EXPENSIVE_LEVELS, is_cheap_name,
+)
 from ..tariff.tariff_provider import PriceLevel
 
 _LOGGER = logging.getLogger(__name__)
@@ -1104,10 +1106,15 @@ class SolarPlusCheapMode(ModeStrategy):
         # copy of that logic. Solar surplus wins whenever it offers more —
         # a cheap hour must never downgrade a strong sun.
         #
-        # ``tariff_level`` None is a static/unknown tariff, NOT a cheap one:
-        # only a live dynamic signal may start a grid charge by day.
-        if (not f.is_night and f.tariff_level is not None
-                and f.tariff_level not in _NOT_CHEAP_LEVELS):
+        # Only a CHEAP hour may start a grid charge by day. This asked the
+        # question backwards — "is it not one of the dear words, and not
+        # None" — which was right only while "no comparative signal" WAS
+        # Python None. (#994) gave that state two names of its own, `flat`
+        # and `no_prices`, and a truthy string sailed through both halves:
+        # on a flat tariff SEM would have topped the car up from the grid
+        # believing it a cheap hour, which is this issue's own disease. Ask
+        # the vocabulary the question it exists to answer.
+        if not f.is_night and is_cheap_name(f.tariff_level):
             solar = _relabel(
                 _SOLAR_ONLY.decide(view), "solar_plus_cheap",
                 f"solar_plus_cheap day: tariff={f.tariff_level}",

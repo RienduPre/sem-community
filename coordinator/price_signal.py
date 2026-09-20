@@ -87,26 +87,69 @@ def _name(level: Any) -> str:
     return str(getattr(level, "value", level) or "").strip().lower()
 
 
-def spread(provider: Any) -> Optional[float]:
-    """The horizon's price range, or ``None`` when it cannot be read.
+#: Below this many upcoming slots the forward curve is too short to be a
+#: horizon of its own — the same floor the percentile classifier uses.
+MIN_HORIZON_POINTS: int = 4
 
-    Every provider populates ``today_min_price``/``today_max_price`` — and
-    for the two clock-based ones those ARE the two configured rates, so the
-    fact that refutes their verdict is already in their own payload.
+
+def _horizon(provider: Any) -> Optional[tuple]:
+    """``(low, high, mean)`` over the horizon the LEVEL was judged against.
+
+    (#994, second review) This used ``today_min_price``/``today_max_price``
+    — today by the wall clock — while the dynamic classifier buckets against
+    a ROLLING window that runs into tomorrow. Two references, one question:
+    a day whose own slots are flat beside a curve that rises sharply after
+    midnight produced a sensor reading ``cheap`` and a fleet reading no
+    level at all, for the same instant. The forward curve is both the
+    classifier's own reference and the only one a consumer can act on — you
+    cannot move load into an hour that has passed — so prefer it, and fall
+    back to today's range when it is too short to mean anything.
     """
     if provider is None:
         return None
     try:
         data = provider.get_tariff_data()
-        lo, hi = data.today_min_price, data.today_max_price
     except Exception:  # noqa: BLE001 — a provider that cannot answer is unknown
         return None
+    prices = []
+    for p in (getattr(data, "upcoming_prices", None) or []):
+        value = getattr(p, "price", None)
+        if value is None:
+            continue
+        try:
+            prices.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if len(prices) >= MIN_HORIZON_POINTS:
+        return min(prices), max(prices), sum(prices) / len(prices)
+    lo, hi = getattr(data, "today_min_price", None), getattr(data, "today_max_price", None)
     if lo is None or hi is None:
         return None
     try:
-        return abs(float(hi) - float(lo))
+        lo, hi = float(lo), float(hi)
     except (TypeError, ValueError):
         return None
+    avg = getattr(data, "today_avg_price", None)
+    try:
+        avg = float(avg) if avg is not None else (lo + hi) / 2.0
+    except (TypeError, ValueError):
+        avg = (lo + hi) / 2.0
+    return lo, hi, avg
+
+
+def spread(provider: Any) -> Optional[float]:
+    """The horizon's price range, or ``None`` when it cannot be read.
+
+    Every provider populates ``today_min_price``/``today_max_price`` — and
+    for the two clock-based ones those ARE the two configured rates, so the
+    fact that refutes their verdict is already in their own payload. A
+    dynamic provider additionally publishes the forward curve, which is the
+    reference its own classifier used; see ``_horizon``.
+    """
+    h = _horizon(provider)
+    if h is None:
+        return None
+    return abs(h[1] - h[0])
 
 
 def variation_known(provider: Any) -> bool:
@@ -138,24 +181,13 @@ def variation_known(provider: Any) -> bool:
 
 
 def _average_price(provider: Any) -> Optional[float]:
-    """The day's mean, for the relative test. ``None`` when unreadable."""
-    try:
-        data = provider.get_tariff_data()
-    except Exception:  # noqa: BLE001
-        return None
-    avg = getattr(data, "today_avg_price", None)
-    if avg is None:
-        lo, hi = getattr(data, "today_min_price", None), getattr(data, "today_max_price", None)
-        if lo is None or hi is None:
-            return None
-        try:
-            avg = (float(lo) + float(hi)) / 2.0
-        except (TypeError, ValueError):
-            return None
-    try:
-        return abs(float(avg))
-    except (TypeError, ValueError):
-        return None
+    """The horizon's mean, for the relative test. ``None`` when unreadable.
+
+    Same horizon as ``spread``, necessarily: a range measured over one
+    window and a mean over another do not make a ratio.
+    """
+    h = _horizon(provider)
+    return None if h is None else abs(h[2])
 
 
 def comparative_level(provider: Any,

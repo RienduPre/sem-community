@@ -58,6 +58,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagnostic sixteen lines away counted the same slots as absent. Five cards
   rendered the level and four had no label for the new words at all; they now
   share one helper.
+- 🐛 **An absence was read as a cheap hour, and would have charged the car
+  from the grid** (#994, found by review). Giving "no comparative level" two
+  names of its own turned a Python `None` into a truthy string, and the
+  daytime grid-charge gate had been asking "is it not one of the dear words,
+  and not None" — a question that was only ever right while absence WAS
+  `None`. On a flat tariff a *Solar + cheapest hours* charger would have
+  topped the car up from the grid believing the hour cheap. The gate now asks
+  the vocabulary the question it exists to answer.
+- 🐛 **A calendar tariff could disagree with itself about the day** (#994,
+  found by review). Beyond the weekday fix above, the reachability check and
+  the code that actually decides had drifted apart in four more ways: a
+  holiday is off-peak from midnight to midnight and the check never knew; an
+  install driven by a Schedule helper has no rules at all and was silenced
+  entirely; a rule written `"HT"` was high tariff to every reader except the
+  one that decides, which compared case-sensitively; and a rule with no days
+  crashed the update loop. Rules are normalised once when they are read, and
+  the check now asks the deciding function instead of re-reading the table.
+- 🐛 **A price nobody could read was still classified** (#994, found by
+  review). With classification set to fixed cutoffs rather than percentiles,
+  a dead price entity fell back to a configured constant — default 0.30 — and
+  that constant was bucketed and published as a confident level. A price that
+  was never read now produces no level at all.
+- 🐛 **The flat-day guard measured every currency with a European ruler**
+  (#994, found by review). A day counted as having no price difference when
+  its spread was under 1 ct/kWh — an absolute cutoff, which is the defect
+  this same release fixes everywhere else, and which was already re-fixed
+  twice for a Slovak tariff and a Sri Lankan one. It is a fraction of the
+  day's own mean now, set so European installs keep the buckets they had.
 - 🐛 **The sensor said why your hour got its word, and named a different
   hour** (#994, found on the test rig). `classifier_path` is set as a
   side-effect and read back later, and the percentile breaks return early

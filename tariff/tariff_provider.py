@@ -133,6 +133,12 @@ class PricePoint:
     #: ``None`` when the classifier had nothing to compare this price
     #: against (#994). A slot with no reference carries no word.
     level: Optional[PriceLevel] = PriceLevel.NORMAL
+    #: …and WHICH absence, frozen with the slot. A single provider-level
+    #: attribute described whichever read ran last, so a slot declined at
+    #: 10:30 for want of points was later relabelled "flat" once the cache
+    #: had grown into a flat day — the same diagnostic-as-side-effect
+    #: defect this issue fixed for ``classifier_path``, one field along.
+    level_absence: Optional[str] = None
 
 
 #: (#994) What SEM publishes instead of a comparative level, and WHY there
@@ -147,6 +153,23 @@ class PricePoint:
 #: worth a user's attention; the other is just their contract.
 LEVEL_FLAT = "flat"
 LEVEL_NO_PRICES = "no_prices"
+
+#: How far p10 and p90 must sit apart, as a FRACTION of the window's own
+#: mean, before a day counts as having a price difference at all. 3 % lands
+#: on the previous hard-coded 1 ct/kWh for a 0.30 EUR tariff, so European
+#: installs keep the buckets #728 gave them; every other currency stops
+#: being measured with a European ruler.
+FLAT_DAY_SPREAD_FRACTION: float = 0.03
+
+
+#: A classification path that means the level rests on nothing. The
+#: percentile fallbacks, the two clock providers' refusals, a price nobody
+#: could read, and the value before anything has classified at all.
+def path_has_no_reference(path: str) -> bool:
+    p = str(path or "")
+    return (p.startswith("percentile_fallback_")
+            or p.endswith("_no_comparison")
+            or p in ("no_price_to_classify", "unknown"))
 
 
 def absence_for_path(path: str) -> str:
@@ -567,6 +590,10 @@ class DynamicTariffProvider(TariffProvider):
         self._last_classifier_path: str = "unknown"
         #: (#994) which absence the last curve read ran into, if any.
         self._last_curve_absence: str = LEVEL_NO_PRICES
+        #: (#994) where the last current-price read came from.
+        self._last_price_source: str = "fallback"
+        #: (#994) per-slot absence, frozen beside ``_level_history``.
+        self._absence_history: Dict[datetime, Optional[str]] = {}
 
     # Day-ahead curves don't change once published; re-fetch only to
     # pick up tomorrow's prices when they publish (~13:00 CET).
@@ -822,6 +849,24 @@ class DynamicTariffProvider(TariffProvider):
         return None
 
     def _read_current_price(self) -> float:
+        """The current price. See ``_read_current_price_with_source``."""
+        return self._read_current_price_with_source()[0]
+
+    def _read_current_price_with_source(self) -> Tuple[float, str]:
+        """The current price and WHERE it came from: ``entity``, ``cache``
+        or ``fallback``.
+
+        (#994) The last of the three is a configured constant, default
+        0.30, invented for a provider that could not read anything. In
+        percentile mode that never mattered — an empty cache had already
+        refused. In ``static`` classification mode it did: the fixed CHF
+        cutoffs classified the constant and published a confident level
+        for an install whose price entity was dead.
+        """
+        price = self._read_current_price_value()
+        return price, self._last_price_source
+
+    def _read_current_price_value(self) -> float:
         """Read current price from the price entity.
 
         Fallback chain when the entity can't be read:
@@ -831,6 +876,7 @@ class DynamicTariffProvider(TariffProvider):
            cache only holds yesterday after a long outage)
         3. ``fallback_price`` (configurable; defaults to 0.30)
         """
+        self._last_price_source = "fallback"
         if not self._price_entity:
             self.detect_provider()
         if not self._price_entity:
@@ -839,7 +885,9 @@ class DynamicTariffProvider(TariffProvider):
         state = self.hass.states.get(self._price_entity)
         if state and state.state not in ("unknown", "unavailable"):
             try:
-                return float(state.state)
+                value = float(state.state)
+                self._last_price_source = "entity"
+                return value
             except (ValueError, TypeError):
                 pass
 
@@ -852,11 +900,17 @@ class DynamicTariffProvider(TariffProvider):
         # the cache is still perfectly valid.
         cached = self._cached_price_for(dt_util.now())
         if cached is not None:
+            self._last_price_source = "cache"
             return cached
         return self._fallback_import_rate()
 
     def _fallback_import_rate(self) -> float:
-        """Best price guess without entity state or a current slot."""
+        """Best price guess without entity state or a current slot.
+
+        A guess, and labelled one: the caller's ``_last_price_source`` stays
+        ``fallback`` even when the cache supplies an average, because an
+        average of yesterday is not this hour's price.
+        """
         if self._prices_cache:
             vals = [p.price for p in self._prices_cache if p.price is not None]
             if vals:
@@ -1462,6 +1516,7 @@ class DynamicTariffProvider(TariffProvider):
             ts = _c(p.timestamp)
             if ts + interval <= now and ts in self._level_history:
                 p.level = self._level_history[ts]
+                p.level_absence = self._absence_history.get(ts)
             else:
                 lvl, path = self._classify_price_with_path(p.price)
                 # (#994) The three percentile fallbacks resolved to a
@@ -1469,18 +1524,23 @@ class DynamicTariffProvider(TariffProvider):
                 # handed every consumer a word while ``get_price_level``
                 # answered None for the very same hour. A slot with no
                 # reference carries none.
-                if path.startswith("percentile_fallback_"):
+                if path_has_no_reference(path):
                     p.level = None
-                    # The reason this read could not classify, kept for the
-                    # surfaces that render the slots it declined.
-                    self._last_curve_absence = absence_for_path(path)
+                    # The reason THIS slot could not be classified, frozen
+                    # with the slot, plus a curve-level copy for surfaces
+                    # that ask once per day.
+                    p.level_absence = absence_for_path(path)
+                    self._last_curve_absence = p.level_absence
                 else:
                     p.level = lvl
+                    p.level_absence = None
                 self._level_history[ts] = p.level
+                self._absence_history[ts] = p.level_absence
 
         cutoff = now - timedelta(hours=48)
         for ts in [t for t in self._level_history if t < cutoff]:
             del self._level_history[ts]
+            self._absence_history.pop(ts, None)
 
     def _get_percentile_breaks(self) -> Optional[Dict[str, Any]]:
         """Compute percentile breakpoints over a rolling ~24h window.
@@ -1595,10 +1655,21 @@ class DynamicTariffProvider(TariffProvider):
         # Degenerate distribution guard (M1 reviewer note): a flat or
         # near-flat day collapses every break to the same value, which
         # would classify every price as VERY_CHEAP and over-trigger
-        # any cheap-window logic downstream. Threshold = 1 ct/kWh —
-        # narrower than that is functionally flat, so classification
-        # falls back to the NORMAL safe default.
-        if (breaks["p90"] - breaks["p10"]) < 0.01:
+        # any cheap-window logic downstream.
+        #
+        # (#994, second review) The threshold was a flat 1 ct/kWh — an
+        # ABSOLUTE cutoff in one currency, which is the #359 defect this
+        # very branch cites twice while fixing it everywhere else (#417 at
+        # 1.69/kWh, #549 three orders of magnitude away). A Sri Lankan day
+        # with no spread at all never reached 0.01 and classified with full
+        # confidence. RELATIVE now, at a fraction chosen to land on the old
+        # 1 ct for a typical 0.30 European tariff, so no EUR/CHF install
+        # changes bucket while every other currency starts working.
+        _window_mean = (sum(window_prices) / len(window_prices)
+                        if window_prices else 0.0)
+        _flat_cutoff = (abs(_window_mean) * FLAT_DAY_SPREAD_FRACTION
+                        if _window_mean else 1e-9)
+        if (breaks["p90"] - breaks["p10"]) < _flat_cutoff:
             self._last_classifier_path = (
                 f"percentile_fallback_flat_day("
                 f"spread={breaks['p90'] - breaks['p10']:.4f})"
@@ -1728,8 +1799,15 @@ class DynamicTariffProvider(TariffProvider):
         answered it instead — the rig showed a ``normal`` shipped beside
         ``negative_price_shortcircuit``. One call, one pair.
         """
-        level, path = self._classify_price_with_path(self._read_current_price())
-        if path.startswith("percentile_fallback_"):
+        price, source = self._read_current_price_with_source()
+        if source == "fallback":
+            # Nothing was read. Classifying the configured constant is how
+            # ``static`` cutoff mode published a confident level for an
+            # install whose price entity had been dead for hours.
+            self._last_classifier_path = "no_price_to_classify"
+            return None, self._last_classifier_path
+        level, path = self._classify_price_with_path(price)
+        if path_has_no_reference(path):
             return None, path
         return level, path
 
@@ -2054,7 +2132,7 @@ class DynamicTariffProvider(TariffProvider):
             published both answers about the same hours.
             """
             if level is None:
-                return absent_word
+                return absent_word          # replaced per slot below
             if level in CHEAP_LEVELS:
                 return "cheap"
             if level in EXPENSIVE_LEVELS:
@@ -2082,7 +2160,8 @@ class DynamicTariffProvider(TariffProvider):
                 })
 
         for p in today_prices:
-            lvl = _coarse_level(p.level)
+            lvl = (p.level_absence or absent_word) if p.level is None \
+                else _coarse_level(p.level)
             local_ts = _as_local(p.timestamp)
             time_str = f"{local_ts.hour:02d}:{local_ts.minute:02d}"
             if lvl != current_level:
