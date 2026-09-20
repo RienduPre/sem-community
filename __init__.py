@@ -347,7 +347,8 @@ def _require_load_manager(coordinator):
     )
 
 
-def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
+def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check,
+                                   charger_service=None):
     """Warn about configured charger entity_ids absent from the state
     registry — DEFERRED past HA's warm-up (#763 beta.7).
 
@@ -358,6 +359,23 @@ def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
     that's the real #315/#357/#462 symptom — and entities that appeared
     in the meantime log the recovery at DEBUG only. Returns the
     still-missing pairs.
+
+    (#991) One of those entities is not like the others. The current
+    control entity is how SEM commands a `number`-driven charger, and the
+    only thing that can stand in for it is a brand ``charger_service``;
+    with neither there is no way to set this charger's current at all — and
+    a fallback that has nowhere to fall is an error, not a line in a list.
+    This is the honest place to say so: past warm-up the absence is a FACT,
+    where the same read at registration would have been a warm-up artefact
+    (the defect this issue is about).
+
+    "Has a service" is not the same question as "has a fallback". An
+    ENTITY-PLATFORM service (`number.set_value` and its `input_number` /
+    `select` twins, #462 / #485 K1) is not its own transport: it writes
+    THROUGH ``ev_current_control_entity or ev_charger_service_entity_id``,
+    current entity first. So when the current entity is the thing that
+    vanished, such a service falls exactly where the entity did — it is not
+    an alternative and must not buy silence here.
     """
     missing = []
     for _attr, _eid in to_check:
@@ -365,6 +383,31 @@ def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
             continue
         if hass.states.get(_eid) is None:
             missing.append((_attr, _eid))
+    # (#991) No current entity and nothing that can stand in for it = no
+    # control method. Said before the generic warning so the ERROR is the
+    # first thing in the log.
+    _svc = str(charger_service or "").strip().lower()
+    _svc_is_own_transport = bool(_svc) and not (
+        "." in _svc
+        and _svc.split(".", 1)[0] in ("number", "input_number", "select")
+    )
+    _no_control = (
+        any(_attr == "ev_current_control_entity" for _attr, _ in missing)
+        and not _svc_is_own_transport
+    )
+    if _no_control:
+        _LOGGER.error(
+            "EV charger '%s' (%s): its current control entity (%s) is "
+            "missing past warm-up and there is no charger service that "
+            "could stand in for it (configured: %s) — SEM has NO way to set "
+            "this charger's current and will not throttle it. Check the "
+            "entity ID, or configure a brand charger service as the "
+            "fallback.",
+            charger_name, charger_id,
+            ", ".join(e for a, e in missing
+                      if a == "ev_current_control_entity"),
+            charger_service or "none",
+        )
     if missing:
         _LOGGER.warning(
             "EV charger '%s' (%s): %d configured entity ID(s) "
@@ -1740,11 +1783,31 @@ def _heat_pump_rows(full_config: dict) -> list[dict]:
             "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
         ) if full_config.get(k) not in (None, "")},
     }]
+    # (#990) Two rows may carry the SAME id — a config written by a build
+    # that minted ids from the list position survives a removal that
+    # renumbers it. ``register_device`` keys on device_id, so a collision
+    # does not fail: the second unit quietly replaces the first and one
+    # physical pump is never driven again, while the log still counts two.
+    # A duplicate is therefore renamed onto the first free number here —
+    # losing a device is the one outcome that must not be silent.
+    _seen = {"heat_pump"}
     for _i, _row in enumerate(full_config.get("heat_pumps") or []):
-        if isinstance(_row, dict):
-            rows.append({"id": _row.get("id") or f"heat_pump_{_i + 2}",
-                         "name": _row.get("name") or f"Heat Pump {_i + 2}",
-                         **_row})
+        if not isinstance(_row, dict):
+            continue
+        _id = str(_row.get("id") or f"heat_pump_{_i + 2}")
+        if _id in _seen:
+            _n = _i + 2
+            while f"heat_pump_{_n}" in _seen:
+                _n += 1
+            _LOGGER.warning(
+                "Heat pump #%d reuses device id '%s' — registering it as "
+                "'heat_pump_%d' so it is not dropped (#990)",
+                _i + 2, _id, _n,
+            )
+            _id = f"heat_pump_{_n}"
+        _seen.add(_id)
+        rows.append({**_row, "id": _id,
+                     "name": _row.get("name") or f"Heat Pump {_i + 2}"})
     return rows
 
 
@@ -2607,8 +2670,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             # a dead end. 120 s is comfortably past integration setup.
             def _deferred_entity_check(_now, _name=charger_name,
                                        _cid=charger_id,
-                                       _chk=tuple(_to_check)):
-                _warn_missing_charger_entities(hass, _name, _cid, _chk)
+                                       _chk=tuple(_to_check),
+                                       _svc=ev_charger_service):
+                # (#991) The helper needs the service to tell "one of
+                # several handles is missing" from "there is no handle at
+                # all" — and to tell a brand service, which is its own
+                # transport, from an entity-platform one, which is not.
+                _warn_missing_charger_entities(hass, _name, _cid, _chk,
+                                               charger_service=_svc)
 
             from homeassistant.helpers.event import async_call_later
             async_call_later(hass, 120, _deferred_entity_check)

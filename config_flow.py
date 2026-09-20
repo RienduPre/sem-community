@@ -146,6 +146,51 @@ def _contact_values_missing(get) -> bool:
     return False
 
 
+def _draft_list(flow: Any, key: str) -> list:
+    """Working copy of a list-valued option — draft first, saved second (#990).
+
+    ``flow._data`` is the DRAFT this dialog is building; ``entry.options`` is
+    what is already saved. Resolving the two with ``draft or saved`` cannot
+    tell *"the flow has not touched the list"* from *"the user just emptied
+    it"* — an empty list is falsy, so both fall the same way and the saved
+    copy wins. That collapses the one state removal exists to produce: pop
+    the LAST additional heat pump and the very next read hands the row
+    straight back (@RienduPre, #990 — Remove was accepted and the pump stayed
+    on the menu; adding afterwards then resurrected it as a phantom sibling).
+
+    Key PRESENCE is the only thing that separates the two, so that is what
+    this tests. Same distinction as ``_merge_form_input``'s cleared-field
+    rule one level up: silence and emptiness are different answers.
+
+    The ROWS are copied too, not just the list. ``entry.options`` is a
+    read-only mapping at the top level and wide open one level down, so a
+    step that merges a form into ``rows[0]`` was writing through to the
+    stored dict — and ``full_config = {**entry.data, **entry.options}``
+    shares those same row objects with the LIVE coordinator. Editing page
+    one and then closing the dialog changed the running charger with no
+    save. Every caller re-stores the list into ``flow._data``, so nobody
+    needs the identity.
+    """
+    raw = flow._data[key] if key in flow._data else flow.config_entry.options.get(key)
+    return [dict(row) if isinstance(row, dict) else row for row in (raw or [])]
+
+
+def _suggest_discovered(saved: dict, discovered: dict, key: str):
+    """Offer a detected entity only where the user never answered (#990).
+
+    ``saved.get(k) or discovered.get(k)`` is ``_draft_list``'s bug on a
+    scalar. A cleared optional field is stored as an explicit ``None``
+    (``_merge_form_input``, #690) — so on the one install that deliberately
+    DELETED the auto-detected sensor, the ``or`` reads that deletion as
+    "nobody said", re-suggests the entity, HA pre-fills the field with it,
+    and the next Submit silently re-adopts what the user just took out.
+    Presence of the key is the difference between silence and an answer.
+    """
+    if key in saved:
+        return saved[key] or None
+    return discovered.get(key) or None
+
+
 def _merge_form_input(flow: Any, target: dict, user_input: dict) -> None:
     """Merge a submitted form into ``target``, honouring CLEARED fields.
 
@@ -1556,7 +1601,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 }
             # Update both flat keys and ev_chargers[0] (#112)
             _merge_form_input(self, self._data, user_input)
-            ev_chargers = list(self._data.get("ev_chargers") or self.config_entry.options.get("ev_chargers") or [])
+            ev_chargers = _draft_list(self, "ev_chargers")
             if ev_chargers:
                 _merge_form_input(self, ev_chargers[0], user_input)
             else:
@@ -2558,37 +2603,28 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 "phase_guard_grid_l1_current_entity",
                 description={
-                    "suggested_value": current_config.get(
-                        "phase_guard_grid_l1_current_entity"
+                    "suggested_value": _suggest_discovered(
+                        current_config, discovered_currents,
+                        "phase_guard_grid_l1_current_entity",
                     )
-                    or discovered_currents.get(
-                        "phase_guard_grid_l1_current_entity"
-                    )
-                    or None
                 },
             ): sensor_selector,
             vol.Optional(
                 "phase_guard_grid_l2_current_entity",
                 description={
-                    "suggested_value": current_config.get(
-                        "phase_guard_grid_l2_current_entity"
+                    "suggested_value": _suggest_discovered(
+                        current_config, discovered_currents,
+                        "phase_guard_grid_l2_current_entity",
                     )
-                    or discovered_currents.get(
-                        "phase_guard_grid_l2_current_entity"
-                    )
-                    or None
                 },
             ): sensor_selector,
             vol.Optional(
                 "phase_guard_grid_l3_current_entity",
                 description={
-                    "suggested_value": current_config.get(
-                        "phase_guard_grid_l3_current_entity"
+                    "suggested_value": _suggest_discovered(
+                        current_config, discovered_currents,
+                        "phase_guard_grid_l3_current_entity",
                     )
-                    or discovered_currents.get(
-                        "phase_guard_grid_l3_current_entity"
-                    )
-                    or None
                 },
             ): sensor_selector,
             vol.Optional(
@@ -3120,8 +3156,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 return await self.async_step_heat_pump_unit()
             if action.startswith("remove_heat_pump:"):
                 idx = int(action.split(":", 1)[1])
-                pumps = list(self._data.get("heat_pumps")
-                             or self.config_entry.options.get("heat_pumps") or [])
+                pumps = _draft_list(self, "heat_pumps")
                 if 0 <= idx < len(pumps):
                     removed = pumps.pop(idx)
                     self._data["heat_pumps"] = pumps
@@ -3130,8 +3165,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 return await self.async_step_heat_pump_menu()
             return await self.async_step_battery_scheduler()
 
-        pumps = list(self._data.get("heat_pumps")
-                     or self.config_entry.options.get("heat_pumps") or [])
+        pumps = _draft_list(self, "heat_pumps")
         options = [{"value": "continue",
                     "label": f"Continue ({1 + len(pumps)} heat pump"
                              f"{'s' if pumps else ''} configured)"}]
@@ -3156,8 +3190,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Add or edit one ADDITIONAL heat pump (#685)."""
         errors: dict[str, str] = {}
-        pumps = list(self._data.get("heat_pumps")
-                     or self.config_entry.options.get("heat_pumps") or [])
+        pumps = _draft_list(self, "heat_pumps")
         editing = getattr(self, "_edit_hp_index", None)
         row = pumps[editing] if editing is not None and editing < len(pumps) else {}
 
@@ -3183,8 +3216,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     new_row.setdefault("id", pumps[editing].get("id", f"heat_pump_{editing + 2}"))
                     pumps[editing] = new_row
                 else:
-                    new_row.setdefault("id", f"heat_pump_{len(pumps) + 2}")
-                    new_row.setdefault("name", f"Heat Pump {len(pumps) + 2}")
+                    # (#990) The id must not be derived from the POSITION:
+                    # that is unique only while the list is append-only, and
+                    # removal — the gesture this step now has to survive —
+                    # ends that. Remove "Heat Pump 2" from [2, 3] and the
+                    # next Add mints heat_pump_3 a second time, which
+                    # ``register_device`` resolves by keeping one of the two.
+                    # Take the lowest number nobody is using instead.
+                    used = {str(p.get("id")) for p in pumps if isinstance(p, dict)}
+                    n = 2
+                    while f"heat_pump_{n}" in used:
+                        n += 1
+                    new_row.setdefault("id", f"heat_pump_{n}")
+                    new_row.setdefault("name", f"Heat Pump {n}")
                     pumps.append(new_row)
                 self._data["heat_pumps"] = pumps
                 self._edit_hp_index = None

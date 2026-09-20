@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   *house as a battery sink* hold the pack at a **0 W discharge limit** all
   night while the house imported 3.66 kWh from a 92–100 % battery.
   A level now exists only when a comparison stands behind it: equal rates,
-  a weekend under HT/NT (one price all day), an empty calendar, a missing or
-  flat dynamic curve all read **`unknown`**, and everything that would have
+  a weekend under HT/NT (one price all day), a calendar with no high-tariff
+  window today, and a flat dynamic curve all read **`flat`**; a curve nobody
+  could read reads **`no_prices`**. Everything that would have
   waited for a better hour acts now instead — the rule the export side has
   followed since #921. The vocabulary is Tibber's, which defines it against a
   3-day moving average and carries a "missing data" state; SEM had kept the
@@ -67,6 +68,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale string to erase a level real breakpoints had produced. An hour whose
   price the classifier could not compare now reads `unknown` on the hour-wise
   accessor too, instead of a confident `normal`.
+# [2.1.0-beta.34] — 19.09.2026
+
+- 🐛 **A charger's current entity missing at startup was treated as missing
+  forever** (#991, found by @traktore-org in @alexmc1510's log). Load
+  management pre-flighted the configured current-control entity while SEM was
+  still setting up, and `hass.states.get()` answers `None` for every entity
+  whose own integration has not finished loading. That empty read was spent on
+  the spot and permanently: the entity was discarded, the code fell back to a
+  charge service a `number`-driven brand does not have, and the log said "EV
+  charger current control entity not found" about an entity that worked all
+  day. Registration no longer decides this — the per-write read and the
+  per-cycle pre-flight already do, and they can be wrong for one cycle and
+  right for the next.
+- 🐛 **A fallback with nowhere to fall is now an error** (#991). Past warm-up,
+  where an absent entity is a fact rather than an artefact, SEM says plainly
+  that it has NO way to set a charger's current instead of listing the entity
+  among others. "Has a service" is not the same question as "has a fallback":
+  a `number.set_value`-style service writes *through* the very entity that
+  vanished, so it no longer buys silence.
+
+# [2.1.0-beta.33] — 19.09.2026
+
+- 🐛 **Remove accepted the press and gave the heat pump back** (#990, reported
+  by @RienduPre). The config dialog resolved its working list as `draft or
+  saved`, and `or` sorts by truthiness — so "this dialog has not touched the
+  list" and "the user just emptied it" were the same value, and the saved copy
+  won both times. That is exactly the state removal exists to produce, so
+  deleting the LAST additional pump could never be shown; adding one
+  afterwards re-read the saved copy and brought the deleted pump back as a
+  phantom sibling, leaving the install with two. The list is now resolved on
+  whether the key is PRESENT, never on whether it is empty.
+- 🐛 **A heat-pump id minted from the list position collided after a removal**
+  (#990). Remove "Heat Pump 2" from [2, 3] and the next Add reused
+  `heat_pump_3`; the device registry keys on that id, so the second unit
+  silently replaced the first and one physical pump stopped being driven while
+  the log still counted two. New units take the lowest free number, and a
+  config that already carries a duplicate has it renamed at registration
+  instead of dropped.
+- 🐛 **A cleared phase-guard current sensor was handed back by auto-discovery**
+  (#990, found by the lint written for it). Clearing the sensor stores an
+  explicit `None`; the same `or` read that deletion as "nobody said",
+  re-offered the detected entity, and the next Configure save re-adopted the
+  sensor the user had just taken out — on every save, since the options flow
+  is one linear chain.
+- 🐛 **An abandoned Configure dialog still changed the running charger**
+  (#990). The working copy of `ev_chargers` shared its row objects with stored
+  options *and* with the live coordinator, so a form merged into charger 0 took
+  effect immediately and survived until the next restart even if the user never
+  finished the dialog. Rows are copied now.
 
 # [2.1.0-beta.32] — 19.09.2026
 
