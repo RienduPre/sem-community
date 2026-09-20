@@ -2136,19 +2136,17 @@ class DynamicTariffProvider(TariffProvider):
 
         absent_word = self._schedule_absence_word()
 
-        def _coarse_level(level: Optional[PriceLevel]) -> str:
+        def _coarse_level(level: PriceLevel) -> str:
             """Collapse the 5-tier scale into 3 user-facing bands.
 
             cheap-ish → ``cheap``; expensive-ish → ``expensive``; rest →
-            ``normal`` — and a slot NOBODY classified is none of the three.
-            (#994) ``level`` is ``Optional`` since the classifier learned to
-            refuse, and ``None`` fell through both membership tests to a
-            confident ``normal``. The sibling diagnostic sixteen lines from
-            the caller counts the same slots as absent, so one cycle
-            published both answers about the same hours.
+            ``normal``. A slot NOBODY classified is none of the three and
+            never reaches here — the caller carries its own absence word.
+            (#994) It used to: ``None`` fell through both membership tests
+            to a confident ``normal``, while the sibling diagnostic sixteen
+            lines from the caller counted the same slots as absent, so one
+            cycle published both answers about the same hours.
             """
-            if level is None:
-                return absent_word          # replaced per slot below
             if level in CHEAP_LEVELS:
                 return "cheap"
             if level in EXPENSIVE_LEVELS:

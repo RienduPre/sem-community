@@ -48,8 +48,8 @@ from ..tariff.tariff_provider import (
 __all__ = [
     "CHEAP_LEVELS", "EXPENSIVE_LEVELS", "LEVEL_FLAT", "LEVEL_NO_PRICES",
     "FLAT_SPREAD_FRACTION", "FLAT_SPREAD_FLOOR", "spread", "variation_known",
-    "comparative_level", "is_cheap", "is_expensive", "is_cheap_name",
-    "is_expensive_name",
+    "comparative_level", "absence_word", "is_cheap", "is_expensive",
+    "is_cheap_name", "is_expensive_name",
 ]
 
 #: Two prices are "the same price" when they differ by less than this
@@ -222,6 +222,28 @@ def comparative_level(provider: Any,
     if resolved is PriceLevel.NEGATIVE:
         return resolved
     return resolved if variation_known(provider) else None
+
+
+def absence_word(provider: Any) -> str:
+    """Which absence to publish when ``comparative_level`` answers ``None``.
+
+    Two different refusals reach that ``None`` and they are not the same
+    thing to say out loud. The PROVIDER may have declined — no curve, too
+    few points, equal rates, a day that holds one price — and it names which
+    (``TariffData.level_absence``). Or the provider answered and THIS layer
+    declined, because the horizon it can still act on holds no difference:
+    the prices are known perfectly well, they simply do not vary from here.
+    That is ``flat``, not ``no_prices``, and reporting the provider's word
+    for it told the user their price feed was broken when it was fine.
+    """
+    try:
+        data = provider.get_tariff_data()
+    except Exception:  # noqa: BLE001
+        return LEVEL_NO_PRICES
+    if getattr(data, "price_level", None) is None:
+        return str(getattr(data, "level_absence", LEVEL_NO_PRICES)
+                   or LEVEL_NO_PRICES)
+    return LEVEL_FLAT
 
 
 def is_cheap(provider: Any, when: Optional[datetime] = None) -> bool:

@@ -686,6 +686,54 @@ class TestAnAbsenceIsNotACheapHour:
     def test_only_a_cheap_hour_may_start_a_day_grid_charge(self, level, expected):
         assert ps.is_cheap_name(level) is expected
 
+    @staticmethod
+    def _view(tariff_level, *, solar_w=0.0, home_w=500.0, target_kwh=8.0):
+        """Daytime, no sun, and a Min floor genuinely owed — the only thing
+        that can start a grid charge in this view is the tariff.
+
+        ``target_kwh`` matters: with nothing to fill the branch returns
+        early with the same words either way, which is what made the first
+        version of this test pass with the fix reverted.
+        """
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            ChargerEnergy, ChargerPower, ChargerView, FleetContext,
+        )
+        return ChargerView(
+            power=ChargerPower(charger_id="wb", power_w=0.0, connected=True,
+                               charging=False),
+            energy=ChargerEnergy(charger_id="wb"),
+            mode="solar_plus_cheap",
+            config={"ev_min_current": 6, "ev_phases": 3, "ev_voltage": 230,
+                    "ev_max_current": 16},
+            target_kwh=target_kwh,
+            fleet=FleetContext(solar_w=solar_w, home_w=home_w,
+                               battery_soc=92.0, is_night=False,
+                               tariff_level=tariff_level),
+        )
+
+    @pytest.mark.parametrize("level", ["flat", "no_prices"])
+    def test_a_flat_tariff_does_not_reach_the_grid_top_up_seam(self, level):
+        """The behavioural half, and it FAILS with the fix reverted —
+        verified by reverting it."""
+        from custom_components.solar_energy_management.coordinator.decide import (
+            decide,
+        )
+        absent = decide(self._view(level))
+        cheap = decide(self._view("cheap"))
+        normal = decide(self._view("normal"))
+
+        def _phase(d):
+            return str(getattr(d, "reason", "") or "").lower()
+
+        # A cheap hour DOES reach the grid seam — without this the test
+        # could pass because the mode never charges at all.
+        assert "day (cheap tariff)" in _phase(cheap) or "grid" in _phase(cheap), (
+            f"the cheap path no longer books a grid top-up: {_phase(cheap)}")
+        # An absence must land exactly where a NORMAL hour lands.
+        assert _phase(absent).replace(level, "normal") == _phase(normal), (
+            f"{level} took a different path from normal:\n  "
+            f"{_phase(absent)}\n  {_phase(normal)}")
+
     def test_the_gate_asks_the_vocabulary_and_not_for_none(self):
         """An AST contract, because the defect was the SHAPE of the test:
         a None-check standing in for "is there a level"."""
@@ -1028,3 +1076,47 @@ class TestAnInputSemCannotReadIsNotAnInputSayingNo:
         assert (now_level is None) == (at_level is None)
         for point in _read():
             assert point.level_absence is None
+
+
+@pytest.mark.unit
+class TestTheAbsenceNamesTheRightRefusal:
+    """Two different refusals reach the same ``None`` and they are not the
+    same thing to tell a user. The provider may have declined — no curve,
+    equal rates, a day holding one price — or it answered and the
+    VOCABULARY declined, because the horizon it can still act on holds no
+    difference. The second is `flat`: the prices are known perfectly well.
+    Reporting the provider's word for it told people their price feed was
+    broken when it was fine."""
+
+    @staticmethod
+    def _prov(today, upcoming, level, absence="no_prices"):
+        d = SimpleNamespace(
+            today_min_price=today[0], today_max_price=today[1],
+            today_avg_price=today[2], price_level=level,
+            level_absence=absence,
+            upcoming_prices=[SimpleNamespace(price=v) for v in upcoming])
+        return SimpleNamespace(get_tariff_data=lambda: d,
+                               get_price_level=lambda: level,
+                               get_price_level_at=lambda w: level)
+
+    def test_a_flat_horizon_on_a_working_feed_is_flat(self):
+        p = self._prov((0.10, 0.40, 0.25), (0.40, 0.40, 0.40, 0.40),
+                       PriceLevel.EXPENSIVE)
+        assert ps.comparative_level(p) is None
+        assert ps.absence_word(p) == "flat"
+
+    def test_a_provider_that_declined_keeps_its_own_word(self):
+        flat = self._prov((0.36, 0.36, 0.36), (), None, "flat")
+        nothing = self._prov((None, None, None), (), None, "no_prices")
+        assert ps.absence_word(flat) == "flat"
+        assert ps.absence_word(nothing) == "no_prices"
+
+    def test_a_provider_that_raises_is_no_prices(self):
+        class _Boom:
+            def get_tariff_data(self): raise RuntimeError("no")
+        assert ps.absence_word(_Boom()) == "no_prices"
+
+    def test_neither_word_is_ever_actionable(self):
+        for word in ("flat", "no_prices"):
+            assert not ps.is_cheap_name(word)
+            assert not ps.is_expensive_name(word)

@@ -11241,8 +11241,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     # sensor reading `flat` — one situation, two stories.
                     # Neither word is in the cheap or expensive set, so no
                     # decision changes.
-                    tariff_level = getattr(
-                        provider.get_tariff_data(), "level_absence", None)
+                    from .price_signal import absence_word
+                    tariff_level = absence_word(provider)
         except Exception:
             tariff_level = None
 
