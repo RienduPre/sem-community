@@ -4906,7 +4906,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     if _today_prices:
                         _level_counts: Dict[str, int] = {}
                         for p in _today_prices:
-                            k = p.level.value if hasattr(p.level, "value") else str(p.level)
+                            # (#994) a slot the classifier could not
+                            # compare carries no level — count it as
+                            # "unknown", never as a confident word.
+                            k = (p.level.value if hasattr(p.level, "value")
+                                 else ("unknown" if p.level is None else str(p.level)))
                             _level_counts[k] = _level_counts.get(k, 0) + 1
                         result["tariff_today_prices_count"] = len(_today_prices)
                         result["tariff_today_level_counts"] = _level_counts
@@ -4936,7 +4940,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _td = self._tariff_provider.get_tariff_data()
                 result["tariff_upcoming"] = [
                     {"t": p.timestamp.isoformat(), "price": round(p.price, 4),
-                     "level": p.level.value}
+                     # (#994) None is a value the price card must render,
+                     # not an AttributeError that drops the whole curve.
+                     "level": p.level.value if p.level is not None else "unknown"}
                     for p in (_td.upcoming_prices or [])[:48]
                 ]
                 result["tariff_currency"] = _td.currency
@@ -5665,7 +5671,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             tariff = self._tariff_provider.get_tariff_data()
             tariff_data.tariff_current_import_rate = tariff.current_import_rate
             tariff_data.tariff_current_export_rate = tariff.current_export_rate
-            tariff_data.tariff_price_level = tariff.price_level.value
+            # (#994) ``price_level`` is tri-state now. ``.value`` on None
+            # raised AttributeError — caught by this block's own except — so
+            # a flat or not-yet-loaded tariff silently dropped the WHOLE
+            # payload (rates, min/max, windows) and published the dataclass
+            # defaults: a confident "normal" beside a classifier_path of
+            # "unknown". Found on the .175 rig within a minute of deploying.
+            tariff_data.tariff_price_level = (
+                tariff.price_level.value if tariff.price_level is not None
+                else "unknown")
             tariff_data.tariff_provider = tariff.provider
             tariff_data.tariff_is_dynamic = tariff.is_dynamic
             tariff_data.tariff_today_min_price = tariff.today_min_price

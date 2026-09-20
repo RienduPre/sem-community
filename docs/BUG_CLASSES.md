@@ -4218,3 +4218,28 @@ the defect as spec and was rewritten.
 produce this word, and what does it say when nobody compared any?** If the second answer is "the
 same word", the label is decoration and something downstream is spending it.
 Refs #994 #359 #728 #524 #953 #879 #925.
+
+### 103. A diagnostic written as a side-effect and read back later — it describes whichever call ran last — GUARDED
+**Symptom:** the one attribute a user reads to learn WHY a value came out that way names a
+different input entirely. On the .175 rig `sensor.sem_tariff_price_level` published `normal`
+beside `classifier_path: negative_price_shortcircuit`, on a current price of +0.00001 (#994).
+**Root shape:** `_classify_price` set `self._last_classifier_path` as a SIDE-EFFECT and every
+caller read the attribute back off the instance some time after the call. Two things then made
+the string belong to somebody else: reading the price curve classifies all 96 slots on every
+read, so the last slot wins; and `_get_percentile_breaks` returned early from its per-slot cache
+*without* re-stating the path, so a cache hit left whatever was there. The diagnostic was merely
+misleading until #994 made it **load-bearing** — `get_price_level` answered `None` when the path
+began with `percentile_fallback_` — at which point a stale fallback string could erase a level
+that real breakpoints had produced, and a stale negative string could dress a percentile answer
+as a sign check. A tri-state answer may never rest on a value a different question wrote.
+**Cure:** return the reason WITH the value from one call (`_classify_price_with_path` →
+`(level, path)`), decide the tri-state from that return, and publish both from the same answer
+(`_current_level_and_path`). Where a cache short-circuits the computation, cache the diagnostic
+beside the result and re-state it on the hit. Sweep question: *if two different questions can
+write this field, which one does a reader get?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestThePathDescribesTheLevelItShipsWith`
+— a cache hit still names its own path; a stale fallback string cannot erase a real level; the
+published path and level come from one answer; and an hour the classifier could not compare reads
+`unknown` on the hour-wise accessor too, not a confident `normal`.
+
+Refs #994 #359 #728 #925.

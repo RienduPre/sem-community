@@ -446,10 +446,33 @@ def _build_coordinator(scenario: Dict[str, Any]):
         # None — unnoticed for months because the night path never consults
         # the level. #856's daytime cheap-hours scenario was the first to.
         tariff_stub.get_price_level = MagicMock(return_value=str(scenario_tariff))
+        # (#994) …and the day the level is a claim ABOUT.
+        tariff_stub.get_tariff_data = MagicMock(
+            return_value=_tariff_stub_payload(scenario_tariff))
         tariff_stub.available = True
         coord._tariff_provider = tariff_stub
     coord._sensor_reader = MagicMock()
     return coord
+
+
+def _tariff_stub_payload(level: str):
+    """A tariff payload whose numbers AGREE with the level it claims (#994).
+
+    A stub that publishes ``very_cheap`` while saying nothing about today's
+    min and max is the exact incoherence #994 exists to end: the one
+    vocabulary refuses a comparative word when no comparison stands, so a
+    scenario asserting a cheap hour has to describe a day that HAS cheap
+    hours. These numbers are a plausible dynamic day; only the spread
+    matters to the vocabulary.
+    """
+    from unittest.mock import MagicMock as _MM
+
+    data = _MM()
+    data.today_min_price = 0.05
+    data.today_max_price = 0.40
+    data.today_avg_price = 0.20
+    data.price_level = str(level)
+    return data
 
 
 def _capture_actuator_calls(coord) -> List[Dict[str, Any]]:
@@ -548,6 +571,8 @@ async def run_scenario(yaml_path: Path) -> ScenarioRun:
             provider.current_level = str(effective["tariff_level"])
             provider.get_price_level = MagicMock(
                 return_value=str(effective["tariff_level"]))
+            provider.get_tariff_data = MagicMock(
+                return_value=_tariff_stub_payload(effective["tariff_level"]))
         readings = _build_power_readings(effective)
 
         # Record raw + derived

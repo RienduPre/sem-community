@@ -306,3 +306,116 @@ class TestNothingWaitsForAnHourThatCannotCome:
         )
         tips = EnergyAssistant._analyze_price(object(), None, 5.0)
         assert not [t for t in (tips or []) if "cheap" in str(getattr(t, "title", "")).lower()]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Live finding on .175, 20.09 10:10 — the path is a SIDE-EFFECT, and the
+# tri-state answer was reading it
+# ═══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.unit
+class TestThePathDescribesTheLevelItShipsWith:
+    """``classifier_path`` said ``negative_price_shortcircuit`` beside a
+    published ``normal``, on a positive current price — read off the rig.
+
+    ``_get_percentile_breaks`` sets the path as a SIDE-EFFECT and returns
+    early on a cache hit **without setting it**, so the string left behind
+    belongs to whichever price was classified last. ``_apply_levels``
+    classifies every point in the curve on each read, so on a day with one
+    negative slot the attribute a user reads to learn WHY describes some
+    other hour entirely (#359's whole purpose).
+
+    #994 made that string load-bearing: ``get_price_level`` answered
+    ``None`` when it started with ``percentile_fallback_``. A stale
+    fallback string from another call would then erase a level that real
+    breaks had produced. A tri-state answer may not rest on a value a
+    different question wrote.
+    """
+
+    @staticmethod
+    def _provider():
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            DynamicTariffProvider, PricePoint,
+        )
+        from homeassistant.util import dt as dt_util
+
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="percentile")
+        base = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        # A real spread, one negative slot — an ordinary NL solar-glut day.
+        curve = [-0.02] + [0.05 + 0.02 * i for i in range(23)]
+        p._prices_cache = [
+            PricePoint(timestamp=base + timedelta(hours=i), price=v,
+                       currency="EUR", level=PriceLevel.NORMAL)
+            for i, v in enumerate(curve)
+        ]
+        p.hass.states.get.return_value = SimpleNamespace(state="0.30")
+        # The parser is not under test here; the cache IS the curve, and
+        # reading it relevels every point exactly as the real one does.
+        def _read():
+            pts = list(p._prices_cache)
+            p._apply_levels(pts)
+            return pts
+        p._read_prices_list = _read
+        return p
+
+    def test_a_cache_hit_still_says_which_path_produced_the_level(self):
+        p = self._provider()
+        first = p.get_price_level()                      # cache MISS — sets the path
+        assert p._last_classifier_path.startswith("percentile_active(")
+        p._classify_price(-0.02)                         # what _apply_levels does
+        assert p._last_classifier_path == "negative_price_shortcircuit"
+        again = p.get_price_level()                      # cache HIT
+        assert again == first
+        assert p._last_classifier_path.startswith("percentile_active("), (
+            "the path must describe the price just classified, not the last "
+            f"one some other caller passed: {p._last_classifier_path}")
+
+    def test_a_stale_fallback_string_cannot_erase_a_real_level(self):
+        p = self._provider()
+        level = p.get_price_level()
+        assert level is not None
+        p._last_classifier_path = "percentile_fallback_flat_day(spread=0.0001)"
+        assert p.get_price_level() == level, (
+            "a level the breaks really produced was erased by a string "
+            "left behind by a different call")
+
+    def test_the_published_path_and_level_come_from_the_same_answer(self):
+        p = self._provider()
+        p._classify_price(-0.02)
+        d = p.get_tariff_data()
+        assert d.price_level is not None
+        assert d.classifier_path.startswith("percentile_active("), d.classifier_path
+
+    def test_an_hour_the_classifier_could_not_compare_has_no_level_either(self):
+        """``get_price_level_at`` used to answer NORMAL where
+        ``get_price_level`` answered None — the disagreement #994 exists
+        to end, still live on two of the three fallbacks."""
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            DynamicTariffProvider, PricePoint,
+        )
+        from homeassistant.util import dt as dt_util
+
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="percentile")
+        base = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        # A flat day: real points, no spread — "percentile_fallback_flat_day".
+        pts = [PricePoint(timestamp=base + timedelta(hours=i), price=0.30,
+                          currency="EUR", level=PriceLevel.NORMAL)
+               for i in range(24)]
+        p._prices_cache = list(pts)
+        p.hass.states.get.return_value = SimpleNamespace(state="0.30")
+
+        def _read():
+            out = list(p._prices_cache)
+            p._apply_levels(out)
+            return out
+        p._read_prices_list = _read
+
+        assert p.get_price_level() is None
+        assert p.get_price_level_at(base + timedelta(hours=1)) is None, (
+            "the hour-wise accessor still handed out a confident word")

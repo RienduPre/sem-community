@@ -52,9 +52,23 @@ was reached (`percentile_active`, `tou_tiers(...)`, `static_ht_nt`,
 If the sensor reads **`unknown`**, that is SEM saying your tariff gives it no
 hour to prefer. On a flat contract that is the correct and final answer.
 
+The path always describes the **same** answer the level came from. It did not
+always: the string was set as a side-effect and read back afterwards, and
+because every read of the price curve classifies all of today's slots, a day
+with one negative slot could publish `normal` beside
+`negative_price_shortcircuit` (seen on the test rig, 20.09). If you ever see a
+path that cannot explain the level beside it, that is a bug worth reporting —
+not a quirk of your tariff.
+
 ## Negative prices are not a comparison
 
 A negative price is an **absolute** fact and is handled as one: the export
 guard closes the meter on the *export* rate's own sign (#921/#955), and the
 battery's negative-price force charge reads the raw import price. Neither
 goes through the comparative path, so a flat tariff changes neither.
+
+`NEGATIVE` is also the one level the comparative vocabulary passes through
+without a spread behind it. Being paid to consume says nothing about any
+other hour and needs nothing from one, so a spot entity that publishes only
+its current state — no curve, nothing to compute a spread from — still holds
+the pack for the house in a negative hour.

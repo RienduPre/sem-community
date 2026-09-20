@@ -533,18 +533,29 @@ class TestWiring:
         assert "number.sem_ev_enable_delay_seconds" in body
         assert "number.sem_ev_disable_delay_seconds" in body
 
-    def test_fleet_tariff_level_uses_get_price_level(self) -> None:
-        # #524 — the fleet cycle state must read the tariff level via the
-        # provider's ``get_price_level()`` API. The old
-        # ``getattr(provider, "current_level", None)`` referenced a
-        # non-existent attribute and silently left tariff_level None,
-        # killing every tariff-aware EV decision.
+    def test_fleet_tariff_level_comes_from_the_one_vocabulary(self) -> None:
+        """#524, re-anchored for #994.
+
+        #524's defect was a fleet ``tariff_level`` read off a
+        ``current_level`` attribute no provider has — silently None, killing
+        every tariff-aware EV decision. The anchor held it to
+        ``provider.get_price_level()``; since #994 the level must come from
+        ``price_signal.comparative_level``, which asks that accessor AND
+        checks a comparison stands behind the answer. Asserted over the AST
+        rather than by searching the file's text — the #925 form. (It never
+        counted in that arc's ledger, which matches ``in src``/``in source``
+        only; this one read a variable called ``body``, which is the same
+        defect wearing a different name.)
+        """
+        from .ast_contracts import call_sites
+
+        sites = call_sites("comparative_level")
+        assert any(f == "coordinator/coordinator.py" for f, _, _ in sites), (
+            "#524/#994 anchor — the fleet tariff_level must come from "
+            f"price_signal.comparative_level. Call sites: {sites}")
+
         body = (Path(__file__).parent.parent / "coordinator"
                 / "coordinator.py").read_text()
-        assert "provider.get_price_level()" in body, (
-            "#524 anchor — fleet tariff_level must come from "
-            "provider.get_price_level()."
-        )
         assert 'getattr(provider, "current_level"' not in body, (
             "#524 — the dead current_level read must not return."
         )

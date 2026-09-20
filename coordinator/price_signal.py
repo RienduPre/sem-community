@@ -155,8 +155,16 @@ def comparative_level(provider: Any,
     ``when`` asks about a specific hour (the planners' question); omitted, it
     asks about now. A provider that declines to answer, or a horizon with no
     spread, is ``None`` — never a level, and never the cheap bucket.
+
+    **NEGATIVE is the exception, and it is not one of principle.** Being paid
+    to consume is an ABSOLUTE fact about a price, not a claim about some
+    other hour, so it survives a horizon nobody could read — a spot entity
+    with no published curve reports its own negative state perfectly well.
+    Gating it on ``variation_known`` cost the house sink its hold in a
+    negative import hour (``test_921_sink_scenario``), which is the one hour
+    where holding the pack is unarguable.
     """
-    if provider is None or not variation_known(provider):
+    if provider is None:
         return None
     try:
         level = (provider.get_price_level_at(when) if when is not None
@@ -166,10 +174,12 @@ def comparative_level(provider: Any,
     if level is None:
         return None
     name = _name(level)
-    for lv in PriceLevel:
-        if lv.value == name:
-            return lv
-    return None
+    resolved = next((lv for lv in PriceLevel if lv.value == name), None)
+    if resolved is None:
+        return None
+    if resolved is PriceLevel.NEGATIVE:
+        return resolved
+    return resolved if variation_known(provider) else None
 
 
 def is_cheap(provider: Any, when: Optional[datetime] = None) -> bool:

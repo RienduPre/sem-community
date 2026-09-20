@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🐛 **The EV planner could book an hour it had no price for** (#994). An
   unpriced hour scored as `normal` in the cheapest-slot search, so silence
   was spent as an answer in the one place that commits money.
+- 🐛 **The sensor said why your hour got its word, and named a different
+  hour** (#994, found on the test rig). `classifier_path` is set as a
+  side-effect and read back later, and the percentile breaks return early
+  from a cache — leaving the previous caller's string in place. Since every
+  read of the price curve classifies all 96 slots, a day with one negative
+  slot published `normal` beside `negative_price_shortcircuit`. A level and
+  the reason for it are now one answer, and the same fix removes a way for a
+  stale string to erase a level real breakpoints had produced. An hour whose
+  price the classifier could not compare now reads `unknown` on the hour-wise
+  accessor too, instead of a confident `normal`.
 
 # [2.1.0-beta.32] — 19.09.2026
 
