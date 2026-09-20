@@ -819,16 +819,43 @@ class TestTheDeeperFindings:
         p = self._dyn(mode="static", entity_state="0.05")
         assert p.get_price_level() is not None
 
-    def test_the_flat_day_guard_is_relative(self):
-        """A 1 ct absolute cutoff is a European ruler. #417 was at 1.69/kWh
-        and #549 three orders of magnitude away."""
+    @staticmethod
+    def _is_flat(values):
+        """What the guard decides for a window, through the real provider."""
+        from unittest.mock import MagicMock
+
         from custom_components.solar_energy_management.tariff.tariff_provider import (
-            FLAT_DAY_SPREAD_FRACTION,
+            DynamicTariffProvider, PricePoint,
         )
-        # A tariff quoted in a unit 1000x smaller, genuinely varying.
-        assert (300.0 * FLAT_DAY_SPREAD_FRACTION) > 1.0
-        # …and one quoted in the usual EUR scale keeps roughly the old cut.
-        assert 0.005 < (0.30 * FLAT_DAY_SPREAD_FRACTION) < 0.02
+        from homeassistant.util import dt as dt_util
+
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="percentile")
+        base = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        p._prices_cache = [
+            PricePoint(timestamp=base + timedelta(hours=i), price=v,
+                       currency="EUR", level=PriceLevel.NORMAL)
+            for i, v in enumerate(values)]
+        p._get_percentile_breaks()
+        return p._last_classifier_path.startswith("percentile_fallback_flat_day")
+
+    @pytest.mark.parametrize("name,values,flat", [
+        ("a EUR day with a real spread", [0.10, 0.20, 0.30, 0.40, 0.15, 0.35], False),
+        ("a EUR day that is functionally flat", [0.300, 0.301, 0.302, 0.300], True),
+        ("a Dutch glut day crossing zero", [-0.05, 0.0, 0.0, 0.05, -0.02, 0.04], False),
+        ("a day flat at exactly zero", [0.0, 0.0, 0.0, 0.0, 0.0], True),
+        ("a rupee-scale day with a real spread", [100.0, 200.0, 300.0, 400.0], False),
+        ("a rupee-scale day that is flat", [300.0, 300.1, 300.0, 300.05], True),
+    ])
+    def test_the_flat_day_guard_measures_in_the_curves_own_units(
+            self, name, values, flat):
+        """The cutoff was a flat 1 ct — an absolute number in one currency,
+        which is #359's defect and was already re-fixed at 1.69/kWh (#417)
+        and three orders of magnitude away (#549). The rupee-scale flat day
+        is the one the old guard got wrong; the Dutch glut day is why the
+        scale comes from the prices' magnitude and not from their mean,
+        which nearly cancels there."""
+        assert self._is_flat(values) is flat, name
 
     def test_the_spread_is_measured_over_the_curve_the_level_used(self):
         """``variation_known`` read today by the wall clock while the
@@ -880,3 +907,124 @@ class TestTheDeeperFindings:
         # "the prices are all the same".
         assert [x.level for x in pts] == [None, None]
         assert {x.level_absence for x in pts} == {LEVEL_NO_PRICES}
+
+
+@pytest.mark.unit
+class TestAnInputSemCannotReadIsNotAnInputSayingNo:
+    """#925's rule, applied to the calendar's two ENTITY inputs and to the
+    price entity itself. Found by working the third review's checklist by
+    hand while it ran."""
+
+    @staticmethod
+    def _cal(rules=None, schedule=None, holiday=None, states=None,
+             default="off_peak"):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.calendar_provider import (
+            CalendarTariffProvider,
+        )
+        hass = MagicMock()
+        hass.states.get = lambda eid: (states or {}).get(eid)
+        return CalendarTariffProvider(
+            hass, peak_rate=0.36, off_peak_rate=0.22, rules=rules or [],
+            default_tariff=default, schedule_entity=schedule,
+            holiday_entity=holiday)
+
+    MON = datetime(2026, 9, 21, 9, 0)
+
+    @pytest.mark.parametrize("state", ["unavailable", "unknown", None])
+    def test_a_schedule_helper_that_will_not_read_says_nothing(self, state):
+        """It answered "not on" → NT → CHEAP, all day, on an input nobody
+        could see."""
+        states = ({"schedule.t": SimpleNamespace(state=state)}
+                  if state is not None else {})
+        p = self._cal(rules=[], schedule="schedule.t", states=states)
+        assert p.get_price_level_at(self.MON) is None
+
+    def test_a_schedule_helper_that_reads_still_answers(self):
+        p = self._cal(rules=[], schedule="schedule.t",
+                      states={"schedule.t": SimpleNamespace(state="on")})
+        assert p.get_price_level_at(self.MON) == PriceLevel.NORMAL
+
+    @pytest.mark.parametrize("state", ["unavailable", "unknown"])
+    def test_an_unreadable_holiday_sensor_is_not_a_working_day(self, state):
+        """A holiday is off-peak midnight to midnight, so while SEM cannot
+        tell, it cannot tell whether a peak hour is reachable either."""
+        p = self._cal(rules=[{"days": [0,1,2,3,4], "start": "07:00",
+                              "end": "20:00", "tariff": "ht"}],
+                      holiday="binary_sensor.h",
+                      states={"binary_sensor.h": SimpleNamespace(state=state)})
+        assert p.get_price_level_at(self.MON) is None
+
+    def test_a_readable_holiday_sensor_that_says_no_still_answers(self):
+        p = self._cal(rules=[{"days": [0,1,2,3,4], "start": "07:00",
+                              "end": "20:00", "tariff": "ht"}],
+                      holiday="binary_sensor.h",
+                      states={"binary_sensor.h": SimpleNamespace(state="off")})
+        assert p.get_price_level_at(self.MON) == PriceLevel.NORMAL
+
+    def test_weekdays_written_as_strings_are_still_weekdays(self):
+        """``dow not in ["0"]`` is True every day of the week, so the whole
+        rule was dropped and the install lost its levels without a word."""
+        p = self._cal(rules=[{"days": ["0", "1"], "start": "07:00",
+                              "end": "20:00", "tariff": "ht"}])
+        assert p.get_price_level_at(self.MON) == PriceLevel.NORMAL
+
+    def test_a_nonsense_weekday_is_dropped_not_crashed(self):
+        p = self._cal(rules=[{"days": [9, "sat", None], "start": "07:00",
+                              "end": "20:00", "tariff": "ht"}])
+        assert p.get_price_level_at(self.MON) is None
+
+    @pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
+    def test_a_price_that_is_not_a_number_is_not_a_price(self, raw):
+        """NaN parses perfectly well and then compares False against every
+        threshold, so it would have been classified rather than refused."""
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            DynamicTariffProvider,
+        )
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="static")
+        p.hass.states.get.return_value = SimpleNamespace(state=raw,
+                                                         attributes={})
+        level, path = p._current_level_and_path()
+        assert level is None
+        assert path == "no_price_to_classify"
+
+
+    def test_both_accessors_agree_in_fixed_cutoff_mode_too(self):
+        """``_apply_levels`` ran only in percentile mode, so with fixed
+        cutoffs the per-slot levels were the parse-time guess and never an
+        absence — ``get_price_level_at`` answering a word for an hour
+        ``get_price_level`` had declined, in the one mode nobody looked at."""
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.tariff.tariff_provider import (
+            DynamicTariffProvider, PricePoint,
+        )
+        from homeassistant.util import dt as dt_util
+
+        p = DynamicTariffProvider(MagicMock(), price_entity="sensor.fake",
+                                  classification_mode="static")
+        base = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        pts = [PricePoint(timestamp=base + timedelta(hours=i), price=0.05 * (i + 1),
+                          currency="EUR", level=None) for i in range(4)]
+        p._prices_cache = list(pts)
+        p.hass.states.get.return_value = SimpleNamespace(state="0.05",
+                                                         attributes={})
+
+        def _read():
+            out = list(p._prices_cache)
+            p._apply_levels(out)
+            return out
+        p._read_prices_list = _read
+
+        now_level = p.get_price_level()
+        at_level = p.get_price_level_at(base + timedelta(minutes=30))
+        assert now_level is not None and at_level is not None
+        # Whatever they say, they may not contradict each other about
+        # whether a level exists at all.
+        assert (now_level is None) == (at_level is None)
+        for point in _read():
+            assert point.level_absence is None

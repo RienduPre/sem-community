@@ -55,6 +55,25 @@ TARIFF_PRESETS = {
 }
 
 
+def _day_numbers(value: object) -> List[int]:
+    """A rule's weekday list as integers 0-6, silently dropping the rest.
+
+    (#994) Storage and YAML both hand back ``["0", "1"]`` readily enough,
+    and ``dow not in ["0"]`` is True for every day of the week — so the
+    whole rule was ignored and the install lost its levels without a word.
+    ``None`` used to raise TypeError out of the update loop.
+    """
+    out: List[int] = []
+    for item in (value or []):
+        try:
+            day = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6:
+            out.append(day)
+    return out
+
+
 def _tariff_word(value: object) -> str:
     """A rule's tariff word, normalised: ``ht`` or ``nt``.
 
@@ -105,7 +124,7 @@ class CalendarTariffProvider(TariffProvider):
             # reader lower-cased and thought it was — a level of CHEAP,
             # forever, on a day that does have a peak window. And a
             # ``"days": null`` raised TypeError out of the update loop.
-            days = list(rule.get("days") or [])
+            days = _day_numbers(rule.get("days"))
             start = self._parse_time(rule.get("start", "00:00"))
             end = self._parse_time(rule.get("end", "00:00"))
             tariff = _tariff_word(rule.get("tariff", "peak"))
@@ -126,6 +145,20 @@ class CalendarTariffProvider(TariffProvider):
         """Parse "HH:MM" string to time object."""
         parts = s.split(":")
         return time(int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
+
+    def _holiday_readable(self) -> bool:
+        """(#994) Can the holiday question be ASKED right now?
+
+        Configured-but-unreadable is its own answer (#925). A holiday is
+        off-peak from midnight to midnight, so while SEM cannot tell, it
+        cannot tell whether a peak hour is reachable today either — and
+        ``_is_holiday`` answering a flat False turned "I could not ask"
+        into "it is a normal working day", complete with a level.
+        """
+        if not self.holiday_entity:
+            return True
+        state = self.hass.states.get(self.holiday_entity)
+        return bool(state) and state.state not in ("unknown", "unavailable")
 
     def _is_holiday(self) -> bool:
         """Check if today is a holiday (via binary_sensor)."""
@@ -148,9 +181,12 @@ class CalendarTariffProvider(TariffProvider):
         # HA Schedule helper mode
         if self.schedule_entity:
             state = self.hass.states.get(self.schedule_entity)
-            if state:
+            if state and state.state not in ("unknown", "unavailable"):
                 # Schedule helper: "on" = HT period, "off" = NT period
                 return "ht" if state.state == "on" else "nt"
+            # (#994) A helper that will not read is not a helper saying NT.
+            # It used to answer "off" → NT → CHEAP, all day, on an input
+            # nobody could see.
             return self.default_tariff
 
         # Rule-based evaluation
@@ -220,6 +256,8 @@ class CalendarTariffProvider(TariffProvider):
         # says — ``_get_tariff_at`` checks it first and the rule scan never
         # knew, so a holiday published a peak/off-peak spread it could not
         # reach.
+        if self.holiday_entity and not self._holiday_readable():
+            return False        # cannot ask → cannot claim a peak hour
         if self.holiday_entity and self._is_holiday():
             return False
         # A Schedule helper decides moment by moment and publishes no
@@ -228,7 +266,8 @@ class CalendarTariffProvider(TariffProvider):
         # entire input mode, because a schedule-helper install has no
         # rules at all.
         if self.schedule_entity:
-            return self.hass.states.get(self.schedule_entity) is not None
+            st = self.hass.states.get(self.schedule_entity)
+            return bool(st) and st.state not in ("unknown", "unavailable")
         if not self._rules:
             return self.default_tariff == "ht"
         # Otherwise: ask the function that DECIDES, at every boundary the

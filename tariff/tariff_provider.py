@@ -154,11 +154,11 @@ class PricePoint:
 LEVEL_FLAT = "flat"
 LEVEL_NO_PRICES = "no_prices"
 
-#: How far p10 and p90 must sit apart, as a FRACTION of the window's own
-#: mean, before a day counts as having a price difference at all. 3 % lands
-#: on the previous hard-coded 1 ct/kWh for a 0.30 EUR tariff, so European
-#: installs keep the buckets #728 gave them; every other currency stops
-#: being measured with a European ruler.
+#: How far p10 and p90 must sit apart, as a FRACTION of the largest price
+#: in the window, before a day counts as having a price difference at all.
+#: 3 % lands on the previous hard-coded 1 ct/kWh for a 0.30 EUR tariff, so
+#: European installs keep the buckets #728 gave them; every other currency
+#: stops being measured with a European ruler.
 FLAT_DAY_SPREAD_FRACTION: float = 0.03
 
 
@@ -886,8 +886,12 @@ class DynamicTariffProvider(TariffProvider):
         if state and state.state not in ("unknown", "unavailable"):
             try:
                 value = float(state.state)
-                self._last_price_source = "entity"
-                return value
+                # (#994) NaN and inf parse perfectly well and then compare
+                # False against every threshold, so a price of "nan" would
+                # have been classified rather than refused.
+                if math.isfinite(value):
+                    self._last_price_source = "entity"
+                    return value
             except (ValueError, TypeError):
                 pass
 
@@ -1243,7 +1247,16 @@ class DynamicTariffProvider(TariffProvider):
         self._percentile_breaks = None  # invalidate to force recompute
         self._percentile_breaks_for = None
         self._tier_memo_for = None  # cache changed — re-detect tiers (#728)
-        if self.classification_mode == "percentile" and prices:
+        if prices:
+            # (#994) Every mode, not just percentile. In fixed-cutoff mode
+            # the per-slot levels were left as the inline parse-time guess
+            # and ``_apply_levels`` never ran, so ``get_price_level_at``
+            # answered a confident word for an hour ``get_price_level``
+            # had already declined — the two-accessor disagreement this
+            # issue exists to end, surviving in the one mode nobody looked
+            # at. The static path keeps its levels either way; what changes
+            # is that they now come from the same classifier, carrying the
+            # same absence when there is one.
             self._apply_levels(prices)
 
         # Re-key the memo with the real detected gap (the provisional
@@ -1665,10 +1678,13 @@ class DynamicTariffProvider(TariffProvider):
         # confidence. RELATIVE now, at a fraction chosen to land on the old
         # 1 ct for a typical 0.30 European tariff, so no EUR/CHF install
         # changes bucket while every other currency starts working.
-        _window_mean = (sum(window_prices) / len(window_prices)
-                        if window_prices else 0.0)
-        _flat_cutoff = (abs(_window_mean) * FLAT_DAY_SPREAD_FRACTION
-                        if _window_mean else 1e-9)
+        # Scale from the prices' own MAGNITUDE, not their mean: a Dutch
+        # solar-glut day runs from a few cents negative to a few cents
+        # positive and averages nearly nothing, so a mean-relative cutoff
+        # loses all traction exactly where this market spends its summer.
+        _scale = max((abs(v) for v in window_prices), default=0.0)
+        _flat_cutoff = (_scale * FLAT_DAY_SPREAD_FRACTION
+                        if _scale else 1e-9)
         if (breaks["p90"] - breaks["p10"]) < _flat_cutoff:
             self._last_classifier_path = (
                 f"percentile_fallback_flat_day("
