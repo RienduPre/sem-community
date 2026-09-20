@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.35] — 20.09.2026
+
 - 🐛 **A flat tariff was published as "cheap", and the battery was held for
   an hour that could not come** (#994). SEM's price level is a *comparison*,
   but two of its three providers produced one from a **clock**: the static
