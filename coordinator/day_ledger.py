@@ -30,6 +30,7 @@ import math
 from datetime import datetime, timedelta
 
 from .energy_planner import LedgerSlot
+from .price_signal import is_cheap_name
 
 # Below this computed surplus a "free window" is forecast noise, not a
 # plannable window — mirrors the delta-guard instinct on the EV side.
@@ -220,8 +221,8 @@ def tariff_cheap_at(prov, ts):
             lvl = prov.get_price_level_at(ts)
         except Exception:  # noqa: BLE001 — no level is not cheap
             return False
-        name = str(getattr(lvl, "value", lvl) or "").lower()
-        return name in ("cheap", "very_cheap", "negative")
+        # (#994) one vocabulary; an unknown level is never cheap.
+        return is_cheap_name(lvl)
     return False
 
 

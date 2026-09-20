@@ -1558,7 +1558,9 @@
     "ev_morning_window_hours": "Ranní okno (h)",
     "config_help_ev_morning_window_hours": "Kolik hodin před odjezdem se okno otevře.",
     "battery_morning_drain_floor_soc": "Ranní dno vybíjení (%)",
-    "config_help_battery_morning_drain_floor_soc": "Okno nikdy nevybije baterii pod tento SOC."
+    "config_help_battery_morning_drain_floor_soc": "Okno nikdy nevybije baterii pod tento SOC.",
+    "price_level_flat": "Žádný cenový rozdíl",
+    "price_level_no_prices": "Nejsou dostupné ceny"
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3119,7 +3121,9 @@
     "ev_morning_window_hours": "Morgenvindue (t)",
     "config_help_ev_morning_window_hours": "Timer før afgang, hvor vinduet åbner.",
     "battery_morning_drain_floor_soc": "Afladningsgulv om morgenen (%)",
-    "config_help_battery_morning_drain_floor_soc": "Vinduet tager aldrig batteriet under denne SOC."
+    "config_help_battery_morning_drain_floor_soc": "Vinduet tager aldrig batteriet under denne SOC.",
+    "price_level_flat": "Ingen prisforskel",
+    "price_level_no_prices": "Ingen priser tilgængelige"
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4680,7 +4684,9 @@
     "ev_morning_window_hours": "Morgen-Fenster (h)",
     "config_help_ev_morning_window_hours": "Stunden vor der Abfahrt, ab denen das Fenster geöffnet ist.",
     "battery_morning_drain_floor_soc": "Morgen-Entladeuntergrenze (%)",
-    "config_help_battery_morning_drain_floor_soc": "Das Fenster entlädt den Speicher nie unter diesen SOC."
+    "config_help_battery_morning_drain_floor_soc": "Das Fenster entlädt den Speicher nie unter diesen SOC.",
+    "price_level_flat": "Kein Preisunterschied",
+    "price_level_no_prices": "Keine Preise verfügbar"
   },
   "en": {
     "% of limit": "% of limit",
@@ -6241,7 +6247,9 @@
     "ev_morning_window_hours": "Morning window (h)",
     "config_help_ev_morning_window_hours": "Hours before departure the window opens.",
     "battery_morning_drain_floor_soc": "Morning drain floor (%)",
-    "config_help_battery_morning_drain_floor_soc": "The window never takes the pack below this SOC."
+    "config_help_battery_morning_drain_floor_soc": "The window never takes the pack below this SOC.",
+    "price_level_flat": "No price difference",
+    "price_level_no_prices": "No prices available"
   },
   "es": {
     "% of limit": "% del límite",
@@ -7802,7 +7810,9 @@
     "ev_morning_window_hours": "Ventana matinal (h)",
     "config_help_ev_morning_window_hours": "Horas antes de la salida en que se abre la ventana.",
     "battery_morning_drain_floor_soc": "Suelo de descarga matinal (%)",
-    "config_help_battery_morning_drain_floor_soc": "La ventana nunca baja la batería por debajo de este SOC."
+    "config_help_battery_morning_drain_floor_soc": "La ventana nunca baja la batería por debajo de este SOC.",
+    "price_level_flat": "Sin diferencia de precio",
+    "price_level_no_prices": "Sin precios disponibles"
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9363,7 +9373,9 @@
     "ev_morning_window_hours": "Aamuikkuna (h)",
     "config_help_ev_morning_window_hours": "Kuinka monta tuntia ennen lähtöä ikkuna avautuu.",
     "battery_morning_drain_floor_soc": "Aamun purkualaraja (%)",
-    "config_help_battery_morning_drain_floor_soc": "Ikkuna ei koskaan pura akkua tämän SOC:n alle."
+    "config_help_battery_morning_drain_floor_soc": "Ikkuna ei koskaan pura akkua tämän SOC:n alle.",
+    "price_level_flat": "Ei hintaeroa",
+    "price_level_no_prices": "Hintoja ei saatavilla"
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -10924,7 +10936,9 @@
     "ev_morning_window_hours": "Fenêtre matinale (h)",
     "config_help_ev_morning_window_hours": "Heures avant le départ où la fenêtre s'ouvre.",
     "battery_morning_drain_floor_soc": "Plancher de décharge matinal (%)",
-    "config_help_battery_morning_drain_floor_soc": "La fenêtre ne descend jamais la batterie sous ce SOC."
+    "config_help_battery_morning_drain_floor_soc": "La fenêtre ne descend jamais la batterie sous ce SOC.",
+    "price_level_flat": "Aucun écart de prix",
+    "price_level_no_prices": "Aucun prix disponible"
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12485,7 +12499,9 @@
     "ev_morning_window_hours": "Reggeli ablak (h)",
     "config_help_ev_morning_window_hours": "Hány órával az indulás előtt nyílik az ablak.",
     "battery_morning_drain_floor_soc": "Reggeli kisütési alsó határ (%)",
-    "config_help_battery_morning_drain_floor_soc": "Az ablak soha nem süti ki az akkut ez alá a SOC alá."
+    "config_help_battery_morning_drain_floor_soc": "Az ablak soha nem süti ki az akkut ez alá a SOC alá.",
+    "price_level_flat": "Nincs árkülönbség",
+    "price_level_no_prices": "Nincsenek elérhető árak"
   },
   "it": {
     "% of limit": "% del limite",
@@ -14046,7 +14062,9 @@
     "ev_morning_window_hours": "Finestra mattutina (h)",
     "config_help_ev_morning_window_hours": "Ore prima della partenza in cui la finestra si apre.",
     "battery_morning_drain_floor_soc": "Soglia di scarica mattutina (%)",
-    "config_help_battery_morning_drain_floor_soc": "La finestra non porta mai la batteria sotto questo SOC."
+    "config_help_battery_morning_drain_floor_soc": "La finestra non porta mai la batteria sotto questo SOC.",
+    "price_level_flat": "Nessuna differenza di prezzo",
+    "price_level_no_prices": "Nessun prezzo disponibile"
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15607,7 +15625,9 @@
     "ev_morning_window_hours": "Ochtendvenster (u)",
     "config_help_ev_morning_window_hours": "Uren vóór vertrek waarop het venster opengaat.",
     "battery_morning_drain_floor_soc": "Ochtend-ontlaadondergrens (%)",
-    "config_help_battery_morning_drain_floor_soc": "Het venster ontlaadt de accu nooit onder deze SOC."
+    "config_help_battery_morning_drain_floor_soc": "Het venster ontlaadt de accu nooit onder deze SOC.",
+    "price_level_flat": "Geen prijsverschil",
+    "price_level_no_prices": "Geen prijzen beschikbaar"
   },
   "no": {
     "% of limit": "% av grense",
@@ -17168,7 +17188,9 @@
     "ev_morning_window_hours": "Morgenvindu (t)",
     "config_help_ev_morning_window_hours": "Timer før avreise da vinduet åpner.",
     "battery_morning_drain_floor_soc": "Utladingsgulv om morgenen (%)",
-    "config_help_battery_morning_drain_floor_soc": "Vinduet tar aldri batteriet under denne SOC."
+    "config_help_battery_morning_drain_floor_soc": "Vinduet tar aldri batteriet under denne SOC.",
+    "price_level_flat": "Ingen prisforskjell",
+    "price_level_no_prices": "Ingen priser tilgjengelig"
   },
   "pl": {
     "% of limit": "% limitu",
@@ -18729,7 +18751,9 @@
     "ev_morning_window_hours": "Poranne okno (h)",
     "config_help_ev_morning_window_hours": "Ile godzin przed wyjazdem okno się otwiera.",
     "battery_morning_drain_floor_soc": "Poranny próg rozładowania (%)",
-    "config_help_battery_morning_drain_floor_soc": "Okno nigdy nie rozładuje baterii poniżej tego SOC."
+    "config_help_battery_morning_drain_floor_soc": "Okno nigdy nie rozładuje baterii poniżej tego SOC.",
+    "price_level_flat": "Brak różnicy cen",
+    "price_level_no_prices": "Brak dostępnych cen"
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20290,7 +20314,9 @@
     "ev_morning_window_hours": "Janela matinal (h)",
     "config_help_ev_morning_window_hours": "Horas antes da partida em que a janela abre.",
     "battery_morning_drain_floor_soc": "Piso de descarga matinal (%)",
-    "config_help_battery_morning_drain_floor_soc": "A janela nunca leva a bateria abaixo deste SOC."
+    "config_help_battery_morning_drain_floor_soc": "A janela nunca leva a bateria abaixo deste SOC.",
+    "price_level_flat": "Sem diferença de preço",
+    "price_level_no_prices": "Sem preços disponíveis"
   },
   "ro": {
     "% of limit": "% din limită",
@@ -21851,7 +21877,9 @@
     "ev_morning_window_hours": "Fereastra de dimineață (h)",
     "config_help_ev_morning_window_hours": "Ore înainte de plecare la care se deschide fereastra.",
     "battery_morning_drain_floor_soc": "Prag de descărcare dimineața (%)",
-    "config_help_battery_morning_drain_floor_soc": "Fereastra nu duce niciodată bateria sub acest SOC."
+    "config_help_battery_morning_drain_floor_soc": "Fereastra nu duce niciodată bateria sub acest SOC.",
+    "price_level_flat": "Fără diferență de preț",
+    "price_level_no_prices": "Niciun preț disponibil"
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23412,7 +23440,9 @@
     "ev_morning_window_hours": "Morgonfönster (h)",
     "config_help_ev_morning_window_hours": "Timmar före avresa då fönstret öppnas.",
     "battery_morning_drain_floor_soc": "Urladdningsgolv på morgonen (%)",
-    "config_help_battery_morning_drain_floor_soc": "Fönstret tar aldrig batteriet under denna SOC."
+    "config_help_battery_morning_drain_floor_soc": "Fönstret tar aldrig batteriet under denna SOC.",
+    "price_level_flat": "Ingen prisskillnad",
+    "price_level_no_prices": "Inga priser tillgängliga"
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -24973,6 +25003,8 @@
     "ev_morning_window_hours": "晨间窗口（小时）",
     "config_help_ev_morning_window_hours": "出发前多少小时窗口开启。",
     "battery_morning_drain_floor_soc": "晨间放电下限（%）",
-    "config_help_battery_morning_drain_floor_soc": "窗口绝不会把电池放电到此 SOC 以下。"
+    "config_help_battery_morning_drain_floor_soc": "窗口绝不会把电池放电到此 SOC 以下。",
+    "price_level_flat": "无价格差异",
+    "price_level_no_prices": "无可用价格"
   }
 }

@@ -622,7 +622,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 grid_import_surcharge=config.get("grid_import_surcharge", 0.0),
             )
         elif tariff_mode == "calendar":
-            schedule = {}  # Was config.get("tariff_schedule", {}) — never set via UI
+            # (#994) Read it after all. No UI writes `tariff_schedule` today,
+            # so this is usually still empty — but hardcoding {} meant the
+            # provider could never be told otherwise, and an empty rule set
+            # made it answer CHEAP unconditionally, forever, for every
+            # install that chose this mode. The provider now refuses to
+            # classify without a reachable HT rule; a YAML/storage-set
+            # schedule is honoured instead of discarded.
+            schedule = config.get("tariff_schedule", {}) or {}
             self._tariff_provider = CalendarTariffProvider(
                 hass,
                 peak_rate=config.get("electricity_import_rate", 0.35),
@@ -4891,6 +4898,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     _prices_for_diag = getattr(
                         self._tariff_provider, "_prices_cache", None,
                     ) or []
+                    _td_absence = getattr(
+                        self._tariff_provider.get_tariff_data(),
+                        "level_absence", "no_prices")
                     _today_for_diag = dt_util.now().date()
                     _today_prices = [
                         p for p in _prices_for_diag
@@ -4899,7 +4909,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     if _today_prices:
                         _level_counts: Dict[str, int] = {}
                         for p in _today_prices:
-                            k = p.level.value if hasattr(p.level, "value") else str(p.level)
+                            # (#994) a slot the classifier could not
+                            # compare carries no level — count it under the
+                            # absence the provider named, never as a
+                            # confident word.
+                            k = (p.level.value if hasattr(p.level, "value")
+                                 else ((getattr(p, "level_absence", None)
+                                        or _td_absence) if p.level is None
+                                       else str(p.level)))
                             _level_counts[k] = _level_counts.get(k, 0) + 1
                         result["tariff_today_prices_count"] = len(_today_prices)
                         result["tariff_today_level_counts"] = _level_counts
@@ -4929,7 +4946,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _td = self._tariff_provider.get_tariff_data()
                 result["tariff_upcoming"] = [
                     {"t": p.timestamp.isoformat(), "price": round(p.price, 4),
-                     "level": p.level.value}
+                     # (#994) None is a value the price card must render,
+                     # not an AttributeError that drops the whole curve.
+                     "level": (p.level.value if p.level is not None
+                               else (getattr(p, "level_absence", None)
+                                     or _td.level_absence))}
                     for p in (_td.upcoming_prices or [])[:48]
                 ]
                 result["tariff_currency"] = _td.currency
@@ -5658,7 +5679,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             tariff = self._tariff_provider.get_tariff_data()
             tariff_data.tariff_current_import_rate = tariff.current_import_rate
             tariff_data.tariff_current_export_rate = tariff.current_export_rate
-            tariff_data.tariff_price_level = tariff.price_level.value
+            # (#994) ``price_level`` is tri-state now. ``.value`` on None
+            # raised AttributeError — caught by this block's own except — so
+            # a flat or not-yet-loaded tariff silently dropped the WHOLE
+            # payload (rates, min/max, windows) and published the dataclass
+            # defaults: a confident "normal" beside a classifier_path of
+            # "unknown". Found on the .175 rig within a minute of deploying.
+            tariff_data.tariff_price_level = (
+                tariff.price_level.value if tariff.price_level is not None
+                else tariff.level_absence)
             tariff_data.tariff_provider = tariff.provider
             tariff_data.tariff_is_dynamic = tariff.is_dynamic
             tariff_data.tariff_today_min_price = tariff.today_min_price
@@ -11196,10 +11225,24 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         try:
             provider = getattr(self, "_tariff_provider", None)
             if provider is not None and getattr(provider, "available", True):
-                level = provider.get_price_level()
+                # (#994) through the one vocabulary: a level only exists
+                # when a comparison stands behind it, so a flat tariff
+                # threads None and every comparative consumer sees "unknown"
+                # rather than "cheap".
+                from .price_signal import comparative_level
+                level = comparative_level(provider)
                 level = getattr(level, "value", level)  # PriceLevel enum → str
                 if isinstance(level, str):
                     tariff_level = level
+                else:
+                    # (#994) …and when there is none, thread the SAME word
+                    # the sensor publishes. Leaving it None made every
+                    # verdict reason say "no prices to compare" beside a
+                    # sensor reading `flat` — one situation, two stories.
+                    # Neither word is in the cheap or expensive set, so no
+                    # decision changes.
+                    from .price_signal import absence_word
+                    tariff_level = absence_word(provider)
         except Exception:
             tariff_level = None
 

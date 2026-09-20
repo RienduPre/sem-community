@@ -18,6 +18,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semCardSurfaceCSS, SEM_COLORS, semDefineCard } from '../base/sem-shared.js';
+import { priceLevelColor, priceLevelKey } from '../util/price-level.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -94,10 +95,14 @@ class SEMGridCard extends SEMLitBase {
     }
 
     _priceLevelColor(level) {
+        // 'high'/'low' are this card's own legacy load-management words.
         if (level === 'high') return '#f06292';
         if (level === 'low')  return '#8DC892';
-        if (level !== '—')   return '#ff9800';
-        return '#888';
+        // (#994) Anything that is not one of the six comparative words —
+        // '—', '', 'unknown', an entity that has not loaded — is grey. The
+        // old fallback handed every one of them NORMAL's orange, which is
+        // pixel-identical to a level SEM had actually concluded.
+        return priceLevelColor(level, '#888');
     }
 
     _metricRow(labelKey, valueHtml) {
@@ -409,7 +414,7 @@ class SEMGridCard extends SEMLitBase {
                         <div class="metric-row">
                             <span class="metric-label">${this._t('price_level')}</span>
                             <span class="metric-val" style="color:${levelColor}">
-                                ${priceLevel ? this._t(priceLevel) : '—'}
+                                ${priceLevel ? this._t(priceLevelKey(priceLevel)) : '—'}
                             </span>
                         </div>
                         <div class="metric-row">

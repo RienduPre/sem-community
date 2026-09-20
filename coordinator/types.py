@@ -786,7 +786,12 @@ class TariffSensorData:
     """Tariff data for coordinator sensors."""
     tariff_current_import_rate: float = 0.0
     tariff_current_export_rate: float = 0.0
-    tariff_price_level: str = "normal"
+    #: (#994) the default is the ABSENCE of a level, not a
+    #: confident middle one — a cycle that could not classify must
+    #: not publish "normal".
+    #: (#994) "no_prices" until a provider answers — nothing has been read
+    #: yet, which is exactly what that word means. Never a level.
+    tariff_price_level: str = "no_prices"
     tariff_provider: str = "static"
     tariff_is_dynamic: bool = False
     tariff_today_min_price: Optional[float] = None

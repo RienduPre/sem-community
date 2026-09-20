@@ -17,16 +17,9 @@
 
 import { SEMLitBase, html, css, svg, nothing } from '../base/sem-lit-base.js';
 import { semDefineCard } from '../base/sem-shared.js';
+import { priceLevelColor, priceLevelKey } from '../util/price-level.js';
 
 const DEFAULT_ENTITY = 'sensor.sem_tariff_current_import_rate';
-const LEVELS = {
-    negative:       { color: '#4db6ac', key: 'price_negative' },
-    very_cheap:     { color: '#8DC892', key: 'very_cheap' },
-    cheap:          { color: '#8DC892', key: 'cheap' },
-    normal:         { color: '#ff9800', key: 'normal' },
-    expensive:      { color: '#f06292', key: 'expensive' },
-    very_expensive: { color: '#e53935', key: 'very_expensive' },
-};
 
 class SEMPriceCard extends SEMLitBase {
     constructor() {
@@ -81,7 +74,14 @@ class SEMPriceCard extends SEMLitBase {
     }
 
     _levelInfo(level) {
-        return LEVELS[level] || { color: '#9e9e9e', key: 'normal' };
+        // A level the card does not recognise is NOT normal — that default
+        // put a word SEM never chose in front of the user (#994). Colour
+        // and key both come from the shared table, so this card cannot
+        // drift from the other five.
+        return {
+            color: priceLevelColor(level, '#9e9e9e'),
+            key: priceLevelKey(level),
+        };
     }
 
     render() {

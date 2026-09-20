@@ -13,6 +13,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A flat tariff was published as "cheap", and the battery was held for
+  an hour that could not come** (#994). SEM's price level is a *comparison*,
+  but two of its three providers produced one from a **clock**: the static
+  HT/NT provider answered `cheap` every night without ever comparing its two
+  rates — its own shipped defaults are equal — and the calendar provider
+  answered `cheap` **unconditionally, forever**, because the coordinator
+  hardcoded an empty schedule. On a flat 0.36/0.36 tariff that made the
+  *house as a battery sink* hold the pack at a **0 W discharge limit** all
+  night while the house imported 3.66 kWh from a 92–100 % battery.
+  A level now exists only when a comparison stands behind it: equal rates,
+  a weekend under HT/NT (one price all day), a calendar with no high-tariff
+  window today, and a flat dynamic curve all read **`flat`**; a curve nobody
+  could read reads **`no_prices`**. Everything that would have
+  waited for a better hour acts now instead — the rule the export side has
+  followed since #921. The vocabulary is Tibber's, which defines it against a
+  3-day moving average and carries a "missing data" state; SEM had kept the
+  five words and dropped both. New [TARIFF_MODELS.md](docs/TARIFF_MODELS.md)
+  says what SEM claims per model, and names the two it does not model
+  (critical-peak events, and block rates priced by monthly consumption).
+- 🐛 **`very_expensive` did not damp the surplus pool** (#994). Six places had
+  hand-typed their own list of which levels count as cheap or dear; one had
+  already drifted. There is one list now, and a lint against a seventh.
+- 🐛 **The EV planner could book an hour it had no price for** (#994). An
+  unpriced hour scored as `normal` in the cheapest-slot search, so silence
+  was spent as an answer in the one place that commits money.
+- 🐛 **"Unknown" is now two words, because they are two different things**
+  (#994). When SEM has no comparative level, the sensor says **`flat`** ("No
+  price difference") when the comparison WAS made and the hours do not
+  differ, and **`no_prices`** ("No prices available") when it could not be
+  made at all. The first is your contract and needs nothing; the second means
+  your price entity is not being read. One word for both read, in Home
+  Assistant, like a broken sensor.
+- 🐛 **A calendar tariff did not know what day it was** (#994, found by
+  review). The new refusal asked whether a high-tariff rule exists anywhere in
+  the weekly table, never whether one can arrive on the day being classified.
+  Three of the five shipped Swiss presets have days with no HT rule — EKZ and
+  ewz stop at Saturday lunchtime, CKW at Friday — so on a Sunday they
+  reproduced this issue's own incident through the calendar instead of the
+  clock, and reported the full rate spread as the day's range while doing it.
+- 🐛 **The schedule strip called an unpriced hour "normal"** (#994, found by
+  review). The 5-tier scale collapses to three bands for the card, and a slot
+  the classifier had declined fell through both tests to `normal` — while the
+  diagnostic sixteen lines away counted the same slots as absent. Five cards
+  rendered the level and four had no label for the new words at all; they now
+  share one helper.
+- 🐛 **An absence was read as a cheap hour, and would have charged the car
+  from the grid** (#994, found by review). Giving "no comparative level" two
+  names of its own turned a Python `None` into a truthy string, and the
+  daytime grid-charge gate had been asking "is it not one of the dear words,
+  and not None" — a question that was only ever right while absence WAS
+  `None`. On a flat tariff a *Solar + cheapest hours* charger would have
+  topped the car up from the grid believing the hour cheap. The gate now asks
+  the vocabulary the question it exists to answer.
+- 🐛 **A calendar tariff could disagree with itself about the day** (#994,
+  found by review). Beyond the weekday fix above, the reachability check and
+  the code that actually decides had drifted apart in four more ways: a
+  holiday is off-peak from midnight to midnight and the check never knew; an
+  install driven by a Schedule helper has no rules at all and was silenced
+  entirely; a rule written `"HT"` was high tariff to every reader except the
+  one that decides, which compared case-sensitively; and a rule with no days
+  crashed the update loop. Rules are normalised once when they are read, and
+  the check now asks the deciding function instead of re-reading the table.
+- 🐛 **A price nobody could read was still classified** (#994, found by
+  review). With classification set to fixed cutoffs rather than percentiles,
+  a dead price entity fell back to a configured constant — default 0.30 — and
+  that constant was bucketed and published as a confident level. A price that
+  was never read now produces no level at all.
+- 🐛 **The flat-day guard measured every currency with a European ruler**
+  (#994, found by review). A day counted as having no price difference when
+  its spread was under 1 ct/kWh — an absolute cutoff, which is the defect
+  this same release fixes everywhere else, and which was already re-fixed
+  twice for a Slovak tariff and a Sri Lankan one. It is a fraction of the
+  day's own mean now, set so European installs keep the buckets they had.
+- 🐛 **The sensor said why your hour got its word, and named a different
+  hour** (#994, found on the test rig). `classifier_path` is set as a
+  side-effect and read back later, and the percentile breaks return early
+  from a cache — leaving the previous caller's string in place. Since every
+  read of the price curve classifies all 96 slots, a day with one negative
+  slot published `normal` beside `negative_price_shortcircuit`. A level and
+  the reason for it are now one answer, and the same fix removes a way for a
+  stale string to erase a level real breakpoints had produced. An hour whose
+  price the classifier could not compare now reads `unknown` on the hour-wise
+  accessor too, instead of a confident `normal`.
 # [2.1.0-beta.34] — 19.09.2026
 
 - 🐛 **A charger's current entity missing at startup was treated as missing

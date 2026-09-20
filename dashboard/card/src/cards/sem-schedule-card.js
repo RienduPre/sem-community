@@ -12,6 +12,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semDefineCard, SEM_COLORS } from '../base/sem-shared.js';
+import { LEVEL_FLAT, LEVEL_NO_PRICES } from '../util/price-level.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -139,10 +140,18 @@ class SEMScheduleCard extends SEMLitBase {
             return schedule.map(s => ({
                 start: parseTime(s.start) ?? 0,
                 end:   parseTime(s.end)   ?? 1,
+                // (#994) The legacy HT/NT fallback is the CLOCK answering
+                // for the classifier — the defect this issue is named for.
+                // It stays for providers that still send only `tariff`, but
+                // a block whose tariff is explicitly absent keeps its own
+                // word rather than being called normal.
                 level: s.level || (
-                    (s.tariff || s.type || 'HT').toUpperCase() === 'NT' ? 'cheap' : 'normal'
+                    s.tariff === null ? 'no_prices'
+                        : (s.tariff || s.type || 'HT').toUpperCase() === 'NT'
+                            ? 'cheap' : 'normal'
                 ),
-                type:  (s.tariff || s.type || 'HT').toUpperCase(),
+                type:  (s.tariff === null ? ''
+                        : (s.tariff || s.type || 'HT').toUpperCase()),
                 avgPrice: s.avg_price,
             }));
         }
@@ -164,6 +173,8 @@ class SEMScheduleCard extends SEMLitBase {
         // distinguish fallback rows from real per-hour data (dashed
         // stripe instead of solid fill).
         const currentLevel = this._stateObj('tariff_price_level')?.state;
+        // The absences are deliberately absent from this set: mirroring a
+        // level across the whole day only makes sense when there IS one.
         const knownLevels = new Set([
             'cheap', 'very_cheap', 'normal', 'expensive', 'very_expensive',
         ]);
@@ -179,7 +190,13 @@ class SEMScheduleCard extends SEMLitBase {
         // level reported. Default to ``normal`` so the colour is
         // neutral (vs the old "cheap on weekends" misleading shape),
         // and still mark as fallback so the renderer flags it.
-        return [{ start: 0, end: 1, level: 'normal', type: 'HT', isFallback: true }];
+        // (#994) …and "neither" is not NORMAL. Every static-tariff install
+        // reaches this line, because StaticTariffProvider publishes no
+        // schedule at all — so the neutral default was painting a
+        // confident mid-priced day for the most common configuration SEM
+        // has. A band with no level says so instead.
+        return [{ start: 0, end: 1, level: LEVEL_NO_PRICES, type: '',
+                  isFallback: true }];
     }
 
     _getNightWindow() {
@@ -356,11 +373,17 @@ class SEMScheduleCard extends SEMLitBase {
             cheap:     { fill: '#66bb6a', opacity: 0.62 },
             normal:    { fill: colors.solar, opacity: 0.55 },
             expensive: { fill: '#e91e63', opacity: 0.90 },
+            // (#994) A day with nothing to compare is drawn as one neutral
+            // band. Without these it took NORMAL's fill and a blank label.
+            [LEVEL_FLAT]:      { fill: '#9e9e9e', opacity: 0.35 },
+            [LEVEL_NO_PRICES]: { fill: '#9e9e9e', opacity: 0.35 },
         };
         const TARIFF_LEVEL_LABEL_KEY = {
             cheap:     'cheap',
             normal:    'normal',
             expensive: 'expensive',
+            [LEVEL_FLAT]:      'price_level_flat',
+            [LEVEL_NO_PRICES]: 'price_level_no_prices',
         };
         const tariffY = FRY;
         for (const block of this._getTariffSchedule()) {

@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from .price_signal import CHEAP_LEVELS, EXPENSIVE_LEVELS
 
 
 # Row kinds — keyed strings the card maps to icons + colors.
@@ -297,8 +298,9 @@ def compose_today_plan(
             except (ValueError, TypeError, KeyError):
                 continue
 
-        cheap_levels = ("cheap", "very_cheap", "negative")
-        expensive_levels = ("expensive", "very_expensive")
+        # (#994) one vocabulary, and a flat tariff draws neither block.
+        cheap_levels = tuple(lv.value for lv in CHEAP_LEVELS)
+        expensive_levels = tuple(lv.value for lv in EXPENSIVE_LEVELS)
 
         for block in _consecutive_blocks(future, cheap_levels, min_block_len=2):
             avg_price = sum(block["prices"]) / len(block["prices"])

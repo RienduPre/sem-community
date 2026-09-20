@@ -4366,3 +4366,105 @@ per-charger→global idiom is the real closure.
 means "empty on purpose", and show the read that can tell it from "not set yet".* If the read is an
 `or`, there is no such value.
 Refs #990 #685 #690 #627 #847.
+### 102. A word borrowed without its reference — GUARDED
+**Symptom:** a label that reads as an instruction is produced by something that never made the
+comparison the word implies. A flat 0.36/0.36 tariff published `cheap`; the house sink read it as
+"a better hour is coming", and the battery sat at a 0 W discharge limit overnight while the house
+imported 3.66 kWh (#994).
+**Root shape:** SEM's `PriceLevel` is Tibber's vocabulary, which is defined against a **3-day
+moving average** and carries a "missing data" state. SEM kept the five words and dropped both the
+reference and the absence. A CLOCK was then free to produce them — `StaticTariffProvider` answering
+from "not 07:00–20:00 on a weekday" without ever comparing its two rates, `CalendarTariffProvider`
+answering CHEAP unconditionally because the coordinator hardcoded an empty schedule — and eighteen
+consumers across six chains could not tell an asserted level from a measured one. The history is
+the proof that this is structural: #359 took six waves in four days, #728 two, and #524, #953 and
+#879 each rediscovered the trap on first contact with the same word.
+**Cure:** restore what the word lost. A level exists only when a comparison stands behind it
+(rates that differ, on a day that contains both; a curve with spread); otherwise the answer is
+`unknown`, and every consumer that would have waited acts now — the rule `sink_verdicts` already
+followed for export. One vocabulary in one module, so a seventh consumer cannot invent a seventh
+opinion. And the flat test is RELATIVE to the day's own mean, because an absolute cutoff in one
+currency is the #359 defect itself (re-fixed at 1.69/kWh in #417 and in LKR in #549).
+**Guard:** `tests/test_994_a_level_needs_a_reference.py` — the vocabulary, a model matrix on the
+real providers (flat · HT/NT weekday · HT/NT weekend · empty calendar · dynamic fallbacks), and one
+pin per comparative chain naming the harm it prevents. `tests/test_tariff_provider.py` was asserting
+the defect as spec and was rewritten.
+**Sweep question:** for any label SEM publishes or acts on — **what two numbers were compared to
+produce this word, and what does it say when nobody compared any?** If the second answer is "the
+same word", the label is decoration and something downstream is spending it.
+Refs #994 #359 #728 #524 #953 #879 #925.
+
+### 103. A diagnostic written as a side-effect and read back later — it describes whichever call ran last — GUARDED
+**Symptom:** the one attribute a user reads to learn WHY a value came out that way names a
+different input entirely. On the .175 rig `sensor.sem_tariff_price_level` published `normal`
+beside `classifier_path: negative_price_shortcircuit`, on a current price of +0.00001 (#994).
+**Root shape:** `_classify_price` set `self._last_classifier_path` as a SIDE-EFFECT and every
+caller read the attribute back off the instance some time after the call. Two things then made
+the string belong to somebody else: reading the price curve classifies all 96 slots on every
+read, so the last slot wins; and `_get_percentile_breaks` returned early from its per-slot cache
+*without* re-stating the path, so a cache hit left whatever was there. The diagnostic was merely
+misleading until #994 made it **load-bearing** — `get_price_level` answered `None` when the path
+began with `percentile_fallback_` — at which point a stale fallback string could erase a level
+that real breakpoints had produced, and a stale negative string could dress a percentile answer
+as a sign check. A tri-state answer may never rest on a value a different question wrote.
+**Cure:** return the reason WITH the value from one call (`_classify_price_with_path` →
+`(level, path)`), decide the tri-state from that return, and publish both from the same answer
+(`_current_level_and_path`). Where a cache short-circuits the computation, cache the diagnostic
+beside the result and re-state it on the hit. Sweep question: *if two different questions can
+write this field, which one does a reader get?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestThePathDescribesTheLevelItShipsWith`
+— a cache hit still names its own path; a stale fallback string cannot erase a real level; the
+published path and level come from one answer; and an hour the classifier could not compare reads
+`unknown` on the hour-wise accessor too, not a confident `normal`.
+
+Refs #994 #359 #728 #925.
+
+### 104. A rule table asked whether something exists, not whether it can happen TODAY — GUARDED
+**Symptom:** the refusal a fix installs holds everywhere except the one day it was meant for.
+`CalendarTariffProvider` answered CHEAP on a Sunday under the shipped EKZ preset, whose rules
+cover Mon–Fri plus Saturday morning — reproducing #994's own incident through the calendar after
+#994 had fixed it in the clock-based provider (#994, found by review).
+**Root shape:** the sibling provider had the question right — `_both_rates_occur(when)` asks
+whether THIS DAY contains both rates — and the second implementation asked a weaker one:
+`any(rule is HT for rule in the whole week)`. A weekly table is a statement about the week; a
+verdict is about a moment. The two differ on exactly the days a schedule leaves uncovered, and
+three of five shipped presets have such days. Worse, `get_price_level_at(when)` received the day
+and dropped it, and `get_tariff_data` used the same blind check — so `today_min`/`today_max`
+carried the full spread and the SECOND gate (`variation_known`, which reads those two fields) was
+fooled too. Going through the sanctioned accessor did not save a consumer, because the defect was
+inside the reference itself.
+**Cure:** when a sibling already answers a question correctly, port the QUESTION, not the shape of
+the answer. Thread the moment through every accessor that takes one, and make the published
+reference agree with the verdict — a `None` level beside a min/max that still spans two rates is
+two answers to one question. Sweep question: *this guard says something is possible — possible
+WHEN, and did anyone pass in the moment?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestTheCalendarKnowsWhatDayItIs` — every
+shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
+NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
+Refs #994 #638.
+
+### 105. A sentinel given a name — every "is it missing?" test silently flips — GUARDED
+**Symptom:** a fix that makes absence legible breaks the code that was already handling absence
+correctly. #994 replaced a `None` price level with the words `flat` and `no_prices` so users could
+tell a flat contract from an unreadable one; `decide.py`'s daytime grid-charge gate read
+`tariff_level is not None and tariff_level not in {normal, expensive, very_expensive}`, and a
+truthy string passed BOTH halves — so on a flat tariff SEM would have charged the car from the
+grid believing the hour cheap. The issue's own disease, reintroduced by its own fix, one commit
+later.
+**Root shape:** `None` was carrying two jobs — "no value" and "no comparative signal" — and the
+second job was being read by an `is not None` test standing in for a predicate nobody had written.
+Naming the sentinel is right; it is what lets a user tell two situations apart. But every existing
+test of the form "is this missing?" was implicitly a test of the form "is this a real answer?",
+and only one of those two meanings survives the rename. Membership tests (`x in CHEAP_LEVELS`)
+survive it untouched, which is why the sweep looks clean until you grep for the identity tests
+specifically.
+**Cure:** when a sentinel gains a name, grep for every `is None` / `is not None` / truthiness test
+on that field IN THE SAME CHANGE, and replace each with the predicate it was standing in for —
+here `is_cheap_name` / `is_expensive_name`, which the vocabulary already published. Then pin the
+predicate over the full value set, sentinels included, so a seventh value cannot slip through.
+Sweep question: *this field just gained a new possible value — which existing comparison was
+relying on it NOT existing?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestAnAbsenceIsNotACheapHour` —
+`is_cheap_name` parametrized over all nine values a level can take, plus an AST contract that no
+`is None` test on `tariff_level` returns to the decide layer.
+Refs #994.
