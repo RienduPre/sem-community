@@ -340,13 +340,31 @@ class TestTheTopUpSaysWhyItReallyStopped:
         assert self._reason_for(level) is None
 
     def test_the_gate_and_the_expiry_read_one_vocabulary(self):
-        """Both sites hand-typed ("cheap","very_cheap","negative"). They were
-        the last two copies outside the vocabulary module."""
+        """Both sites hand-typed the cheap levels as string literals. They
+        were the last two copies outside the vocabulary module.
+
+        Asserted over the AST, not by searching the file's text: a
+        source-string guard is coupled to spelling rather than to code, and
+        the #925 ledger only shrinks."""
+        import ast
         from pathlib import Path
-        src = (Path(__file__).parent.parent / "coordinator"
-               / "surplus_controller.py").read_text(encoding="utf-8")
-        assert '("cheap", "very_cheap", "negative")' not in src, (
-            "a hand-typed cheap-level tuple is back — import is_cheap_name")
+
+        CHEAP = {"cheap", "very_cheap", "negative"}
+        root = Path(__file__).parent.parent
+        offenders = []
+        for f in sorted(root.rglob("*.py")):
+            if set(f.relative_to(root).parts) & {"tests", "scripts", "node_modules"}:
+                continue
+            for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+                if not isinstance(n, (ast.Tuple, ast.Set, ast.List)):
+                    continue
+                vals = {e.value for e in n.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+                if CHEAP <= vals:
+                    offenders.append(f"{f.relative_to(root)}:{n.lineno}")
+        assert not offenders, (
+            "a hand-typed cheap-level tuple is back — import is_cheap_name "
+            f"from coordinator.price_signal instead: {offenders}")
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -143,7 +143,12 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
         # could not run. #875 already carries the flag that answers this.
         _soc_ever_read = bool(getattr(
             getattr(view, "fleet", None), "battery_soc_known", True))
-        if not rt.available:
+        if soc is None:
+            # Not the "never read" signal — that is the flag above — but the
+            # field is typed float and a caller can still hand us None, and
+            # a formatting crash here takes out the whole battery decision.
+            _why = "SOC unknown — not selling blind"
+        elif not rt.available:
             _why = (f"SOC unreadable (last seen {soc:.0f}%) — not selling blind"
                     if _soc_ever_read else
                     "SOC never read — not selling blind")
