@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A cheap-hours top-up blamed the tariff for SEM losing its price feed**
+  (#992, a tenth class-99 instance, found when this sweep met #994). Ending a
+  grid top-up reported `tariff now <level>`, which was truthful only while
+  every level named a real comparison. #994 gave "no comparison stands" two
+  names of its own, and both turn that sentence into a lie: *tariff now flat*
+  claims a transition a flat tariff cannot make, and *tariff now no_prices*
+  blames the tariff for the one thing that did not change. It now says
+  whether the hours stopped being cheap, whether this tariff has no cheaper
+  hours at all, or whether there are no prices left to compare. The same two
+  sites held the last hand-typed copies of the cheap-level list outside the
+  vocabulary module; both now read it.
 - 🐛 **Nine verdicts that named a cause their own scope refutes** (#992 — a
   swept bug class 99). Three instances in two days said the class had never
   been swept, so it was: three reviewers over the decision engines, the

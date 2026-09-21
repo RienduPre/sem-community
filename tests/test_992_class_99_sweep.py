@@ -284,3 +284,160 @@ class TestThePlanClaimsThePauseOnlyWhenThereIsOne:
             names = {c.value for c in ast.walk(detail)
                      if isinstance(c, ast.Constant) and isinstance(c.value, str)}
             assert "plan_expensive_detail_plain" in names
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# A tenth, found when #994's vocabulary met this sweep's strings
+# ═══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.unit
+class TestTheTopUpSaysWhyItReallyStopped:
+    """``reason = f"tariff now {price_level}"`` was truthful only while every
+    level named a real comparison.
+
+    #994 gave "no comparison stands" two names of its own, and both make that
+    sentence a class-99 lie. **"tariff now flat"** claims a transition a flat
+    tariff cannot make — it was flat when the top-up started, which is why
+    the top-up should never have been running. **"tariff now no_prices"**
+    blames the tariff for SEM losing its price feed, which is the one thing
+    that did NOT change. Reachable the ordinary way: a top-up starts in a
+    genuine cheap hour on a dynamic tariff and the price entity then dies.
+    """
+
+    @staticmethod
+    def _reason_for(price_level):
+        """The expiry branch, in isolation — mirrors surplus_controller."""
+        from custom_components.solar_energy_management.coordinator.price_signal import (
+            is_cheap_name,
+        )
+        if is_cheap_name(price_level):
+            return None
+        if price_level == "flat":
+            return "cheap-hours top-up ended — this tariff has no cheaper hours to wait for"
+        if price_level in ("no_prices", "", "unknown", None):
+            return "cheap-hours top-up ended — no prices left to compare"
+        return f"tariff now {price_level}"
+
+    @pytest.mark.parametrize("level", ["flat", "no_prices", "", "unknown", None])
+    def test_an_absence_is_never_reported_as_a_tariff_change(self, level):
+        reason = self._reason_for(level)
+        assert reason is not None
+        assert not reason.startswith("tariff now "), (
+            f"{level!r} produced {reason!r} — a transition that did not happen")
+
+    def test_a_flat_tariff_says_there_is_nothing_to_wait_for(self):
+        assert "no cheaper hours" in self._reason_for("flat")
+
+    def test_a_lost_price_feed_says_so(self):
+        assert "no prices left to compare" in self._reason_for("no_prices")
+
+    @pytest.mark.parametrize("level", ["normal", "expensive", "very_expensive"])
+    def test_a_real_move_out_of_the_cheap_band_still_says_so(self, level):
+        assert self._reason_for(level) == f"tariff now {level}"
+
+    @pytest.mark.parametrize("level", ["cheap", "very_cheap", "negative"])
+    def test_a_cheap_hour_does_not_end_the_top_up(self, level):
+        assert self._reason_for(level) is None
+
+    def test_the_gate_and_the_expiry_read_one_vocabulary(self):
+        """Both sites hand-typed ("cheap","very_cheap","negative"). They were
+        the last two copies outside the vocabulary module."""
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "coordinator"
+               / "surplus_controller.py").read_text(encoding="utf-8")
+        assert '("cheap", "very_cheap", "negative")' not in src, (
+            "a hand-typed cheap-level tuple is back — import is_cheap_name")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Two the sweep's own fixes introduced — found by review, pinned here
+# ═══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.unit
+class TestTheHoldDoesNotInventAReading:
+    """The first cut of the force-discharge hold asked ``soc is not None``
+    to tell a HELD reading from one that never arrived — three lines below
+    its own comment saying ``last_known_soc`` is a float that is never
+    None. So a pack whose sensor had not reported once was told it was
+    "last seen 0%", a measurement nobody took, and the arm that would have
+    said otherwise could not run. #875 already carries the flag for this."""
+
+    @staticmethod
+    def _reason(available, soc, ever_read):
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            BatteryRuntime, BatteryView, FleetContext,
+        )
+        from custom_components.solar_energy_management.coordinator.decide_battery import (
+            decide_battery,
+        )
+        return decide_battery(BatteryView(
+            runtime=BatteryRuntime(battery_id="b", last_known_soc=soc,
+                                   available=available),
+            config={"battery_mode": "force_discharge", "battery_reserve_soc": 70},
+            fleet=FleetContext(battery_soc_known=ever_read),
+            charging_state="idle", ev_charging=False,
+            home_consumption_w=500.0)).reason
+
+    def test_a_pack_that_never_reported_is_not_last_seen_at_zero(self):
+        r = self._reason(available=False, soc=0.0, ever_read=False)
+        assert "never read" in r
+        assert "last seen" not in r, r
+
+    def test_a_held_reading_still_says_what_it_was(self):
+        r = self._reason(available=False, soc=80.0, ever_read=True)
+        assert "last seen 80%" in r
+
+    def test_a_readable_pack_below_reserve_states_the_comparison(self):
+        r = self._reason(available=True, soc=40.0, ever_read=True)
+        assert "40% ≤ reserve 70%" in r
+
+    def test_a_readable_link_with_no_reading_yet_says_so(self):
+        r = self._reason(available=True, soc=0.0, ever_read=False)
+        assert "never read" in r
+        assert "≤ reserve" not in r, r
+
+
+@pytest.mark.unit
+class TestOnlyAModeThatPausesPromisesAPause:
+    """Gating the "Min+PV grid pauses" promise on the Min shortfall alone
+    still made it for Always-Max, which charges through every expensive
+    hour by definition. An unmet Min is close to the DEFAULT state — every
+    install gets a daily target whatever its mode — so this was not an
+    edge case."""
+
+    @staticmethod
+    def _detail(tariff_optimized, remaining):
+        from datetime import datetime, timedelta
+
+        from custom_components.solar_energy_management.coordinator.today_plan import (
+            KIND_EXPENSIVE_START, compose_today_plan,
+        )
+        now = datetime(2026, 9, 21, 12, 0)
+        # The composer takes the published `tariff_upcoming` shape: dicts
+        # with an ISO timestamp, a price and a level string.
+        upcoming = [{"t": (now + timedelta(hours=h)).isoformat(),
+                     "price": 0.40, "level": "expensive"}
+                    for h in range(1, 5)]
+        rows = compose_today_plan(
+            now=now, upcoming_prices=upcoming, currency="EUR",
+            ev_min_remaining_kwh=remaining,
+            ev_tariff_optimized=tariff_optimized)
+        def _f(row, key):
+            return row.get(key) if isinstance(row, dict) else getattr(row, key, None)
+        return [_f(r, "detail") for r in rows
+                if _f(r, "kind") == KIND_EXPENSIVE_START]
+
+    def test_always_max_is_never_promised_a_pause(self):
+        details = self._detail(tariff_optimized=False, remaining=8.0)
+        assert details, "no expensive row was produced — test proves nothing"
+        assert all(d == "plan_expensive_detail_plain" for d in details), details
+
+    def test_a_cheap_hours_charger_with_a_min_still_gets_the_promise(self):
+        details = self._detail(tariff_optimized=True, remaining=8.0)
+        assert details
+        assert all(d == "plan_expensive_detail" for d in details), details
+
+    def test_a_cheap_hours_charger_past_its_min_does_not(self):
+        details = self._detail(tariff_optimized=True, remaining=0.0)
+        assert details
+        assert all(d == "plan_expensive_detail_plain" for d in details), details

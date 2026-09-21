@@ -134,12 +134,21 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
         # a dark read was told it was at or below a 70 % reserve, sending
         # the reader to look at a battery that is comfortably charged while
         # the real fault is the link to it.
+        # …and "last seen X%" must be a reading that HAPPENED. The first
+        # cut of this fix asked ``soc is not None`` to tell a held value
+        # from one that never arrived — three lines under a comment saying
+        # ``last_known_soc`` is never None. So a pack whose sensor had not
+        # reported once was told it was "last seen 0%", a measurement
+        # nobody took, and the dead arm that would have said otherwise
+        # could not run. #875 already carries the flag that answers this.
+        _soc_ever_read = bool(getattr(
+            getattr(view, "fleet", None), "battery_soc_known", True))
         if not rt.available:
             _why = (f"SOC unreadable (last seen {soc:.0f}%) — not selling blind"
-                    if soc is not None else
-                    "SOC unreadable and never read — not selling blind")
-        elif soc is None:
-            _why = "SOC unknown — not selling blind"
+                    if _soc_ever_read else
+                    "SOC never read — not selling blind")
+        elif not _soc_ever_read:
+            _why = "SOC never read — not selling blind"
         else:
             _why = f"SOC {soc:.0f}% ≤ reserve {reserve:.0f}%"
         return BatteryDecision(
