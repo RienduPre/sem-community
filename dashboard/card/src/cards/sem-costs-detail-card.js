@@ -14,6 +14,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
+import { priceLevelKey } from '../util/price-level.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -107,7 +108,7 @@ class SEMCostsDetailCard extends SEMLitBase {
         if (id === 'tariff') {
             const imp = this._val('tariff_current_import_rate');
             const level = this._valStr('tariff_price_level');
-            return level ? `${imp.toFixed(4)} ${curr} · ${this._t(level.toLowerCase())}` : `${imp.toFixed(4)} ${curr}`;
+            return level ? `${imp.toFixed(4)} ${curr} · ${this._t(priceLevelKey(level))}` : `${imp.toFixed(4)} ${curr}`;
         }
         return '';
     }
@@ -246,7 +247,7 @@ class SEMCostsDetailCard extends SEMLitBase {
                 <div class="info-tiles tariff-info-tiles">
                     ${this._renderInfoTile('mdi:transmission-tower-import', '#488fc2', 'current_import_rate', `${impRate} ${impUnit}`)}
                     ${this._renderInfoTile('mdi:transmission-tower-export', '#8353d1', 'current_export_rate', `${expRate} ${expUnit}`)}
-                    ${this._renderInfoTile('mdi:signal-cellular-outline', '#96CAEE', 'price_level', priceLevel ? this._t(priceLevel) : '—')}
+                    ${this._renderInfoTile('mdi:signal-cellular-outline', '#96CAEE', 'price_level', priceLevel ? this._t(priceLevelKey(priceLevel)) : '—')}
                 </div>
                 ${hasStaticImport ? this._renderStepper('number.sem_electricity_import_rate', 'current_import_rate') : nothing}
                 ${hasStaticExport ? this._renderStepper('number.sem_electricity_export_rate', 'current_export_rate') : nothing}

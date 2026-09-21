@@ -26,6 +26,7 @@ from ..devices.base import ControllableDevice, DeviceState, DeviceControlMode
 from .plan_verdict import NO_OPINION, PlanVerdict
 
 from ..utils.log_gate import log_on_change
+from .price_signal import is_cheap_name, is_expensive_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -504,7 +505,9 @@ def price_damped_pool(distributable: float, price_level: str) -> float:
     direction structural rather than a property of the branches.
     """
     damped = distributable
-    if price_level == "expensive":
+    # (#994) was ``== "expensive"`` — very_expensive silently did not damp
+    # the pool, the one drift the six hand-typed copies had already produced.
+    if is_expensive_name(price_level):
         damped = max(0.0, distributable - 500)
     return min(damped, distributable)
 
@@ -1326,7 +1329,7 @@ class SurplusController:
         actuation (``reconcile_load`` applies them); the shared cycle context
         (``self._batt_*`` / ``self._tier1_budget_left``) is already stamped by
         ``update()``. This is what REPLACES the 7 imperative passes."""
-        price_is_cheap = price_level in ("cheap", "very_cheap", "negative")
+        price_is_cheap = is_cheap_name(price_level)
         soc_above = (self._batt_soc is not None
                      and self._batt_soc > self._batt_reserve_soc)
 

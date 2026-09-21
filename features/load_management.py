@@ -409,14 +409,52 @@ class LoadManagementCoordinator:
                 _LOGGER.error("EV charger registration requires either current_control_entity or charger_service")
                 return False
 
-            # Check if number entity exists (if specified)
+            # (#991) An absence read HERE is not an answer. Registration runs
+            # inside SEM's setup, where ``hass.states.get()`` returns None for
+            # every entity whose own integration has not finished loading —
+            # "not published yet", never "does not exist". The old code spent
+            # that absence on the spot and PERMANENTLY: it nulled the
+            # configured number entity and fell back to ``charger_service``,
+            # which a `number`-driven brand (alexmc1510's Victron EVCS) does
+            # not have, so the row carried no control handle at all. Entity
+            # ids are structural — ``refresh_runtime_config`` re-derives
+            # scalars, not ids — so only a reload could put it back.
+            #
+            # The lesson was already learned once, a few lines up the same
+            # setup loop: #763 moved ``_warn_missing_charger_entities`` 120 s
+            # past warm-up after a registration-time read called onkelfu's
+            # healthy wallbox switch missing. This second check kept the
+            # setup-time read — and it is the one that also DISCARDS.
+            #
+            # So the question moves to where an answer can be wrong for one
+            # cycle and right for the next. Two places already ask it, both
+            # off the CONFIG rather than off this row:
+            # ``CurrentControlDevice._set_current`` re-reads
+            # ``current_entity_id`` on every write and falls back to
+            # ``charger_service`` there, and #824's pre-flight owns the
+            # Repair once the absence outlives warm-up. This row itself is
+            # read by the Load Priority card and by #748's claimed-entity
+            # set, not by an actuator — the load manager never sheds an
+            # ``ev_charger`` row (#461-peak, ``_peak_managed_elsewhere``) —
+            # so what the drop cost was a truthful card and a truthful log,
+            # not a throttle. Here we only note it.
             if current_control_entity and not self.hass.states.get(current_control_entity):
-                _LOGGER.warning("EV charger current control entity not found: %s", current_control_entity)
-                current_control_entity = None  # Fall back to service
+                _LOGGER.debug(
+                    "EV charger current control entity %s is not published yet "
+                    "at registration — keeping it (#991); the per-cycle read "
+                    "decides, and the deferred check (#763) reports it if it "
+                    "is still missing past warm-up",
+                    current_control_entity,
+                )
 
-            # Check power entity
+            # Same for the power sensor — DEBUG, not WARNING: the deferred
+            # #763 check covers ``ev_charging_power_sensor`` past warm-up and
+            # is the one that may honestly call it missing (#991).
             if power_entity and not self.hass.states.get(power_entity):
-                _LOGGER.warning("EV charger power entity not found: %s", power_entity)
+                _LOGGER.debug(
+                    "EV charger power entity %s is not published yet at "
+                    "registration (#991)", power_entity,
+                )
 
             # Get friendly name. Caller-supplied ``charger_name`` wins
             # (it's the user-chosen label from ``ev_chargers[i].name``);

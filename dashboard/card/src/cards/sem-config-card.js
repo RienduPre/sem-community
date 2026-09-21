@@ -20,6 +20,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semDefineCard, semCardSurfaceCSS } from '../base/sem-shared.js';
+import { priceLevelKey } from '../util/price-level.js';
 
 // Section index — order = visual order in the rendered tab. Each entry
 // carries a colour-accent that matches the section icon, mirroring the
@@ -596,7 +597,7 @@ class SEMConfigCard extends SEMLitBase {
     _tariffSubtitle() {
         const provider = this._val('tariff_provider') || '—';
         const level = this._val('tariff_price_level') || '';
-        return level ? `${provider} · ${this._t(level.toLowerCase()) || level}` : provider;
+        return level ? `${provider} · ${this._t(priceLevelKey(level)) || level}` : provider;
     }
     _heatPumpSubtitle() {
         return this._bin('heat_pump_registered')

@@ -267,3 +267,173 @@ def symbol_reference_files(name: str, *, root: Optional[Path] = None,
                     if isinstance(a, ast.Constant) and a.value == name:
                         hits.append((str(rel), n.lineno))
     return sorted(set(hits))
+
+
+def _mentions_states_get(node: ast.AST) -> bool:
+    """Does this subtree CALL ``<something>.states.get(...)``?
+
+    Narrow on purpose: a bare ``dict.get()`` is a mapping read and says
+    nothing about HA's state machine. The receiver must be named ``states``
+    — as an attribute (``hass.states.get``, the spelling this codebase uses
+    everywhere) or as a bare name, which covers a hoisted
+    ``states = hass.states``. The bare-name arm is deliberately wider than
+    the attribute one: a local mapping called ``states`` would be flagged,
+    and that false positive is cheaper than missing the hoisted spelling,
+    because it only matters at all inside an ABSENCE branch that also nulls
+    a handle — which is the bug either way.
+    """
+    for n in ast.walk(node):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "get"):
+            continue
+        recv = n.func.value
+        if isinstance(recv, ast.Attribute) and recv.attr == "states":
+            return True
+        if isinstance(recv, ast.Name) and recv.id == "states":
+            return True
+    return False
+
+
+def _is_absence_test(test: ast.AST) -> bool:
+    """Is this condition asking whether a state read came back EMPTY?
+
+    ``not hass.states.get(e)`` / ``hass.states.get(e) is None`` /
+    ``... == None``. A POSITIVE test (``if hass.states.get(e):``) is the
+    opposite shape and is not the class — acting on a reading you actually
+    have is evidence, never silence.
+    """
+    if not _mentions_states_get(test):
+        return False
+    for n in ast.walk(test):
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not):
+            if _mentions_states_get(n.operand):
+                return True
+        if isinstance(n, ast.Compare) and _mentions_states_get(n.left):
+            for op, cmp in zip(n.ops, n.comparators, strict=False):
+                if (isinstance(op, (ast.Is, ast.Eq))
+                        and isinstance(cmp, ast.Constant)
+                        and cmp.value is None):
+                    return True
+    return False
+
+
+def _null_target_names(target: ast.AST) -> list:
+    """Every handle this assignment target discards, by the name a reader
+    would recognise. Covers the four spellings a config handle is actually
+    written in: a local (``entity = None``), an attribute
+    (``device.current_entity_id = None``), a dict slot
+    (``row["switch_entity"] = None`` — this tree keeps device rows in dicts,
+    so it is the MOST natural way to re-acquire the class), and a tuple
+    unpack."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Attribute):
+        return [target.attr]
+    if isinstance(target, ast.Subscript):
+        sl = target.slice
+        if isinstance(sl, ast.Constant) and isinstance(sl.value, str):
+            return [sl.value]
+        base = target.value
+        if isinstance(base, ast.Name):
+            return [base.id]
+        if isinstance(base, ast.Attribute):
+            return [base.attr]
+        return ["<subscript>"]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out = []
+        for el in target.elts:
+            out.extend(_null_target_names(el))
+        return out
+    return []
+
+
+def _assigns_none(stmt: ast.AST) -> list:
+    """``[(lineno, name)]`` for every ``= None`` this statement performs —
+    plain, annotated, or the conditional-expression form
+    (``e = None if states.get(e) is None else e``), which carries its own
+    absence test and so is judged here rather than by an enclosing ``if``."""
+    hits = []
+    if isinstance(stmt, ast.Assign):
+        targets, value = stmt.targets, stmt.value
+    elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+        targets, value = [stmt.target], stmt.value
+    else:
+        return hits
+    nulls_unconditionally = (
+        (isinstance(value, ast.Constant) and value.value is None)
+        # ``entity, service = None, None`` — one statement, two handles.
+        or (isinstance(value, (ast.Tuple, ast.List)) and bool(value.elts)
+            and all(isinstance(el, ast.Constant) and el.value is None
+                    for el in value.elts)))
+    nulls_on_absence = (
+        isinstance(value, ast.IfExp)
+        and ((_is_absence_test(value.test)
+              and isinstance(value.body, ast.Constant)
+              and value.body.value is None)
+             or (_mentions_states_get(value.test)
+                 and isinstance(value.orelse, ast.Constant)
+                 and value.orelse.value is None)))
+    if not (nulls_unconditionally or nulls_on_absence):
+        return hits
+    for t in targets:
+        for name in _null_target_names(t):
+            hits.append((stmt.lineno, name, nulls_on_absence))
+    return hits
+
+
+def absence_spent_as_config(*, root: Optional[Path] = None,
+                            skip_dirs: Iterable[str] = _SKIP_DIRS) -> list:
+    """(#991, bug class 86) Every production site that DISCARDS a configured
+    handle on the strength of a ``hass.states.get()`` absence.
+
+    The class-86 sweep question, asked of the other consumer. #945 asked it
+    of evidence COUNTERS ("is this observation evidence, or silence?"); this
+    asks it of CONFIGURATION, where the same empty read is spent not on a
+    verdict but on a capability — ``current_control_entity = None`` because
+    an integration had not finished loading yet, permanent for the session
+    because entity ids are structural and only a reload re-derives them.
+
+    The shape: a condition that asks whether a state read is empty, and an
+    assignment of ``None`` reached by it — as an ``if``/``elif`` body (at
+    any nesting depth inside it) or as the conditional-expression form,
+    which carries its own test. Targets cover a local, an attribute, a dict
+    slot and a tuple unpack; plain and annotated assignment both. The answer
+    to "is this entity there?" belongs where the entity is USED — a
+    per-cycle read that may be wrong for one cycle and right for the next —
+    never at setup, where the only honest answer is "I could not ask yet".
+
+    **The limit, named so nobody mistakes a pass for proof:** the test and
+    the assignment must be syntactically connected. The two-step dataflow
+    form — ``st = hass.states.get(e)`` … later … ``if st is None: e = None``
+    — is invisible here, and so is any spelling that hides the absence
+    behind a helper predicate (``if self._dead(e): e = None``). That is not
+    a gap this contract can close without dataflow; it is why the
+    behavioural pin exists, driving the real registration with the entity
+    absent. Both limits are pinned in
+    ``tests/test_991_warmup_absence_not_spent.py`` so a future reader sees
+    them rather than discovers them.
+
+    Returns ``[(relative_path, lineno, what_was_nulled)]``."""
+    hits = []
+    for rel, tree in _production_files(root, skip_dirs):
+        for n in ast.walk(tree):
+            # (a) the conditional-expression form carries its own test, so
+            # it is judged wherever it appears — no enclosing ``if`` needed.
+            if isinstance(n, (ast.Assign, ast.AnnAssign)):
+                for lineno, name, conditional in _assigns_none(n):
+                    if conditional:
+                        hits.append((str(rel), lineno, name))
+                continue
+            # (b) an absence branch, and anything it reaches. ``ast.walk``
+            # over each body statement so a null nested in a ``try`` / ``for``
+            # / ``with`` — or in a closure defined there — is not a hiding
+            # place. ``elif`` is an ``If`` in ``orelse`` and is reached by
+            # the same walk of the enclosing tree.
+            if not (isinstance(n, ast.If) and _is_absence_test(n.test)):
+                continue
+            for stmt in n.body:
+                for sub in ast.walk(stmt):
+                    for lineno, name, conditional in _assigns_none(sub):
+                        if not conditional:
+                            hits.append((str(rel), lineno, name))
+    return sorted(set(hits))

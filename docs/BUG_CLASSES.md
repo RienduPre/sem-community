@@ -3353,7 +3353,7 @@ clock); the next no-surplus cycle sheds it, and the cycle then sits in `heating_
 ever re-heating. A tank adopted at 65 °C after a restart is released the same way.
 Refs #914 #559 #656 #766 #779 #847 #908 #523 #801.
 
-### 86. Absence of evidence spent as evidence — a warm-up read raised as a verdict — GUARDED
+### 86. Absence of evidence spent as evidence — a warm-up read taken for a fact — GUARDED
 **Symptom:** a Repair appears seconds after every HA restart, names a device that is fine, and
 describes something that never happened. alexmc1510 (#945, 2.1.0-beta.14) got "SEM's last 3+ current
 commands to EV Charger were rejected … The charger is NOT under SEM control right now" on a restart —
@@ -3378,7 +3378,14 @@ while a contradicted one still files at once). *Assessed and already safe:* `sen
 Repairs and #824's control-entity pre-flight — both wall-clock `UNAVAILABLE_REPAIR_THRESHOLD_S`, and
 the precedent this row generalises; #840's unsupported-capability count (three RAISED refusals — real
 evidence); #627 `can_stop_charging`, whose input is config, not a live read (`_bound_to_entity_range`
-answers "unknown → don't cry wolf" on an unreadable entity).
+answers "unknown → don't cry wolf" on an unreadable entity). *And the second consumer* (round 3):
+any SETUP-time read that spends an absence on CONFIGURATION rather than on a verdict —
+`register_ev_charger` nulling the configured current entity (#991, the instance) and
+`_warn_missing_charger_entities` (#763, already deferred 120 s). `wire_current_entity` (#976) reads
+the entity REGISTRY, which is persisted across restarts, so it is class 87's question, not this one;
+`_check_charger_control_entities` (#824) is not on this half at all — it runs per-cycle off
+`_async_update_data` and spends its absence on a verdict, which is the half above.
+`ast_contracts.absence_spent_as_config` is the standing sweep of the config half.
 **Closure:** an entity-absence verdict is held on the WALL CLOCK, never on a cycle count, and the hold
 is the one constant `UNAVAILABLE_REPAIR_THRESHOLD_S` (#611's warm-up) rather than a fresh literal
 (class 46). Evidence counters stay for evidence: a command that raised keeps its three-strike
@@ -3506,7 +3513,92 @@ own review: `_apply_actions` defaults `now` to `getattr(self, "_last_apply_at", 
 reconciler instance would stamp the episode at `0.0` and the next real `time.monotonic()` files
 instantly. Unreachable in production (`actuate.py` always passes `now`) and reached today only by
 tests built on bare instances, but it is a zero-valued clock in a tree that measures wall time.
-Refs #945 #611 #824 #915 #462 #536 #548 #840 #627.
+(8) Round 3's ERROR names the CURRENT entity only, because that is the one surface whose fallbacks
+SEM can enumerate (`charger_service`, minus the entity-platform services that write THROUGH the
+missing entity). A charger whose start/stop entity is the thing that vanished, with no stop service
+either, is equally uncommandable and still gets only the generic WARNING — saying it properly means
+enumerating every capability's fallbacks, which is #824's `_CONTROL_CAPABILITIES` table, one layer up
+from a log line. (9) `_shed_device`'s `control_type == "current"` branch is the
+fallback-with-nowhere-to-fall at WRITE time, and it is unreachable today: `_peak_managed_elsewhere`
+excludes every `ev_charger` row from the load manager's shedding (#461-peak), so the branch that
+would notice cannot run. Left as-is rather than given a log line no test could reach non-vacuously.
+That unreachability is also the honest bound on #991's impact, worth stating plainly because the
+issue text does not: NOTHING actuates off this row. Its `switch_entity` is read by the Load Priority
+card and by #748's claimed-entity set — and the claimed set could not have mattered either, since
+`LOAD_MANAGEMENT_DEVICE_PATTERNS` globs only `switch.*` and the entity dropped is a `number.*`. What
+the bug cost was a WARNING that told its reader the opposite of the truth, on the one read most
+likely to be wrong, plus a card row missing its entity. Worth fixing for exactly the reason #763 was:
+the log is a diagnostic instrument, and a false reading in it costs days. (10) That round-3 ERROR
+fires once, from inside the 120 s one-shot `async_call_later`, and nothing retracts it — an
+integration that publishes at 121 s leaves a permanent ERROR with no recovery line. The CARD
+self-corrects (#824 republishes `charger_<cid>_ev_current_control_entity_valid` every cycle and
+clears its Repair), so only the log is stuck. Giving it a recovery line means giving the deferred
+check a second life, which is a scheduler question, not a log question.
+
+**Round 3 (#991, 2.1.0-beta.34) — the other consumer: the absence spent on CONFIGURATION.** Rounds 1
+and 2 asked the question of evidence COUNTERS, whose cost is a false accusation. The same empty read
+has a second buyer, and it is quieter. alexmc1510 again, same charger, `features/load_management.py`
+`register_ev_charger`: `if current_control_entity and not self.hass.states.get(...)` → warn, then
+`current_control_entity = None  # Fall back to service`. Registration runs *inside* SEM's setup,
+where `states.get()` returns None for every entity whose own integration has not finished loading, so
+the Victron EVCS's `number.*` current entity was "not found" for exactly as long as Victron took to
+load — and the fallback it took had nowhere to fall (a `number`-driven brand has no charge service).
+Entity ids are STRUCTURAL: `refresh_runtime_config` re-derives cached scalars, never ids, so the row
+carried `switch_entity: None` for the whole session and only a reload put it back. No Repair, no
+ERROR, one WARNING that told the reader the opposite of the truth. See residual (9) for what that
+did and did not cost — the row drives no actuator, and overstating it would be its own defect.
+
+The sharpest part is the sweep that was there and stopped one function short. Two checks ask this
+charger "are your entities there?", and #763 had already moved the first — the
+`_warn_missing_charger_entities` roll-up — 120 s past warm-up, after a registration-time read
+declared onkelfu's healthy wallbox switch missing. The second ran a few lines later in the same setup
+loop, still at setup, and was the only one that also DISCARDED something — so an instance-local fix
+had left the class's worst site untouched because that site did not look like a Repair. **The
+consumer, not the verdict, is what makes an absence expensive.** A verdict is loud and gets reported;
+a discarded capability is silent and survives.
+
+Closure for this half: an absence is not spent at SETUP at all. The question moves to where an answer
+may be wrong for one cycle and right for the next — `CurrentControlDevice._set_current` re-reads
+`current_entity_id` on every write and falls back to `charger_service` there, and #824's per-cycle
+pre-flight owns the Repair once the absence outlives warm-up — so registration only notes it at
+DEBUG. And a fallback that has nowhere to fall is an ERROR, said in the one place the absence is a
+fact rather than an artefact: past warm-up, in #763's deferred check, which now takes the charger's
+`charger_service` so it can tell "one of several handles is missing" from "there is no handle at
+all". *Having* a service is not the same question as having a FALLBACK: an entity-platform service
+(`number.set_value` and its `input_number` / `select` twins, #462 / #485 K1) writes THROUGH
+`ev_current_control_entity or ev_charger_service_entity_id`, current entity first, so when the
+current entity is what vanished it falls exactly where the entity did and must not buy silence.
+
+**Guard:** `tests/test_991_warmup_absence_not_spent.py` — the reporter's boot driven through the real
+`register_ev_charger` with the entity absent, read back through the card payload
+`get_load_management_data`, the surface a user actually sees; the vacuity twin (the published entity
+registers identically, so the pin cannot pass on a registration that never stores one); a positive
+control on the log pin (a registration that dies inside its own `except` emits no warning either, and
+would otherwise satisfy an absence-only assertion); and the config-shaped absence that IS an answer
+(neither entity nor service still refuses). No pin claims an INDEPENDENT consumer, because there is
+none — every reader of this row reads this row, which is residual (9)'s point.
+
+The structural guard is `ast_contracts.absence_spent_as_config`: any condition asking whether a
+`…states.get()` came back EMPTY, and any `= None` it reaches. Its first cut was the shape the bug
+happened to wear — a top-level `Assign` to a `Name` in an `if` body — and that is the mistake round 2
+already named once, when `invented_evidence_call_sites` turned out blind to `getattr`: a guard
+written to the instance's spelling waves through the class's next one. So the question is asked of
+every spelling a handle is actually written in — a local, an attribute, a DICT SLOT
+(`row["switch_entity"] = None`, the natural form in a tree that keeps device rows in dicts, and so
+the likeliest re-acquisition *in the very file this fixes*), a tuple unpack, an annotated assignment,
+the conditional-expression form that carries its own test, `elif`, and any depth of `try` / `for` /
+`with` / closure nesting inside the branch. Eight bug spellings are caught by probe, the verbatim
+pre-fix body among them; a POSITIVE reading acted on is not caught (that is evidence) and neither is
+a plain `dict.get`. The remaining limit is named and pinned rather than left to be discovered: test
+and assignment must be syntactically connected, so the two-step dataflow form (`st = states.get(e)` …
+`if st is None: e = None`) and a helper predicate (`if self._dead(e): e = None`) are invisible without
+dataflow — which is why the behavioural pin exists.
+
+**Sweep question, round 3:** for every `states.get()` absence, ask not only "is this evidence or
+silence?" but **"what does this absence BUY, and for how long?"** A verdict is bought for a cycle; a
+nulled entity id is bought until the next reload. Anything read at SETUP and kept is the expensive
+kind, and setup is precisely when the read is least trustworthy.
+Refs #945 #611 #824 #915 #462 #536 #548 #840 #627 #991 #763 #461 #485.
 
 ### 87. A register that lists only half the world, asked a yes/no question — GUARDED
 **Symptom:** a reporter is still getting the same false Repair three betas after it was "fixed"
@@ -4287,3 +4379,105 @@ per-charger→global idiom is the real closure.
 means "empty on purpose", and show the read that can tell it from "not set yet".* If the read is an
 `or`, there is no such value.
 Refs #990 #685 #690 #627 #847.
+### 102. A word borrowed without its reference — GUARDED
+**Symptom:** a label that reads as an instruction is produced by something that never made the
+comparison the word implies. A flat 0.36/0.36 tariff published `cheap`; the house sink read it as
+"a better hour is coming", and the battery sat at a 0 W discharge limit overnight while the house
+imported 3.66 kWh (#994).
+**Root shape:** SEM's `PriceLevel` is Tibber's vocabulary, which is defined against a **3-day
+moving average** and carries a "missing data" state. SEM kept the five words and dropped both the
+reference and the absence. A CLOCK was then free to produce them — `StaticTariffProvider` answering
+from "not 07:00–20:00 on a weekday" without ever comparing its two rates, `CalendarTariffProvider`
+answering CHEAP unconditionally because the coordinator hardcoded an empty schedule — and eighteen
+consumers across six chains could not tell an asserted level from a measured one. The history is
+the proof that this is structural: #359 took six waves in four days, #728 two, and #524, #953 and
+#879 each rediscovered the trap on first contact with the same word.
+**Cure:** restore what the word lost. A level exists only when a comparison stands behind it
+(rates that differ, on a day that contains both; a curve with spread); otherwise the answer is
+`unknown`, and every consumer that would have waited acts now — the rule `sink_verdicts` already
+followed for export. One vocabulary in one module, so a seventh consumer cannot invent a seventh
+opinion. And the flat test is RELATIVE to the day's own mean, because an absolute cutoff in one
+currency is the #359 defect itself (re-fixed at 1.69/kWh in #417 and in LKR in #549).
+**Guard:** `tests/test_994_a_level_needs_a_reference.py` — the vocabulary, a model matrix on the
+real providers (flat · HT/NT weekday · HT/NT weekend · empty calendar · dynamic fallbacks), and one
+pin per comparative chain naming the harm it prevents. `tests/test_tariff_provider.py` was asserting
+the defect as spec and was rewritten.
+**Sweep question:** for any label SEM publishes or acts on — **what two numbers were compared to
+produce this word, and what does it say when nobody compared any?** If the second answer is "the
+same word", the label is decoration and something downstream is spending it.
+Refs #994 #359 #728 #524 #953 #879 #925.
+
+### 103. A diagnostic written as a side-effect and read back later — it describes whichever call ran last — GUARDED
+**Symptom:** the one attribute a user reads to learn WHY a value came out that way names a
+different input entirely. On the .175 rig `sensor.sem_tariff_price_level` published `normal`
+beside `classifier_path: negative_price_shortcircuit`, on a current price of +0.00001 (#994).
+**Root shape:** `_classify_price` set `self._last_classifier_path` as a SIDE-EFFECT and every
+caller read the attribute back off the instance some time after the call. Two things then made
+the string belong to somebody else: reading the price curve classifies all 96 slots on every
+read, so the last slot wins; and `_get_percentile_breaks` returned early from its per-slot cache
+*without* re-stating the path, so a cache hit left whatever was there. The diagnostic was merely
+misleading until #994 made it **load-bearing** — `get_price_level` answered `None` when the path
+began with `percentile_fallback_` — at which point a stale fallback string could erase a level
+that real breakpoints had produced, and a stale negative string could dress a percentile answer
+as a sign check. A tri-state answer may never rest on a value a different question wrote.
+**Cure:** return the reason WITH the value from one call (`_classify_price_with_path` →
+`(level, path)`), decide the tri-state from that return, and publish both from the same answer
+(`_current_level_and_path`). Where a cache short-circuits the computation, cache the diagnostic
+beside the result and re-state it on the hit. Sweep question: *if two different questions can
+write this field, which one does a reader get?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestThePathDescribesTheLevelItShipsWith`
+— a cache hit still names its own path; a stale fallback string cannot erase a real level; the
+published path and level come from one answer; and an hour the classifier could not compare reads
+`unknown` on the hour-wise accessor too, not a confident `normal`.
+
+Refs #994 #359 #728 #925.
+
+### 104. A rule table asked whether something exists, not whether it can happen TODAY — GUARDED
+**Symptom:** the refusal a fix installs holds everywhere except the one day it was meant for.
+`CalendarTariffProvider` answered CHEAP on a Sunday under the shipped EKZ preset, whose rules
+cover Mon–Fri plus Saturday morning — reproducing #994's own incident through the calendar after
+#994 had fixed it in the clock-based provider (#994, found by review).
+**Root shape:** the sibling provider had the question right — `_both_rates_occur(when)` asks
+whether THIS DAY contains both rates — and the second implementation asked a weaker one:
+`any(rule is HT for rule in the whole week)`. A weekly table is a statement about the week; a
+verdict is about a moment. The two differ on exactly the days a schedule leaves uncovered, and
+three of five shipped presets have such days. Worse, `get_price_level_at(when)` received the day
+and dropped it, and `get_tariff_data` used the same blind check — so `today_min`/`today_max`
+carried the full spread and the SECOND gate (`variation_known`, which reads those two fields) was
+fooled too. Going through the sanctioned accessor did not save a consumer, because the defect was
+inside the reference itself.
+**Cure:** when a sibling already answers a question correctly, port the QUESTION, not the shape of
+the answer. Thread the moment through every accessor that takes one, and make the published
+reference agree with the verdict — a `None` level beside a min/max that still spans two rates is
+two answers to one question. Sweep question: *this guard says something is possible — possible
+WHEN, and did anyone pass in the moment?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestTheCalendarKnowsWhatDayItIs` — every
+shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
+NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
+Refs #994 #638.
+
+### 105. A sentinel given a name — every "is it missing?" test silently flips — GUARDED
+**Symptom:** a fix that makes absence legible breaks the code that was already handling absence
+correctly. #994 replaced a `None` price level with the words `flat` and `no_prices` so users could
+tell a flat contract from an unreadable one; `decide.py`'s daytime grid-charge gate read
+`tariff_level is not None and tariff_level not in {normal, expensive, very_expensive}`, and a
+truthy string passed BOTH halves — so on a flat tariff SEM would have charged the car from the
+grid believing the hour cheap. The issue's own disease, reintroduced by its own fix, one commit
+later.
+**Root shape:** `None` was carrying two jobs — "no value" and "no comparative signal" — and the
+second job was being read by an `is not None` test standing in for a predicate nobody had written.
+Naming the sentinel is right; it is what lets a user tell two situations apart. But every existing
+test of the form "is this missing?" was implicitly a test of the form "is this a real answer?",
+and only one of those two meanings survives the rename. Membership tests (`x in CHEAP_LEVELS`)
+survive it untouched, which is why the sweep looks clean until you grep for the identity tests
+specifically.
+**Cure:** when a sentinel gains a name, grep for every `is None` / `is not None` / truthiness test
+on that field IN THE SAME CHANGE, and replace each with the predicate it was standing in for —
+here `is_cheap_name` / `is_expensive_name`, which the vocabulary already published. Then pin the
+predicate over the full value set, sentinels included, so a seventh value cannot slip through.
+Sweep question: *this field just gained a new possible value — which existing comparison was
+relying on it NOT existing?*
+**Guard:** `tests/test_994_a_level_needs_a_reference.py::TestAnAbsenceIsNotACheapHour` —
+`is_cheap_name` parametrized over all nine values a level can take, plus an AST contract that no
+`is None` test on `tariff_level` returns to the decide layer.
+Refs #994.

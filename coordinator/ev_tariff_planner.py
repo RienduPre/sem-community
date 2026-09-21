@@ -25,6 +25,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from .price_signal import is_expensive_name
 
 
 @dataclass
@@ -108,17 +109,30 @@ def _hours_between(start: datetime, end: datetime) -> float:
 
 
 def _is_expensive(level) -> bool:
-    """``PriceLevel`` or its string value → is this an hour to hold through?"""
-    value = str(getattr(level, "value", level) or "").lower()
-    return value in ("expensive", "very_expensive")
+    """``PriceLevel`` or its string value → is this an hour to hold through?
+
+    (#994) One vocabulary: ``price_signal`` owns which words are dear, so
+    ``very_expensive`` cannot fall out of a tuple the way it did in
+    ``surplus_controller``.
+    """
+    return is_expensive_name(level)
 
 
 _LEVEL_RANK = {"negative": 0, "very_cheap": 1, "cheap": 2, "normal": 3,
                "expensive": 4, "very_expensive": 5}
 
+#: (#994) An hour nobody priced is not a mid-priced hour. ``.get(..., 3)``
+#: scored silence as NORMAL, so ``affordable_start`` would pick an unpriced
+#: slot as though it were ordinary and book the charge there — "I could not
+#: ask" spent as an answer, in the one place that commits money (#925).
+UNPRICED_RANK = 10 ** 6
+
 
 def _rank(level) -> int:
-    return _LEVEL_RANK.get(str(getattr(level, "value", level) or "").lower(), 3)
+    name = str(getattr(level, "value", level) or "").lower()
+    if not name:
+        return UNPRICED_RANK
+    return _LEVEL_RANK.get(name, UNPRICED_RANK)
 
 
 def affordable_start(now: datetime, deadline: datetime, need_kwh: float,
