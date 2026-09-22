@@ -36,6 +36,36 @@ _ONOFF_CONTROL_DOMAINS = frozenset(
 _CONFIG_SURFACE_CATEGORIES = frozenset({"config", "diagnostic"})
 
 
+def setpoint_is_running(hass: HomeAssistant, entity_id: str) -> Optional[bool]:
+    """(#880) Is a watt-setpoint control commanding a draw? ``None`` = can't tell.
+
+    A ``number``/``input_number`` control has no on/off state — its VALUE is
+    the command — so both twins below used to read it as OFF and a
+    watt-modulating load was invisible to the shedder: never a shed
+    candidate, its kilowatts booked as *uncontrolled*, and a Repair filed
+    saying SEM does not control a load SEM is driving.
+
+    "Running" is "above the floor the entity itself declares", because that
+    floor is what ``PowerSetpointDevice.deactivate`` writes to stop it.
+    """
+    domain = str(entity_id or "").split(".", 1)[0]
+    if domain not in ("number", "input_number"):
+        return None
+    state = hass.states.get(entity_id)
+    if not state or state.state in ("unknown", "unavailable", None, ""):
+        return None
+    try:
+        value = float(state.state)
+    except (TypeError, ValueError):
+        return None
+    attrs = getattr(state, "attributes", None) or {}
+    try:
+        floor = float(attrs.get("min", 0.0))
+    except (TypeError, ValueError):
+        floor = 0.0
+    return value > floor
+
+
 def resolve_load_is_on(
     hass: HomeAssistant, control_entity: Optional[str], current_power: float
 ) -> bool:
@@ -59,6 +89,10 @@ def resolve_load_is_on(
             state = hass.states.get(control_entity)
             if state and state.state not in ("unknown", "unavailable", None, ""):
                 return str(state.state).strip().lower() in ("on", "true", "1")
+        # (#880) a watt setpoint's VALUE is its on/off state.
+        running = setpoint_is_running(hass, control_entity)
+        if running is not None:
+            return running
     return (current_power or 0) > 0
 
 
@@ -945,12 +979,23 @@ class LoadDeviceDiscovery:
 
         # Determine is_on state
         if switch_entity:
-            # Normal device with switch entity
-            switch_state = self.hass.states.get(switch_entity)
-            if switch_state and switch_state.state:
-                state_lower = switch_state.state.lower() if isinstance(switch_state.state, str) else str(switch_state.state).lower()
-                if state_lower in ("on", "true", "1"):
-                    is_on = True
+            # (#880) A watt setpoint answers with its VALUE, not with "on".
+            # Reading "3200" as not-on made a running AC-THOR invisible to
+            # _shed_plan: never a candidate, its draw counted as uncontrolled,
+            # and the setpoint shed branch below unreachable by construction.
+            # Same predicate the DISPLAY twin uses (resolve_load_is_on) — the
+            # two differ only in the fallback for an unreadable control, and
+            # that difference must not extend to which domains they can read.
+            _running = setpoint_is_running(self.hass, switch_entity)
+            if _running is not None:
+                is_on = _running
+            else:
+                # Normal device with switch entity
+                switch_state = self.hass.states.get(switch_entity)
+                if switch_state and switch_state.state:
+                    state_lower = switch_state.state.lower() if isinstance(switch_state.state, str) else str(switch_state.state).lower()
+                    if state_lower in ("on", "true", "1"):
+                        is_on = True
         else:
             # Service-based device (no switch entity) - infer is_on from power
             # If power > 0, device is on

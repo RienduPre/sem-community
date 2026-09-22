@@ -23,7 +23,6 @@ import pytest
 from custom_components.solar_energy_management.coordinator.charge_pause import (
     PAUSE_MAX_MIN,
     deadline_for_minutes,
-    is_paused,
     parse_deadline,
     remaining_minutes,
 )
@@ -37,6 +36,14 @@ from custom_components.solar_energy_management.coordinator.charger_types import 
 from custom_components.solar_energy_management.coordinator.decide import decide
 
 NOW = datetime(2026, 9, 22, 19, 0, 0)
+
+
+def _holding(value, now) -> bool:
+    """Is SEM holding this charger stopped? Read the way PRODUCTION reads
+    it — `decide` branches on `pause_remaining_min > 0` and nothing else,
+    so a helper that agrees with the deadline but not with the knob would
+    pass here and change nothing on the wire."""
+    return remaining_minutes(value, now) > 0
 
 
 @pytest.mark.unit
@@ -56,20 +63,20 @@ class TestTheDeadlineIsTheWholeState:
 
     def test_it_holds_until_the_deadline_and_not_after(self):
         armed = deadline_for_minutes(60, NOW)
-        assert is_paused(armed, NOW) is True
-        assert is_paused(armed, NOW + timedelta(minutes=59)) is True
-        assert is_paused(armed, NOW + timedelta(minutes=60)) is False
-        assert is_paused(armed, NOW + timedelta(hours=9)) is False
+        assert _holding(armed, NOW) is True
+        assert _holding(armed, NOW + timedelta(minutes=59)) is True
+        assert _holding(armed, NOW + timedelta(minutes=60)) is False
+        assert _holding(armed, NOW + timedelta(hours=9)) is False
 
     def test_nothing_armed_is_not_paused(self):
         for value in (None, "", 0):
-            assert is_paused(value, NOW) is False
+            assert _holding(value, NOW) is False
 
     def test_an_unreadable_deadline_releases_rather_than_holds(self):
         """#925 — "I could not ask" is not "yes". The safe side of not
         knowing is letting the charger go, not holding a contactor open
         forever on a corrupt string."""
-        assert is_paused("not-a-date", NOW) is False
+        assert _holding("not-a-date", NOW) is False
         assert parse_deadline("not-a-date") is None
 
     def test_a_restart_does_not_extend_the_pause(self):
@@ -217,7 +224,6 @@ class TestTheKnobIsWiredToTheDecision:
     def test_the_coordinator_resolves_it_for_the_view(self):
         """The ONE producer: three view builders would otherwise each have
         to ask the clock, and one of them would forget."""
-        from unittest.mock import MagicMock
         import homeassistant.util.dt as dt_util
 
         from custom_components.solar_energy_management.coordinator import (

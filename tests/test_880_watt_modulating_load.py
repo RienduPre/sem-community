@@ -40,10 +40,10 @@ def _hass(current: float = 0.0, minimum: float | None = 0.0,
 
 
 def _device(hass, **kw):
-    d = PowerSetpointDevice(
+    kw.setdefault("rated_power", 9000.0)
+    return PowerSetpointDevice(
         hass=hass, device_id="ac_thor", name="AC-THOR 9s",
-        rated_power=9000.0, entity_id=ENTITY, **kw)
-    return d
+        entity_id=ENTITY, **kw)
 
 
 def _payload(hass):
@@ -484,3 +484,112 @@ class TestTheBeliefFollowsTheNumber:
         d = _device(hass)
         assert d.adopt_if_running() is True
         assert d._status.current_consumption_w == pytest.approx(3200.0)
+
+
+@pytest.mark.unit
+class TestEveryConstructionSite:
+    """The first cut of #880 put the resolver in `device_registry` and a
+    ruflo reviewer found a FOURTH factory that never called it —
+    `surplus_device_from_spec`, which every service-registered device goes
+    through at every restart. A helper whose purpose is "so the factory and
+    the shed path cannot disagree" that one factory ignores is worse than
+    none: it reads as covered."""
+
+    def test_the_service_registration_factory_builds_a_setpoint(self):
+        """`register_surplus_device` takes entity_id as a plain string —
+        no domain validation — so an automation can and does pass a number."""
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.devices.base import (
+            surplus_device_from_spec,
+        )
+        dev = surplus_device_from_spec(
+            MagicMock(), "ac_thor",
+            {"name": "AC-THOR", "entity_id": ENTITY, "device_type": "water_heater",
+             "rated_power": 9000.0},
+        )
+        assert isinstance(dev, PowerSetpointDevice), (
+            "a service-registered watt load got a SwitchDevice, which calls "
+            "homeassistant.turn_on on a number entity: no such service, the "
+            "error swallowed, the device parked in ERROR at 0 W — #880's "
+            "reported symptom, on the path its first fix did not reach"
+        )
+
+    def test_that_factory_still_builds_switches_for_switches(self):
+        from unittest.mock import MagicMock
+
+        from custom_components.solar_energy_management.devices.base import (
+            SwitchDevice, surplus_device_from_spec,
+        )
+        dev = surplus_device_from_spec(
+            MagicMock(), "towel",
+            {"name": "Towel", "entity_id": "switch.towel", "rated_power": 500.0},
+        )
+        assert isinstance(dev, SwitchDevice)
+        assert not isinstance(dev, PowerSetpointDevice)
+
+    def test_the_resolver_has_exactly_one_home(self):
+        """It must not be re-derived beside a factory that then forgets to
+        call it — the shape that produced the missed site."""
+        import re
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        defs = [
+            p.relative_to(root).as_posix()
+            for p in root.rglob("*.py")
+            if "tests/" not in p.relative_to(root).as_posix()
+            and re.search(r"^def device_class_for_control",
+                          p.read_text(encoding="utf-8"), re.M)
+        ]
+        assert defs == ["devices/power_setpoint.py"], defs
+
+
+@pytest.mark.unit
+class TestTheFloorsEverySiblingApplies:
+    """`_get_power_rating` returns 0 W for a load that is OFF right now —
+    its own docstring says SwitchDevice turns that into the 1 kW default.
+    Taking the 0 at face value made `min_power_threshold` zero, so the
+    allocator 'activated' the heater into 0 W of surplus every cycle of a
+    dark night, the belief never flipped ACTIVE, `calibrate_rated_power`
+    could never run, and the reporter's symptom reproduced itself
+    THROUGH the fix."""
+
+    def test_an_unmeasured_rating_is_not_zero(self):
+        d = _device(_hass(), rated_power=0.0)
+        assert d.rated_power == 1000.0
+        assert d.rated_power_measured is False
+
+    def test_and_neither_is_the_activation_threshold(self):
+        d = _device(_hass(), rated_power=0.0)
+        assert d.min_power_threshold == 1000.0, (
+            "the surplus walk activates when effective_surplus >= this; at "
+            "0.0 that is true at midnight with no sun"
+        )
+
+    def test_a_measured_rating_is_kept_and_labelled(self):
+        d = _device(_hass(), rated_power=9000.0)
+        assert d.rated_power == 9000.0
+        assert d.rated_power_measured is True
+
+    def test_an_explicit_threshold_still_wins(self):
+        d = _device(_hass(), rated_power=9000.0, min_power_threshold=250.0)
+        assert d.min_power_threshold == 250.0
+
+
+@pytest.mark.unit
+class TestTheStopPathHasTheSameGate:
+    """`deactivate` was the one method with no unit check — the way a 0
+    lands on an ampere knob, which on OCPP persists as a 0 A profile (#976)."""
+
+    @pytest.mark.asyncio
+    async def test_it_refuses_an_entity_the_write_path_refuses(self):
+        hass = MagicMock()
+        hass.states.get = MagicMock(return_value=SimpleNamespace(
+            state="16", attributes={"min": 6, "max": 32,
+                                    "unit_of_measurement": "A"}))
+        hass.services.async_call = AsyncMock()
+        d = PowerSetpointDevice(
+            hass=hass, device_id="x", name="X", rated_power=9000.0,
+            entity_id="number.keba_charging_current")
+        await d.deactivate()
+        assert hass.services.async_call.await_count == 0

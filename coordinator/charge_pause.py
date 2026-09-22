@@ -71,11 +71,6 @@ def pause_remaining_s(value, now: datetime) -> Optional[float]:
     return left if left > 0 else None
 
 
-def is_paused(value, now: datetime) -> bool:
-    """Is this charger being held stopped right now?"""
-    return pause_remaining_s(value, now) is not None
-
-
 def remaining_minutes(value, now: datetime, step: int = PAUSE_STEP_MIN) -> float:
     """What the knob reads: minutes left, rounded UP to ``step``.
 

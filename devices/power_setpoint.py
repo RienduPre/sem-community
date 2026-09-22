@@ -33,6 +33,7 @@ from typing import Optional, Tuple
 from homeassistant.core import HomeAssistant
 
 from ..coordinator.power_control import native_power_scale
+from ..consts.core import DEFAULT_DEVICE_RATED_POWER
 from .base import ControllableDevice, DeviceState, DeviceType
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +55,25 @@ def setpoint_domain(entity_id: Optional[str]) -> str:
     return domain if domain in SETPOINT_DOMAINS else "number"
 
 
+def device_class_for_control(entity_id: Optional[str]):
+    """Which device class drives this control entity (#880).
+
+    THE producer. It lives here, beside the class it may return, because
+    the first cut of #880 put it in ``features/device_registry.py`` and a
+    fourth construction site — ``surplus_device_from_spec``, which every
+    service-registered device goes through at every restart — went on
+    building a ``SwitchDevice`` for a ``number`` entity. A helper whose
+    whole purpose is "so the factory and the shed path cannot disagree"
+    that one of the factories does not call is worse than no helper: it
+    reads as covered.
+
+    The import is function-local because ``base`` imports this module.
+    """
+    from .base import SwitchDevice
+    domain = str(entity_id or "").split(".", 1)[0]
+    return PowerSetpointDevice if domain in SETPOINT_DOMAINS else SwitchDevice
+
+
 class PowerSetpointDevice(ControllableDevice):
     """A load whose draw SEM sets in watts, through a ``number`` entity."""
 
@@ -69,21 +89,43 @@ class PowerSetpointDevice(ControllableDevice):
         power_entity_id: Optional[str] = None,
         energy_entity_id: Optional[str] = None,
     ) -> None:
+        # (#576/#744) The same two floors ``SwitchDevice`` applies, for the
+        # same reason and from the same source: ``_get_power_rating`` returns
+        # 0 W for a load that is OFF right now, or has no power sensor at
+        # all. Taking that 0 at face value made ``min_power_threshold`` zero,
+        # so ``effective_surplus >= 0`` was true at every cycle of a dark
+        # night: the allocator "activated" the heater into 0 W of surplus,
+        # ``_write`` clamped it to the entity's floor, the belief never
+        # flipped ACTIVE — so ``calibrate_rated_power`` could never run and
+        # learn the real number — and the reporter's symptom reproduced
+        # itself through the fix. 0 W here means NOT MEASURED YET.
+        rp = (float(rated_power) if (rated_power and rated_power > 0)
+              else DEFAULT_DEVICE_RATED_POWER)
         super().__init__(
             hass, device_id, name, priority,
-            min_power_threshold, entity_id, power_entity_id,
+            min_power_threshold or rp,
+            entity_id, power_entity_id,
             energy_entity_id=energy_entity_id,
         )
-        self.rated_power = rated_power
+        self.rated_power = rp
+        #: (#744) Label the invention — the 1 kW above is a placeholder.
+        self.rated_power_measured = bool(rated_power and rated_power > 0)
 
     @property
     def device_type(self) -> DeviceType:
         return DeviceType.SETPOINT
 
     # ── the entity's own bounds, read live ────────────────────────────
-    def _bounds(self) -> Tuple[float, float, float]:
-        """``(min, max, step)`` from the entity, in the ENTITY's own unit."""
-        scale = self.scale_to_watts() or 1.0
+    def _bounds(self, scale: Optional[float] = None) -> Tuple[float, float, float]:
+        """``(min, max, step)`` from the entity, in the ENTITY's own unit.
+
+        ``scale`` is passed in by every caller that has already asked for it
+        — the probe logs a WARNING on each refusal, and asking three times a
+        cycle turned one misconfigured entity into ~1 200 lines an hour.
+        """
+        if scale is None:
+            scale = self.scale_to_watts()
+        scale = scale or 1.0
         low, high, step = _DEFAULT_MIN_W, float(self.rated_power or 0.0) / scale, 1.0
         state = self.hass.states.get(self.entity_id) if self.entity_id else None
         attrs = getattr(state, "attributes", None) or {}
@@ -117,9 +159,9 @@ class PowerSetpointDevice(ControllableDevice):
             return None
         return native_power_scale(self.hass, self.entity_id)
 
-    def _clamp(self, watts: float) -> float:
+    def _clamp(self, watts: float, scale: Optional[float] = None) -> float:
         """The value this entity will actually accept for ``watts``."""
-        low, high, step = self._bounds()
+        low, high, step = self._bounds(scale)
         try:
             value = float(watts)
         except (TypeError, ValueError):
@@ -140,7 +182,7 @@ class PowerSetpointDevice(ControllableDevice):
                 "setpoint (see #882)", watts, self.entity_id,
             )
             return 0.0
-        native = self._clamp(float(watts) / scale)
+        native = self._clamp(float(watts) / scale, scale)
         await self.send(setpoint_domain(self.entity_id), "set_value",
                         {"entity_id": self.entity_id, "value": native})
         written_w = native * scale
@@ -170,7 +212,7 @@ class PowerSetpointDevice(ControllableDevice):
             native = float(state.state)
         except (TypeError, ValueError):
             return None
-        low, _high, _step = self._bounds()
+        low, _high, _step = self._bounds(scale)
         return None if native <= low else native * scale
 
     def _believe_running(self, watts: float, how: str) -> bool:
@@ -271,7 +313,18 @@ class PowerSetpointDevice(ControllableDevice):
             elapsed = (datetime.now() - self._last_activated).total_seconds()
             if elapsed < self.min_on_seconds:
                 return
-        low, _high, _step = self._bounds()
+        scale = self.scale_to_watts()
+        if scale is None:
+            # The one method that had no unit gate. An entity the write path
+            # refuses must not be written by the STOP path either — that is
+            # how a 0 lands on an ampere knob, and on OCPP a 0 A profile is
+            # persisted (#976).
+            _LOGGER.warning(
+                "Not stopping %s — %s does not read as a power setpoint",
+                self.name, self.entity_id,
+            )
+            return
+        low, _high, _step = self._bounds(scale)
         try:
             await self.send(setpoint_domain(self.entity_id), "set_value",
                             {"entity_id": self.entity_id, "value": low})
