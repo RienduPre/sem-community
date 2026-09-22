@@ -51,12 +51,23 @@ def setpoint_is_running(hass: HomeAssistant, entity_id: str) -> Optional[bool]:
     domain = str(entity_id or "").split(".", 1)[0]
     if domain not in ("number", "input_number"):
         return None
-    state = hass.states.get(entity_id)
-    if not state or state.state in ("unknown", "unavailable", None, ""):
+    # A WATT setpoint commands the draw, so its value answers "is it
+    # running". An AMPERE one only sets a CEILING — the car decides whether
+    # to take it — so a charger sitting at 16 A and drawing nothing is not
+    # running, and #745's power fallback is right for those. The same unit
+    # rule (#749) tells them apart, and it also answers "can I read this at
+    # all": ``None`` covers unavailable, unknown and unparseable together.
+    # require_explicit_unit: only an entity that SAYS it is watts speaks for
+    # itself. A bare number could be anything, and #745's rule — the power
+    # reading wins, because it is a measurement and a setpoint is only an
+    # intention — is the safer answer when nobody said.
+    from ..coordinator.power_control import native_power_scale
+    if native_power_scale(hass, entity_id, require_explicit_unit=True) is None:
         return None
+    state = hass.states.get(entity_id)
     try:
         value = float(state.state)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AttributeError):
         return None
     attrs = getattr(state, "attributes", None) or {}
     try:

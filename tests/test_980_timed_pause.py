@@ -214,8 +214,20 @@ class TestItAddsNoStopWar:
 
     def test_decide_has_no_pause_branch_left(self):
         """The retired design. A stray branch would put SEM back to
-        re-asserting DISABLE, which is the thing this replaced."""
-        from pathlib import Path
-        src = (Path(__file__).resolve().parent.parent
-               / "coordinator" / "decide.py").read_text(encoding="utf-8")
-        assert "pause_remaining_min" not in src
+        re-asserting DISABLE, which is the thing this replaced.
+
+        Asked of the AST, not of the spelling (#925): what must not exist
+        is a READ of a pause field on the view, whatever it is called."""
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            ChargerView,
+        )
+        from custom_components.solar_energy_management.coordinator.decide import (
+            decide,
+        )
+        from .ast_contracts import reads_attribute
+
+        assert not any("pause" in f for f in ChargerView.__dataclass_fields__), (
+            "the view carries a pause field again — decide() is pure, so a "
+            "field is the only way a pause could reach it"
+        )
+        assert not reads_attribute(decide, "view", "pause_remaining_min")

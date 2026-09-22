@@ -195,8 +195,10 @@ class TestTheRepairFollowsTheMapping:
         d = self._load({"type": "switch", "entity": "switch.ac_thor"})
         reg = self._sync_registry(d)
         with patch(
+            # (#880) the registry no longer names a class here — it asks
+            # ``device_class_for_control`` which one the entity needs.
             "custom_components.solar_energy_management.features.device_registry"
-            ".SwitchDevice"
+            ".device_class_for_control"
         ), patch(
             "custom_components.solar_energy_management.coordinator.repair_issues"
             ".clear_load_current_control_wrong_unit"

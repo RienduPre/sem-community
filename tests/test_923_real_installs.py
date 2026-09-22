@@ -68,7 +68,11 @@ async def _setup(hass, entry):
 
 
 def _uid(entry, platform, key):
-    if platform == "number":
+    # Platforms do not agree on the shape, and changing one now would rename
+    # an entity on every install — a migration, for nothing. numbers and
+    # selects carry the entry id; switch/sensor/binary_sensor/button use the
+    # bare ``sem_`` form. (#980 added the first select to this table.)
+    if platform in ("number", "select"):
         return f"{entry.entry_id}_{'battery_capacity_kwh' if key == 'battery_capacity' else key}"
     return f"sem_{key}"
 

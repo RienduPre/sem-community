@@ -13,63 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
-- ✨ **The battery can hold the meter on the capacity ceiling** (#970,
-  requested by @Hanzzzie85). A new *Battery peak shaving* switch, default
-  OFF. With it on, SEM caps battery discharge at
-  `house − solar − the slot's allowed import`, so the grid funds everything
-  up to the Target Peak Limit — which costs nothing on a capacity tariff —
-  and the pack supplies only the part the meter may not carry. It can only
-  ever discharge the pack *less* than today, never more. When tonight's
-  forecast budget (#778) says tomorrow refills what the house takes, the
-  shave lifts and the battery goes back to covering the lot: his "zero
-  grid until the evening".
+- ✨ **Battery can hold the meter at your peak limit** (#970). The grid pays up to the limit, the battery covers the rest. Off by default.
 
-- ✨ **Pause charging for a while, and SEM puts the mode back** (#980,
-  requested by @RienduPre). One *Pause Charging For* dropdown (30 min …
-  12 h) for the install, and a *Pause Charging* button per charger. Press a
-  charger's button and its charge mode goes to **Off** for that long, then
-  back to exactly what it was. There is no Resume button: setting the
-  Charge Mode back is already one, and it ends the pause on the spot.
-  Off is the right instrument here and not a compromise — it is hands-off
-  (#898), so SEM sends one stop and starts no fight with a box that
-  restarts itself. What SEM adds is the part you cannot do yourself:
-  remembering to turn it back on. The deadline is stored as an instant, so
-  a restart neither extends the pause nor hands back minutes already
-  spent, and a pause that ran out while Home Assistant was down resumes on
-  the next cycle. Change the mode by hand while it is running and the
-  pause stands down — it never snaps a deliberate choice back.
+- ✨ **Pause a charger for a while** (#980). Pick a time, press Pause, the charge mode goes Off and comes back on its own.
 
-- ✨ **A load whose control is a watt setpoint now gets the watts** (#880,
-  reported by @jonasbkarlsson and @florianhadersbeck). SEM's surplus
-  allocator has always handed each device the power it may have —
-  `activate(available_watts)` — and every class but the EV chargers' threw
-  the number away: a `number` entity was driven by `SwitchDevice`, which
-  calls `turn_on` and reports the nameplate. A my-PV AC-THOR, a boiler
-  element, or a plain Home Assistant number helper therefore read
-  *Allocated surplus: 0 W* forever, and the allocator's remaining-surplus
-  arithmetic was wrong on top of it. The new `PowerSetpointDevice` writes
-  the allocation, clamped to the entity's own min/max and quantised to its
-  step, and reports what it wrote. It shares #749's one unit rule, so a
-  `kW` entity is written kilowatts and an ampere knob is still refused.
+- ✨ **A load set by watts now gets the watts** (#880). SEM wrote nothing to a Number control before, so it read 0 W for ever.
 
-- 🐛 **…and the peak shedder can now actually shed one** (#880). Three
-  places declare `type: "switch"` for whatever control entity the user
-  picked, so shedding called `switch.turn_off` on a `number` entity: no
-  such service for that domain, nothing written, and the load ran straight
-  through the peak event. The entity's domain now decides, the setpoint is
-  taken to its floor, and restoring puts back the user's own number.
+- 🐛 **Peak shedding can now stop a watt load** (#880). It tried to switch off a Number entity, which does nothing.
 
-- 🐛 **A watt entity under "current" control is driven instead of refused**
-  (#880, superseding half of #882). #882 could only raise a repair — SEM
-  had no class that writes watts. It has one now, so the pairing is routed
-  to it and the repair is cleared: the configuration the user already made
-  starts working on upgrade, with nothing to reconfigure.
+- 🐛 **A watt entity set to current control now works** (#880, #882). SEM used to refuse it. It drives it instead, and clears the repair.
 
-- 🐛 **A setpoint load is no longer orphaned by a restart** (#880). SEM
-  believed a heater sitting at 3.2 kW was idle and offered those watts to
-  something else, while the heater went on drawing them answerable to
-  nobody — #559's orphan in the shape a setpoint takes. The belief now
-  follows the number, at registration and every cycle (#766, #914).
+- 🐛 **A restart no longer loses a running watt load** (#880). SEM read a running heater as idle and gave its power away twice.
 
 # [2.1.0-beta.36] — 22.09.2026
 
