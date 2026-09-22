@@ -58,6 +58,19 @@ def per_charger_translation_keys() -> dict[str, tuple[str, ...]]:
     end = number_src.index("per_charger_descriptions.append(base_desc)")
     numbers = re.findall(r'\)\s*,\s*"([a-z_0-9]+)"\s*,', number_src[start:end])
 
+    # (#980) The pause knob is not one of the (description, config_key,
+    # default) tuples above — it is a countdown with its own class, and its
+    # translation key is the module constant that class persists under. Read
+    # it from there rather than listing it: delete the entity and the key
+    # drops out of this derivation with it, which is the whole point of
+    # deriving instead of maintaining a list beside a list.
+    if "SEMChargerPauseNumber(" in number_src:
+        pause_src = (_ROOT / "coordinator" / "charge_pause.py").read_text(
+            encoding="utf-8")
+        m = re.search(r'PAUSE_UNTIL_KEY\s*=\s*"([a-z_0-9]+)"', pause_src)
+        if m:
+            numbers.append(m.group(1))
+
     select_src = (_ROOT / "select.py").read_text(encoding="utf-8")
     selects = re.findall(r'entry,\s*cid,\s*"([a-z_0-9]+)"\s*,', select_src)
 

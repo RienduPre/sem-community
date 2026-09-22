@@ -468,6 +468,19 @@ class BatteryView:
     #: the disabled sentinel is also "open" (legacy rule) and must not lift the
     #: EV protection clamp (review of the first cut: it did, on every install).
     morning_window_open: bool = False
+    peak_shaving_enabled: bool = False
+    """(#970) The master switch for battery peak shaving. Default OFF: a
+    shaving install DELIBERATELY imports up to the capacity ceiling, which
+    is the opposite of what every install does today, so it can only ever
+    be a choice someone makes."""
+    peak_slot_allowed_w: "Any" = None
+    """(#970) #864's slot allowance — what the rest of the billed 15-minute
+    slot may average so the slot lands on the Target Peak Limit. ``None``
+    means no ceiling (an unlimited install, or a slot the guard could not
+    compute), and absence of a ceiling is not a ceiling of zero. Carried on
+    the view because ``decide_battery`` is pure; produced once per cycle by
+    ``_compute_peak_slot_allowance``, the same number the EV offer and the
+    cheap-hours clamp read."""
     """(#778) ``(in_block, per_battery_power_w)`` from ``forecast_sell_gate``
     — the SPEND twin of ``arbitrage_sell``, fleet-split by the pipeline.
     decide_battery consults THIS gate when the verdict carries
@@ -1112,6 +1125,15 @@ class ChargerView:
     Defaults to no opinion, which every consumer must treat as "no planner
     exists" — the fail-open contract. Day/night agnostic (see
     :mod:`.plan_verdict`): a daytime planner fills this same field."""
+
+    pause_remaining_min: float = 0.0
+    """(#980) Minutes left on a SEM-enforced pause; 0 = none armed.
+
+    Resolved by the coordinator against the wall clock (``decide`` is pure
+    and has none) from the charger's ``pause_charging_until``. A positive
+    value means DISABLE this cycle and every cycle until it runs out —
+    the opposite intent to Off, which releases control instead of holding
+    it. See ``coordinator/charge_pause.py``."""
 
     soc_ceiling_reached: bool = False
     """The car has reached its configured MAX target (SOC % ceiling, or

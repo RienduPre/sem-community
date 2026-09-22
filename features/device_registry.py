@@ -41,8 +41,22 @@ from ..devices.base import (
     CurrentControlDevice,
     surplus_device_from_spec,
 )
+from ..devices.power_setpoint import SETPOINT_DOMAINS, PowerSetpointDevice
 from ..hardware_detection import discover_ev_charger_from_registry
 from ..const import LOAD_PRIORITY_BASE as _LOAD_PRIORITY_BASE
+
+#: (#880) Domains whose control is a watt SETPOINT rather than a contact.
+#: The reporter configured "Control type: Number entity" and got a
+#: SwitchDevice, so SEM turned the AC-THOR fully on and wrote no value.
+def device_class_for_control(entity_id):
+    """Which device class drives this control entity (#880).
+
+    One place, so the factory and the shed path cannot disagree about what
+    a device is. ``SETPOINT_DOMAINS`` is the setpoint module's, not a second
+    copy — that is the whole lesson of #880.
+    """
+    domain = str(entity_id or "").split(".", 1)[0]
+    return PowerSetpointDevice if domain in SETPOINT_DOMAINS else SwitchDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -983,7 +997,7 @@ class UnifiedDeviceRegistry:
                         device.device_id, entity,
                     )
                     continue
-                surplus_device = SwitchDevice(
+                surplus_device = device_class_for_control(entity)(
                     hass=self.hass,
                     device_id=device.device_id,
                     name=device.name,
@@ -1087,28 +1101,39 @@ class UnifiedDeviceRegistry:
             except Exception:  # noqa: BLE001 — a probe never costs a setup
                 scale = None
         if scale is not None:
+            # (#880) A POWER entity under "current" control. #882 could only
+            # refuse this pairing — current control writes amperes and SEM had
+            # no class that writes watts. It has one now, and the entity
+            # itself says which: route, don't refuse. The user keeps the
+            # configuration they already made and the load starts following
+            # the surplus on upgrade.
             st = self.hass.states.get(entity)
             unit = ""
             if st is not None and isinstance(getattr(st, "attributes", None), dict):
                 unit = str(st.attributes.get("unit_of_measurement") or "")
-            _LOGGER.warning(
+            _LOGGER.info(
                 "Load %s (%s) is set to CURRENT control but %s is a POWER "
-                "entity (%s). Current control writes amperes — this pairing "
-                "can never work, so the device is not registered for surplus. "
-                "Watt-modulating loads are #880; see the repair for what to "
-                "do now.",
+                "entity (%s) — driving it as a watt setpoint (#880).",
                 device.name, device.device_id, entity, unit or "no unit",
             )
             try:
                 from ..coordinator.repair_issues import (
-                    raise_load_current_control_wrong_unit,
+                    clear_load_current_control_wrong_unit,
                 )
-                raise_load_current_control_wrong_unit(
-                    self.hass, device_id=device.device_id, name=device.name,
-                    entity_id=entity, unit=unit or "W",
-                )
+                clear_load_current_control_wrong_unit(self.hass, device.device_id)
             except Exception:  # noqa: BLE001
                 pass
+            self._surplus_controller.register_device(PowerSetpointDevice(
+                hass=self.hass,
+                device_id=device.device_id,
+                name=device.name,
+                rated_power=self._initial_rated_power(
+                    device.device_id, device.power_sensor),
+                priority=device.priority,
+                entity_id=entity,
+                power_entity_id=device.power_sensor,
+                energy_entity_id=getattr(device, "energy_sensor", None),
+            ))
             return
 
         try:

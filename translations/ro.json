@@ -1427,6 +1427,9 @@
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
       },
+      "battery_peak_shaving_enabled": {
+        "name": "Reducerea vârfurilor cu bateria"
+      },
       "export_guard_enabled": {
         "name": "Gardă de export"
       },
@@ -1563,6 +1566,9 @@
       },
       "ev_phases": {
         "name": "{charger} Faze"
+      },
+      "pause_charging_until": {
+        "name": "{charger} Pune încărcarea pe pauză"
       }
     },
     "select": {

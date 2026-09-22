@@ -1427,6 +1427,9 @@
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
       },
+      "battery_peak_shaving_enabled": {
+        "name": "Livellamento dei picchi con la batteria"
+      },
       "export_guard_enabled": {
         "name": "Guardia dell'esportazione"
       },
@@ -1563,6 +1566,9 @@
       },
       "ev_phases": {
         "name": "{charger} Fasi"
+      },
+      "pause_charging_until": {
+        "name": "{charger} Metti in pausa la ricarica"
       }
     },
     "select": {

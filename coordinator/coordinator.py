@@ -3755,6 +3755,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             redirect_allowed=not bool(getattr(
                                 getattr(pcc, "state", None), "redirect_vetoed", False)),
                             charger_cfg=charger_cfg,
+                            # (#980) the enforced pause, resolved once
+                            pause_remaining_min=self._charger_pause_remaining_min(cid),
                             mode=per_mode,
                             daily_ev_kwh=self._charger_daily_kwh(cid, energy),
                             target_kwh=decide_target_kwh,
@@ -4095,6 +4097,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     ev_priority=self._ev_priority_for(cid),
                     wpa_table=self._wpa_table_for(cid),
                     charger_cfg={},
+                    pause_remaining_min=self._charger_pause_remaining_min(cid),  # (#980)
                     mode=per_mode,
                     daily_ev_kwh=getattr(energy, "daily_ev", 0.0),
                     target_kwh=getattr(charging_context, "night_target_kwh", None),
@@ -7981,6 +7984,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             "state", "") == "open"
                     and self.config.get("ev_morning_window_enabled", False)),
                 forecast_sell=_fsell,
+                # (#970) Peak shaving: the master switch and #864's slot
+                # allowance. The allowance is the SAME number the EV offer
+                # and the cheap-hours clamp read — computed once per cycle
+                # in _compute_peak_slot_allowance, never re-derived here.
+                peak_shaving_enabled=bool(
+                    self.config.get("battery_peak_shaving_enabled", False)),
+                peak_slot_allowed_w=getattr(self, "_peak_slot_allowed_w", None),
             )
 
             # 3. Decide
@@ -11189,6 +11199,25 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 return adapter
         return self._primary_battery_adapter()
 
+    def _charger_pause_remaining_min(self, charger_id: str) -> float:
+        """(#980) Minutes left on this charger's SEM-enforced pause, 0 = none.
+
+        The ONE producer. ``decide`` and ``build_charger_view`` are pure and
+        have no clock, so the wall-clock question is answered here and rides
+        the view — and answered in one place so the three view builders
+        cannot disagree about whether a charger is paused.
+        """
+        from .charge_pause import PAUSE_UNTIL_KEY, remaining_minutes
+        import homeassistant.util.dt as _dt
+        cfg = None
+        for c in (self.config.get("ev_chargers") or []):
+            if (c.get("id") or "ev_charger") == charger_id:
+                cfg = c
+                break
+        if cfg is None:
+            return 0.0
+        return remaining_minutes(cfg.get(PAUSE_UNTIL_KEY), _dt.now())
+
     def _compute_peak_slot_allowance(self, power) -> None:
         """(#864) The slot-budget allowance — the PREVENTIVE peak bound.
 
@@ -11768,6 +11797,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             ev_priority=self._ev_priority_for(_primary_cfg.get("id") or "ev_charger"),
             wpa_table=self._wpa_table_for(_primary_cfg.get("id") or "ev_charger"),
             charger_cfg=_primary_cfg,
+            pause_remaining_min=self._charger_pause_remaining_min(   # (#980)
+                _primary_cfg.get("id") or "ev_charger"),
             mode=self._effective_charge_mode_for(_primary_cfg),
             daily_ev_kwh=self._charger_daily_kwh(
                 _primary_cfg.get("id") or "ev_charger", energy,

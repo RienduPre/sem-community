@@ -1427,6 +1427,9 @@
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
       },
+      "battery_peak_shaving_enabled": {
+        "name": "Akkumulátoros csúcsleszabályozás"
+      },
       "export_guard_enabled": {
         "name": "Export-őr"
       },
@@ -1563,6 +1566,9 @@
       },
       "ev_phases": {
         "name": "{charger} Fázisok"
+      },
+      "pause_charging_until": {
+        "name": "{charger} Töltés szüneteltetése"
       }
     },
     "select": {

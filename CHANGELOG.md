@@ -13,6 +13,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **The battery can hold the meter on the capacity ceiling** (#970,
+  requested by @Hanzzzie85). A new *Battery peak shaving* switch, default
+  OFF. With it on, SEM caps battery discharge at
+  `house − solar − the slot's allowed import`, so the grid funds everything
+  up to the Target Peak Limit — which costs nothing on a capacity tariff —
+  and the pack supplies only the part the meter may not carry. It can only
+  ever discharge the pack *less* than today, never more. When tonight's
+  forecast budget (#778) says tomorrow refills what the house takes, the
+  shave lifts and the battery goes back to covering the lot: his "zero
+  grid until the evening".
+
+- ✨ **Pause charging, and SEM keeps it paused** (#980, requested by
+  @RienduPre). Every charger gets a *Pause Charging* knob in minutes.
+  While it is running down, SEM commands the stop every cycle — so a
+  wallbox that restarts itself (his Pulsar does) stays stopped without
+  opening its app. This is deliberately NOT what *Off* means: Off releases
+  control and sends nothing (#898/#942); a pause is SEM acting, to hold.
+  Set it back to 0 to resume. The deadline is what is stored, so a restart
+  does not hand back the minutes already spent.
+
+- ✨ **A load whose control is a watt setpoint now gets the watts** (#880,
+  reported by @jonasbkarlsson and @florianhadersbeck). SEM's surplus
+  allocator has always handed each device the power it may have —
+  `activate(available_watts)` — and every class but the EV chargers' threw
+  the number away: a `number` entity was driven by `SwitchDevice`, which
+  calls `turn_on` and reports the nameplate. A my-PV AC-THOR, a boiler
+  element, or a plain Home Assistant number helper therefore read
+  *Allocated surplus: 0 W* forever, and the allocator's remaining-surplus
+  arithmetic was wrong on top of it. The new `PowerSetpointDevice` writes
+  the allocation, clamped to the entity's own min/max and quantised to its
+  step, and reports what it wrote. It shares #749's one unit rule, so a
+  `kW` entity is written kilowatts and an ampere knob is still refused.
+
+- 🐛 **…and the peak shedder can now actually shed one** (#880). Three
+  places declare `type: "switch"` for whatever control entity the user
+  picked, so shedding called `switch.turn_off` on a `number` entity: no
+  such service for that domain, nothing written, and the load ran straight
+  through the peak event. The entity's domain now decides, the setpoint is
+  taken to its floor, and restoring puts back the user's own number.
+
+- 🐛 **A watt entity under "current" control is driven instead of refused**
+  (#880, superseding half of #882). #882 could only raise a repair — SEM
+  had no class that writes watts. It has one now, so the pairing is routed
+  to it and the repair is cleared: the configuration the user already made
+  starts working on upgrade, with nothing to reconfigure.
+
+- 🐛 **A setpoint load is no longer orphaned by a restart** (#880). SEM
+  believed a heater sitting at 3.2 kW was idle and offered those watts to
+  something else, while the heater went on drawing them answerable to
+  nobody — #559's orphan in the shape a setpoint takes. The belief now
+  follows the number, at registration and every cycle (#766, #914).
+
 # [2.1.0-beta.36] — 22.09.2026
 
 - 🐛 **A thirteenth verdict that named a cause its own scope refutes, and a

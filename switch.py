@@ -66,6 +66,14 @@ SWITCH_TYPES = [
         entity_category=EntityCategory.CONFIG,
         icon="mdi:speedometer-slow",
     ),
+    # (#970) Battery peak shaving. Default OFF — see PERSISTED_FLAG_DEFAULTS
+    # for why this one in particular is never inherited. It additionally
+    # needs a Target Peak Limit below MAX to have a ceiling to hold to.
+    SwitchEntityDescription(
+        key="battery_peak_shaving_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:home-lightning-bolt-outline",
+    ),
     # (#778 phase 6) The two battery permissions. Switches rather than another
     # battery mode because a mode is single-select and cannot say "may sell,
     # may not touch the car". Both default to UNSET, which resolves to today's

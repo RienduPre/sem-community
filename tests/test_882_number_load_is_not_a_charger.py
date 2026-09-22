@@ -15,10 +15,17 @@ AMPERES and defaults to ``min 6 / max 32`` — pointed at an entity whose range
 is 0–9000 **watts**. Nothing sensible could ever have been written, and
 nothing was: no error, no log, ``Allocated surplus: 0 W`` forever.
 
-The missing capability (a watt-modulating device class) is an ENHANCEMENT,
-#880 — SEM was never designed for it. This is the narrower defect: SEM offers
+The missing capability (a watt-modulating device class) was an ENHANCEMENT,
+#880 — SEM was never designed for it. This was the narrower defect: SEM offers
 that control type in a picker and silently produces something inert. #799's
 rule is that a silent no-op is not an answer.
+
+**Superseded in part by #880.** The class exists now, so a power entity under
+"current" control is no longer refused with a repair — it is ROUTED to
+``PowerSetpointDevice``, which writes watts. What #882 established and what
+still holds is the invariant below: a 0-9000 W entity is never driven as a
+6-32 A charger. The repair is cleared on the same path, because the user's
+configuration now works as they meant it.
 
 SEM already knows how to ask "is this entity a power setpoint?" —
 ``native_power_scale`` in ``coordinator/power_control.py``, built generic for
@@ -46,6 +53,7 @@ def _registry(entity_unit):
     reg._surplus_controller = MagicMock()
     reg._surplus_controller.register_device = MagicMock()
     reg._load_manager = None
+    reg._initial_rated_power = MagicMock(return_value=9000.0)
     return reg
 
 
@@ -65,34 +73,53 @@ def _register(reg, unit):
     reg._register_current_control(_device(), control)
 
 
-class TestAWattNativeEntityIsRefused:
+class TestAWattNativeEntityIsNeverACharger:
+    def _registered(self, reg):
+        assert reg._surplus_controller.register_device.called
+        return reg._surplus_controller.register_device.call_args.args[0]
+
     def test_it_is_not_registered_as_a_charger(self):
+        from custom_components.solar_energy_management.devices.base import (
+            CurrentControlDevice,
+        )
         reg = _registry("W")
         _register(reg, "W")
-        assert not reg._surplus_controller.register_device.called, (
+        assert not isinstance(self._registered(reg), CurrentControlDevice), (
             "a 0-9000 W water heater was registered as a 6-32 A EV charger — "
             "it shows up in diagnostics as 'Chargers: 1' and can never be "
             "written a value that means anything"
         )
 
-    def test_a_kilowatt_entity_is_refused_too(self):
+    def test_it_is_driven_as_a_watt_setpoint_instead(self):
+        """(#880) The capability #882 was missing. His configuration was
+        never wrong about the ENTITY — only about the class behind it."""
+        from custom_components.solar_energy_management.devices.power_setpoint import (
+            PowerSetpointDevice,
+        )
+        reg = _registry("W")
+        _register(reg, "W")
+        dev = self._registered(reg)
+        assert isinstance(dev, PowerSetpointDevice)
+        assert dev.entity_id == "number.mypv_ac_thor_9s_power_ac9"
+
+    def test_a_kilowatt_entity_takes_the_same_route(self):
+        from custom_components.solar_energy_management.devices.power_setpoint import (
+            PowerSetpointDevice,
+        )
         reg = _registry("kW")
         _register(reg, "kW")
-        assert not reg._surplus_controller.register_device.called
+        assert isinstance(self._registered(reg), PowerSetpointDevice)
 
-    def test_the_user_is_told_rather_than_left_guessing(self):
-        """#799 — a silent no-op is not an answer. Florian read
-        'Allocated surplus: 0 W' and had to reason his way to the cause."""
+    def test_the_repair_is_cleared_because_it_now_works(self):
+        """#799 — a silent no-op is not an answer, and neither is a standing
+        repair for something SEM has since learned to do."""
         reg = _registry("W")
         with patch(
             "custom_components.solar_energy_management.coordinator.repair_issues"
-            ".raise_load_current_control_wrong_unit"
+            ".clear_load_current_control_wrong_unit"
         ) as m:
             _register(reg, "W")
-        assert m.called, "refused silently — the whole complaint"
-        kw = m.call_args.kwargs
-        assert "number.mypv_ac_thor_9s_power_ac9" in str(kw), \
-            "the repair must name the entity"
+        assert m.called, "the repair outlived the defect it described"
 
 
 class TestGenuineCurrentControlIsUntouched:
@@ -194,9 +221,13 @@ class TestTheRepairFollowsTheMapping:
             reg._sync_to_surplus_controller()
         assert clear.called
 
-    def test_a_watt_mapping_that_persists_keeps_its_repair(self):
-        """The clear must not race the raise: a device still on the wrong
-        mapping is raised on every sync and cleared on none."""
+    def test_a_watt_mapping_clears_its_repair_and_runs(self):
+        """(#880) The mapping that used to be unfixable now works, so the
+        repair must go — a standing repair for a working device is the same
+        silent lie in the other direction."""
+        from custom_components.solar_energy_management.devices.power_setpoint import (
+            PowerSetpointDevice,
+        )
         d = self._load({"type": "current", "entity": "number.ac_thor",
                         "min_value": 0, "max_value": 9000})
         reg = self._sync_registry(d)
@@ -206,10 +237,8 @@ class TestTheRepairFollowsTheMapping:
         with patch(
             "custom_components.solar_energy_management.coordinator.repair_issues"
             ".clear_load_current_control_wrong_unit"
-        ) as clear, patch(
-            "custom_components.solar_energy_management.coordinator.repair_issues"
-            ".raise_load_current_control_wrong_unit"
-        ) as raise_:
+        ) as clear:
             reg._sync_to_surplus_controller()
-        assert raise_.called
-        assert not clear.called
+        assert clear.called
+        registered = reg._surplus_controller.register_device.call_args.args[0]
+        assert isinstance(registered, PowerSetpointDevice)

@@ -3952,3 +3952,9 @@ def surplus_device_from_spec(
         power_entity_id=power_entity_id,
         energy_entity_id=energy_entity_id,
     )
+
+
+# (#880) Re-exported so `from .base import PowerSetpointDevice` works for the
+# call sites that already import every other device class from here. The
+# class lives in its own module: this file is already 3,900 lines.
+from .power_setpoint import PowerSetpointDevice  # noqa: E402,F401
