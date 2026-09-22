@@ -184,3 +184,35 @@ def clamp_import_command(
     if float(desired_w) <= headroom_w:
         return float(desired_w), False
     return headroom_w, True
+
+
+def cover_for_peak_w(
+    allowed_w: Optional[float],
+    house_w: float,
+    solar_w: float = 0.0,
+) -> float:
+    """Watts the battery must cover so the meter stays under the allowance.
+
+    The mirror of :func:`clamp_import_command`. That one bounds a command
+    that CREATES import; this one says how much of the import a HOLD has to
+    take back. One slot budget, read from the other side.
+
+    ``house_w - solar_w`` is what the meter buys for the house when the pack
+    covers nothing — the house is served from the sun first, as everywhere
+    else in SEM (``decide.self_consumption_surplus_w`` is the same
+    subtraction). Deliberately NOT the meter's own total: that carries the
+    car, and the pack's own charging, and each of those answers for itself
+    against this same allowance (the EV offer, the cheap-hours top-up, the
+    night charge). Sized from the total, the cover would make the pack pay
+    for a car's breach — and the watts it freed would go straight into that
+    car, whose clamp reads the lowered meter as room. The house's own draw
+    is the one quantity with nobody else to answer for it.
+
+    ``None`` allowance → 0.0. No ceiling is configured, so nothing has to be
+    covered: absence of a ceiling is never a ceiling of zero.
+    """
+    if allowed_w is None:
+        return 0.0
+    house_import_w = max(0.0, float(house_w or 0.0)
+                         - max(0.0, float(solar_w or 0.0)))
+    return max(0.0, house_import_w - max(0.0, float(allowed_w)))
