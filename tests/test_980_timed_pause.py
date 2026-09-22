@@ -231,3 +231,73 @@ class TestItAddsNoStopWar:
             "field is the only way a pause could reach it"
         )
         assert not reads_attribute(decide, "view", "pause_remaining_min")
+
+
+@pytest.mark.unit
+class TestTheButtonsSurviveSetup:
+    """The rig caught this on the first deploy and 11,653 unit tests did
+    not. Both buttons registered and were deleted in the same second: the
+    stale-entity sweep only knew the static list, so every per-charger
+    button looked like a leftover from an older version.
+
+        Registered new button.sem_charger_keba_fa87f74cd3_pause_charging
+        Removing stale entity ... (key 'charger_..._pause_charging'
+        no longer exists)
+    """
+
+    def test_the_sweep_is_told_about_them(self):
+        """Whatever is added must also be declared, or it is swept."""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent
+               / "button.py").read_text(encoding="utf-8")
+        body = src[src.index("async def async_setup_entry"):]
+        swept = re.search(r"_cleanup_stale_entities\(\s*hass,\s*entry,\s*(\w+)",
+                          body)
+        added = re.search(r"_fix_entity_ids\(\s*hass,\s*entry,\s*(\w+)", body)
+        assert swept and added, "the sweep calls moved — re-read button.py"
+        assert swept.group(1) == added.group(1) != "static_descriptions", (
+            f"the sweep is given {swept.group(1)!r}. If that is only the "
+            "static list, every per-charger button is registered and "
+            "deleted again on the same cycle."
+        )
+
+    @pytest.mark.asyncio
+    async def test_one_button_per_charger_is_built(self):
+        from unittest.mock import MagicMock, patch
+
+        from custom_components.solar_energy_management.button import (
+            SEMChargerPauseButton, async_setup_entry,
+        )
+        from custom_components.solar_energy_management.const import DOMAIN
+
+        hass = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "e"
+        entry.data = {"ev_chargers": [{"id": "keba", "name": "KEBA"},
+                                      {"id": "wb2", "name": "Wallbox"}]}
+        entry.options = {}
+        coordinator = MagicMock()
+        coordinator.config = entry.data
+        hass.data = {DOMAIN: {"e": coordinator}}
+        added = []
+        with patch("custom_components.solar_energy_management.button"
+                   ".kept_descriptions", return_value=[]), \
+             patch("custom_components.solar_energy_management.button"
+                   ".presence_of", return_value={}), \
+             patch("custom_components.solar_energy_management.button"
+                   "._fix_entity_ids"), \
+             patch("custom_components.solar_energy_management.button"
+                   "._cleanup_stale_entities") as sweep:
+            await async_setup_entry(hass, entry, lambda e: added.extend(e))
+
+        pause = [e for e in added if isinstance(e, SEMChargerPauseButton)]
+        assert [e._charger_id for e in pause] == ["keba", "wb2"]
+        assert [e.entity_id for e in pause] == [
+            "button.sem_charger_keba_pause_charging",
+            "button.sem_charger_wb2_pause_charging",
+        ]
+        # …and the sweep was handed both of them, not an empty static list.
+        kept = {d.key for d in sweep.call_args.args[2]}
+        assert kept == {"charger_keba_pause_charging",
+                        "charger_wb2_pause_charging"}, kept

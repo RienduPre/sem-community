@@ -56,13 +56,21 @@ async def async_setup_entry(
         ))
 
     async_add_entities(entities)
+    # (#980) The sweep below deletes any button whose key it does not
+    # recognise, so it must be told about the per-charger ones. Without
+    # this they are registered and removed again in the same second —
+    # which no unit test saw, and .175 showed on the first deploy.
+    all_descriptions = list(static_descriptions) + [
+        e.entity_description for e in entities
+        if isinstance(e, SEMChargerPauseButton)
+    ]
     # ``self.entity_id`` below is honoured only at FIRST registration; an
     # install that registered the button before the #815 id line existed
     # keeps the derived id (the .175 rig held
     # ``button.garden_sem_rebuild_battery_night_history`` on 01.09.2026).
     # Same registry repair switch/number/sensor run at setup.
-    _fix_entity_ids(hass, entry, static_descriptions, "button")
-    _cleanup_stale_entities(hass, entry, static_descriptions, "button")
+    _fix_entity_ids(hass, entry, all_descriptions, "button")
+    _cleanup_stale_entities(hass, entry, all_descriptions, "button")
 
 
 class SEMButton(CoordinatorEntity, ButtonEntity):
