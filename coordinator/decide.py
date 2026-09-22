@@ -481,8 +481,14 @@ def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
     """
     f = view.fleet
     if float(f.solar_w) < float(f.min_solar_w):
+        # (#992, class 99) "sun gone" was a claim about the sky, and the
+        # reader's own dashboard refuted it: @alexmc1510 saw this at 828 W
+        # of production while the house EXPORTED 316 W (#967). The gate is
+        # a configured minimum, not darkness — and it is the same knob
+        # SolarOnlyMode quotes correctly a few hundred lines below.
         return False, (
-            f"sun gone (solar {_cw(f.solar_w)}W < {_cw(f.min_solar_w)}W)"
+            f"below the solar minimum (solar {_cw(f.solar_w)}W < "
+            f"{_cw(f.min_solar_w)}W)"
         )
     # (#893) The tariff clause is scoped to the modes that PRICE their
     # grid use. It used to apply to EVERY mode, which made each daytime

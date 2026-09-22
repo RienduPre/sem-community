@@ -4242,6 +4242,19 @@ start) is a product call and 16 translation files, so it is named here rather th
 Also unfixed and not SEM's: RienduPre's home-consumption residual swings ~5 kW cycle to cycle
 (662 health violations), which is what made the surplus read 0–3000 W for the quarter-hour before
 the ladder ran.
+**SWEPT 19.09.2026 (#992) — and the first audit had cleared an instance of itself.** Three reviewers
+over disjoint scopes found NINE more: four on surfaces that send someone to do something (the futile-shed
+Repair telling people to add a charger SEM already manages; the force-discharge Repair asserting the
+firmware lacks a register when all SEM ruled out was a flaky entity; the failsafe Repair naming a
+charger-side fallback without offering the second controller its own sibling always offers; the
+load-priority card labelling every EMERGENCY shed "peak protection" through a case mismatch), and five in
+the decision surfaces (`export cut refused — holding the meter shut`; `sun gone` at 828 W of production
+while the house exported; `SOC 80% (held from a dark read) ≤ reserve 70%`; `Deye force charge blocked: ok`;
+`Min+PV grid pauses` on installs with no EV). **The lesson is in the miss:** when this class was written,
+`decide.py`'s `sun gone` was assessed and CLEARED — the check confirmed the quoted comparison was the real
+gate (true) and never asked whether the WORD survived the values in scope (false). A user hit it the next
+day. The sweep question is literal: *can the reader's own state contradict this sentence?* — not "is the
+quoted number the right one".
 Refs #983 #979 #944 #893 #875 #778 #885 #610 #548 #461 #440.
 
 ### 100. A sensor's failure wearing the costume of a valid reading — GUARDED

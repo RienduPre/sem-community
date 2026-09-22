@@ -128,11 +128,20 @@ def _publish_standing(controller, standing: str) -> None:
     if controller is None:
         return
     action = "release_export" if standing == "releasing" else "limit_export"
+    # (#992, class 99) One sentence for three states was one too few:
+    # ``refused`` means the adapter could not or may not apply the cut, so
+    # the meter is NOT shut — and this row is the surface someone reads to
+    # verify the #955 guarantee. Say what each state actually is.
+    said = {
+        "engaged": "export cut engaged — holding the meter shut",
+        "releasing": "export cut releasing — handing the meter back",
+        "refused": "export cut refused — the adapter declined the write, "
+                   "the meter is NOT held",
+    }.get(standing, f"export cut {standing}")
     try:
         controller.publish_observer_decision(
             key=OBSERVER_KEY, name="grid export", action=action, power_w=0.0,
-            reason=f"export cut {standing} — holding the meter shut",
-            kind="battery")
+            reason=said, kind="battery")
     except Exception:  # noqa: BLE001 — the surface never breaks the seam
         pass
 

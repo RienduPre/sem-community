@@ -128,12 +128,38 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
                 floor_soc=reserve,
                 reason="mode=force_discharge (manual sell to grid)",
             )
-        _soc_txt = (f"{soc:.0f}% (held from a dark read)" if not rt.available
-                    else f"{soc:.0f}%" if soc is not None else "unavailable")
+        # (#992, class 99) The guard above is a three-way OR, and only ONE
+        # of its arms is a comparison. Printing "≤ reserve" for the other
+        # two states a relation nobody evaluated: a pack held at 80 % from
+        # a dark read was told it was at or below a 70 % reserve, sending
+        # the reader to look at a battery that is comfortably charged while
+        # the real fault is the link to it.
+        # …and "last seen X%" must be a reading that HAPPENED. The first
+        # cut of this fix asked ``soc is not None`` to tell a held value
+        # from one that never arrived — three lines under a comment saying
+        # ``last_known_soc`` is never None. So a pack whose sensor had not
+        # reported once was told it was "last seen 0%", a measurement
+        # nobody took, and the dead arm that would have said otherwise
+        # could not run. #875 already carries the flag that answers this.
+        _soc_ever_read = bool(getattr(
+            getattr(view, "fleet", None), "battery_soc_known", True))
+        if soc is None:
+            # Not the "never read" signal — that is the flag above — but the
+            # field is typed float and a caller can still hand us None, and
+            # a formatting crash here takes out the whole battery decision.
+            _why = "SOC unknown — not selling blind"
+        elif not rt.available:
+            _why = (f"SOC unreadable (last seen {soc:.0f}%) — not selling blind"
+                    if _soc_ever_read else
+                    "SOC never read — not selling blind")
+        elif not _soc_ever_read:
+            _why = "SOC never read — not selling blind"
+        else:
+            _why = f"SOC {soc:.0f}% ≤ reserve {reserve:.0f}%"
         return BatteryDecision(
             battery_id=rt.battery_id,
             intent=BatteryIntent.NORMAL,
-            reason=f"mode=force_discharge but SOC {_soc_txt} ≤ reserve {reserve:.0f}% — hold",
+            reason=f"mode=force_discharge but {_why} — hold",
         )
     if mode == "force_charge":
         return BatteryDecision(

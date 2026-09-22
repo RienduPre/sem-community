@@ -1171,6 +1171,44 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         """Safe finite discharge config, else 0 (never a state read)."""
         return self._max_discharge_w
 
+    def force_charge_blocked_why(self) -> str:
+        """(#992, class 99) WHICH gate is shut, or "" when none is.
+
+        ``supports_forced_charge`` ANDs thirteen terms; the message that
+        explained a refusal named three of them and otherwise quoted
+        ``capability.reason`` — which says ``ok`` whenever the ENTITIES
+        validate. An install with `deye_program_control` left at its default
+        was therefore told "Deye force charge blocked: ok", with the switch
+        it needed nowhere in the sentence. One resolver now, so the boolean
+        and its explanation are the same evaluation.
+        """
+        capability = self.capability()
+        if self._unsafe_latched:
+            return "an unsafe latch is set — clear it first"
+        if self._observer_mode:
+            return "observer mode is active — SEM is watching, not writing"
+        if not self._actuation_enabled:
+            return "actuation is not enabled (deye_actuation_enabled)"
+        if not self._program_control:
+            return "program control is off (deye_program_control) — SEM may not write the charge programs"
+        if not capability.available:
+            return capability.reason or "the control entities are not usable"
+        if not capability.snapshot_supported:
+            return "this battery cannot snapshot its programs, so SEM cannot restore them"
+        if not capability.readback_supported:
+            return "this battery cannot read its programs back, so a write cannot be verified"
+        if not capability.restore_supported:
+            return "this battery cannot restore its programs, so SEM will not change them"
+        if not self._config_entry_id:
+            return "the Deye config entry is not known to SEM"
+        if not self._battery_id:
+            return "this battery has no id"
+        if not (self._readback_attempts > 0):
+            return "readback attempts are set to 0 — a write could never be verified"
+        if not (math.isfinite(self._readback_delay_s) and self._readback_delay_s >= 0):
+            return f"the readback delay is not a usable number ({self._readback_delay_s})"
+        return ""
+
     @property
     def supports_forced_charge(self) -> bool:
         """True only behind all hardware, transaction and operator gates."""
@@ -1276,16 +1314,12 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         self, target_soc: float, charge_power_w: float, duration_min: int,
     ) -> None:
         if not self.supports_forced_charge:
-            capability = self.capability()
-            if self._unsafe_latched:
-                reason = "unsafe latch is set"
-            elif self._observer_mode:
-                reason = "observer mode is active"
-            elif not self._actuation_enabled:
-                reason = "actuation is not explicitly enabled"
-            else:
-                reason = capability.reason
-            self._last_error = f"Deye force charge blocked: {reason}"
+            # (#992) the resolver above, so the refusal names the gate that
+            # is actually shut rather than a capability reason that only
+            # covers four of the thirteen.
+            self._last_error = (
+                f"Deye force charge blocked: "
+                f"{self.force_charge_blocked_why() or 'reason not identified'}")
             return
         if any(
             isinstance(value, bool)
