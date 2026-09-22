@@ -1,0 +1,23 @@
+{
+  "_why": "#998 \u2014 reason strings that assert something about the WORLD and carry no `# CAUSE:` annotation naming the state in their own scope that proves it. Bug class 99 lives here. The ledger only shrinks; see tests/test_998_causal_claims_ratchet.py.",
+  "total": 68,
+  "per_file": {
+    "coordinator/energy_plan_actuation.py": 8,
+    "coordinator/battery_charge_scheduler.py": 7,
+    "coordinator/forecast_sell.py": 7,
+    "coordinator/surplus_controller.py": 7,
+    "coordinator/battery_adapters/deye.py": 6,
+    "coordinator/decide_battery.py": 6,
+    "coordinator/coordinator.py": 5,
+    "coordinator/charge_stability.py": 4,
+    "coordinator/decide.py": 4,
+    "coordinator/export_guard.py": 4,
+    "coordinator/vpp_dispatch.py": 3,
+    "__init__.py": 2,
+    "coordinator/charge_pacing.py": 1,
+    "coordinator/decide_export.py": 1,
+    "coordinator/ev_tariff_planner.py": 1,
+    "coordinator/refill_estimate.py": 1,
+    "coordinator/spendable_budget.py": 1
+  }
+}
