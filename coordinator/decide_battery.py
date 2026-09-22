@@ -29,6 +29,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from .charger_types import BatteryDecision, BatteryIntent
+from .peak_guard import cover_for_peak_w
 from ..consts.battery_modes import arbitrage_allowed_for_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -72,6 +73,41 @@ def effective_battery_count(pbcs: "list[dict]") -> int:
         else:
             unknown += 1
     return max(1, len(surfaces) + unknown)
+
+
+def peak_cover_floor_w(view: "BatteryView", limit_w: float, n: int) -> float:
+    """Raise a per-battery discharge limit to what the meter may not buy (#1003).
+
+    Every LIMIT_DISCHARGE below hands part of the house's draw to the grid on
+    purpose: the #879 hold keeps the pack for a dearer hour, the #620 clamp
+    lets the grid fund the cheap-hours loads. Both save cents. Going over the
+    limit costs far more — a capacity tariff bills the whole month on one bad
+    15-minute slot — so every one of those limits gets a floor: the watts the
+    meter may not buy, which the pack has to cover instead.
+
+    Bounded by ``home_consumption_w``, the house load the pack may serve. That
+    figure already excludes the car (the balance subtracts ``ev_power``), so a
+    car that breaks the limit by itself never drains the pack here — the
+    charger's own peak clamp is what answers for the car. Split by ``n`` like
+    the limit it floors (#531/#691), so N batteries cover the excess once.
+
+    Returns ``limit_w`` untouched when no ceiling is configured, when the meter
+    could not be read this cycle (#906/#925 — a dark meter is no evidence
+    either way), and when the import already fits.
+    """
+    f = view.fleet
+    allowed_w = getattr(f, "peak_slot_allowed_w", None)
+    if allowed_w is None or not bool(getattr(f, "grid_import_known", True)):
+        return float(limit_w)
+    cover_w = min(
+        max(0.0, float(view.home_consumption_w or 0.0)),
+        cover_for_peak_w(
+            allowed_w,
+            float(getattr(f, "grid_import_w", 0.0) or 0.0),
+            float(getattr(f, "battery_discharge_w", 0.0) or 0.0),
+        ),
+    ) / max(1, int(n or 1))
+    return max(float(limit_w), cover_w)
 
 
 def decide_battery(view: "BatteryView") -> BatteryDecision:
@@ -385,12 +421,38 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
     # (#879) The house as a sink: HELD in a cheap/negative hour means "let the
     # house import, keep the pack for the expensive hours" — the WHEN is the
     # tariff level, the HOW MUCH is zero house cover (0 W quantises to 0).
+    #
+    # (#1003) …except the meter has a ceiling. While the hold stands the house
+    # buys everything, and a capacity tariff bills the whole month on one bad
+    # 15-minute slot: waiting for a cheaper hour saves cents, going over the
+    # limit costs far more. So the hold gives way to the limit — the pack
+    # covers at least what the meter is not allowed to buy. The verdict still
+    # says WHEN; this is the floor under its HOW MUCH, and it is the same slot
+    # budget the EV and the cheap-hours loads are already sized against.
     if _house_v is not None and getattr(_house_v, "state", "") == "held":
-        return BatteryDecision(
-            battery_id=rt.battery_id, intent=BatteryIntent.LIMIT_DISCHARGE,
-            discharge_limit_w=0.0,
-            reason=f"house sink held — {getattr(_house_v, 'reason', '')}",
-        )
+        _f = view.fleet
+        _allowed = getattr(_f, "peak_slot_allowed_w", None)
+        # (#906/#925) A meter that could not be read is 0.0 from the reader,
+        # and reading that as "the house is buying nothing" is the optimistic
+        # direction. A hold that cannot see the meter cannot show the slot is
+        # safe, so it does not hold: fall through and let the pack cover the
+        # house, exactly as it did before this sink existed.
+        _blind = (_allowed is not None
+                  and not bool(getattr(_f, "grid_import_known", True)))
+        if not _blind:
+            _n = max(1, int(getattr(_f, "battery_count", 1) or 1))
+            _cover_w = peak_cover_floor_w(view, 0.0, _n)
+            _why = f"house sink held — {getattr(_house_v, 'reason', '')}"
+            if _cover_w > 0.0:
+                _why = (
+                    f"{_why}; the meter may buy {float(_allowed):.0f} W this "
+                    f"quarter hour, so the pack covers {_cover_w:.0f} W"
+                )
+            return BatteryDecision(
+                battery_id=rt.battery_id, intent=BatteryIntent.LIMIT_DISCHARGE,
+                discharge_limit_w=_cover_w,
+                reason=_why,
+            )
 
     # ─── LIMIT_DISCHARGE branch (unified solar gate) ───
     # The home battery must NEVER be drained to charge the EV when there
@@ -478,6 +540,10 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
             n = max(1, int(getattr(f, "battery_count", 1) or 1))
             gf_w = max(0.0, float(getattr(view, "grid_funded_load_w", 0.0) or 0.0))
             home_w = max(0.0, view.home_consumption_w - gf_w) / n
+            # (#1003) the grid-funded slice goes to the meter, and the meter
+            # has a ceiling. Floored, never lowered; the car is not in this
+            # figure, so this never feeds the car.
+            home_w = peak_cover_floor_w(view, home_w, n)
             if not getattr(f, "battery_soc_known", True):
                 # (#983) ``below_buffer`` is a disjunction, and the unread
                 # arm has no comparison in it: printing "SoC unknown < buffer
@@ -524,6 +590,9 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
             f = view.fleet
             n = max(1, int(getattr(f, "battery_count", 1) or 1))
             home_w = max(0.0, view.home_consumption_w - gf_w) / n
+            # (#1003) same floor as its sibling above: the grid funds these
+            # loads to save cents, and the peak limit outranks that.
+            home_w = peak_cover_floor_w(view, home_w, n)
             return BatteryDecision(
                 battery_id=rt.battery_id,
                 intent=BatteryIntent.LIMIT_DISCHARGE,

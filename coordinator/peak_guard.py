@@ -184,3 +184,34 @@ def clamp_import_command(
     if float(desired_w) <= headroom_w:
         return float(desired_w), False
     return headroom_w, True
+
+
+def cover_for_peak_w(
+    allowed_w: Optional[float],
+    grid_import_w: float,
+    battery_discharge_w: float = 0.0,
+) -> float:
+    """Watts the battery must cover so the meter stays under the allowance.
+
+    The mirror of :func:`clamp_import_command`. That one bounds a command
+    that CREATES import; this one says how much of the import a HOLD has to
+    take back. The same slot budget, read from the other side.
+
+    ``None`` allowance → 0.0: no ceiling is configured, so nothing has to be
+    covered (absence of a ceiling is never a ceiling of zero).
+
+    ``battery_discharge_w`` is what the pack covers right now, added back
+    because the meter already reads that much lower for it. Without it the
+    first cycle of a hold under-counts by exactly the discharge it is about
+    to stop.
+
+    A meter that could not be read is NOT guessed at here (#906/#925): the
+    caller knows what a blind cycle means for its own hold. The caller also
+    bounds the answer by the load it may serve — this is the meter's
+    arithmetic and nothing else.
+    """
+    if allowed_w is None:
+        return 0.0
+    would_import_w = (max(0.0, float(grid_import_w or 0.0))
+                      + max(0.0, float(battery_discharge_w or 0.0)))
+    return max(0.0, would_import_w - max(0.0, float(allowed_w)))

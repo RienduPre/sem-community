@@ -7803,6 +7803,20 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             export_guard_enabled=bool(getattr(_fs, "export_guard_enabled", False)),
             sink_verdicts=dict(getattr(_fs, "sink_verdicts", None) or {}),
             ev_morning_window_open=bool(getattr(_fs, "morning_window_open", False)),
+            # (#1003) The peak layer's four numbers, the same class as the
+            # export axis above and found the same way. The battery decider
+            # hands part of the house's draw to the meter (the #879 hold, the
+            # #620 clamp) and could not see the ceiling it has to stay under:
+            # these rode build_view's charger context from #864/#906 on, and
+            # never this second producer. Bug class: two producers of one
+            # context, a field threaded through one of them.
+            peak_slot_allowed_w=getattr(_fs, "peak_slot_allowed_w", None),
+            grid_import_w=float(getattr(power, "grid_import_power", 0.0) or 0.0),
+            # (#906) unread is not zero — the hold needs to know.
+            grid_import_known=not bool(
+                getattr(power, "grid_power_unavailable", False)),
+            battery_discharge_w=float(
+                getattr(power, "battery_discharge_power", 0.0) or 0.0),
         )
 
         # 2. Source per-battery iteration. Multi-battery installs

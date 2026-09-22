@@ -3982,7 +3982,13 @@ pipeline with the guard's command on the fleet state and asserts the adapter was
 the pre-fix coordinator (5 of 8).
 **Sweep question:** for any field added to a context dataclass — *how many call sites construct
 that class, and did the field reach all of them?* `call_sites(ClassName)` answers it in one line.
-Refs #955 #921 #358 #924.
+**Second instance (#1003, 22.09.2026):** the peak axis — `peak_slot_allowed_w`, `grid_import_w`,
+`grid_import_known`, `battery_discharge_w` — reached `build_view`'s charger context from #864/#906
+on and never `_run_battery_pipeline`'s. The battery decider read the dataclass defaults, so the
+#879 house hold could not have seen a ceiling if it had asked. Same class, same two producers, a
+different axis: the #955 guard pinned the export fields by name, and naming the fields is what let
+the next axis through. `tests/test_1003_the_hold_yields_to_the_peak.py` pins the peak four the same
+way. Refs #955 #921 #358 #924 #1003.
 
 ### 94. An observer surface that cannot tell "decided to write" from "still holding" — GUARDED
 **Symptom:** the rig shows a perfect `limit_export` row with the right service and the right device
@@ -4557,3 +4563,36 @@ the same cycle — right, but worth a deliberate look. (4) No orphan sweep: dele
 leaves its Repair until restart, which every per-charger repair in SEM shares. (5) `implausible`
 stays mute — a Repair there needs field evidence about what actually produces it.
 Refs #967 #966 #939 #846 #804 #744 #944.
+
+### 107. A saving that spends someone else's ceiling — a hold that hands the meter a bill — GUARDED
+**Symptom:** a feature that is *supposed* to import does, on purpose, and the month's capacity
+charge goes up. Nothing in the logs is wrong: the hold engaged in the hour it was built for, the
+saving it names is real, and the peak layer — which is *senior to every mode of every device*
+(#864, 29.08) — was never asked, because the new layer does not command an import, it merely
+declines to prevent one. **Root shape:** SEM's peak defence bounds every command that *creates*
+import: the EV offer (`decide.clamp_to_peak_slot`), the cheap-hours top-up
+(`surplus_controller` → `clamp_import_command`), the battery's own night charge (its
+`peak_limit_w`). A saving-shaped feature creates import from the other side — by removing a cover
+that was already there — and that side had no clamp. The economics make the omission look safe
+("we only pay the spot price for an hour we chose"), and the cost is invisible for up to a month:
+a capacity tariff bills the WORST 15-minute slot, so one bad quarter hour costs more than the
+feature saves in a season. **Where it lives:** every `LIMIT_DISCHARGE` that lowers the pack's cover
+on purpose — the #879 house sink (`decide_battery`, the reported instance), the #620 grid-funded
+clamp beside it, and the EV protection clamp's own `- gf_w` subtraction; the #926 battery-headroom
+hold; anything future that answers "keep the energy where it is". **Live catch (#1003, found by
+review of the peak layers, not from a report — the switch `battery_house_sink_enabled` is off by
+default, so no install was exposed).** **Closure:** one floor under every such limit —
+`decide_battery.peak_cover_floor_w`, over `peak_guard.cover_for_peak_w`, the mirror of
+`clamp_import_command`: what a command may ADD and what a hold must GIVE BACK read one slot budget.
+Bounded by `home_consumption_w` (which excludes the car, so the floor can never drain the pack into
+an EV — the charger's own clamp answers for the car), split across the fleet like the limit it
+floors, and never lowering a limit. A meter that could not be read does not hold at all: the pack
+covers the house, as it did before the sink existed (#906/#925 — the reader's 0.0 is not "buying
+nothing"). **Guard:** `tests/test_1003_the_hold_yields_to_the_peak.py` — the reported case through
+the real decider, the pre-fix 0 W pinned so the plumbing cannot rot back quietly, the car-bound,
+the fleet split, the dark meter, both sibling clamps, and `call_sites("FleetContext")` requiring
+the peak axis on EVERY producer. **Sweep question:** for every feature whose benefit is a price —
+*what does it make the meter buy, and who bounds that?* A layer that never issues an import command
+can still be the reason for one. **Neighbour:** class 93 is the other half of this instance — the
+peak numbers had ridden `build_view`'s charger context since #864 and never the battery pipeline's
+own, so the decider read `None` and could not have asked. Refs #1003 #879 #620 #864 #906 #925 #955.
