@@ -557,41 +557,6 @@ The discharge *rate* is not per-battery: **`number.sem_battery_max_discharge_pow
 
 **Other brands:** set `battery_force_discharge_control_entity` in the options flow to a number entity on your inverter (e.g. Growatt's max discharge power, SolaX's force-discharge current).
 
-### Battery peak shaving (v2.1)
-
-**In one sentence:** on a capacity tariff, let the grid pay for the house up
-to your Target Peak Limit and keep the pack for the evening.
-
-This one is backwards from what SEM normally does, so read it before you
-switch it on. Today the battery covers the whole house and your meter reads
-zero. That is right when you are billed for kilowatt-hours. It is *wasteful*
-when you are billed for your highest 15-minute peak: importing 2 kW under a
-2.5 kW ceiling costs you the energy and nothing else, while every kilowatt-
-hour you take from the pack instead is one you will not have at eight in the
-evening.
-
-So with **Configuration → Battery intelligence → Battery peak shaving** on,
-SEM caps battery discharge at:
-
-```
-house − solar − what the current 15-minute slot may still import
-```
-
-Your worked example, and the reporter's: house 5 kW, sun 2 kW, limit 2.5 kW —
-the battery gives 500 W, the meter sits on 2.5 kW, and the other 2.5 kWh/h
-stays in the pack.
-
-**What it will never do.** Discharge the pack *more* than it would have
-anyway. It is a cap; it can only hold the battery back. It also needs a
-Target Limit below MAX — with no ceiling there is nothing to hold to, and
-SEM leaves the battery alone rather than inventing one.
-
-**When it lets go.** Once tonight's forecast budget (below) says the pack has
-something spendable — it is high enough, and tomorrow is expected to refill
-what the house takes — the shave lifts and the battery covers everything
-again. Zero grid until the evening, which is the second half of what was
-asked for.
-
 ### Forecast-Led Spending (v2.1)
 
 **In one sentence:** let the car drain the home battery in the evening, but

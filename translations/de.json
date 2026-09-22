@@ -1427,9 +1427,6 @@
       "battery_charge_pacing_enabled": {
         "name": "Batterie-Ladetempo"
       },
-      "battery_peak_shaving_enabled": {
-        "name": "Batterie-Lastspitzenkappung"
-      },
       "export_guard_enabled": {
         "name": "Einspeise-Wächter"
       },

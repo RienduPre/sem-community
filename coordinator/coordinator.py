@@ -7981,13 +7981,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             "state", "") == "open"
                     and self.config.get("ev_morning_window_enabled", False)),
                 forecast_sell=_fsell,
-                # (#970) Peak shaving: the master switch and #864's slot
-                # allowance. The allowance is the SAME number the EV offer
-                # and the cheap-hours clamp read — computed once per cycle
-                # in _compute_peak_slot_allowance, never re-derived here.
-                peak_shaving_enabled=bool(
-                    self.config.get("battery_peak_shaving_enabled", False)),
-                peak_slot_allowed_w=getattr(self, "_peak_slot_allowed_w", None),
             )
 
             # 3. Decide

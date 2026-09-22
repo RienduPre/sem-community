@@ -44,10 +44,6 @@ class TestSEMSwitches:
                         # #820 — charge pacing, asleep by default; sits with
                         # the battery family it paces.
                         "battery_charge_pacing_enabled",
-                        # #970 — battery peak shaving, default OFF. Beside
-                        # pacing, the other knob that decides WHEN the pack
-                        # moves power rather than what it may be spent on.
-                        "battery_peak_shaving_enabled",
                         "battery_may_export", "battery_may_assist_ev",
                         # arc #921 — four switches, all default OFF, after the permissions
                         "export_guard_enabled", "export_guard_override_external",

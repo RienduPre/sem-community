@@ -217,7 +217,6 @@ const WATCHED = [
     'number.sem_battery_auto_start_soc',
     'number.sem_battery_assist_min_surplus', 'number.sem_battery_assist_max_power',
     // arc #921
-    'switch.sem_battery_peak_shaving_enabled',                    // (#970)
     'switch.sem_export_guard_enabled', 'switch.sem_export_guard_override_external',
     'switch.sem_battery_house_sink_enabled', 'switch.sem_ev_morning_window_enabled',
     'number.sem_export_guard_engage_s', 'number.sem_export_guard_release_s',
@@ -2437,10 +2436,6 @@ class SEMConfigCard extends SEMLitBase {
                   default OFF, and their numbers. Same pattern as the pacing
                   switch above: the entity is the source of truth, the card stages. */ ''}
             <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
-            ${/* (#970) The battery as the peak-shaving instrument. Sits with
-                  the guards because it is the same kind of promise: a meter
-                  limit the pack is held to, not a price preference. */ ''}
-            ${this._renderToggle('switch.sem_battery_peak_shaving_enabled', 'battery_peak_shaving', T, 'config_help_battery_peak_shaving')}
             ${this._renderToggle('switch.sem_export_guard_enabled', 'export_guard', T, 'config_help_export_guard')}
             ${this._renderStepper('number.sem_export_guard_engage_s', 'export_guard_engage_s', T, 'config_help_export_guard_engage_s')}
             ${this._renderStepper('number.sem_export_guard_release_s', 'export_guard_release_s', T, 'config_help_export_guard_release_s')}

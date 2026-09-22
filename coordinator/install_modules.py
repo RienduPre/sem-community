@@ -262,7 +262,6 @@ ENTITY_MODULES: Mapping[tuple[str, str], frozenset[Module]] = _table(
     _rows("switch", _B, (
         "battery_charge_pacing_enabled", "battery_may_export",
         "battery_house_sink_enabled",   # arc #921 (#879)
-        "battery_peak_shaving_enabled",  # (#970): the pack IS the instrument
         "forecast_spending_enabled",
     )),
     _rows("binary_sensor", _B, (

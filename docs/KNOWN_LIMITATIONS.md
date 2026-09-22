@@ -163,14 +163,6 @@ freely. Two further limits worth knowing:
 Set the Control tab's Target Limit slider to MAX (*No grid limit*) to disable
 peak management entirely, guard included.
 
-**The battery can now hold the meter to the ceiling too** (#970, 2.1), but it
-is off until you ask for it: switch on *Battery peak shaving*. It changes what
-a normal evening looks like — SEM will let the grid supply the house *up to*
-your target limit and keep the pack for later, where today the pack covers
-everything and the meter reads zero. That is the point on a capacity tariff,
-and it is the wrong trade on a pure energy tariff. It needs a Target Limit
-below MAX to have a ceiling to hold to, and it never discharges the pack more
-than it would have anyway.
 
 ## A blinking inverter feed is held, not shown
 

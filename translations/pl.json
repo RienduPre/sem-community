@@ -1427,9 +1427,6 @@
       "battery_charge_pacing_enabled": {
         "name": "Battery charge pacing"
       },
-      "battery_peak_shaving_enabled": {
-        "name": "Ścinanie szczytów z akumulatora"
-      },
       "export_guard_enabled": {
         "name": "Strażnik eksportu"
       },

@@ -13,8 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
-- ✨ **Battery can hold the meter at your peak limit** (#970). The grid pays up to the limit, the battery covers the rest. Off by default.
-
 - ✨ **Pause a charger for a while** (#980). Pick a time, press Pause, the charge mode goes Off and comes back on its own.
 
 - ✨ **A load set by watts now gets the watts** (#880). SEM wrote nothing to a Number control before, so it read 0 W for ever.

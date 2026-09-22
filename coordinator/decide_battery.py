@@ -21,11 +21,7 @@ Decision tree (precedence top-down):
 4. LIMIT_DISCHARGE (grid-funded loads, #620) — cheap-hours top-up loads
    ("Finish overnight from: Grid") are running; clamp battery to
    home − grid_funded so the grid, not the battery, feeds them.
-5. LIMIT_DISCHARGE (peak shaving, #970, opt-in) — hold the meter ON the
-   billed slot's ceiling: the grid funds everything up to it and the pack
-   supplies only the excess. Lifts to NORMAL when tonight's forecast
-   budget says tomorrow refills whatever the house takes.
-6. NORMAL — default.
+5. NORMAL — default.
 """
 from __future__ import annotations
 
@@ -33,7 +29,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from .charger_types import BatteryDecision, BatteryIntent
-from .peak_shave import shave_discharge_limit_w, zero_grid_open
 from ..consts.battery_modes import arbitrage_allowed_for_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -537,58 +532,6 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
                     f"grid-funded load(s) {gf_w:.0f}W running (cheap-hours "
                     f"top-up) → discharge limit {home_w:.0f} W (home/{n} "
                     f"across fleet) so the grid feeds them"
-                ),
-            )
-
-    # ─── LIMIT_DISCHARGE for peak shaving (#970) ───
-    # @Hanzzzie85, on a capacity tariff: let the grid fund everything UP TO
-    # the billed ceiling and keep the rest of the pack for the evening. The
-    # battery supplies only the part the meter may not carry. This is the
-    # last branch on purpose — every protection above it is a floor SEM owes
-    # someone (the car, the cheap-hours loads, the reserve), and this one is
-    # an economics preference about the DEFAULT.
-    #
-    # It can only ever discharge the pack less than today, never more, so it
-    # adds no drain path and needs no floor of its own. What it does add is
-    # deliberate grid import on an install that imports nothing today —
-    # which is why it is opt-in and stays off until someone means it.
-    if bool(getattr(view, "peak_shaving_enabled", False)):
-        _spendable = getattr(view, "battery_spendable_kwh", None)
-        if zero_grid_open(_spendable):
-            # Tomorrow refills what the house takes tonight, so holding the
-            # meter at the ceiling is miserliness. Back to covering the house.
-            # CAUSE: zero_grid_open() read battery_spendable_kwh > 0 on this view.
-            return BatteryDecision(
-                battery_id=rt.battery_id,
-                intent=BatteryIntent.NORMAL,
-                reason=(
-                    f"peak shaving lifted — tonight's budget has "
-                    f"{float(_spendable or 0.0):.1f} kWh spendable and "
-                    "tomorrow refills it (zero grid)"
-                ),
-            )
-        f = view.fleet
-        limit_w = shave_discharge_limit_w(
-            view.home_consumption_w,
-            float(getattr(f, "solar_w", 0.0) or 0.0),
-            getattr(view, "peak_slot_allowed_w", None),
-            battery_count=int(getattr(f, "battery_count", 1) or 1),
-        )
-        if limit_w is not None:
-            _allowed = float(getattr(view, "peak_slot_allowed_w", 0.0) or 0.0)
-            _n = max(1, int(getattr(f, "battery_count", 1) or 1))
-            _split = f" (gap/{_n} across fleet)" if _n > 1 else ""
-            # CAUSE: limit_w is not None, so peak_slot_allowed_w was a number
-            # this cycle — the slot ceiling below is the one it was computed from.
-            return BatteryDecision(
-                battery_id=rt.battery_id,
-                intent=BatteryIntent.LIMIT_DISCHARGE,
-                discharge_limit_w=limit_w,
-                reason=(
-                    f"peak shaving: house {view.home_consumption_w:.0f}W − "
-                    f"solar {float(getattr(f, 'solar_w', 0.0) or 0.0):.0f}W − "
-                    f"slot allowance {_allowed:.0f}W → discharge limit "
-                    f"{limit_w:.0f} W{_split}; the grid funds the rest"
                 ),
             )
 
