@@ -807,6 +807,13 @@ class FleetContext:
 
     grid_import_w: float = 0.0
     grid_export_w: float = 0.0
+    home_residual_clamped_w: float = 0.0
+    """(#660/#1003) How much the energy balance had to clamp away to keep
+    ``home_w`` at or above zero. Zero on a healthy house; anything else says
+    the inputs do not add up — a stale sensor, or a sign the autodetect got
+    wrong — and then ``home_w`` is not a measurement. The peak floor reads it
+    for exactly that: a house figure that lost import is the one reading that
+    would let a hold sit through a breach."""
     grid_import_known: bool = True
     """(#906) False when the grid sensor was unreadable this cycle — then
     ``grid_import_w`` is the reader's 0.0 fallback, not a measurement. The

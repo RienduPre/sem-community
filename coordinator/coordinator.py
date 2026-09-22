@@ -7816,6 +7816,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # floor that reads it must know when it is not a measurement.
             inputs_degraded=bool(getattr(power, "inputs_degraded", False)),
             dark_inputs=tuple(getattr(power, "dark_inputs", ()) or ()),
+            # (#660/#1003) …and a balance that did not close, which is the
+            # other way that number stops being a measurement.
+            home_residual_clamped_w=float(
+                getattr(power, "home_residual_clamped_w", 0.0) or 0.0),
         )
 
         # 2. Source per-battery iteration. Multi-battery installs

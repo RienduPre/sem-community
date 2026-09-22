@@ -50,13 +50,14 @@ from custom_components.solar_energy_management.coordinator.sink_verdicts import 
 
 
 def _view(*, allowed_w=None, home_w=8000.0, solar_w=0.0, degraded=False,
-          batteries=1, soc=80.0, held=True, grid_funded_w=0.0,
+          clamped_w=0.0, batteries=1, soc=80.0, held=True, grid_funded_w=0.0,
           ev_connected=False):
     cfg = {"battery_max_discharge_power": 9000, "battery_mode": "auto"}
     fleet = FleetContext(
         solar_w=solar_w, home_w=home_w, battery_soc=soc, battery_soc_known=True,
         battery_count=batteries, peak_slot_allowed_w=allowed_w,
         inputs_degraded=degraded, dark_inputs=(("grid",) if degraded else ()),
+        home_residual_clamped_w=clamped_w,
     )
     return BatteryView(
         runtime=BatteryRuntime(battery_id="b1", last_known_soc=soc), config=cfg,
@@ -124,7 +125,10 @@ class TestWhatTheCoverMayNotDo:
         assert d.discharge_limit_w == 0.0
         assert "covers" not in d.reason
 
-    def test_the_cover_never_exceeds_the_house(self):
+    def test_a_spent_slot_covers_the_house_and_no_more(self):
+        """The bound is redundant today (the cover is derived FROM the house,
+        so it cannot exceed it) and written anyway — this pins the ceiling it
+        guarantees, not the ``min``."""
         d = decide_battery(_view(allowed_w=0.0, home_w=2500.0))
         assert d.discharge_limit_w == pytest.approx(2500.0)
 
@@ -136,22 +140,43 @@ class TestWhatTheCoverMayNotDo:
 
 
 class TestACycleThatCannotSee:
-    """#818: ``home_consumption_w`` IS the energy balance's residual, so any
-    dark steering read moves it. A hold that cannot see cannot show the slot
-    is safe."""
+    """``home_consumption_w`` is the energy balance's residual, not a sensor.
+    A hold that cannot read the house cannot show the slot is safe."""
 
-    def test_a_dark_read_releases_the_hold_to_the_house_cover(self):
-        d = decide_battery(_view(allowed_w=6000.0, home_w=5000.0,
+    def _dark_house_w(self):
+        """What the reader really produces on a dark grid read during a hold.
+
+        Not hand-fed: the first cut released to ``home_consumption_w``, and in
+        this exact state — the term that went dark IS an input to the balance,
+        the pack is held so its term is zero, and a cheap hour is usually dark
+        — that figure is 0. The release wrote the hold and said it had not."""
+        from custom_components.solar_energy_management.coordinator.types import (
+            PowerReadings,
+        )
+        p = PowerReadings()
+        p.solar_power = 0.0      # night
+        p.grid_power = 0.0       # the reader's fallback — the dark read
+        p.battery_power = 0.0    # the hold: the pack covers nothing
+        p.ev_power = 0.0
+        p.calculate_derived()
+        return p.home_consumption_power
+
+    def test_the_house_figure_really_does_collapse(self):
+        assert self._dark_house_w() == 0.0
+
+    def test_the_release_is_the_packs_max_not_the_dark_house_figure(self):
+        d = decide_battery(_view(allowed_w=6000.0, home_w=self._dark_house_w(),
                                  degraded=True))
-        assert d.discharge_limit_w == pytest.approx(5000.0)
+        assert d.discharge_limit_w == pytest.approx(9000.0)
         assert "not held" in d.reason and "grid" in d.reason
 
     def test_the_release_keeps_the_intent_so_it_reaches_the_wire(self):
         """The first cut released as NORMAL. ``actuate_battery`` refuses a
         FLIP between NORMAL and LIMIT_DISCHARGE on a degraded cycle (#818), so
         that release was never written and the 0 W hold stood through exactly
-        the blindness that released it."""
-        d = decide_battery(_view(allowed_w=6000.0, home_w=5000.0,
+        the blindness that released it. NORMAL at the wire is this same write:
+        ``command_normal`` applies the pack's own max discharge."""
+        d = decide_battery(_view(allowed_w=6000.0, home_w=self._dark_house_w(),
                                  degraded=True))
         assert d.intent is BatteryIntent.LIMIT_DISCHARGE
 
@@ -159,19 +184,34 @@ class TestACycleThatCannotSee:
     async def test_the_release_actually_lands_on_the_adapter(self):
         adapter = MagicMock()
         adapter.last_intent = BatteryIntent.LIMIT_DISCHARGE   # today's hold
-        adapter.last_discharge_limit_w = 0.0
+        adapter.last_discharge_limit_w = 250.0                # a real last write
+        adapter._limit_lower_streak = 0
         adapter.command_limit_discharge = AsyncMock()
-        d = decide_battery(_view(allowed_w=6000.0, home_w=5000.0,
+        d = decide_battery(_view(allowed_w=6000.0, home_w=self._dark_house_w(),
                                  degraded=True))
         await actuate_battery(d, adapter, inputs_degraded=True)
         adapter.command_limit_discharge.assert_awaited_once()
-        assert adapter.command_limit_discharge.await_args[0][0] >= 5000.0
+        assert adapter.command_limit_discharge.await_args[0][0] >= 9000.0
+
+    def test_a_balance_that_did_not_close_releases_too(self):
+        """#660: a grid sign the autodetect got wrong is READABLE, so
+        ``inputs_degraded`` says nothing — the house clamps to 0 and the hold
+        would sit through the breach it was meant to stop."""
+        d = decide_battery(_view(allowed_w=1000.0, home_w=0.0,
+                                 clamped_w=4000.0))
+        assert d.discharge_limit_w == pytest.approx(9000.0)
+        assert "clamped balance" in d.reason
 
     def test_a_dark_read_with_no_limit_still_holds(self):
         """No limit is nothing to defend, dark read or not — an install with
         no peak limit keeps the whole saving."""
         d = decide_battery(_view(allowed_w=None, degraded=True))
         assert d.intent is BatteryIntent.LIMIT_DISCHARGE
+        assert d.discharge_limit_w == 0.0
+
+    def test_a_clamped_balance_never_floors_a_sibling_clamp(self):
+        d = decide_battery(_view(held=False, allowed_w=1000.0, home_w=0.0,
+                                 clamped_w=4000.0, grid_funded_w=200.0))
         assert d.discharge_limit_w == 0.0
 
 
@@ -186,7 +226,7 @@ class TestTheSiblingClamps:
                                  grid_funded_w=4000.0))
         assert d.intent is BatteryIntent.LIMIT_DISCHARGE
         assert d.discharge_limit_w == pytest.approx(3000.0)
-        assert "peak limit" in d.reason
+        assert "may buy only 3000 W" in d.reason
         assert "so the grid feeds them" not in d.reason   # it no longer does
 
     def test_the_grid_funded_clamp_is_untouched_under_the_limit(self):
@@ -204,7 +244,8 @@ class TestTheSiblingClamps:
         assert d.intent is BatteryIntent.LIMIT_DISCHARGE
         assert "ev plugged in" in d.reason
         assert d.discharge_limit_w == pytest.approx(1000.0)
-        assert "excl." not in d.reason         # the grid no longer funds them
+        assert "may buy only 1000 W" in d.reason
+        assert "excl. 1500W" in d.reason       # how much was excluded, still
 
     def test_the_ev_clamp_is_untouched_under_the_limit(self):
         d = decide_battery(_view(held=False, ev_connected=True, soc=40.0,
@@ -251,7 +292,8 @@ class TestBothProducersCarryThePeakAxis:
     a ``FleetContext``. The peak numbers reached the first and not the second,
     and no per-function pin could ask."""
 
-    REQUIRED = ("peak_slot_allowed_w", "inputs_degraded", "dark_inputs")
+    REQUIRED = ("peak_slot_allowed_w", "inputs_degraded", "dark_inputs",
+                "home_residual_clamped_w")
 
     def test_every_production_site_threads_them(self):
         from .ast_contracts import call_sites

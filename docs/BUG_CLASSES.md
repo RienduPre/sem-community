@@ -4606,16 +4606,29 @@ between those two on a degraded cycle, so a release spelled `NORMAL` is never wr
 stands through exactly the blindness that released it. **Guard:**
 `tests/test_1003_the_hold_yields_to_the_peak.py` — the reported case through the real decider, the
 pre-fix 0 W pinned so the plumbing cannot rot back quietly, the car-alone case, the sun-first
-subtraction, the fleet split, the dark read proven to reach the adapter, both sibling clamps, and
-`call_sites("FleetContext")` over the peak axis. **Sweep question:** for every feature whose
+subtraction, the fleet split, the dark house figure built by the REAL `calculate_derived` (not
+hand-fed) and the release proven to reach the adapter through `actuate_battery`'s own degraded
+guard, the clamped balance, both sibling clamps, and `call_sites("FleetContext")` over the peak
+axis. **Sweep question:** for every feature whose
 benefit is a price — *what does it make the meter buy, and who bounds that?* And for every layer
 sized against a shared allowance — *does it subtract the draws that answer for themselves, or the
 whole meter?* A layer that never issues an import command can still be the reason for one.
-**Residuals (for Guido):** (1) the #531 fleet split divides the cover by the battery count, so an
-empty or unreachable pack silently under-covers — the split's failure mode is over-injection, and
-on a floor it is a breached limit; (2) `battery_adapters/deye.py` records "discharge limiting is
-not implemented", so on Deye this whole floor is a no-op — pre-existing, but this is the first
-feature where that silence is a billed peak rather than a missed saving.
+**Residuals (for Guido), all one shape — the floor is promised and may not be delivered, and
+nothing says so at runtime:** (1) `#900`'s `DISCHARGE_LIMIT_LOWER_DWELL_CYCLES` makes LOWERING wait
+six cycles and resets the streak on every raise, so an input that blips once a minute (the #818
+motivation names 8-15 % of cycles on a Huawei modbus) pins the limit at the release value and the
+#879 hold never comes back. Safe direction, dead feature; the seam that would fix it is a
+`follows_load` flag on `BatteryDecision` read by `actuate_battery` — a change to the actuator's
+contract, so it is a call, not a sweep. (2) The #531 fleet split divides the cover by the battery
+count, so an empty or unreachable pack silently under-covers — the split's failure mode is
+over-injection, and on a floor it is a breached limit. (3) The cover is not bounded by
+`battery_max_discharge_power`: a 12 kW house under a 3 kW allowance asks 9 kW of a 5 kW pack, the
+adapter clips it, and the reason still says the pack covers 9 kW. (4) `battery_adapters/deye.py`
+records "discharge limiting is not implemented", so on Deye this whole floor is a no-op —
+pre-existing, but this is the first feature where that silence is a billed peak rather than a
+missed saving. (5) A fresh `PeakSlotTracker` after a restart reports `imported_kwh=0, elapsed_s=0`
+mid-slot and grants the full target as the remaining average, so the cover under-sizes for up to
+15 minutes after every restart — #864's own shape, which #1003 now leans a billed guarantee on.
 **Neighbour:** class 93 is the other half of this instance — the peak numbers had ridden
 `build_view`'s charger context since #864 and never the battery pipeline's own, so the decider read
 `None` and could not have asked. Refs #1003 #879 #620 #864 #818 #545 #955.
