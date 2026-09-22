@@ -67,6 +67,9 @@ DOCS_SIDE = {
     # (#944) the stop war's stand-down — the box's auto-start or another
     # controller is the next step, not a SEM change.
     "charger_stop_war_stand_down",
+    # (#967) the measured draw does not fit the configured phase count — the
+    # next step is the charger's own Phases number, one setting.
+    "charger_phase_count_mismatch",
     # (#896) the peak is somebody else's load — the next step is giving
     # SEM that load or raising the target, both settings, not a SEM bug.
     "load_shed_futile",

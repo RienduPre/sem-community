@@ -451,6 +451,25 @@ async def async_get_config_entry_diagnostics(
                     "pause_switch_entity": getattr(ad, "_pause_switch_entity", None),
                     "pause_switch_discovered": getattr(ad, "_pause_switch_entity", None) is not None,
                 }
+            # (#967) What SEM believes one amp buys on THIS charger, and
+            # what it measured. The learner's refusals are the only place a
+            # wrong ``ev_phases`` is visible — and the download never carried
+            # them, so #967's phase question had to be answered from a
+            # screenshot and a multiplication instead of from the file.
+            try:
+                cfg = coordinator._ev_charger_cfg(str(cid))
+                phases, belief_ok = coordinator._wpa_phases_for(str(cid), cfg)
+                learner = getattr(coordinator, "_wpa_learner", None)
+                entry_info["phases"] = {
+                    "configured": cfg.get("ev_phases"),
+                    "believed": phases,
+                    "belief_undisputed": belief_ok,
+                    "voltage": cfg.get("ev_voltage"),
+                    "verdict": (learner.phase_verdict(str(cid), int(phases))
+                                if learner is not None and phases else None),
+                }
+            except Exception:  # noqa: BLE001 — a dump never fails on a field
+                entry_info["phases"] = None
             charger_adapter_info[cid] = entry_info
 
     # Battery control observability (#523) — the battery-side mirror of
@@ -650,6 +669,14 @@ async def async_get_config_entry_diagnostics(
         "split_grid_discovery": split_grid_info,
         "pv_strings_discovery": pv_strings_info,
         "charger_adapters": charger_adapter_info,
+        # (#846/#967) fire → check → adjust, in the file: the measured W/A
+        # table per (charger, phase count), the buckets still earning
+        # confidence, and the refusals WITH their reasons. "SEM has no
+        # measurement" and "SEM measured and refused it" are different
+        # statements about an install, and the download used to carry
+        # neither.
+        "ev_watts_per_amp": data.get("ev_watts_per_amp"),
+        "ev_watts_per_amp_replay": data.get("ev_watts_per_amp_replay"),
         # #432 — full heat-pump observability block. One-click dump for
         # users with non-standard SG-Ready wiring (ESP relays, Shellies,
         # Modbus-bridged template switches). Tells the maintainer in a

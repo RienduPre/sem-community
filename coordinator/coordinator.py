@@ -4516,6 +4516,18 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                                            result[f"charger_{cid}_connected"])
                 except Exception:  # noqa: BLE001
                     _LOGGER.debug("wpa learner feed skipped", exc_info=True)
+                # (#967) …and then ASK it. The learner's plausibility band is
+                # the only place in SEM that can see a wrong ``ev_phases``,
+                # and until now the sight went nowhere: @alexmc1510's car took
+                # a third of the watts SEM thought it had bought, all night,
+                # and the only trace was a counter no surface reads.
+                try:
+                    result[f"charger_{cid}_phase_verdict"] = (
+                        self._surface_phase_verdict(
+                            cid, ev_dev,
+                            connected=result[f"charger_{cid}_connected"]))
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("phase verdict skipped", exc_info=True)
                 # #351 M4 — surface per-charger effective state so the
                 # fleet ``sem_charging_state`` no longer hides per-charger
                 # disagreements (e.g. fleet says NIGHT_CHARGING_ACTIVE
@@ -7127,6 +7139,67 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             belief_confirmed=belief_ok, setpoint_steady=steady,
             switch_in_flight=in_flight, tapering=tapering,
         )
+
+    def _surface_phase_verdict(self, cid, ev_dev, *, connected=True):
+        """(#967) Raise or clear this charger's phase-count Repair, and return
+        the verdict for the coordinator surface.
+
+        The verdict follows the CONDITION, like #944's stand-down: raised
+        while the measurements contradict the belief, deleted the cycle they
+        stop doing so — correcting ``ev_phases`` moves the learner to a fresh
+        (charger, phases) bucket, so the fix clears the notice by itself.
+
+        Four things it will NOT do:
+
+        * **accuse in observer mode** — SEM is not commanding the setpoint, so
+          the amps the draw is divided by are not SEM's number to defend;
+        * **accuse a phase-SWITCHING charger** — there the belief is the
+          sequencer's, not ``ev_phases``, so the Repair would name a field
+          that changes nothing; a mismatch under SEM's own commanded count is
+          #804's not-taking question and wants a different notice;
+        * **touch the registry with no car on the plug** — an idle box has
+          nothing to be wrong about this cycle (#708's rule), so a standing
+          notice is held rather than re-argued or retracted;
+        * **re-file an unchanged accusation** — ``async_create_issue`` fires a
+          registry event whenever a placeholder moves, and ``samples`` moves
+          every cycle. Once per (believed, measured) pair, like #944's
+          once-per-ceasefire serial.
+        """
+        from .repair_issues import (
+            clear_charger_phase_count_mismatch,
+            raise_charger_phase_count_mismatch,
+        )
+        learner = getattr(self, "_wpa_learner", None)
+        cfg = self._ev_charger_cfg(str(cid))
+        phases, belief_ok = self._wpa_phases_for(str(cid), cfg)
+        switching = bool(cfg.get("ev_phase_switching_enabled", False))
+        observer = getattr(self, "_observer_mode", False)
+        verdict = None
+        if (learner is not None and phases and belief_ok
+                and not observer and not switching):
+            verdict = learner.phase_verdict(str(cid), int(phases))
+        shown = getattr(self, "_phase_repair_shown", None)
+        if shown is None:
+            shown = self._phase_repair_shown = {}
+        if not verdict:
+            if shown.pop(str(cid), None) is not None or connected:
+                clear_charger_phase_count_mismatch(self.hass, str(cid))
+            return None
+        if not connected:
+            return dict(verdict)
+        stamp = (int(verdict["believed"]), int(verdict["measured"]))
+        if shown.get(str(cid)) != stamp:
+            shown[str(cid)] = stamp
+            raise_charger_phase_count_mismatch(
+                self.hass, str(cid),
+                name=getattr(ev_dev, "name", None) or str(cid),
+                believed=stamp[0],
+                measured=stamp[1],
+                watts_per_amp=float(verdict["watts_per_amp"]),
+                nominal_wpa=float(verdict["nominal_wpa"]),
+                samples=int(verdict["samples"]),
+            )
+        return dict(verdict)
 
     def _schedule_wpa_replay(self) -> None:
         """(#846) Once per boot: a charger the learner has never been fed

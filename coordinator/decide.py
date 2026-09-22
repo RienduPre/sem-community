@@ -469,8 +469,13 @@ def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
     the diagnostics that the bridge used to emit).
 
     STRUCTURAL (returns False) when ANY of:
-      * the sun is effectively gone (``solar_w < min_solar_w``) — deep
-        darkness, nothing to bridge to (#461 part 2);
+      * solar is below the user's own **Minimum Solar Power** floor
+        (``solar_w < min_solar_w``) — nothing to bridge to (#461 part 2).
+        (#967) The sentence names the FLOOR, not the sky: @alexmc1510 read
+        "sun gone (solar 800W < 1000W)" off an install that was producing
+        828 W and exporting 316 W at the time. The threshold is a slider he
+        set to 1000; "gone" is a claim about the world that the same cycle's
+        own numbers refute, and it sent him looking at his panels;
       * a not-cheap tariff window (#524) — holding imports expensive grid;
       * the battery can't assist — below buffer, never read (#875), or not
         permitted to (#778/#885); ``_assist_blocked_why`` owns which — AND
@@ -482,7 +487,7 @@ def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
     f = view.fleet
     if float(f.solar_w) < float(f.min_solar_w):
         return False, (
-            f"sun gone (solar {_cw(f.solar_w)}W < {_cw(f.min_solar_w)}W)"
+            f"solar {_cw(f.solar_w)}W < the {_cw(f.min_solar_w)}W minimum"
         )
     # (#893) The tariff clause is scoped to the modes that PRICE their
     # grid use. It used to apply to EVERY mode, which made each daytime
@@ -1290,8 +1295,9 @@ def decide(view: ChargerView) -> ChargerDecision:
     # decisions keep the default (bridgeable=True, irrelevant to them).
     # Only DAY idles matter: the stability bridge bypasses at night (the night
     # planner owns start/stop), so classifying a night idle would just append a
-    # misleading "[structural: sun gone]" to "target reached" / "waiting for
-    # cheaper". Leave night idles at the default bridgeable=True (ignored).
+    # misleading "[structural: solar 0W < the 1000W minimum]" to "target
+    # reached" / "waiting for cheaper". Leave night idles at the default
+    # bridgeable=True (ignored).
     if result.intent is ChargerIntent.IDLE and not view.fleet.is_night:
         bridgeable, why = _idle_bridgeable(view)
         if bridgeable:

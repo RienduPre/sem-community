@@ -67,6 +67,12 @@ DECLARED: dict[str, str] = {
     "coordinator/coordinator.py::SEMCoordinator._check_charger_control_entities":
         "the first valid verdict per (charger, entity) of each lifetime "
         "clears once (_control_repair_reconciled, #933)",
+    "coordinator/coordinator.py::SEMCoordinator._surface_phase_verdict":
+        "the memo only edge-triggers the RAISE (#967): the clear runs on the "
+        "current verdict whenever a car is on the plug, memo or not, so a "
+        "fresh coordinator's first healthy verdict clears an options-reload "
+        "leftover once; the Repair is non-persistent, so a restart drops it "
+        "anyway",
     "coordinator/coordinator.py::SEMCoordinator._check_soc_zone_order":
         "the memo starts at None but the verdict is a bool, never None, so "
         "a lifetime's first verdict always acts (pinned in test_933)",

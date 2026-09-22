@@ -1731,6 +1731,10 @@
       "title": "SEM stood down on {name} — the car is still charging",
       "description": "**{name}** restarted itself every time SEM stopped it. So that the car is not strobed into a charging fault, SEM has stood down and **will not stop it for up to {minutes} minutes** — meanwhile the car is drawing **{power} W**, from the grid or from your house battery.\n\nTwo causes look identical from SEM's side:\n\n1. **The wallbox's own auto-start or authorization** closes the contactor again whenever the car retries. Turn off auto-start on the charger (or require authorization), or give SEM a stop mechanism the box respects.\n2. **Another controller** is commanding the same charger — a second SEM instance, a Home Assistant automation, or the vendor's app. Check this first if one could exist: if SEM's stops start holding the moment the other controller is silenced, that was it.\n\nThis notice clears itself as soon as the car stops drawing or SEM takes control again."
     },
+    "charger_phase_count_mismatch": {
+      "title": "{name}：实测功率与 {believed} 相不符",
+      "description": "SEM 用 **相数 × 电压** 把它下发的每一个充电电流换算成瓦。**{name}** 配置的是 **{believed}** 相，因此 1 A 本应换来 **{nominal} W**；但在 **{cycles}** 个稳定周期里，充电桩实际每安培只取用 **{watts_per_amp} W**，这与 **{measured}** 相吻合。\n\n这一个数字同时决定了 SEM 下发的电流、夜间规划器认为车辆所需的最小功率，以及峰值保护留出的余量。它不会自行纠正：只要两者相互矛盾，每一次测量都会落在可信区间之外而被丢弃，SEM 于是继续沿用电表早已否定的数值。\n\n**修复只需改一个设置。** 打开该充电桩的 *相数* 数值实体，把它设为 **{measured}**——这是电表在 SEM 下发的每一个电流下都测到的相数，也是 SEM 必须用来换算的相数。日后更换车辆或线路，SEM 会再次提醒。\n\n一旦设置与充电桩的实际取电相符，本提示会自动消失。"
+    },
     "deye_system_work_mode_invalid": {
       "title": "Deye export control cannot be used: {entity_id}",
       "description": "SEM cannot use {entity_id} for export control: {reason}. Check the select entity and the three option labels under Configuration → Battery intelligence."

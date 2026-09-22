@@ -4242,7 +4242,16 @@ start) is a product call and 16 translation files, so it is named here rather th
 Also unfixed and not SEM's: RienduPre's home-consumption residual swings ~5 kW cycle to cycle
 (662 health violations), which is what made the surplus read 0–3000 W for the quarter-hour before
 the ladder ran.
-Refs #983 #979 #944 #893 #875 #778 #885 #610 #548 #461 #440.
+**Second instance — the refutation can be a WORD, not a number (#967, @alexmc1510).** #983's
+oracle checks that a reason's arithmetic is true; it cannot see a clause whose *name* the same
+cycle refutes. `_idle_bridgeable` printed **"sun gone (solar 800W < 1000W)"** on an install
+producing 828 W and exporting 316 W of it: the arithmetic is honest, and "gone" is a claim about
+the sky where the scope is a slider the owner set to 1000. It sent him to look at his panels. The
+sibling eighteen lines further down (`solar_only: solar=828W < 1000W threshold`) had always had
+the right shape, which is the tell — one branch drifted, the other did not. The reason now names
+the floor it crossed. **Sweep question: does this clause name the THING SEM measured, or a story
+about the world that the measurement merely triggered?**
+Refs #983 #979 #967 #944 #893 #875 #778 #885 #610 #548 #461 #440.
 
 ### 100. A sensor's failure wearing the costume of a valid reading — GUARDED
 **Symptom:** the energy balance needs a clamp to stay non-negative, repeatedly, on a healthy house —
@@ -4468,3 +4477,79 @@ relying on it NOT existing?*
 `is_cheap_name` parametrized over all nine values a level can take, plus an AST contract that no
 `is None` test on `tariff_level` returns to the decide layer.
 Refs #994.
+
+### 106. A plausibility filter is the only witness that the CONFIG is wrong — and it only ever discards — GUARDED
+**Symptom:** a device performs at a fixed fraction (or multiple) of what SEM believes it can,
+session after session, and nothing in the system moves. No error, no unavailable entity, no Repair,
+nothing in the diagnostics download; every guard reads as correct when inspected alone. #967
+(@alexmc1510, Victron EVCS, Madrid): his car took a third of the watts SEM thought it was handing
+it, all night, and the fault had to be inferred from a screenshot and a multiplication because the
+one block holding the answer was in neither the card nor the file.
+**Root shape:** a learner defends itself from implausible input with a band around a **configured**
+nameplate — right, and necessary. But when the *configuration* is the wrong thing, every honest
+measurement lands outside that band, so the filter accumulates, cycle after cycle, the one fact
+nobody else in the system can derive — *the belief is wrong, and here is the count that fits* — and
+spends it as a rejection. The model then falls back to the very nameplate the meter has refuted,
+and cannot correct itself, because correcting itself is what the band forbids. The tell is a
+**refusal reason whose name is a hypothesis about the config** (`phase_belief`, `wrong_unit`,
+`sign_flip`, `prober_only`) with no consumer: the code had already worked out the diagnosis and
+filed it under "no".
+**Where it lives:** every plausibility gate that compares a measurement against a configured
+constant. `watts_per_amp.record` — `phase_belief` (fixed here) and its sibling `implausible`
+(deliberately left mute: a dead sensor and a car at 10 % of the offer produce it too, and guessing
+from it is the cry-wolf this class must not become); `estimate_active_phases`'s 1..3 clamp;
+`detection.disagreements` (`prober_only` rows, diagnostics-only); the battery sign detector's
+`evidence` / `confidence` pair; the grid-sign auto-correction's log-only stand-down (already named
+in class 82). **Sweep question: for every gate that throws a reading away as impossible — what
+would have to be wrong for that reading to be RIGHT, and who is told when the gate keeps saying so?**
+**Relation to its neighbours:** class 40 is the same collision seen from the value's side (an
+invention defended by a ratchet built for measurements); class 82 is the same silence seen from the
+decision's side (a deliberate stand-down announced only in the log). This row is the *detector*
+view: the filter is not merely mute, it is the only witness there is.
+**Closure:** the filter answers a question instead of only dropping a sample.
+`WattsPerAmpLearner.phase_verdict` returns the alternative count, the setpoints behind it, how many
+held samples support it, and the W/A the owner can check against their own meter — or `None`.
+**The physics is asymmetric and the answer has to be too**, which is the part the first draft of
+this fix got wrong and an adversarial review caught. A draw ABOVE what the belief allows refutes it
+outright at any single setpoint (one phase carries at most `amps × voltage`), and that is the
+direction that commands 3× the watts SEM thinks it bought, through a peak limit. A draw BELOW it
+proves nothing alone: a car taking a third of the offer and a car on one of three phases are
+identical at one setpoint — PROD's Zoe read "1 phase" at 10.15 kW on a 32 A offer, impossible at
+7.36 kW per phase (#804). Nearest-fit would have convicted a correctly wired 3-phase wallbox whose
+car caps at 3.7 kW, and the Repair would then have told the owner to set 1 — after which the capped
+draw is *inside* the band, the learner adopts it as a trusted measurement, and 7 kW goes through
+the peak guard with the learner's own table defending it. **What separates the two stories is the
+LADDER:** a fixed power cap gives `W/A ∝ 1/amps`, a phase count gives the same W/A at every
+setpoint. So the low direction needs two commanded setpoints at least 1.4× apart whose implied
+counts agree within 0.25, and where SEM never moved the setpoint it says nothing — the honest
+answer, not a guess that costs 7 kW. Two further bars: `PHASE_VERDICT_REFUSALS` (20, far above
+`MIN_SAMPLES`) steady non-tapering cycles, and **no bucket under this belief ever having earned
+trust** (a belief that explains real draw is not on trial). From there the verdict reaches a Repair
+naming the value to set (`charger_phase_count_mismatch`, docs-side: the fix is one setting), the
+charging-state sensor's `per_charger_phases` block beside the #804 estimate, and the diagnostics
+download — which now carries `ev_watts_per_amp` and `charger_adapters.<id>.phases` at all, the gap
+that made #967 unanswerable from the file. It follows the CONDITION (#944's rule) but is filed once
+per (believed, measured) pair, because `async_create_issue` fires a registry event whenever a
+placeholder moves and the sample count moves every cycle. It stays silent in observer mode (SEM is
+not commanding the setpoint), on a phase-SWITCHING charger (the belief there is the sequencer's, so
+the Repair would name a field that changes nothing — that is #804's not-taking question), and with
+no car on the plug (#708: an idle box has nothing to be wrong about this cycle; a standing notice
+is held, not re-argued).
+**Guard:** `tests/test_967_phase_belief_surface.py` — the reporter's ladder convicted, a 3.7 kW and
+a 2.5 kW capped car NOT convicted, a single setpoint declining to answer, two setpoints too close
+declining, both over-command cases caught including the partial draw that nearest-fit called
+`implausible`, the trusted-bucket and 20-cycle bars, restart survival with per-entry repair, the
+quoted evidence bounded to what is still held, the Repair's raise/clear/once/disconnected/observer/
+switching paths, the placeholder set rendered from the real raiser against all 17 string files, the
+docs anchor, a `call_sites` contract that the cycle actually asks (deleting the one call site left
+every other test in the file green), and a vacuity twin (class 8).
+**Left for Guido:** (1) `ev_phases` has no **provenance** — class 40's own prescribed closure. SEM
+cannot tell "the owner said 3" from "nobody said, so 3", so the Repair words itself around the
+difference instead of stating it. (2) The verdict is a notice, not an action: SEM keeps converting
+with the refuted nameplate until a human changes the setting. Auto-adopting downward is arguably
+safe and upward certainly is not, so the asymmetry needs a decision, not a patch. (3) The refusal
+evidence does not decay, so reverting a corrected `ev_phases` re-accuses from the stored samples
+the same cycle — right, but worth a deliberate look. (4) No orphan sweep: deleting a charger row
+leaves its Repair until restart, which every per-charger repair in SEM shares. (5) `implausible`
+stays mute — a Repair there needs field evidence about what actually produces it.
+Refs #967 #966 #939 #846 #804 #744 #944.

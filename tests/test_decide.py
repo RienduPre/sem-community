@@ -624,10 +624,13 @@ class TestIdleBridgeable:
     6*3*230 = 4140 W.)
     """
 
-    def test_sun_gone_is_structural(self):
+    def test_solar_below_the_configured_minimum_is_structural(self):
         ok, why = _idle_bridgeable(_view(solar_w=500))  # < 1000 min_solar
         assert ok is False
-        assert "sun gone" in why
+        # (#967) the sentence names the SLIDER, not the sky — 500 W of sun is
+        # not "gone", it is under a floor the owner chose.
+        assert "500W < the 1000W minimum" in why
+        assert "sun gone" not in why
 
     def test_not_cheap_tariff_is_structural_only_for_tariff_modes(self):
         """(#893) supersedes the blanket clause this test used to pin. A
