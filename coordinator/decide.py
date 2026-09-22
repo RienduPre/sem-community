@@ -1270,30 +1270,6 @@ def decide(view: ChargerView) -> ChargerDecision:
     # ceiling can't suppress the "idle — disconnected" reason.
     # (#898) Off is hands-off before any guard: a ceiling, a disconnect or
     # a night gate has nothing to police on a charger SEM does not command.
-    # (#980) A SEM-ENFORCED pause — before Off, and before every guard.
-    # Off releases control: one stop, then silence, so a wallbox that
-    # restarts itself is left alone (#898/#942, and @RienduPre's Pulsar does
-    # exactly that). A pause is the opposite intent — "hold it stopped, and
-    # keep holding it" — which is what DISABLE already contracts for: the
-    # brand disable, re-asserted every cycle until the draw drops. It sits
-    # above Off because a user who arms a pause on a released charger means
-    # the pause; that is the whole request.
-    if view.pause_remaining_min > 0:
-        # CAUSE: pause_remaining_min > 0 on this view — the coordinator
-        # resolved the charger's own pause_charging_until against the clock.
-        return ChargerDecision(
-            charger_id=view.power.charger_id,
-            mode=view.mode,
-            intent=ChargerIntent.DISABLE,
-            commanded_amps=0,
-            budget_w=0.0,
-            bridgeable=False,
-            reason=(
-                f"paused by the user — SEM holds this charger stopped for "
-                f"another {view.pause_remaining_min:.0f} min"
-            ),
-        )
-
     if view.mode == "off":
         return _OFF.decide(view)
 

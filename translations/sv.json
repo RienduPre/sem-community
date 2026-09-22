@@ -1566,9 +1566,6 @@
       },
       "ev_phases": {
         "name": "{charger} Faser"
-      },
-      "pause_charging_until": {
-        "name": "{charger} Pausa laddning"
       }
     },
     "select": {
@@ -1597,11 +1594,25 @@
           "1": "1-fas",
           "3": "3-fas"
         }
+      },
+      "pause_duration": {
+        "name": "Pausa laddning i",
+        "state": {
+          "30_minutes": "30 minuter",
+          "1_hour": "1 timme",
+          "2_hours": "2 timmar",
+          "4_hours": "4 timmar",
+          "8_hours": "8 timmar",
+          "12_hours": "12 timmar"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Pausa laddning"
       }
     }
   },

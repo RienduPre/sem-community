@@ -1566,9 +1566,6 @@
       },
       "ev_phases": {
         "name": "{charger} Vaiheet"
-      },
-      "pause_charging_until": {
-        "name": "{charger} Keskeytä lataus"
       }
     },
     "select": {
@@ -1597,11 +1594,25 @@
           "1": "1-vaiheinen",
           "3": "3-vaiheinen"
         }
+      },
+      "pause_duration": {
+        "name": "Keskeytä lataus ajaksi",
+        "state": {
+          "30_minutes": "30 minuuttia",
+          "1_hour": "1 tunti",
+          "2_hours": "2 tuntia",
+          "4_hours": "4 tuntia",
+          "8_hours": "8 tuntia",
+          "12_hours": "12 tuntia"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Keskeytä lataus"
       }
     }
   },

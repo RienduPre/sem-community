@@ -1566,9 +1566,6 @@
       },
       "ev_phases": {
         "name": "{charger} Phases"
-      },
-      "pause_charging_until": {
-        "name": "{charger} Mettre la charge en pause"
       }
     },
     "select": {
@@ -1597,11 +1594,25 @@
           "1": "Monophasé",
           "3": "Triphasé"
         }
+      },
+      "pause_duration": {
+        "name": "Mettre la charge en pause pendant",
+        "state": {
+          "30_minutes": "30 minutes",
+          "1_hour": "1 heure",
+          "2_hours": "2 heures",
+          "4_hours": "4 heures",
+          "8_hours": "8 heures",
+          "12_hours": "12 heures"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Mettre la charge en pause"
       }
     }
   },

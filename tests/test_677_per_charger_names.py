@@ -58,23 +58,22 @@ def per_charger_translation_keys() -> dict[str, tuple[str, ...]]:
     end = number_src.index("per_charger_descriptions.append(base_desc)")
     numbers = re.findall(r'\)\s*,\s*"([a-z_0-9]+)"\s*,', number_src[start:end])
 
-    # (#980) The pause knob is not one of the (description, config_key,
-    # default) tuples above — it is a countdown with its own class, and its
-    # translation key is the module constant that class persists under. Read
-    # it from there rather than listing it: delete the entity and the key
-    # drops out of this derivation with it, which is the whole point of
-    # deriving instead of maintaining a list beside a list.
-    if "SEMChargerPauseNumber(" in number_src:
-        pause_src = (_ROOT / "coordinator" / "charge_pause.py").read_text(
-            encoding="utf-8")
-        m = re.search(r'PAUSE_UNTIL_KEY\s*=\s*"([a-z_0-9]+)"', pause_src)
-        if m:
-            numbers.append(m.group(1))
 
     select_src = (_ROOT / "select.py").read_text(encoding="utf-8")
     selects = re.findall(r'entry,\s*cid,\s*"([a-z_0-9]+)"\s*,', select_src)
 
-    return {"number": tuple(numbers), "select": tuple(selects)}
+    # (#980) The per-charger Pause button. Its class sets the translation key
+    # directly rather than taking it as a constructor argument, so it is read
+    # from there — derived, so deleting the entity drops the key with it.
+    button_src = (_ROOT / "button.py").read_text(encoding="utf-8")
+    buttons = []
+    if "class SEMChargerPauseButton" in button_src:
+        buttons = re.findall(
+            r'_attr_translation_key\s*=\s*"([a-z_0-9]+)"',
+            button_src[button_src.index("class SEMChargerPauseButton"):])
+
+    return {"number": tuple(numbers), "select": tuple(selects),
+            "button": tuple(buttons)}
 
 
 class TestPerChargerNamesResolve677:

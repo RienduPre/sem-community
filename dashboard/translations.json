@@ -1563,7 +1563,16 @@
     "config_help_battery_morning_drain_floor_soc": "Okno nikdy nevybije baterii pod tento SOC.",
     "plan_expensive_detail_plain": "do {end} · prům. {price} {currency}/kWh",
     "price_level_flat": "Žádný cenový rozdíl",
-    "price_level_no_prices": "Nejsou dostupné ceny"
+    "price_level_no_prices": "Nejsou dostupné ceny",
+    "pause_charging_for": "Pozastavit na",
+    "pause_charging": "Pauza",
+    "pause_charging_hint": "Nastaví režim této nabíječky na Vypnuto na zvolenou dobu a pak jej vrátí. Dřívější ukončení: nastavte režim nabíjení sami.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 hodina",
+    "pause_duration_2_hours": "2 hodiny",
+    "pause_duration_4_hours": "4 hodiny",
+    "pause_duration_8_hours": "8 hodin",
+    "pause_duration_12_hours": "12 hodin"
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3129,7 +3138,16 @@
     "config_help_battery_morning_drain_floor_soc": "Vinduet tager aldrig batteriet under denne SOC.",
     "plan_expensive_detail_plain": "til {end} · gns. {price} {currency}/kWh",
     "price_level_flat": "Ingen prisforskel",
-    "price_level_no_prices": "Ingen priser tilgængelige"
+    "price_level_no_prices": "Ingen priser tilgængelige",
+    "pause_charging_for": "Pause i",
+    "pause_charging": "Pause",
+    "pause_charging_hint": "Sætter denne laders tilstand til Fra i den valgte tid og derefter tilbage. Sæt selv ladetilstanden for at slutte tidligere.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 time",
+    "pause_duration_2_hours": "2 timer",
+    "pause_duration_4_hours": "4 timer",
+    "pause_duration_8_hours": "8 timer",
+    "pause_duration_12_hours": "12 timer"
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4695,7 +4713,16 @@
     "config_help_battery_morning_drain_floor_soc": "Das Fenster entlädt den Speicher nie unter diesen SOC.",
     "plan_expensive_detail_plain": "bis {end} · Ø {price} {currency}/kWh",
     "price_level_flat": "Kein Preisunterschied",
-    "price_level_no_prices": "Keine Preise verfügbar"
+    "price_level_no_prices": "Keine Preise verfügbar",
+    "pause_charging_for": "Pausieren für",
+    "pause_charging": "Pause",
+    "pause_charging_hint": "Setzt den Modus dieser Wallbox für die gewählte Zeit auf Aus und danach zurück auf den jetzigen. Zum früheren Beenden den Lademodus selbst setzen.",
+    "pause_duration_30_minutes": "30 Min.",
+    "pause_duration_1_hour": "1 Std.",
+    "pause_duration_2_hours": "2 Std.",
+    "pause_duration_4_hours": "4 Std.",
+    "pause_duration_8_hours": "8 Std.",
+    "pause_duration_12_hours": "12 Std."
   },
   "en": {
     "% of limit": "% of limit",
@@ -6261,7 +6288,16 @@
     "config_help_battery_morning_drain_floor_soc": "The window never takes the pack below this SOC.",
     "plan_expensive_detail_plain": "until {end} · avg {price} {currency}/kWh",
     "price_level_flat": "No price difference",
-    "price_level_no_prices": "No prices available"
+    "price_level_no_prices": "No prices available",
+    "pause_charging_for": "Pause for",
+    "pause_charging": "Pause",
+    "pause_charging_hint": "Sets this charger's mode to Off for the chosen time, then back to what it is now. Set the Charge Mode yourself to end it sooner.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 hour",
+    "pause_duration_2_hours": "2 hours",
+    "pause_duration_4_hours": "4 hours",
+    "pause_duration_8_hours": "8 hours",
+    "pause_duration_12_hours": "12 hours"
   },
   "es": {
     "% of limit": "% del límite",
@@ -7827,7 +7863,16 @@
     "config_help_battery_morning_drain_floor_soc": "La ventana nunca baja la batería por debajo de este SOC.",
     "plan_expensive_detail_plain": "hasta {end} · med. {price} {currency}/kWh",
     "price_level_flat": "Sin diferencia de precio",
-    "price_level_no_prices": "Sin precios disponibles"
+    "price_level_no_prices": "Sin precios disponibles",
+    "pause_charging_for": "Pausar durante",
+    "pause_charging": "Pausa",
+    "pause_charging_hint": "Pone el modo de este cargador en Apagado durante el tiempo elegido y luego lo devuelve. Cambia el modo de carga tú mismo para terminar antes.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 hora",
+    "pause_duration_2_hours": "2 horas",
+    "pause_duration_4_hours": "4 horas",
+    "pause_duration_8_hours": "8 horas",
+    "pause_duration_12_hours": "12 horas"
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9393,7 +9438,16 @@
     "config_help_battery_morning_drain_floor_soc": "Ikkuna ei koskaan pura akkua tämän SOC:n alle.",
     "plan_expensive_detail_plain": "klo {end} asti · ka. {price} {currency}/kWh",
     "price_level_flat": "Ei hintaeroa",
-    "price_level_no_prices": "Hintoja ei saatavilla"
+    "price_level_no_prices": "Hintoja ei saatavilla",
+    "pause_charging_for": "Keskeytä ajaksi",
+    "pause_charging": "Tauko",
+    "pause_charging_hint": "Asettaa tämän latausaseman tilaksi Pois valituksi ajaksi ja palauttaa sen sitten. Aseta lataustila itse lopettaaksesi aiemmin.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 tunti",
+    "pause_duration_2_hours": "2 tuntia",
+    "pause_duration_4_hours": "4 tuntia",
+    "pause_duration_8_hours": "8 tuntia",
+    "pause_duration_12_hours": "12 tuntia"
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -10959,7 +11013,16 @@
     "config_help_battery_morning_drain_floor_soc": "La fenêtre ne descend jamais la batterie sous ce SOC.",
     "plan_expensive_detail_plain": "jusqu'à {end} · moy. {price} {currency}/kWh",
     "price_level_flat": "Aucun écart de prix",
-    "price_level_no_prices": "Aucun prix disponible"
+    "price_level_no_prices": "Aucun prix disponible",
+    "pause_charging_for": "Pause pendant",
+    "pause_charging": "Pause",
+    "pause_charging_hint": "Met le mode de cette borne sur Arrêt pendant la durée choisie, puis le rétablit. Réglez vous-même le mode de charge pour terminer plus tôt.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 heure",
+    "pause_duration_2_hours": "2 heures",
+    "pause_duration_4_hours": "4 heures",
+    "pause_duration_8_hours": "8 heures",
+    "pause_duration_12_hours": "12 heures"
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12525,7 +12588,16 @@
     "config_help_battery_morning_drain_floor_soc": "Az ablak soha nem süti ki az akkut ez alá a SOC alá.",
     "plan_expensive_detail_plain": "{end}-ig · átl. {price} {currency}/kWh",
     "price_level_flat": "Nincs árkülönbség",
-    "price_level_no_prices": "Nincsenek elérhető árak"
+    "price_level_no_prices": "Nincsenek elérhető árak",
+    "pause_charging_for": "Szüneteltetés ennyi ideig",
+    "pause_charging": "Szünet",
+    "pause_charging_hint": "A töltő módját a választott időre Ki állásba teszi, majd visszaállítja. Korábbi befejezéshez állítsa be a töltési módot saját kezűleg.",
+    "pause_duration_30_minutes": "30 perc",
+    "pause_duration_1_hour": "1 óra",
+    "pause_duration_2_hours": "2 óra",
+    "pause_duration_4_hours": "4 óra",
+    "pause_duration_8_hours": "8 óra",
+    "pause_duration_12_hours": "12 óra"
   },
   "it": {
     "% of limit": "% del limite",
@@ -14091,7 +14163,16 @@
     "config_help_battery_morning_drain_floor_soc": "La finestra non porta mai la batteria sotto questo SOC.",
     "plan_expensive_detail_plain": "fino alle {end} · media {price} {currency}/kWh",
     "price_level_flat": "Nessuna differenza di prezzo",
-    "price_level_no_prices": "Nessun prezzo disponibile"
+    "price_level_no_prices": "Nessun prezzo disponibile",
+    "pause_charging_for": "Pausa per",
+    "pause_charging": "Pausa",
+    "pause_charging_hint": "Imposta la modalità di questa colonnina su Off per il tempo scelto, poi la ripristina. Cambia tu la modalità di ricarica per finire prima.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 ora",
+    "pause_duration_2_hours": "2 ore",
+    "pause_duration_4_hours": "4 ore",
+    "pause_duration_8_hours": "8 ore",
+    "pause_duration_12_hours": "12 ore"
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15657,7 +15738,16 @@
     "config_help_battery_morning_drain_floor_soc": "Het venster ontlaadt de accu nooit onder deze SOC.",
     "plan_expensive_detail_plain": "tot {end} · gem. {price} {currency}/kWh",
     "price_level_flat": "Geen prijsverschil",
-    "price_level_no_prices": "Geen prijzen beschikbaar"
+    "price_level_no_prices": "Geen prijzen beschikbaar",
+    "pause_charging_for": "Pauzeren voor",
+    "pause_charging": "Pauze",
+    "pause_charging_hint": "Zet de modus van deze lader op Uit voor de gekozen tijd en daarna terug. Stel de laadmodus zelf in om eerder te stoppen.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 uur",
+    "pause_duration_2_hours": "2 uur",
+    "pause_duration_4_hours": "4 uur",
+    "pause_duration_8_hours": "8 uur",
+    "pause_duration_12_hours": "12 uur"
   },
   "no": {
     "% of limit": "% av grense",
@@ -17223,7 +17313,16 @@
     "config_help_battery_morning_drain_floor_soc": "Vinduet tar aldri batteriet under denne SOC.",
     "plan_expensive_detail_plain": "til {end} · snitt {price} {currency}/kWh",
     "price_level_flat": "Ingen prisforskjell",
-    "price_level_no_prices": "Ingen priser tilgjengelig"
+    "price_level_no_prices": "Ingen priser tilgjengelig",
+    "pause_charging_for": "Pause i",
+    "pause_charging": "Pause",
+    "pause_charging_hint": "Setter laderens modus til Av i valgt tid og deretter tilbake. Sett lademodus selv for å avslutte tidligere.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 time",
+    "pause_duration_2_hours": "2 timer",
+    "pause_duration_4_hours": "4 timer",
+    "pause_duration_8_hours": "8 timer",
+    "pause_duration_12_hours": "12 timer"
   },
   "pl": {
     "% of limit": "% limitu",
@@ -18789,7 +18888,16 @@
     "config_help_battery_morning_drain_floor_soc": "Okno nigdy nie rozładuje baterii poniżej tego SOC.",
     "plan_expensive_detail_plain": "do {end} · śr. {price} {currency}/kWh",
     "price_level_flat": "Brak różnicy cen",
-    "price_level_no_prices": "Brak dostępnych cen"
+    "price_level_no_prices": "Brak dostępnych cen",
+    "pause_charging_for": "Wstrzymaj na",
+    "pause_charging": "Pauza",
+    "pause_charging_hint": "Ustawia tryb tej ładowarki na Wyłączony na wybrany czas, a potem go przywraca. Ustaw tryb ładowania samodzielnie, aby zakończyć wcześniej.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 godz.",
+    "pause_duration_2_hours": "2 godz.",
+    "pause_duration_4_hours": "4 godz.",
+    "pause_duration_8_hours": "8 godz.",
+    "pause_duration_12_hours": "12 godz."
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20355,7 +20463,16 @@
     "config_help_battery_morning_drain_floor_soc": "A janela nunca leva a bateria abaixo deste SOC.",
     "plan_expensive_detail_plain": "até {end} · méd. {price} {currency}/kWh",
     "price_level_flat": "Sem diferença de preço",
-    "price_level_no_prices": "Sem preços disponíveis"
+    "price_level_no_prices": "Sem preços disponíveis",
+    "pause_charging_for": "Pausar durante",
+    "pause_charging": "Pausa",
+    "pause_charging_hint": "Coloca o modo deste carregador em Desligado durante o tempo escolhido e depois repõe-no. Defina o modo de carregamento para terminar antes.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 hora",
+    "pause_duration_2_hours": "2 horas",
+    "pause_duration_4_hours": "4 horas",
+    "pause_duration_8_hours": "8 horas",
+    "pause_duration_12_hours": "12 horas"
   },
   "ro": {
     "% of limit": "% din limită",
@@ -21921,7 +22038,16 @@
     "config_help_battery_morning_drain_floor_soc": "Fereastra nu duce niciodată bateria sub acest SOC.",
     "plan_expensive_detail_plain": "până la {end} · med. {price} {currency}/kWh",
     "price_level_flat": "Fără diferență de preț",
-    "price_level_no_prices": "Niciun preț disponibil"
+    "price_level_no_prices": "Niciun preț disponibil",
+    "pause_charging_for": "Pauză pentru",
+    "pause_charging": "Pauză",
+    "pause_charging_hint": "Pune modul acestui încărcător pe Oprit pentru timpul ales, apoi îl readuce. Setează singur modul de încărcare pentru a termina mai devreme.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 oră",
+    "pause_duration_2_hours": "2 ore",
+    "pause_duration_4_hours": "4 ore",
+    "pause_duration_8_hours": "8 ore",
+    "pause_duration_12_hours": "12 ore"
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23487,7 +23613,16 @@
     "config_help_battery_morning_drain_floor_soc": "Fönstret tar aldrig batteriet under denna SOC.",
     "plan_expensive_detail_plain": "till {end} · snitt {price} {currency}/kWh",
     "price_level_flat": "Ingen prisskillnad",
-    "price_level_no_prices": "Inga priser tillgängliga"
+    "price_level_no_prices": "Inga priser tillgängliga",
+    "pause_charging_for": "Pausa i",
+    "pause_charging": "Paus",
+    "pause_charging_hint": "Sätter laddarens läge till Av under vald tid och återställer det sedan. Ställ in laddläget själv för att avsluta tidigare.",
+    "pause_duration_30_minutes": "30 min",
+    "pause_duration_1_hour": "1 timme",
+    "pause_duration_2_hours": "2 timmar",
+    "pause_duration_4_hours": "4 timmar",
+    "pause_duration_8_hours": "8 timmar",
+    "pause_duration_12_hours": "12 timmar"
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25053,6 +25188,15 @@
     "config_help_battery_morning_drain_floor_soc": "窗口绝不会把电池放电到此 SOC 以下。",
     "plan_expensive_detail_plain": "至 {end} · 平均 {price} {currency}/kWh",
     "price_level_flat": "无价格差异",
-    "price_level_no_prices": "无可用价格"
+    "price_level_no_prices": "无可用价格",
+    "pause_charging_for": "暂停",
+    "pause_charging": "暂停",
+    "pause_charging_hint": "将此充电桩的模式设为“关闭”并持续所选时长，之后恢复原状。想提前结束，请自行设置充电模式。",
+    "pause_duration_30_minutes": "30 分钟",
+    "pause_duration_1_hour": "1 小时",
+    "pause_duration_2_hours": "2 小时",
+    "pause_duration_4_hours": "4 小时",
+    "pause_duration_8_hours": "8 小时",
+    "pause_duration_12_hours": "12 小时"
   }
 }

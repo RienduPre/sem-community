@@ -301,6 +301,13 @@ ENTITY_MODULES: Mapping[tuple[str, str], frozenset[Module]] = _table(
     _rows("binary_sensor", _E, (
         "ev_charging", "ev_connected",
     )),
+    # (#980) The shared pause duration. An install with no charger has
+    # nothing to pause, so it should not carry the dropdown either. (The
+    # per-charger Pause BUTTONS are built from the charger list itself, so
+    # they cannot appear without one.)
+    _rows("select", _E, (
+        "pause_duration",
+    )),
     _rows("sensor", _HP, (
         "heat_pump_energy_month", "heat_pump_energy_shifted_today",
         "heat_pump_energy_today", "heat_pump_energy_total", "heat_pump_energy_year",

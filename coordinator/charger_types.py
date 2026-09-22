@@ -1126,15 +1126,6 @@ class ChargerView:
     exists" — the fail-open contract. Day/night agnostic (see
     :mod:`.plan_verdict`): a daytime planner fills this same field."""
 
-    pause_remaining_min: float = 0.0
-    """(#980) Minutes left on a SEM-enforced pause; 0 = none armed.
-
-    Resolved by the coordinator against the wall clock (``decide`` is pure
-    and has none) from the charger's ``pause_charging_until``. A positive
-    value means DISABLE this cycle and every cycle until it runs out —
-    the opposite intent to Off, which releases control instead of holding
-    it. See ``coordinator/charge_pause.py``."""
-
     soc_ceiling_reached: bool = False
     """The car has reached its configured MAX target (SOC % ceiling, or
     the max-kWh ceiling) — stop charging in EVERY mode, including solar

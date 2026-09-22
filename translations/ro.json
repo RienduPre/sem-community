@@ -1566,9 +1566,6 @@
       },
       "ev_phases": {
         "name": "{charger} Faze"
-      },
-      "pause_charging_until": {
-        "name": "{charger} Pune încărcarea pe pauză"
       }
     },
     "select": {
@@ -1597,11 +1594,25 @@
           "1": "Monofazat",
           "3": "Trifazat"
         }
+      },
+      "pause_duration": {
+        "name": "Pune încărcarea pe pauză pentru",
+        "state": {
+          "30_minutes": "30 de minute",
+          "1_hour": "1 oră",
+          "2_hours": "2 ore",
+          "4_hours": "4 ore",
+          "8_hours": "8 ore",
+          "12_hours": "12 ore"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Pune încărcarea pe pauză"
       }
     }
   },

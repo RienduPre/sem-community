@@ -24,14 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shave lifts and the battery goes back to covering the lot: his "zero
   grid until the evening".
 
-- ✨ **Pause charging, and SEM keeps it paused** (#980, requested by
-  @RienduPre). Every charger gets a *Pause Charging* knob in minutes.
-  While it is running down, SEM commands the stop every cycle — so a
-  wallbox that restarts itself (his Pulsar does) stays stopped without
-  opening its app. This is deliberately NOT what *Off* means: Off releases
-  control and sends nothing (#898/#942); a pause is SEM acting, to hold.
-  Set it back to 0 to resume. The deadline is what is stored, so a restart
-  does not hand back the minutes already spent.
+- ✨ **Pause charging for a while, and SEM puts the mode back** (#980,
+  requested by @RienduPre). One *Pause Charging For* dropdown (30 min …
+  12 h) for the install, and a *Pause Charging* button per charger. Press a
+  charger's button and its charge mode goes to **Off** for that long, then
+  back to exactly what it was. There is no Resume button: setting the
+  Charge Mode back is already one, and it ends the pause on the spot.
+  Off is the right instrument here and not a compromise — it is hands-off
+  (#898), so SEM sends one stop and starts no fight with a box that
+  restarts itself. What SEM adds is the part you cannot do yourself:
+  remembering to turn it back on. The deadline is stored as an instant, so
+  a restart neither extends the pause nor hands back minutes already
+  spent, and a pause that ran out while Home Assistant was down resumes on
+  the next cycle. Change the mode by hand while it is running and the
+  pause stands down — it never snaps a deliberate choice back.
 
 - ✨ **A load whose control is a watt setpoint now gets the watts** (#880,
   reported by @jonasbkarlsson and @florianhadersbeck). SEM's surplus

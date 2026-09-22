@@ -82,7 +82,6 @@ def build_charger_view(
     hardware_max_a: Optional[float] = None,
     wpa_table: Optional[Mapping[int, float]] = None,
     redirect_allowed: bool = True,
-    pause_remaining_min: float = 0.0,
 ) -> ChargerView:
     """Construct a ChargerView from a per-cycle FleetCycleState +
     per-charger overrides.
@@ -358,7 +357,4 @@ def build_charger_view(
         ev_priority=ev_priority,
         wpa_table=dict(wpa_table or {}),
         redirect_allowed=bool(redirect_allowed),
-        # (#980) resolved against the clock by the coordinator — this
-        # builder and decide() both stay pure.
-        pause_remaining_min=float(pause_remaining_min or 0.0),
     )

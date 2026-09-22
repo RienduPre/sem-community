@@ -3755,8 +3755,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             redirect_allowed=not bool(getattr(
                                 getattr(pcc, "state", None), "redirect_vetoed", False)),
                             charger_cfg=charger_cfg,
-                            # (#980) the enforced pause, resolved once
-                            pause_remaining_min=self._charger_pause_remaining_min(cid),
                             mode=per_mode,
                             daily_ev_kwh=self._charger_daily_kwh(cid, energy),
                             target_kwh=decide_target_kwh,
@@ -4097,7 +4095,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     ev_priority=self._ev_priority_for(cid),
                     wpa_table=self._wpa_table_for(cid),
                     charger_cfg={},
-                    pause_remaining_min=self._charger_pause_remaining_min(cid),  # (#980)
                     mode=per_mode,
                     daily_ev_kwh=getattr(energy, "daily_ev", 0.0),
                     target_kwh=getattr(charging_context, "night_target_kwh", None),
@@ -11199,24 +11196,45 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 return adapter
         return self._primary_battery_adapter()
 
-    def _charger_pause_remaining_min(self, charger_id: str) -> float:
-        """(#980) Minutes left on this charger's SEM-enforced pause, 0 = none.
+    def _resume_expired_pauses(self) -> None:
+        """(#980) Put the charge mode back when a timed pause runs out.
 
-        The ONE producer. ``decide`` and ``build_charger_view`` are pure and
-        have no clock, so the wall-clock question is answered here and rides
-        the view — and answered in one place so the three view builders
-        cannot disagree about whether a charger is paused.
+        The ONE place a pause ends. It is a mode write, not a command — the
+        charger goes back to doing what it was doing before the user pressed
+        Pause, and today's control path takes it from there.
+
+        Runs every cycle, and the whole decision is ``charge_pause.tick``.
+        It answers three ways: nothing to do, give the mode back, or —
+        because there is no Resume button, only the charge-mode select —
+        forget a pause the user ended by hand. That third one is the reason
+        this writes a dict rather than returning a mode: a cancelled pause
+        whose record survived would fire the next time someone chose Off
+        deliberately, and put the pre-pause mode back over it.
+
+        A pause is a convenience, never a claim on the knob.
         """
-        from .charge_pause import PAUSE_UNTIL_KEY, remaining_minutes
+        from .charge_pause import tick
         import homeassistant.util.dt as _dt
-        cfg = None
-        for c in (self.config.get("ev_chargers") or []):
-            if (c.get("id") or "ev_charger") == charger_id:
-                cfg = c
-                break
-        if cfg is None:
-            return 0.0
-        return remaining_minutes(cfg.get(PAUSE_UNTIL_KEY), _dt.now())
+        if self.config_entry is None:
+            return          # too early to persist anything
+        _now = _dt.now()
+        for cfg in (self.config.get("ev_chargers") or []):
+            if not isinstance(cfg, dict):
+                continue
+            writes = tick(cfg, _now)
+            if not writes:
+                continue
+            cid = cfg.get("id") or "ev_charger"
+            from .. import persist_per_charger_option
+            for key, value in writes.items():
+                persist_per_charger_option(
+                    self.hass, self.config_entry, self, cid, key, value)
+            mode = writes.get("charge_mode")
+            _LOGGER.info(
+                "Charger %s: %s (#980)", cid,
+                f"pause finished — charge mode restored to {mode}" if mode
+                else "pause record cleared — the mode was set back by hand",
+            )
 
     def _compute_peak_slot_allowance(self, power) -> None:
         """(#864) The slot-budget allowance — the PREVENTIVE peak bound.
@@ -11381,6 +11399,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
         # (#864) The slot-budget allowance — the PREVENTIVE peak bound.
         self._compute_peak_slot_allowance(power)
+
+        # (#980) A timed pause that has run out hands the charge mode back
+        # BEFORE this cycle's charger decisions read it.
+        try:
+            self._resume_expired_pauses()
+        except Exception:  # noqa: BLE001 — a pause must not end a cycle
+            _LOGGER.warning("resuming an expired charge pause failed (#980)",
+                            exc_info=True)
 
         # (arc #921) one verdict per sink, computed here and nowhere else. The
         # export price is read with the SAME tri-state the forecast sell uses:
@@ -11797,8 +11823,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             ev_priority=self._ev_priority_for(_primary_cfg.get("id") or "ev_charger"),
             wpa_table=self._wpa_table_for(_primary_cfg.get("id") or "ev_charger"),
             charger_cfg=_primary_cfg,
-            pause_remaining_min=self._charger_pause_remaining_min(   # (#980)
-                _primary_cfg.get("id") or "ev_charger"),
             mode=self._effective_charge_mode_for(_primary_cfg),
             daily_ev_kwh=self._charger_daily_kwh(
                 _primary_cfg.get("id") or "ev_charger", energy,

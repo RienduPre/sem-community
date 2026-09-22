@@ -11,7 +11,7 @@ from homeassistant.components.number import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import entity_registry as er
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import (
@@ -28,10 +28,6 @@ from homeassistant.helpers.entity import EntityCategory
 from .const import DEFAULT_MAX_CHARGING_CURRENT
 from .consts.bounds import BOUNDS      # (#870) one range per field
 from .coordinator import SEMCoordinator
-from .coordinator.charge_pause import (      # (#980)
-    PAUSE_MAX_MIN, PAUSE_STEP_MIN, PAUSE_UNTIL_KEY,
-    deadline_for_minutes, remaining_minutes,
-)
 from .coordinator.install_modules import kept_descriptions, presence_of
 
 type SEMConfigEntry = ConfigEntry[SEMCoordinator]
@@ -524,25 +520,6 @@ async def async_setup_entry(
                     charger_cfg.get(config_key, default_val), cname,
                 ))
 
-            # (#980) The SEM-ENFORCED pause. Not a setting like the sliders
-            # above — it is a live countdown, so it gets its own class (the
-            # stored fact is a deadline; the knob reads the minutes left).
-            _pause_desc = NumberEntityDescription(
-                key=f"charger_{cid}_pause_charging",
-                name=f"{cname} Pause Charging",
-                native_unit_of_measurement=UnitOfTime.MINUTES,
-                native_min_value=0,
-                native_max_value=PAUSE_MAX_MIN,
-                native_step=PAUSE_STEP_MIN,
-                mode=NumberMode.BOX,
-                icon="mdi:pause-octagon-outline",
-                entity_category=EntityCategory.CONFIG,
-            )
-            per_charger_descriptions.append(_pause_desc)
-            entities.append(SEMChargerPauseNumber(
-                coordinator, _pause_desc, entry, cid, cname,
-            ))
-
     if per_charger_descriptions:
         _LOGGER.info(
             "Created %d per-charger number entities for %d charger(s)",
@@ -896,66 +873,6 @@ class SEMPerChargerNumber(CoordinatorEntity, NumberEntity):
             "Updated per-charger %s.%s to %s",
             self._charger_id, self._config_key, value,
         )
-
-
-class SEMChargerPauseNumber(SEMPerChargerNumber):
-    """(#980) "Pause charging for N minutes" — a SEM-ENFORCED hold.
-
-    @RienduPre wanted to stop a charger for a while without opening his
-    Wallbox app, and Off could not give him that: Off is hands-off by
-    design (#898), so a box that restarts itself is left alone. This knob
-    means the opposite — SEM keeps commanding the stop until it runs out.
-
-    Unlike every other per-charger number this one is a COUNTDOWN, not a
-    setting: what is persisted is the deadline, and the value read back is
-    the minutes left, refreshed each coordinator cycle. Storing a duration
-    instead would have re-armed itself after a restart — silently
-    extending a pause the user had already half spent — and a deadline
-    answers "how much longer?" without a second number to keep in step.
-
-    Setting it to 0 resumes immediately; that is the same gesture as never
-    having paused.
-    """
-
-    def __init__(self, coordinator, description, entry, charger_id,
-                 charger_name="EV Charger") -> None:
-        super().__init__(
-            coordinator, description, entry, charger_id,
-            PAUSE_UNTIL_KEY, 0.0, charger_name,
-        )
-        self._attr_native_value = self._remaining()
-
-    def _remaining(self) -> float:
-        import homeassistant.util.dt as dt_util
-        cfg = {}
-        for c in (self.coordinator.config.get("ev_chargers") or []):
-            if (c.get("id") or "ev_charger") == self._charger_id:
-                cfg = c
-                break
-        return remaining_minutes(cfg.get(PAUSE_UNTIL_KEY), dt_util.now())
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self._attr_native_value = self._remaining()
-        super()._handle_coordinator_update()
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Arm (or clear) the pause. The DEADLINE is what is stored."""
-        import homeassistant.util.dt as dt_util
-        deadline = deadline_for_minutes(value, dt_util.now())
-        self._attr_native_value = 0.0 if deadline is None else float(value)
-
-        from . import persist_per_charger_option
-        persist_per_charger_option(
-            self.hass, self._entry, self.coordinator,
-            self._charger_id, PAUSE_UNTIL_KEY, deadline,
-        )
-        _LOGGER.info(
-            "Charger %s: %s", self._charger_id,
-            f"charging paused for {float(value):.0f} min (until {deadline})"
-            if deadline else "pause cleared — charging may resume",
-        )
-        self.async_write_ha_state()
 
 
 class SEMPerBatteryNumber(CoordinatorEntity, NumberEntity):
