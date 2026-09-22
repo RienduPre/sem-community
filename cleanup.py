@@ -45,6 +45,14 @@ _PER_ENTRY_STORE_FORMATS: tuple[str, ...] = (
     "sem_seen_version_{entry_id}",
     "sem.pacing.{entry_id}",
     "sem.export_guard.{entry_id}",
+    # (#935 follow-up) The park debt — __init__.py:_parked_store. It was
+    # missing from its OWN issue's inventory: #935 created this store to let
+    # a park outlive the process that took it, and then removal took every
+    # file except this one. "Outlive the process" is not "outlive removal" —
+    # on removal the box is handed back first, so the debt is paid and the
+    # record of it is a leftover. Found by enumerating the Store() calls
+    # rather than re-reading the list, which is why the guard below exists.
+    "sem.parked.{entry_id}",
 )
 
 #: Per-entry stores whose key carries a SECOND scope (a battery id), so they
