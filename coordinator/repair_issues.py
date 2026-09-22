@@ -266,6 +266,9 @@ _DOCS_ANCHORS = {
     # (#944) The stop war's stand-down — the fix is on the box or in the
     # other controller, never in SEM.
     "charger_stop_war_stand_down": "sem-stood-down-while-the-charger-kept-charging",
+    # (#967) The measured draw does not fit the configured phase count.
+    "charger_phase_count_mismatch":
+        "the-charger-draws-on-a-different-number-of-phases-than-sem-believes",
     "battery_force_discharge_unsupported":
         "the-inverter-refuses-forced-discharge",
     # (#872) Same withdrawal, different culprit — the entity rather than the
@@ -934,6 +937,64 @@ def clear_charger_stop_war_stand_down(hass: HomeAssistant, device_id: str) -> No
     """(#944) The draw stopped, the war ended, or SEM is stopping again."""
     try:
         ir.async_delete_issue(hass, DOMAIN, _stop_war_stand_down_issue_id(device_id))
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
+
+
+def _phase_mismatch_issue_id(device_id: str) -> str:
+    return f"charger_phase_count_mismatch_{device_id}"
+
+
+def raise_charger_phase_count_mismatch(
+    hass: HomeAssistant,
+    device_id: str,
+    *,
+    name: str,
+    believed: int,
+    measured: int,
+    watts_per_amp: float,
+    nominal_wpa: float,
+    samples: int,
+) -> None:
+    """(#967) The draw SEM measured does not fit the phase count it converts
+    with — and SEM has been converting with it anyway.
+
+    Every amp SEM commands is ``watts ÷ (phases × volts)``, so this one
+    number sets the charge current, the planner's minimum, and the peak
+    guard's headroom. Believing 3 where 1 is true starves the car (@alexmc1510
+    got 6 A of a 5 kW budget); believing 1 where 3 is true commands three
+    times the watts SEM thinks it bought, straight through a peak limit. The
+    learner has always been able to see this — a refused sample named
+    ``phase_belief`` IS the observation — and spent it as a rejection.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_phase_mismatch_issue_id(device_id),
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="charger_phase_count_mismatch",
+            learn_more_url=next_step_url(
+                "docs", "charger_phase_count_mismatch", **_versions(hass)),
+            translation_placeholders={
+                "name": name,
+                "believed": str(int(believed)),
+                "measured": str(int(measured)),
+                "watts_per_amp": f"{float(watts_per_amp):.0f}",
+                "nominal": f"{float(nominal_wpa):.0f}",
+                "cycles": str(int(samples)),
+            },
+        )
+    except Exception as e:  # noqa: BLE001 — never fail the cycle over a repair
+        _LOGGER.debug("issue_registry.create failed for %s: %s", device_id, e)
+
+
+def clear_charger_phase_count_mismatch(hass: HomeAssistant, device_id: str) -> None:
+    """(#967) The count was corrected, or the draw started fitting it."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _phase_mismatch_issue_id(device_id))
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
 

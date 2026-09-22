@@ -977,6 +977,55 @@ give SEM a stop mechanism the box respects. If another controller could
 exist, silence it first: if SEM's stops then hold, that was it. The notice
 clears as soon as the car stops drawing or SEM takes control again.
 
+## The charger draws on a different number of phases than SEM believes
+
+**Symptom:** the car takes a fraction — or a multiple — of the power SEM says
+it is giving it, and the numbers never converge. On a *Solar + cheapest hours*
+or *Minimum + solar* charger the planner also refuses to book the night at
+all, because the minimum it computes is wider than the headroom it has.
+
+Every current SEM commands is `watts ÷ (phases × volts)`. That one number
+therefore sets the current offered, the minimum the night planner believes the
+car needs, and the headroom the peak guard leaves. SEM's default is **3**, and
+the per-charger *Phases* number is where you correct it.
+
+Two failure directions, both real:
+
+| belief | truth | what happens |
+|---|---|---|
+| 3 | 1 | SEM offers a third of the amps it could. 5 kW of budget becomes 7 A; the night planner sizes 6 A at 4.1 kW against headroom it does not have and books nothing. |
+| 1 | 3 | SEM commands three times the watts it thinks it bought — straight through the peak limit and the phase guard. |
+
+**SEM now says so itself — but only when it can prove it.** A draw *above*
+what the belief allows refutes it outright: one 230 V phase can buy at most
+230 W per commanded amp, so a higher figure means more phases, at any single
+setpoint. A draw *below* it proves nothing on its own — a car taking a third
+of the offer looks exactly like a car on one of three phases. What separates
+them is the ladder: **a fixed power cap gives fewer watts per amp as the offer
+rises; a phase count gives the same watts per amp at every setpoint.** So SEM
+reports the low direction only after it has seen two setpoints far enough apart
+to tell those two stories apart, and stays quiet otherwise rather than guess.
+
+Until you correct a real mismatch SEM will not learn from that charger at all:
+every measurement falls outside the plausible band and is discarded, so it does
+not heal on its own.
+
+**Fix:** set *Phases* on the charger to the number the Repair reports — it is
+the count the meter measured over the whole ladder, which is the count SEM has
+to convert with. Change the car or the wiring later and SEM will say so again.
+The notice clears itself on the next cycle.
+
+**If you get no Repair but the numbers still look wrong**, SEM has most likely
+only ever commanded one setpoint on this charger, where the question is
+genuinely unanswerable from watts alone. `ev_watts_per_amp` in the diagnostics
+download shows what it has: `implied_phases` per setpoint is the number to read.
+
+Diagnostics (Settings → Devices & services → SEM → ⋮ → Download diagnostics)
+carries the whole picture under `ev_watts_per_amp` and
+`charger_adapters.<id>.phases`: the measured W/A table per (charger, phase
+count), the buckets still earning confidence, and the refusals with their
+reasons. A refusal named `phase_belief` *is* this fault.
+
 ## The export guard never engages, or reads "refused"
 
 **Symptom:** the export price is negative, `sensor.sem_export_guard_state`

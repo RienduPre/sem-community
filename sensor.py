@@ -2876,6 +2876,13 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                             f"charger_{cid}_phase_switch_state"),
                         "believed_phases": self.coordinator.data.get(
                             f"charger_{cid}_believed_phases"),
+                        # (#967) …and whether the MEASUREMENTS contradict the
+                        # configured count. Beside the estimate on purpose:
+                        # a verdict that lives only in coordinator.data is
+                        # invisible to the card, and this block is where a
+                        # reader already comes to ask about phases.
+                        "phase_verdict": self.coordinator.data.get(
+                            f"charger_{cid}_phase_verdict"),
                     }
             attrs.update({
                 "battery_soc": self.coordinator.data.get("battery_soc"),

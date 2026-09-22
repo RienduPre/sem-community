@@ -35,10 +35,18 @@ Design:
   ``amps_for_watts`` walks the ladder DOWN and returns the largest setpoint
   that fits;
 * **survives a restart** — ``as_state``/``restore`` (learned state that
-  gates behaviour is not allowed to die at boot, the #638 night-2 rule).
+  gates behaviour is not allowed to die at boot, the #638 night-2 rule);
+* **says what its refusals mean** (#967) — the band is the only place in SEM
+  that can see a wrong ``ev_phases``, because a draw on the wrong number of
+  phases is exactly what it rejects. Refusing was all it did: the count went
+  into a dict no Repair, no card and not even the diagnostics download ever
+  read, while every amp SEM commanded went on being converted through a
+  nameplate the meter had already refuted. ``phase_verdict`` turns those
+  refusals into an answer — and only when they can honestly carry one.
 """
 from __future__ import annotations
 
+import math
 import statistics
 from typing import Dict, Optional, Tuple
 
@@ -54,6 +62,27 @@ MAX_RATIO: float = 1.05
 #: not outvote today's.
 _WINDOW: int = 20
 _PHASE_COUNTS = (1, 3)
+
+# ── (#967) when refusals may be spent as a verdict about the CONFIG ──────
+#: Steady, non-tapering, refused cycles before SEM will contradict the
+#: owner's own configuration. Far above ``MIN_SAMPLES``: accepting a
+#: measurement is cheap and reversible, accusing a setting is neither.
+PHASE_VERDICT_REFUSALS: int = 20
+#: Refused samples a single setpoint needs before its median is a number.
+_REFUSED_MIN_PER_BUCKET: int = 3
+#: Metering tolerance, the same 5 % ``estimate_active_phases`` allows.
+_PHASE_TOLERANCE: float = 0.95
+#: Two commanded setpoints must differ by at least this factor before a LOW
+#: draw may be read as a phase count. A fixed power cap gives W/A ∝ 1/amps;
+#: a phase count gives the SAME W/A at every setpoint. 1.4 clears the
+#: smallest step the surplus ladder actually takes.
+_SPREAD_MIN: float = 1.4
+#: How far two setpoints' implied counts may sit apart and still be one
+#: number.
+_IMPLIED_AGREEMENT: float = 0.25
+#: How close the agreed number must sit to a real phase count. An implied
+#: 2.0 is nobody's answer and must stay unspoken.
+_IMPLIED_TIGHTNESS: float = 0.35
 
 Key = Tuple[str, int, int]
 
@@ -104,6 +133,14 @@ class WattsPerAmpLearner:
         # refusals are about the (charger, phases) belief, not one setpoint
         self._refused: Dict[Tuple[str, int], int] = {}
         self._reasons: Dict[Tuple[str, int], Dict[str, int]] = {}
+        # (#967) The refusals' own CONTENT, per setpoint — what separates a
+        # phase count from a car that simply declines part of the offer.
+        # Windowed like ``_samples``: the evidence a verdict quotes must be
+        # evidence it still holds.
+        self._refused_wpa: Dict[Key, list] = {}
+        #: nameplate per (charger, phases) — the learner is told it, so it
+        #: can recover the per-phase voltage without being handed config.
+        self._nominal: Dict[Tuple[str, int], float] = {}
 
     # ── learning ────────────────────────────────────────────────────────
     def record(self, charger_id: str, *, phases: int, commanded_amps: float,
@@ -144,6 +181,15 @@ class WattsPerAmpLearner:
             self._refused[pkey] = self._refused.get(pkey, 0) + 1
             self._reasons.setdefault(pkey, {})
             self._reasons[pkey][reason] = self._reasons[pkey].get(reason, 0) + 1
+            # (#967) Both reasons are kept: which of the two ``record``
+            # prints is a naming call made one sample at a time, and the
+            # question "how many phases is this?" is answered over the whole
+            # ladder. A 2-phase-looking draw under a 1-phase belief reads
+            # ``implausible`` here and still refutes the belief outright.
+            rbuf = self._refused_wpa.setdefault((pkey[0], pkey[1], bucket), [])
+            rbuf.append(wpa)
+            del rbuf[:-_WINDOW]
+            self._nominal[pkey] = nominal
             return False
 
         buf = self._samples.setdefault((pkey[0], pkey[1], bucket), [])
@@ -174,6 +220,95 @@ class WattsPerAmpLearner:
 
     def refusal_reasons(self, charger_id: str, phases: int) -> dict:
         return dict(self._reasons.get((str(charger_id), int(phases)), {}))
+
+    def _implied_per_setpoint(self, cid: str, ph: int) -> Dict[int, float]:
+        """(#967) ``{commanded amps: phases the draw implies}`` over the
+        refused setpoints that hold enough samples to have a median."""
+        nominal = self._nominal.get((cid, ph))
+        if not nominal or nominal <= 0:
+            return {}
+        per_phase = float(nominal) / float(ph)     # ≈ the voltage
+        if per_phase <= 0:
+            return {}
+        out: Dict[int, float] = {}
+        for (c, p, amps), buf in self._refused_wpa.items():
+            if c == cid and p == ph and len(buf) >= _REFUSED_MIN_PER_BUCKET:
+                out[amps] = statistics.median(buf) / per_phase
+        return out
+
+    def phase_verdict(self, charger_id: str, phases: int) -> Optional[dict]:
+        """(#967) How many phases the MEASUREMENTS say this charger draws on,
+        when they can say it — else ``None``.
+
+        The physics is asymmetric, and the answer has to be too.
+
+        **More phases than believed is determinate.** One phase carries at
+        most ``amps × voltage`` watts, so a draw above that REFUTES the belief
+        outright, at any single setpoint — the #804 estimator's own floor
+        (``ceil(implied × 0.95)``), reused here. This is the direction that
+        matters: believing 1 where 3 are wired makes SEM command three times
+        the watts it thinks it bought, through a peak limit.
+
+        **Fewer phases than believed is under-determined.** A car taking a
+        third of the offer and a car on one of three phases look identical at
+        one setpoint (PROD: a Zoe at a 32 A offer read "1 phase" at 10.15 kW,
+        which is impossible at 7.36 kW per phase). What separates them is the
+        LADDER: a fixed power cap gives ``W/A ∝ 1/amps``, a phase count gives
+        the same W/A at every setpoint. So this direction needs two setpoints
+        at least ``_SPREAD_MIN`` apart whose implied counts agree — and where
+        SEM never moved the setpoint, it says nothing, which is the honest
+        answer rather than a guess that costs the owner 7 kW.
+
+        Two further conditions, both about not crying wolf:
+        ``PHASE_VERDICT_REFUSALS`` steady non-tapering cycles behind it, and
+        **no bucket under this belief having ever earned trust** — a belief
+        that explains real draw is not on trial.
+
+        Returns ``{"believed", "measured", "samples", "watts_per_amp",
+        "setpoints"}``; ``samples`` counts only evidence still held, so the
+        number a Repair quotes never drifts from the median beside it.
+        """
+        cid, ph = str(charger_id), int(phases)
+        if ph not in _PHASE_COUNTS:
+            return None
+        for (c, p, _a), buf in self._samples.items():
+            if c == cid and p == ph and len(buf) >= MIN_SAMPLES:
+                return None
+        held = [(a, buf) for (c, p, a), buf in self._refused_wpa.items()
+                if c == cid and p == ph]
+        total = sum(len(buf) for _a, buf in held)
+        implied = self._implied_per_setpoint(cid, ph)
+        if total < PHASE_VERDICT_REFUSALS or not implied:
+            return None
+        nominal = float(self._nominal[(cid, ph)])
+        per_phase = nominal / float(ph)
+
+        measured = None
+        # ── determinate: the draw does not fit on this many phases ──
+        bound = min(math.ceil(v * _PHASE_TOLERANCE) for v in implied.values())
+        if bound > ph:
+            measured = next((p for p in _PHASE_COUNTS if p >= bound), None)
+        # ── under-determined: only the ladder can answer ──
+        elif len(implied) >= 2:
+            lo, hi = min(implied), max(implied)
+            vals = list(implied.values())
+            if (lo > 0 and hi / lo >= _SPREAD_MIN
+                    and max(vals) - min(vals) <= _IMPLIED_AGREEMENT):
+                mean = sum(vals) / len(vals)
+                near = min(_PHASE_COUNTS, key=lambda p: abs(mean - p))
+                if near < ph and abs(mean - near) < _IMPLIED_TIGHTNESS:
+                    measured = near
+        if measured is None or measured == ph:
+            return None
+        wpa = [x for _a, buf in held for x in buf]
+        return {
+            "believed": ph,
+            "measured": int(measured),
+            "samples": int(total),
+            "watts_per_amp": round(statistics.median(wpa), 1),
+            "setpoints": sorted(int(a) for a in implied),
+            "nominal_wpa": round(per_phase * ph, 1),
+        }
 
     def is_cold(self, charger_id: str, phases: int) -> bool:
         """True when this charger has never been fed under THIS phase count
@@ -207,6 +342,13 @@ class WattsPerAmpLearner:
                         for (c, p, a), buf in self._samples.items() if buf},
             "refused": {f"{c}|{p}": n for (c, p), n in self._refused.items() if n},
             "reasons": {f"{c}|{p}": dict(r) for (c, p), r in self._reasons.items() if r},
+            # (#967) the refusals' content. A verdict that died at boot would
+            # re-earn its 20 cycles every restart — or never reach them on a
+            # car that charges in short bursts.
+            "refused_wpa": {f"{c}|{p}|{a}": [round(x, 2) for x in buf]
+                            for (c, p, a), buf in self._refused_wpa.items() if buf},
+            "nominal": {f"{c}|{p}": round(n, 2)
+                        for (c, p), n in self._nominal.items() if n > 0},
         }
 
     def restore(self, state) -> None:
@@ -243,6 +385,26 @@ class WattsPerAmpLearner:
                 continue
             if p in _PHASE_COUNTS and r:
                 self._reasons[(c, p)] = r
+        for key, buf in (state.get("refused_wpa") or {}).items():
+            try:
+                c, p, a = str(key).split("|")
+                p, a = int(p), int(a)
+                vals = [float(x) for x in buf]
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if p not in _PHASE_COUNTS or a < 1 or not vals:
+                continue
+            if any(v <= 0 for v in vals):
+                continue
+            self._refused_wpa[(c, p, a)] = vals[-_WINDOW:]
+        for key, n in (state.get("nominal") or {}).items():
+            try:
+                c, p = str(key).split("|")
+                p, n = int(p), float(n)
+            except (TypeError, ValueError):
+                continue
+            if p in _PHASE_COUNTS and n > 0:
+                self._nominal[(c, p)] = n
 
     # ── surface ─────────────────────────────────────────────────────────
     def as_dict(self) -> dict:
@@ -258,6 +420,11 @@ class WattsPerAmpLearner:
                 "table": {}, "samples": {}, "nominal_ratio": {},
                 "refused": self._refused.get((cid, ph), 0),
                 "refusal_reasons": dict(self._reasons.get((cid, ph), {})),
+                # (#967) the refusals' own content, so the download answers
+                # "is the phase count right?" instead of needing a screenshot
+                # and a multiplication.
+                "implied_phases": {},
+                "phase_verdict": None,
             })
 
         for (cid, ph), n in self._refused.items():
@@ -270,6 +437,16 @@ class WattsPerAmpLearner:
             r["samples"][str(amps)] = len(buf)
             if len(buf) >= MIN_SAMPLES:
                 r["table"][str(amps)] = round(statistics.median(buf), 1)
+        for (cid, ph, _a) in list(self._refused_wpa):
+            row(cid, ph)
+        # Once per row, not once per ``setdefault`` (the diagnostic rides the
+        # per-cycle sensor-attribute path).
+        for cid, per in out.items():
+            for ph, r in per.items():
+                r["implied_phases"] = {
+                    str(a): round(v, 2)
+                    for a, v in self._implied_per_setpoint(cid, int(ph)).items()}
+                r["phase_verdict"] = self.phase_verdict(cid, int(ph))
         return out
 
     def as_dict_with_nominal(self, nominal_for) -> dict:

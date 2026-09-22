@@ -64,9 +64,10 @@ class TestTheCloudCase:
 
 
 class TestTheFundingClauseStillGuards:
-    def test_sun_gone_is_structural(self):
+    def test_solar_below_the_configured_minimum_is_structural(self):
         ok, why = _idle_bridgeable(_view(solar_w=200.0))
-        assert ok is False and "sun gone" in why
+        # (#967) named for the floor it crossed, not for a sky it cannot see.
+        assert ok is False and "200W < the 1000W minimum" in why
 
     def test_below_buffer_with_no_surplus_is_structural(self):
         """#524's REAL case: the hold could only be grid-fed."""
