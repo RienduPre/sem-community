@@ -201,6 +201,9 @@ async def test_futile_sheds_nothing_and_files_a_repair(lm):
         "grid_import_kw": "9.0",
         "target_kw": "5.0",
         "uncontrolled_kw": "5.5",
+        # (#992) how much of that "uncontrolled" draw is a charger SEM
+        # already manages — the Repair used to tell people to add it.
+        "managed_charger_kw": "0.0",
     }
 
 

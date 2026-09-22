@@ -1682,8 +1682,21 @@ class SurplusController:
                     # only blocks re-activation (class 17).
                     reason = ("cheap-hours top-up ended — today's daylight "
                               "can still finish the target")
-                elif price_level not in ("cheap", "very_cheap", "negative"):
-                    reason = f"tariff now {price_level}"
+                elif not is_cheap_name(price_level):
+                    # (#992/#994) Say which of three things happened. "tariff
+                    # now flat" claims a transition that a flat tariff cannot
+                    # make — it was flat when this top-up started — and
+                    # "tariff now no_prices" blames the tariff for SEM losing
+                    # the price feed. Class 99: a verdict naming a cause its
+                    # own scope refutes.
+                    if price_level == "flat":
+                        reason = ("cheap-hours top-up ended — this tariff has "
+                                  "no cheaper hours to wait for")
+                    elif price_level in ("no_prices", "", "unknown", None):
+                        reason = ("cheap-hours top-up ended — no prices left "
+                                  "to compare")
+                    else:
+                        reason = f"tariff now {price_level}"
             # (#620) Tier-2 overnight battery force expiry — its OWN terms: the
             # user turned the "Use battery overnight" toggle OFF, the Reserve
             # floor was crossed (battery must be protected), or the day rolled
@@ -2047,7 +2060,7 @@ class SurplusController:
                         device.name, consumed,
                     )
 
-        if price_level in ("cheap", "very_cheap", "negative") and not peak_freeze:
+        if is_cheap_name(price_level) and not peak_freeze:
             for device in devices:
                 if device.control_mode != DeviceControlMode.SURPLUS:
                     continue

@@ -22,9 +22,9 @@ Both directions are live. Believing 3 where 1 is true starves the car.
 Believing 1 where 3 is true commands three times the watts SEM thinks it
 bought — through a peak limit and a phase guard.
 
-Second instance in the same reply thread: the IDLE classifier called the
-user's own **Minimum Solar Power** slider "sun gone" at 828 W of production
-with 316 W going to the grid.
+(The other half of the same reply — the idle classifier calling the owner's own
+**Minimum Solar Power** slider "sun gone" at 828 W of production — landed in
+#992's class-99 sweep and is guarded there.)
 """
 from __future__ import annotations
 
@@ -471,44 +471,3 @@ class TestTheRepairIsLegibleEverywhere:
                 rendered = text.format(**passed)      # KeyError = the bug
                 assert not re.search(r"\{[a-z_]+\}", rendered), path.name
         assert passed["measured"] == "1" and passed["believed"] == "3"
-
-
-@pytest.mark.unit
-class TestAThresholdIsNotAFactAboutTheSky:
-    """Second instance, same reporter, same reply: the IDLE classifier named
-    the user's own slider "sun gone" while his panels made 828 W and 316 W of
-    it went to the grid."""
-
-    def _view(self, solar_w):
-        from custom_components.solar_energy_management.coordinator.charger_types import (
-            ChargerEnergy, ChargerPower, ChargerView, FleetContext,
-        )
-        return ChargerView(
-            power=ChargerPower(charger_id="ev_charger", power_w=0.0,
-                               connected=True, charging=False),
-            energy=ChargerEnergy(charger_id="ev_charger"),
-            mode="solar_only",
-            config={"ev_min_current": 6, "ev_phases": 3, "ev_voltage": 230,
-                    "ev_max_current": 16},
-            fleet=FleetContext(solar_w=solar_w, home_w=319.0,
-                               battery_soc=100.0, min_solar_w=1000.0),
-        )
-
-    def test_the_reason_names_the_setting_it_crossed(self):
-        from custom_components.solar_energy_management.coordinator.decide import (
-            _idle_bridgeable,
-        )
-        ok, why = _idle_bridgeable(self._view(828.0))
-        assert ok is False
-        assert "800W < the 1000W minimum" in why
-        assert "sun" not in why.lower(), (
-            "the sentence claims a fact about the sky that the same cycle's "
-            "own export refutes"
-        )
-
-    def test_above_the_floor_is_still_bridgeable(self):
-        from custom_components.solar_energy_management.coordinator.decide import (
-            _idle_bridgeable,
-        )
-        ok, _why = _idle_bridgeable(self._view(5000.0))
-        assert ok is True

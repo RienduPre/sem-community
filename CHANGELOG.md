@@ -15,6 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [2.1.0-beta.36] — 22.09.2026
 
+- 🐛 **A cheap-hours top-up blamed the tariff for SEM losing its price feed**
+  (#992, a tenth class-99 instance, found when this sweep met #994). Ending a
+  grid top-up reported `tariff now <level>`, which was truthful only while
+  every level named a real comparison. #994 gave "no comparison stands" two
+  names of its own, and both turn that sentence into a lie: *tariff now flat*
+  claims a transition a flat tariff cannot make, and *tariff now no_prices*
+  blames the tariff for the one thing that did not change. It now says
+  whether the hours stopped being cheap, whether this tariff has no cheaper
+  hours at all, or whether there are no prices left to compare. The same two
+  sites held the last hand-typed copies of the cheap-level list outside the
+  vocabulary module; both now read it.
+- 🐛 **Nine verdicts that named a cause their own scope refutes** (#992 — a
+  swept bug class 99). Three instances in two days said the class had never
+  been swept, so it was: three reviewers over the decision engines, the
+  battery path and the user-facing surfaces. Fixed — a Repair that told you
+  to *add an EV charger SEM already manages* now says how much of the peak
+  that charger is; `sun gone` is `below the solar minimum` (it was printed at
+  828 W of production while the house exported); `export cut refused` no
+  longer claims to be *holding the meter shut*, on the very surface that
+  proves the export guard; a hold on an unreadable SOC no longer asserts
+  `80% ≤ reserve 70%`; a Deye refusal names the gate that is shut instead of
+  saying `blocked: ok`; the *"the firmware does not implement this register"*
+  Repair says what SEM actually ruled out; the failsafe Repair offers
+  **another controller** as an equal cause, as its sibling always did; and
+  the expensive-hours plan row claims *Min+PV grid pauses* only when there is
+  a charge to make.
+- 🐛 **Every emergency load shed was labelled "peak protection"** (#992). The
+  load-priority card compared the shed reason against `emergency` while the
+  backend has only ever written `EMERGENCY` — so the one label that matters
+  most was wrong 100 % of the time it appeared.
 - 🐛 **SEM starved a charger for a whole night and the only trace was a
   counter nobody reads** (#967, reported by @alexmc1510). Every current SEM
   commands is `watts ÷ (phases × volts)`, so the per-charger **Phases**
@@ -46,12 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measurement" and "SEM measured it and refused it" are different statements
   about an install, and the file used to carry neither — this issue's own
   phase question had to be answered from a screenshot and a multiplication.
-- 🐛 **"Sun gone" was a claim about the sky; the number was a slider** (#967).
-  The idle classifier printed *sun gone (solar 800W < 1000W)* on an install
-  producing 828 W and exporting 316 W of it. `1000` is the owner's own
-  **Minimum Solar Power** setting, and the sentence sent him to look at his
-  panels. It now names the floor it crossed — the wording its own sibling
-  eighteen lines further down had always used.
 
 # [2.1.0-beta.35] — 20.09.2026
 

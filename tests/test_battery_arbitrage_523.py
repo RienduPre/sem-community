@@ -724,7 +724,7 @@ def test_force_discharge_holds_when_soc_unavailable():
     # unavailable SOC must HOLD, not drain blind past the backup reserve.
     d = decide_battery(_mode_view("force_discharge", None, reserve=20.0))
     assert d.intent is BatteryIntent.NORMAL
-    assert "unavailable" in d.reason
+    assert "SOC unknown" in d.reason
 
 
 def test_force_discharge_holds_on_a_HELD_soc_the_shape_production_makes():
@@ -738,7 +738,7 @@ def test_force_discharge_holds_on_a_HELD_soc_the_shape_production_makes():
     assert d.intent is BatteryIntent.NORMAL, (
         "a HELD SOC above the reserve still sold — the sell gate does not "
         "ask rt.available")
-    assert "held" in d.reason
+    assert "last seen" in d.reason
 
 
 def test_force_discharge_sells_on_a_LIVE_soc_above_reserve():
