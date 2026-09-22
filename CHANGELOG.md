@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.37] — 22.09.2026
+
+- 🐛 **Waiting for a cheap hour no longer breaks the peak limit** (#1003). The battery now covers what the meter may not buy.
+
 - ✨ **Pause a charger for a while** (#980). Pick a time, press Pause, the charge mode goes Off and comes back on its own.
 
 - ✨ **A load set by watts now gets the watts** (#880). SEM wrote nothing to a Number control before, so it read 0 W for ever.
