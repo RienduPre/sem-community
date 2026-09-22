@@ -190,6 +190,7 @@ def build_charger_view(
         # 0.0 fallback this cycle? Consumed by ChargeStability, which
         # holds the committed command rather than steering blind.
         inputs_degraded=bool(getattr(power_reading, "inputs_degraded", False)),
+        dark_inputs=tuple(getattr(power_reading, "dark_inputs", ()) or ()),
         # #743 — the curtailment probe's grant rides the same one-place
         # thread as every other fleet input.
         curtailment_grant_w=float(

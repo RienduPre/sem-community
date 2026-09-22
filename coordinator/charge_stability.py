@@ -223,6 +223,26 @@ def _meanwhile(decision: ChargerDecision) -> str:
     return f"; SEM is withholding the {rounded}W it had sized for this car"
 
 
+def _dark_inputs_phrase(view) -> str:
+    """Name the reads that actually went dark this cycle (#992, class 99).
+
+    ``inputs_degraded`` is raised by three different gates: an entity that
+    will not read, a battery power no battery could produce (#902), and a
+    solar zero the energy balance refutes (#988). This verdict used to say
+    "sensor unavailable" for all three — and two of them are sensors that
+    answered perfectly well with a number SEM chose to disbelieve, so the
+    reader went hunting for a broken entity that was fine. #988 added one
+    of those two the week this was written.
+
+    Falls back to the honest general phrase when the names did not travel,
+    rather than to the specific claim that was wrong.
+    """
+    names = tuple(getattr(getattr(view, "fleet", None), "dark_inputs", ()) or ())
+    if not names:
+        return "a steering read came back dark"
+    return f"{', '.join(names)} read dark"
+
+
 class ChargeStability:
     """Per-charger smoothing + enable/disable delay state.
 
@@ -650,7 +670,8 @@ class ChargeStability:
                     decision,
                     intent=ChargerIntent.CHARGE_AT_AMPS,
                     commanded_amps=held,
-                    reason=f"inputs degraded (sensor unavailable) — holding {held}A",
+                    reason=(f"inputs degraded ({_dark_inputs_phrase(view)}) "
+                            f"— holding {held}A"),
                 )
 
         # #610 — declined-start backoff gate. MUST sit ABOVE the ``charge_wanted``
@@ -731,6 +752,10 @@ class ChargeStability:
                 self._reset(cid)
                 return replace(
                     decision, intent=ChargerIntent.IDLE, commanded_amps=0,
+                    # CAUSE: the guard above is `target < _floor and not
+                    # drawing`, so both halves of this sentence — below the
+                    # floor, and not currently drawing — are the branch's
+                    # own condition.
                     reason=(
                         f"stability: budget {target}A is below this car's "
                         f"demonstrated {_floor}A latch floor — holding off "
@@ -1019,6 +1044,12 @@ class ChargeStability:
                 # decision.reason already carries the structural cause.
                 return replace(
                     decision, intent=ChargerIntent.IDLE, commanded_amps=0,
+                    # CAUSE: `stop_for_short` is this scope's own variable
+                    # (short_grace and deep_held past the floor), so "not
+                    # bridging" is the branch we are standing in. The
+                    # STRUCTURAL half is not ours to assert — it is quoted
+                    # verbatim from `decision.reason`, which is the layer
+                    # that evaluated it.
                     reason=f"stability: structural idle — not bridging — "
                            f"{decision.reason}",
                 )

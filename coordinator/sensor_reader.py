@@ -855,6 +855,8 @@ class SensorReader:
         # the per-input flags gate PUBLISHING (only a total with nothing
         # real left in it should read unavailable).
         readings.inputs_degraded = any(self._input_dark.values())
+        readings.dark_inputs = tuple(sorted(
+            n for n, c in self._input_dark.items() if c))
         readings.solar_power_unavailable = self._all_dark("solar")
         # (#925 audit) BOTH shapes of grid meter — a combined sensor tags
         # "grid", a split pair tags "grid_import"/"grid_export" and never
@@ -1042,6 +1044,8 @@ class SensorReader:
         # …and the two flags it can move are computed from the dark map, so
         # they are re-derived now rather than upstream of their own input.
         readings.inputs_degraded = any(self._input_dark.values())
+        readings.dark_inputs = tuple(sorted(
+            n for n, c in self._input_dark.items() if c))
         readings.solar_power_unavailable = self._all_dark("solar")
 
         return readings
