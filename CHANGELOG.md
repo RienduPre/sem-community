@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [2.1.0-beta.36] — 22.09.2026
 
+- 🐛 **A thirteenth verdict that named a cause its own scope refutes, and a
+  ratchet so there is no fourteenth silent one** (#992, #998). See the
+  sibling entries below; the new guard is
+  `tests/test_998_causal_claims_ratchet.py`.
+
 - 🐛 **A cheap-hours top-up blamed the tariff for SEM losing its price feed**
   (#992, a tenth class-99 instance, found when this sweep met #994). Ending a
   grid top-up reported `tariff now <level>`, which was truthful only while
