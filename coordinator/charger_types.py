@@ -726,6 +726,8 @@ class FleetContext:
     """Solar production this cycle (W)."""
 
     inputs_degraded: bool = False
+    #: (#992) the names behind that flag — see PowerReadings.dark_inputs.
+    dark_inputs: tuple = ()
     """#818 — one or more of the shared inputs above was UNAVAILABLE this
     cycle, so its number is ``_read_sensor``'s 0.0 fallback rather than a
     measurement. On PROD the Huawei modbus blips 8-15 % of the time, which

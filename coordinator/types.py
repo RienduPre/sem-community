@@ -211,6 +211,15 @@ class PowerReadings:
     # showing a fabricated 0 W. One dark inverter among three does NOT
     # blank a total that is mostly real.
     inputs_degraded: bool = False
+    #: (#992, class 99) …and WHICH reads went dark. ``inputs_degraded`` is
+    #: set by three different gates — an entity that will not read, a
+    #: battery power no battery could produce (#902), and a solar zero the
+    #: energy balance refutes (#988) — and the verdict that consumes it
+    #: told users "sensor unavailable", naming one of the three. Two of
+    #: them are sensors that answered perfectly well with a number SEM
+    #: chose to disbelieve, so the user went looking for a broken entity
+    #: that was fine. The reader knows the names; now they travel.
+    dark_inputs: tuple = ()
     solar_power_unavailable: bool = False
     grid_power_unavailable: bool = False
     battery_power_all_unavailable: bool = False
