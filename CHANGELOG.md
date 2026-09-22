@@ -13,6 +13,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.36] — 22.09.2026
+
+- 🐛 **SEM starved a charger for a whole night and the only trace was a
+  counter nobody reads** (#967, reported by @alexmc1510). Every current SEM
+  commands is `watts ÷ (phases × volts)`, so the per-charger **Phases**
+  setting decides the amps offered, the minimum the night planner believes
+  the car needs, and the headroom the peak guard leaves. It defaults to 3,
+  and his charger never set it — so a 5 kW budget became 7 A and his car took
+  a third of the power SEM thought it was giving it.
+  SEM could see this. The watts-per-amp learner guards itself with a
+  plausibility band around nameplate, and a draw on the wrong number of
+  phases is exactly what that band rejects — it even names the rejection
+  `phase_belief`. That name went into a dict no Repair, no card and not even
+  the diagnostics download ever read, while every amp went on being converted
+  through a figure the meter had already refuted. Now a **Repair names the
+  belief, the measurement and the value to set**, and clears itself the cycle
+  the setting matches.
+- 🐛 **…and it only says so when it can prove it** (#967). A draw *above* what
+  the belief allows refutes it outright — one phase carries at most
+  `amps × voltage` — and that is the dangerous direction, where SEM commands
+  three times the watts it thinks it bought, straight through a peak limit. A
+  draw *below* it proves nothing on its own: a car taking a third of the offer
+  looks exactly like a car on one of three phases. What separates them is the
+  ladder — a power cap gives fewer watts per amp as the offer rises, a phase
+  count gives the same watts per amp at every setpoint — so SEM reports the
+  low direction only after seeing two setpoints far enough apart, and stays
+  quiet otherwise rather than send an owner to change a setting that is right.
+- 🔍 **The diagnostics download carries what the learner knows** (#967): the
+  measured W/A table per (charger, phase count), the buckets still earning
+  confidence, and the refusals **with their reasons**. "SEM has no
+  measurement" and "SEM measured it and refused it" are different statements
+  about an install, and the file used to carry neither — this issue's own
+  phase question had to be answered from a screenshot and a multiplication.
+- 🐛 **"Sun gone" was a claim about the sky; the number was a slider** (#967).
+  The idle classifier printed *sun gone (solar 800W < 1000W)* on an install
+  producing 828 W and exporting 316 W of it. `1000` is the owner's own
+  **Minimum Solar Power** setting, and the sentence sent him to look at his
+  panels. It now names the floor it crossed — the wording its own sibling
+  eighteen lines further down had always used.
+
 # [2.1.0-beta.35] — 20.09.2026
 
 - 🐛 **A flat tariff was published as "cheap", and the battery was held for
