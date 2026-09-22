@@ -28,6 +28,7 @@ from ..const import (
     DEFAULT_MIN_OFF_DURATION,
     LoadManagementState,
 )
+from ..devices.power_setpoint import SETPOINT_DOMAINS, setpoint_domain
 from .device_axes import may_actuate
 from .load_device_discovery import LoadDeviceDiscovery
 
@@ -35,6 +36,59 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "load_management_devices"
+
+
+def resolved_control_type(control: Optional[Mapping]) -> str:
+    """What the control's ENTITY can actually honour (#880).
+
+    A control dict's ``type`` is whatever its writer declared, and three
+    writers declare ``"switch"`` for any entity the user picked
+    (``_service_lm_row``, the surplus-registration row, and
+    ``async_set_manual_mapping``'s default argument). Hand a watt setpoint
+    to that chain and it calls ``switch.turn_off`` on a ``number`` entity:
+    no such service for that domain, nothing is written, and the load runs
+    straight through a peak event. @jonasbkarlsson hit the surplus half of
+    exactly this on a plain HA number helper.
+
+    The entity's DOMAIN decides which service exists, so it is the ground
+    truth and the declared type is a hint. Two declared types keep their
+    identity because they carry semantics the domain cannot express:
+
+    * ``current`` — an EV charger's amp knob. Also a ``number`` entity, but
+      shedding writes AMPS and restoring deliberately hands the charger
+      back to the EV planner rather than writing a value.
+    * ``service`` — no entity at all; the call definition IS the control.
+
+    Everything else resolves from the entity: ``number``/``input_number``
+    become ``setpoint``, ``input_boolean`` stays itself, the rest are
+    switches.
+    """
+    if not control:
+        return ""
+    declared = str(control.get("type") or "")
+    if declared in ("current", "service", "none", "surplus"):
+        return declared
+    entity = str(control.get("entity") or "")
+    domain = entity.split(".", 1)[0] if "." in entity else ""
+    if domain in SETPOINT_DOMAINS:
+        return "setpoint"
+    if domain == "input_boolean":
+        return "input_boolean"
+    return declared or ("switch" if entity else "")
+
+
+def setpoint_floor(attributes: Optional[Mapping]) -> float:
+    """The lowest value a setpoint entity will accept — its shed target.
+
+    An entity that declares no minimum sheds to zero. One that declares a
+    non-zero minimum cannot be driven below it, so that IS its floor; the
+    load keeps drawing that much and the caller is told what was written
+    rather than that the device is off.
+    """
+    try:
+        return float((attributes or {}).get("min", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def repair_ladder(
@@ -1470,10 +1524,38 @@ class LoadManagementCoordinator:
 
         try:
             if control:
-                # New unified control config from discover_control_for_energy_device()
-                control_type = control.get("type")
+                # New unified control config from discover_control_for_energy_device().
+                # (#880) Resolved against the ENTITY, not taken on the dict's
+                # word — see ``resolved_control_type``.
+                control_type = resolved_control_type(control)
 
-                if control_type == "switch":
+                if control_type == "setpoint":
+                    entity = control.get("entity")
+                    if entity:
+                        # Remember what it was set to, so restore puts back
+                        # the user's own number rather than a guess.
+                        state = self.hass.states.get(entity)
+                        floor = setpoint_floor(getattr(state, "attributes", None))
+                        previous = None
+                        if state is not None:
+                            try:
+                                previous = float(state.state)
+                            except (ValueError, TypeError):
+                                previous = None
+                        self._devices[device_id]["_pre_shed_setpoint"] = previous
+
+                        await self.hass.services.async_call(
+                            setpoint_domain(entity), "set_value",
+                            {"entity_id": entity, "value": floor},
+                            blocking=True
+                        )
+                        success = True
+                        _LOGGER.debug(
+                            "Shed device via setpoint %s (%s W -> %s W)",
+                            entity, previous, floor,
+                        )
+
+                elif control_type == "switch":
                     entity = control.get("entity")
                     if entity:
                         # Record pre-shed state so restore only turns on if it was on
@@ -1627,10 +1709,33 @@ class LoadManagementCoordinator:
 
         try:
             if control:
-                # New unified control config
-                control_type = control.get("type")
+                # New unified control config — resolved against the entity (#880).
+                control_type = resolved_control_type(control)
 
-                if control_type == "switch":
+                if control_type == "setpoint":
+                    entity = control.get("entity")
+                    previous = device_info.get("_pre_shed_setpoint")
+                    if entity and previous is not None:
+                        await self.hass.services.async_call(
+                            setpoint_domain(entity), "set_value",
+                            {"entity_id": entity, "value": float(previous)},
+                            blocking=True
+                        )
+                        success = True
+                        _LOGGER.debug("Restored setpoint %s to %s W", entity, previous)
+                    elif entity:
+                        # Never read a pre-shed value (shed before an upgrade,
+                        # or the entity was unreadable). Writing a guessed
+                        # wattage is worse than leaving the floor in place and
+                        # letting whoever owns the load set it — a surplus
+                        # device gets its next allocation on the next cycle.
+                        success = True
+                        _LOGGER.info(
+                            "Restoring %s without a pre-shed setpoint — left at "
+                            "its floor for its owner to set", entity,
+                        )
+
+                elif control_type == "switch":
                     entity = control.get("entity")
                     if entity:
                         # Check if device was on before shedding

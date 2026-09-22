@@ -685,50 +685,17 @@ def _load_unit_issue_id(device_id: str) -> str:
     return f"load_current_control_wrong_unit_{device_id}"
 
 
-def raise_load_current_control_wrong_unit(
-    hass: HomeAssistant,
-    *,
-    device_id: str,
-    name: str,
-    entity_id: str,
-    unit: str,
-) -> None:
-    """A load set to current control points at a POWER entity (#882).
-
-    ``control_type: "current"`` builds a ``CurrentControlDevice`` — the EV
-    charger class, in amperes, defaulting to 6–32. Aimed at a 0–9000 W
-    setpoint it can never write anything meaningful, and before this it wrote
-    nothing at all and said nothing: @florianhadersbeck read
-    ``Allocated surplus: 0 W`` for days and had to reason his way to the
-    cause. #799's rule — a silent no-op is not an answer.
-
-    The watt-modulating class this user actually needs is #880; this repair
-    exists so that until it lands, the picker's promise is visibly broken
-    rather than quietly.
-    """
-    try:
-        ir.async_create_issue(
-            hass,
-            domain=DOMAIN,
-            issue_id=_load_unit_issue_id(device_id),
-            is_fixable=False,
-            is_persistent=True,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key="load_current_control_wrong_unit",
-            learn_more_url=next_step_url(
-                "docs", "load_current_control_wrong_unit", **_versions(hass)),
-            translation_placeholders={
-                "name": name, "entity_id": entity_id, "unit": unit,
-            },
-        )
-    except Exception as e:  # noqa: BLE001 — never fail setup over a repair
-        _LOGGER.debug("issue_registry.create failed for %s: %s", device_id, e)
-
-
 def clear_load_current_control_wrong_unit(
     hass: HomeAssistant, device_id: str,
 ) -> None:
-    """Cleared once the device is reconfigured."""
+    """Clear the #882 repair.
+
+    Its RAISE is gone: #882 could only warn that a load set to "current"
+    control pointed at a POWER entity, because SEM had no class that
+    writes watts. #880 built one, so that pairing is now driven instead of
+    refused. The clear stays — an install upgrading from a beta that
+    raised it must not keep a standing repair for something that works.
+    """
     try:
         ir.async_delete_issue(hass, DOMAIN, _load_unit_issue_id(device_id))
     except Exception as e:  # noqa: BLE001

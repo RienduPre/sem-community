@@ -1591,11 +1591,25 @@
           "1": "Monofásico",
           "3": "Trifásico"
         }
+      },
+      "pause_duration": {
+        "name": "Pausar o carregamento durante",
+        "state": {
+          "30_minutes": "30 minutos",
+          "1_hour": "1 hora",
+          "2_hours": "2 horas",
+          "4_hours": "4 horas",
+          "8_hours": "8 horas",
+          "12_hours": "12 horas"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Pausar o carregamento"
       }
     }
   },

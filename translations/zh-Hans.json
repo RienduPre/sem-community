@@ -1591,11 +1591,25 @@
           "1": "单相",
           "3": "三相"
         }
+      },
+      "pause_duration": {
+        "name": "暂停充电时长",
+        "state": {
+          "30_minutes": "30 分钟",
+          "1_hour": "1 小时",
+          "2_hours": "2 小时",
+          "4_hours": "4 小时",
+          "8_hours": "8 小时",
+          "12_hours": "12 小时"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} 暂停充电"
       }
     }
   },

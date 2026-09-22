@@ -1591,11 +1591,25 @@
           "1": "1fázový",
           "3": "3fázový"
         }
+      },
+      "pause_duration": {
+        "name": "Pozastavit nabíjení na",
+        "state": {
+          "30_minutes": "30 minut",
+          "1_hour": "1 hodina",
+          "2_hours": "2 hodiny",
+          "4_hours": "4 hodiny",
+          "8_hours": "8 hodin",
+          "12_hours": "12 hodin"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Pozastavit nabíjení"
       }
     }
   },

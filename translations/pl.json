@@ -1591,11 +1591,25 @@
           "1": "1-fazowy",
           "3": "3-fazowy"
         }
+      },
+      "pause_duration": {
+        "name": "Wstrzymaj ładowanie na",
+        "state": {
+          "30_minutes": "30 minut",
+          "1_hour": "1 godzina",
+          "2_hours": "2 godziny",
+          "4_hours": "4 godziny",
+          "8_hours": "8 godzin",
+          "12_hours": "12 godzin"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Wstrzymaj ładowanie"
       }
     }
   },

@@ -1591,11 +1591,25 @@
           "1": "1 fázisú",
           "3": "3 fázisú"
         }
+      },
+      "pause_duration": {
+        "name": "Töltés szüneteltetése ennyi ideig",
+        "state": {
+          "30_minutes": "30 perc",
+          "1_hour": "1 óra",
+          "2_hours": "2 óra",
+          "4_hours": "4 óra",
+          "8_hours": "8 óra",
+          "12_hours": "12 óra"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Töltés szüneteltetése"
       }
     }
   },

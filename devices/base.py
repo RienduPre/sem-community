@@ -3942,7 +3942,14 @@ def surplus_device_from_spec(
             comfort_offset=float(spec.get("comfort_offset", 0.0) or 0.0),
             comfort_limit=float(spec.get("comfort_limit", 0.0) or 0.0),
         )
-    return SwitchDevice(
+    # (#880) NOT a bare SwitchDevice. Every service-registered device comes
+    # back through here at every restart, and the register_surplus_device
+    # schema takes ``entity_id`` as a plain string — so a my-PV AC-THOR
+    # registered by an automation got a SwitchDevice calling
+    # ``homeassistant.turn_on`` on a ``number`` entity: no such service, the
+    # error swallowed, the device parked in ERROR at 0 W. That IS the bug
+    # this issue is about, on the one path its first fix did not reach.
+    return device_class_for_control(entity_id)(
         hass=hass,
         device_id=device_id,
         name=name,
@@ -3952,3 +3959,11 @@ def surplus_device_from_spec(
         power_entity_id=power_entity_id,
         energy_entity_id=energy_entity_id,
     )
+
+
+# (#880) Re-exported so `from .base import PowerSetpointDevice` works for the
+# call sites that already import every other device class from here. The
+# class lives in its own module: this file is already 3,900 lines.
+from .power_setpoint import (  # noqa: E402,F401
+    PowerSetpointDevice, device_class_for_control,
+)

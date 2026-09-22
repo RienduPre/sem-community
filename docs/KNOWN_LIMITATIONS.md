@@ -163,6 +163,7 @@ freely. Two further limits worth knowing:
 Set the Control tab's Target Limit slider to MAX (*No grid limit*) to disable
 peak management entirely, guard included.
 
+
 ## A blinking inverter feed is held, not shown
 
 Some inverter integrations (Huawei modbus in particular) drop out for a few

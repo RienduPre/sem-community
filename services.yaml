@@ -123,7 +123,7 @@ set_device_control_mapping:
         entity:
     control_type:
       name: Control Type
-      description: "How the device is controlled: switch (on/off), current (set amperage on a number entity), input_boolean (toggle), or service (call a service such as keba.set_current)"
+      description: "How the device is controlled: switch (on/off), current (a number entity — amperes for a charger, or WATTS for a modulating load such as an AC-THOR: SEM reads the entity's unit and drives it accordingly, #880), input_boolean (toggle), or service (call a service such as keba.set_current)"
       required: false
       default: "switch"
       selector:

@@ -60,9 +60,12 @@ DOCS_SIDE = {
     # "your setup needs attention" — a sensor to add, not a SEM bug.
     "battery_night_backfill_blocked",
     "battery_night_backfill_incomplete",
-    # (#882) a load pointed at the wrong kind of entity — the fix is a
-    # setting the card names, not a SEM change.
-    "load_current_control_wrong_unit",
+    # (#882) a load pointed at the wrong kind of entity. RETIRED by #880:
+    # SEM learned to drive a watt setpoint, so the pairing this repair could
+    # only warn about is now routed to PowerSetpointDevice and the repair is
+    # CLEARED on the same path. Only the clear survives, for an install
+    # upgrading from a beta that raised it — so there is no raiser left to
+    # classify, and the key drops out of this split with it.
     "deye_system_work_mode_invalid",
     # (#944) the stop war's stand-down — the box's auto-start or another
     # controller is the next step, not a SEM change.

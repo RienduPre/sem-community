@@ -1591,11 +1591,25 @@
           "1": "1-phasig",
           "3": "3-phasig"
         }
+      },
+      "pause_duration": {
+        "name": "Laden pausieren für",
+        "state": {
+          "30_minutes": "30 Minuten",
+          "1_hour": "1 Stunde",
+          "2_hours": "2 Stunden",
+          "4_hours": "4 Stunden",
+          "8_hours": "8 Stunden",
+          "12_hours": "12 Stunden"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Batterie-Nachthistorie neu aufbauen"
+      },
+      "pause_charging": {
+        "name": "{charger} Laden pausieren"
       }
     }
   },

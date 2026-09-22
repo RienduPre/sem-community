@@ -600,6 +600,17 @@ class SEMEVStatusCard extends SEMLitBase {
         // select entity itself — solar_plus_cheap is conditionally
         // hidden by the entity's ``options`` property when no dynamic
         // tariff is configured (Q1 resolution).
+        // (#980) Pause: the shared duration dropdown + THIS charger's button.
+        // It lives beside the mode because that is what it sets — Off for a
+        // while, then back — and because setting the mode back is how a
+        // pause is cancelled, so the two belong in one place.
+        const pauseDurationId = 'select.sem_pause_duration';
+        const pauseDurationAttrs = this._stateAttrs(pauseDurationId);
+        const pauseDuration = this._stateStr(pauseDurationId) || '1_hour';
+        const pauseOptions = pauseDurationAttrs.options || [];
+        const pauseButtonId = `button.sem_charger_${id}_pause_charging`;
+        const pauseAvailable = !!this._hass?.states?.[pauseButtonId];
+
         const chargeModeEntityId = `select.sem_charger_${id}_charge_mode`;
         const chargeModeAttrs = this._stateAttrs(chargeModeEntityId);
         const chargeMode = this._stateStr(chargeModeEntityId) || 'min_plus_solar';
@@ -814,6 +825,28 @@ class SEMEVStatusCard extends SEMLitBase {
                             </select>
                         </span>
                     </div>
+                    ${pauseAvailable ? html`
+                    <div class="ct-row">
+                        <span class="ct-label">${this._t('pause_charging_for')}</span>
+                        <span class="ct-ctl ct-pause">
+                            <select class="ct-mode-select ct-pause-select"
+                                    .value=${pauseDuration}
+                                    @click=${(e) => e.stopPropagation()}
+                                    @change=${(e) => this._selectOption(pauseDurationId, e.target.value)}>
+                                ${pauseOptions.map(o => html`
+                                    <option value=${o} ?selected=${o === pauseDuration}>
+                                        ${this._t(`pause_duration_${o}`) || o}
+                                    </option>`)}
+                            </select>
+                            <button class="ct-pause-btn"
+                                    @click=${(e) => { e.stopPropagation(); this._pressButton(pauseButtonId); }}
+                                    title=${this._t('pause_charging_hint')}>
+                                <ha-icon icon="mdi:pause-octagon-outline" style="--mdc-icon-size:15px"></ha-icon>
+                                ${this._t('pause_charging')}
+                            </button>
+                        </span>
+                    </div>
+                    ` : nothing}
                     ${chargeMode === 'solar_plus_battery' && learnerLearning ? html`
                     <div class="ct-subhint">
                         <div class="ct-hint-row">

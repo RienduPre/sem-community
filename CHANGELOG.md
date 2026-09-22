@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **Pause a charger for a while** (#980). Pick a time, press Pause, the charge mode goes Off and comes back on its own.
+
+- ✨ **A load set by watts now gets the watts** (#880). SEM wrote nothing to a Number control before, so it read 0 W for ever.
+
+- 🐛 **Peak shedding can now stop a watt load** (#880). It tried to switch off a Number entity, which does nothing.
+
+- 🐛 **A watt entity set to current control now works** (#880, #882). SEM used to refuse it. It drives it instead, and clears the repair.
+
+- 🐛 **A restart no longer loses a running watt load** (#880). SEM read a running heater as idle and gave its power away twice.
+
 # [2.1.0-beta.36] — 22.09.2026
 
 - 🐛 **A thirteenth verdict that named a cause its own scope refutes, and a

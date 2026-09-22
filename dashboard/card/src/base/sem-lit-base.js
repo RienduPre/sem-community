@@ -264,6 +264,12 @@ export class SEMLitBase extends LitElement {
         this._callService('select', 'select_option', { entity_id: entityId, option });
     }
 
+    // (#980) A button is a one-shot action with no state to freeze — what
+    // it changes is some OTHER entity, which arrives on the next update.
+    _pressButton(entityId) {
+        this._callService('button', 'press', { entity_id: entityId });
+    }
+
     // ── Hold-to-repeat for steppers ──
     _startHold(entityId, delta) {
         this._stopHold(entityId);

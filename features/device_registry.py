@@ -37,17 +37,27 @@ from .load_device_discovery import LoadDeviceDiscovery, resolve_load_is_on
 # unaliased so a structural test can see the call.
 from .device_axes import user_hands_off
 from ..devices.base import (
-    SwitchDevice,
     CurrentControlDevice,
     surplus_device_from_spec,
+)
+from ..devices.power_setpoint import (   # (#880) ONE producer, over there
+    PowerSetpointDevice, device_class_for_control,
 )
 from ..hardware_detection import discover_ev_charger_from_registry
 from ..const import LOAD_PRIORITY_BASE as _LOAD_PRIORITY_BASE
 
+#: (#880) Domains whose control is a watt SETPOINT rather than a contact.
+#: The reporter configured "Control type: Number entity" and got a
+#: SwitchDevice, so SEM turned the AC-THOR fully on and wrote no value.
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "sem_device_mappings"
+
+
+#: (#880) The top of every EVSE SEM supports. A "current" control that
+#: ranges past it is not amperes — see ``_register_current_control``.
+MAX_PLAUSIBLE_CHARGER_AMPS: int = 32
 
 
 def _goal_bool(value: Any) -> bool:
@@ -983,7 +993,7 @@ class UnifiedDeviceRegistry:
                         device.device_id, entity,
                     )
                     continue
-                surplus_device = SwitchDevice(
+                surplus_device = device_class_for_control(entity)(
                     hass=self.hass,
                     device_id=device.device_id,
                     name=device.name,
@@ -1086,29 +1096,79 @@ class UnifiedDeviceRegistry:
                     self.hass, entity, require_explicit_unit=True)
             except Exception:  # noqa: BLE001 — a probe never costs a setup
                 scale = None
+        # (#880) …and when it declares NO unit, its RANGE still answers.
+        # @jonasbkarlsson reproduced #880 on a plain Home Assistant number
+        # helper, which carries a unit only if its owner typed one — so the
+        # unit probe above says nothing about exactly the install the issue
+        # was filed from. A control whose ceiling is past any charger's is
+        # not an ampere knob: 32 A is the top of every EVSE SEM supports,
+        # and the #882 pairing is a 0-9000 entity. This is evidence, not a
+        # guess, and it runs only where the unit gave no answer — an entity
+        # that DECLARES amperes is still a charger, whatever its range.
+        if scale is None:
+            # ONLY where the unit gave no answer. ``native_power_scale``
+            # returns None for two different facts — "declares no unit" and
+            # "declares a unit that is not power" — and an entity that says
+            # AMPERES is a charger whatever its range. Reading the attribute
+            # is the only way to tell those apart.
+            _st = self.hass.states.get(entity)
+            _attrs = getattr(_st, "attributes", None)
+            _readable = isinstance(_attrs, dict) and _st.state not in (
+                "unavailable", "unknown", None, "")
+            _declared = (str(_attrs.get("unit_of_measurement") or "").strip()
+                         if _readable else "")
+            try:
+                _ceiling = float(control.get("max_value") or 0.0)
+            except (TypeError, ValueError):
+                _ceiling = 0.0
+            # (#925) An entity SEM could not read has not "declared no unit" —
+            # it has not answered. Only a live read that came back empty opens
+            # the range question; an unreadable one keeps today's behaviour,
+            # which is what #882's own test asks for (a device that vanishes
+            # for a cycle must not be re-typed under SEM's feet).
+            if _readable and not _declared and _ceiling > MAX_PLAUSIBLE_CHARGER_AMPS:
+                scale = 1.0
+                _LOGGER.info(
+                    "Load %s (%s): %s declares no unit but ranges to %.0f — "
+                    "past any charger's %d A, so it is a watt setpoint (#880).",
+                    device.name, device.device_id, entity, _ceiling,
+                    MAX_PLAUSIBLE_CHARGER_AMPS,
+                )
+
         if scale is not None:
+            # (#880) A POWER entity under "current" control. #882 could only
+            # refuse this pairing — current control writes amperes and SEM had
+            # no class that writes watts. It has one now, and the entity
+            # itself says which: route, don't refuse. The user keeps the
+            # configuration they already made and the load starts following
+            # the surplus on upgrade.
             st = self.hass.states.get(entity)
             unit = ""
             if st is not None and isinstance(getattr(st, "attributes", None), dict):
                 unit = str(st.attributes.get("unit_of_measurement") or "")
-            _LOGGER.warning(
+            _LOGGER.info(
                 "Load %s (%s) is set to CURRENT control but %s is a POWER "
-                "entity (%s). Current control writes amperes — this pairing "
-                "can never work, so the device is not registered for surplus. "
-                "Watt-modulating loads are #880; see the repair for what to "
-                "do now.",
+                "entity (%s) — driving it as a watt setpoint (#880).",
                 device.name, device.device_id, entity, unit or "no unit",
             )
             try:
                 from ..coordinator.repair_issues import (
-                    raise_load_current_control_wrong_unit,
+                    clear_load_current_control_wrong_unit,
                 )
-                raise_load_current_control_wrong_unit(
-                    self.hass, device_id=device.device_id, name=device.name,
-                    entity_id=entity, unit=unit or "W",
-                )
+                clear_load_current_control_wrong_unit(self.hass, device.device_id)
             except Exception:  # noqa: BLE001
                 pass
+            self._surplus_controller.register_device(PowerSetpointDevice(
+                hass=self.hass,
+                device_id=device.device_id,
+                name=device.name,
+                rated_power=self._initial_rated_power(
+                    device.device_id, device.power_sensor),
+                priority=device.priority,
+                entity_id=entity,
+                power_entity_id=device.power_sensor,
+                energy_entity_id=getattr(device, "energy_sensor", None),
+            ))
             return
 
         try:

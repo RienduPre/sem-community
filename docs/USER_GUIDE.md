@@ -449,6 +449,42 @@ Best for: urgent charging (departing soon, road trip, or testing).
 
 EV charging is disabled. SEM continues monitoring but does not send any commands to the charger. Use when you want manual control or a charger is offline.
 
+**Off releases the charger — it does not hold it stopped.** SEM sends one stop
+for a session it started itself and then nothing at all, so a wallbox that
+resumes on its own is left alone on purpose. That is deliberate: holding a
+contactor open against a box that disagrees is a stop war, and SEM does not
+start one.
+
+### Pause charging (per charger, #980)
+
+One **Pause Charging For** dropdown (30 minutes to 12 hours) for the whole
+install, and one **Pause Charging** button per charger.
+
+Press a charger's button and its charge mode goes to **Off** for the selected
+time, then back to exactly what it was.
+
+That is all it is — the mode you would have picked anyway, plus the part that
+is easy to forget. The duration is shared because "how long" is a choice you
+make in the moment, not a property of a charger; the buttons are separate, so
+pausing one charger and leaving the other running still works.
+
+| you want | do |
+|---|---|
+| pause this charger for two hours | pick `2 hours`, press its button |
+| make it four instead | pick `4 hours`, press again |
+| carry on now | set its Charge Mode back to whatever you want |
+
+There is no Resume button, because the Charge Mode select already is one.
+
+Two things worth knowing:
+
+- **It stores when the pause ends, not how long it is.** A Home Assistant
+  restart mid-pause neither extends it nor gives back the minutes already
+  spent, and a pause that expired while HA was down resumes on the next cycle.
+- **Changing the mode by hand ends it, there and then.** SEM will not snap
+  your choice back when the timer would have finished — and it forgets the
+  pause immediately, so choosing Off yourself an hour later stays Off.
+
 ---
 
 ## SOC Zone Strategy

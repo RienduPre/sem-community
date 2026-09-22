@@ -1591,11 +1591,25 @@
           "1": "Monofase",
           "3": "Trifase"
         }
+      },
+      "pause_duration": {
+        "name": "Metti in pausa la ricarica per",
+        "state": {
+          "30_minutes": "30 minuti",
+          "1_hour": "1 ora",
+          "2_hours": "2 ore",
+          "4_hours": "4 ore",
+          "8_hours": "8 ore",
+          "12_hours": "12 ore"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Metti in pausa la ricarica"
       }
     }
   },

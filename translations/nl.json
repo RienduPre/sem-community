@@ -1591,11 +1591,25 @@
           "1": "1-fase",
           "3": "3-fase"
         }
+      },
+      "pause_duration": {
+        "name": "Laden pauzeren voor",
+        "state": {
+          "30_minutes": "30 minuten",
+          "1_hour": "1 uur",
+          "2_hours": "2 uur",
+          "4_hours": "4 uur",
+          "8_hours": "8 uur",
+          "12_hours": "12 uur"
+        }
       }
     },
     "button": {
       "backfill_battery_nights": {
         "name": "Rebuild battery-night history"
+      },
+      "pause_charging": {
+        "name": "{charger} Laden pauzeren"
       }
     }
   },

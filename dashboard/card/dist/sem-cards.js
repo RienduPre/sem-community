@@ -15,7 +15,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
     ha-card:hover {
         box-shadow: var(--ha-card-box-shadow, 0 4px 16px rgba(0, 0, 0, 0.12));
     }
-`;class Se extends ce{constructor(){super(),this._hass=null,this._config=null,this._lang=null,this._localizeReady=!1,this._prevVals={},this._frozenEntities={},this._holdTimers={},this._holdIntervals={},this._cachedTheme=null,this._updateTimer=null}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this.constructor.watchedEntities||[];if(r.length>0&&!s){const t=e.states[r[0]]?.state;if("unavailable"===t||"unknown"===t)return}let a=!1;for(const t of r){const i=e.states[t]?.state;if(this._prevVals[t]!==i){a=!0;break}}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_scheduleUpdate(){this._updateTimer||(this._updateTimer=setTimeout(()=>{this._updateTimer=null,this.requestUpdate()},16))}_theme(){const e=getComputedStyle(document.documentElement).getPropertyValue("--primary-background-color").trim();return this._cachedTheme&&this._cachedThemeKey===e||(this._cachedThemeKey=e,this._cachedTheme=ve()),this._cachedTheme}_t(e){return e?"function"==typeof semLocalize?semLocalize(e,this._hass?.language):e:""}_forecastProviderLabel(e){if(!e)return"";return{solcast:"Solcast",forecast_solar:"Forecast.Solar",open_meteo:"Open-Meteo",custom:this._t("custom")||"Custom"}[e]||e}_state(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_stateStr(e){const t=this._frozenEntities[e];if(t)return String(t.value);const i=this._hass?.states[e];return i&&"unavailable"!==i.state&&"unknown"!==i.state?i.state:""}_unitOf(e){const t=this._hass?.states[e];return t&&t.attributes&&t.attributes.unit_of_measurement||""}_pcEntity(e,t,i){const s=this._hass?.states||{},r=new RegExp(`^${e}\\.sem_charger_.+_${t}$`);let a=Object.keys(s).filter(e=>r.test(e));return"night_charging"===t&&(a=a.filter(e=>!e.endsWith("_smart_night_charging"))),a.sort(),a.length?a[0]:i}_stateAttrs(e){return this._hass?.states[e]?.attributes||{}}_freezeEntity(e,t){const i=this._frozenEntities[e];i?.timer&&clearTimeout(i.timer),this._frozenEntities[e]={value:t,timer:setTimeout(()=>{delete this._frozenEntities[e],this.requestUpdate()},1500)}}_isFrozen(){return Object.keys(this._frozenEntities).length>0}async _callService(e,t,i){if(this._hass)try{await this._hass.callService(e,t,i)}catch(e){console.error(`[SEM ${this.tagName}]`,e)}}_setNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.min)||0,r=parseFloat(i.attributes.max)||100,a=Math.max(s,Math.min(r,t));this._freezeEntity(e,a),this.requestUpdate(),this._callService("number","set_value",{entity_id:e,value:a})}_stepNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=this._frozenEntities[e],r=s?s.value:parseFloat(i.state)||0,a=parseFloat(i.attributes.step)||1;this._setNumber(e,r+t*a)}_toggleSwitch(e){const t=this._hass?.states[e];if(!t)return;const i="on"===t.state?"off":"on";this._freezeEntity(e,i),this.requestUpdate();const s="on"===t.state?"turn_off":"turn_on";this._callService("switch",s,{entity_id:e})}_selectOption(e,t){this._freezeEntity(e,t),this.requestUpdate(),this._callService("select","select_option",{entity_id:e,option:t})}_startHold(e,t){this._stopHold(e),this._holdTimers[e]=setTimeout(()=>{this._holdIntervals[e]=setInterval(()=>{this._stepNumber(e,t)},150)},400)}_stopHold(e){clearTimeout(this._holdTimers[e]),clearInterval(this._holdIntervals[e]),delete this._holdTimers[e],delete this._holdIntervals[e]}updated(){if(window._semDebug){this.style.outline="2px solid red",this.style.outlineOffset="-2px",clearTimeout(this._debugFlashTimer),this._debugFlashTimer=setTimeout(()=>{this.style.outline="",this.style.outlineOffset=""},200);const e=this.tagName.toLowerCase();window._semRenderLog||(window._semRenderLog={}),window._semRenderLog[e]=(window._semRenderLog[e]||0)+1}}connectedCallback(){super.connectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} connectedCallback`),this._localizeReady||"function"==typeof semLocalize?"function"==typeof semLocalize&&(this._localizeReady=!0):(this._onLocalizeReady=()=>{document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null,this._localizeReady=!0,this._hass&&this.requestUpdate()},document.addEventListener("sem-localize-ready",this._onLocalizeReady))}disconnectedCallback(){super.disconnectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} disconnectedCallback !!!`),this._onLocalizeReady&&(document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null),this._updateTimer&&(clearTimeout(this._updateTimer),this._updateTimer=null);for(const e of Object.keys(this._holdTimers))this._stopHold(e);for(const e of Object.keys(this._frozenEntities))clearTimeout(this._frozenEntities[e]?.timer);this._frozenEntities={}}setConfig(e){this._config=e}getCardSize(){return 4}static getStubConfig(){return{}}}we("sem-title-card",class extends Se{static get watchedEntities(){return[]}constructor(){super(),this._renderedSubtitle=null,this._templateUnsub=null,this._templateSubbed=!1}setConfig(e){super.setConfig(e),this._unsubTemplate(),this._templateSubbed=!1,this._renderedSubtitle=null}_hasJinja(e){return e&&(e.includes("{%")||e.includes("{{"))}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,this.requestUpdate()),this._hasJinja(this._config?.subtitle)&&!this._templateSubbed&&this._subscribeTemplate()}_subscribeTemplate(){if(!this._hass?.connection||this._templateSubbed)return;this._templateSubbed=!0;const e=this._config.subtitle;this._hass.connection.subscribeMessage(e=>{const t=e.result;t!==this._renderedSubtitle&&(this._renderedSubtitle=t,this.requestUpdate())},{type:"render_template",template:e,variables:{}}).then(e=>{this._templateUnsub=e}).catch(()=>{this._renderedSubtitle=this._config.subtitle,this.requestUpdate()})}_unsubTemplate(){this._templateUnsub&&(this._templateUnsub(),this._templateUnsub=null)}disconnectedCallback(){super.disconnectedCallback(),this._unsubTemplate()}render(){if(!this._config)return K;const e=this._t(this._config.title_key||this._config.title||"");let t="";t=this._hasJinja(this._config.subtitle)?this._renderedSubtitle||"":this._t(this._config.subtitle||"");const i=this._theme();return W`
+`;class Se extends ce{constructor(){super(),this._hass=null,this._config=null,this._lang=null,this._localizeReady=!1,this._prevVals={},this._frozenEntities={},this._holdTimers={},this._holdIntervals={},this._cachedTheme=null,this._updateTimer=null}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this.constructor.watchedEntities||[];if(r.length>0&&!s){const t=e.states[r[0]]?.state;if("unavailable"===t||"unknown"===t)return}let a=!1;for(const t of r){const i=e.states[t]?.state;if(this._prevVals[t]!==i){a=!0;break}}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_scheduleUpdate(){this._updateTimer||(this._updateTimer=setTimeout(()=>{this._updateTimer=null,this.requestUpdate()},16))}_theme(){const e=getComputedStyle(document.documentElement).getPropertyValue("--primary-background-color").trim();return this._cachedTheme&&this._cachedThemeKey===e||(this._cachedThemeKey=e,this._cachedTheme=ve()),this._cachedTheme}_t(e){return e?"function"==typeof semLocalize?semLocalize(e,this._hass?.language):e:""}_forecastProviderLabel(e){if(!e)return"";return{solcast:"Solcast",forecast_solar:"Forecast.Solar",open_meteo:"Open-Meteo",custom:this._t("custom")||"Custom"}[e]||e}_state(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_stateStr(e){const t=this._frozenEntities[e];if(t)return String(t.value);const i=this._hass?.states[e];return i&&"unavailable"!==i.state&&"unknown"!==i.state?i.state:""}_unitOf(e){const t=this._hass?.states[e];return t&&t.attributes&&t.attributes.unit_of_measurement||""}_pcEntity(e,t,i){const s=this._hass?.states||{},r=new RegExp(`^${e}\\.sem_charger_.+_${t}$`);let a=Object.keys(s).filter(e=>r.test(e));return"night_charging"===t&&(a=a.filter(e=>!e.endsWith("_smart_night_charging"))),a.sort(),a.length?a[0]:i}_stateAttrs(e){return this._hass?.states[e]?.attributes||{}}_freezeEntity(e,t){const i=this._frozenEntities[e];i?.timer&&clearTimeout(i.timer),this._frozenEntities[e]={value:t,timer:setTimeout(()=>{delete this._frozenEntities[e],this.requestUpdate()},1500)}}_isFrozen(){return Object.keys(this._frozenEntities).length>0}async _callService(e,t,i){if(this._hass)try{await this._hass.callService(e,t,i)}catch(e){console.error(`[SEM ${this.tagName}]`,e)}}_setNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.min)||0,r=parseFloat(i.attributes.max)||100,a=Math.max(s,Math.min(r,t));this._freezeEntity(e,a),this.requestUpdate(),this._callService("number","set_value",{entity_id:e,value:a})}_stepNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=this._frozenEntities[e],r=s?s.value:parseFloat(i.state)||0,a=parseFloat(i.attributes.step)||1;this._setNumber(e,r+t*a)}_toggleSwitch(e){const t=this._hass?.states[e];if(!t)return;const i="on"===t.state?"off":"on";this._freezeEntity(e,i),this.requestUpdate();const s="on"===t.state?"turn_off":"turn_on";this._callService("switch",s,{entity_id:e})}_selectOption(e,t){this._freezeEntity(e,t),this.requestUpdate(),this._callService("select","select_option",{entity_id:e,option:t})}_pressButton(e){this._callService("button","press",{entity_id:e})}_startHold(e,t){this._stopHold(e),this._holdTimers[e]=setTimeout(()=>{this._holdIntervals[e]=setInterval(()=>{this._stepNumber(e,t)},150)},400)}_stopHold(e){clearTimeout(this._holdTimers[e]),clearInterval(this._holdIntervals[e]),delete this._holdTimers[e],delete this._holdIntervals[e]}updated(){if(window._semDebug){this.style.outline="2px solid red",this.style.outlineOffset="-2px",clearTimeout(this._debugFlashTimer),this._debugFlashTimer=setTimeout(()=>{this.style.outline="",this.style.outlineOffset=""},200);const e=this.tagName.toLowerCase();window._semRenderLog||(window._semRenderLog={}),window._semRenderLog[e]=(window._semRenderLog[e]||0)+1}}connectedCallback(){super.connectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} connectedCallback`),this._localizeReady||"function"==typeof semLocalize?"function"==typeof semLocalize&&(this._localizeReady=!0):(this._onLocalizeReady=()=>{document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null,this._localizeReady=!0,this._hass&&this.requestUpdate()},document.addEventListener("sem-localize-ready",this._onLocalizeReady))}disconnectedCallback(){super.disconnectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} disconnectedCallback !!!`),this._onLocalizeReady&&(document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null),this._updateTimer&&(clearTimeout(this._updateTimer),this._updateTimer=null);for(const e of Object.keys(this._holdTimers))this._stopHold(e);for(const e of Object.keys(this._frozenEntities))clearTimeout(this._frozenEntities[e]?.timer);this._frozenEntities={}}setConfig(e){this._config=e}getCardSize(){return 4}static getStubConfig(){return{}}}we("sem-title-card",class extends Se{static get watchedEntities(){return[]}constructor(){super(),this._renderedSubtitle=null,this._templateUnsub=null,this._templateSubbed=!1}setConfig(e){super.setConfig(e),this._unsubTemplate(),this._templateSubbed=!1,this._renderedSubtitle=null}_hasJinja(e){return e&&(e.includes("{%")||e.includes("{{"))}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,this.requestUpdate()),this._hasJinja(this._config?.subtitle)&&!this._templateSubbed&&this._subscribeTemplate()}_subscribeTemplate(){if(!this._hass?.connection||this._templateSubbed)return;this._templateSubbed=!0;const e=this._config.subtitle;this._hass.connection.subscribeMessage(e=>{const t=e.result;t!==this._renderedSubtitle&&(this._renderedSubtitle=t,this.requestUpdate())},{type:"render_template",template:e,variables:{}}).then(e=>{this._templateUnsub=e}).catch(()=>{this._renderedSubtitle=this._config.subtitle,this.requestUpdate()})}_unsubTemplate(){this._templateUnsub&&(this._templateUnsub(),this._templateUnsub=null)}disconnectedCallback(){super.disconnectedCallback(),this._unsubTemplate()}render(){if(!this._config)return K;const e=this._t(this._config.title_key||this._config.title||"");let t="";t=this._hasJinja(this._config.subtitle)?this._renderedSubtitle||"":this._t(this._config.subtitle||"");const i=this._theme();return W`
             <style>
                 :host { display: block; }
                 .sem-title-wrap {
@@ -3407,11 +3407,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         </span>
                     `:K}
                 </div>
-            </div>`}_rangeHandleStart(e,t,i,s,r,a){e.stopPropagation(),e.preventDefault();const o=e.currentTarget.closest(".range-track");if(!o)return;const n="min"===t?i:s,l="min"===t?s:i,c=this._hass?.states[n],d=parseFloat(c?.attributes?.step)||(a>50?1:.5),p=a-r||1,h=e=>{const i=o.getBoundingClientRect();let s=(e-i.left)/(i.width||1);s=Math.max(0,Math.min(1,s));let n=Math.round((r+s*p)/d)*d;const c=this._entityVal(l,"min"===t?a:r);return n="min"===t?Math.min(n,c):Math.max(n,c),Math.max(r,Math.min(a,n))},_=e=>{this._freezeEntity(n,h(e.clientX)),this.requestUpdate()},g=e=>{window.removeEventListener("pointermove",_),window.removeEventListener("pointerup",g),window.removeEventListener("pointercancel",g),this._setNumber(n,h(e.clientX))};window.addEventListener("pointermove",_),window.addEventListener("pointerup",g),window.addEventListener("pointercancel",g)}_renderChargerSection(e,t){const i=kt[t%kt.length],s=this._val(`charger_${e}_power`,0),r=this._val(`charger_${e}_session_energy_external`,0),a=this._val(`charger_${e}_session_energy`,0),o=r>0?r:a,n=this._val(`charger_${e}_daily_energy`,0),l=this._val("energy_ev_solar_percentage",0),{soc:c,isEstimate:d}=function(e,t,i,s){const r=null!=e?e:s<=1?t??null:null;return null!=r?{soc:r,isEstimate:!1}:null!=i?{soc:i,isEstimate:!0}:{soc:null,isEstimate:!1}}(this._val(`charger_${e}_vehicle_soc`,null),this._val("vehicle_soc",null),this._val(`charger_${e}_estimated_soc`,null),this._chargers.length),p=this._stateAttrs(`sensor.sem_charger_${e}_estimated_soc`),h=p.energy_accounted_soc,_=!0===p.estimate_stop_active,g=this._val(`charger_${e}_vehicle_soc`,null),u=p.vehicle_soc_last??g;let m=null;const f=Date.parse(p.vehicle_soc_last_at??"");Number.isNaN(f)||(m=Math.round((Date.now()-f)/6e4));const v=e=>(this._t(e)||"").replace(/\{soc\}/g,null!=u?Math.round(u):"—").replace(/\{age\}/g,null!=m?m:"—").replace(/\{est\}/g,null!=h?Math.round(h):"—"),y=null!=u&&null!=h&&null!=m&&m>=5&&(h-u>=1||null==g),b=this._chargerName(e),x=this._hass?.states[`binary_sensor.sem_charger_${e}_connected`],$="on"===x?.state,w=s>50,k=(this._stateAttrs(`${this._prefix}charging_state`).per_charger_stop_war||{})[e],S=this._t(function({isCharging:e,isConnected:t,standDown:i}){return e&&i&&!0===i.standing_down?"charger_status_stood_down":e?"charging":t?"connected":"idle"}({isCharging:w,isConnected:$,standDown:k})),C=this._val(`charger_${e}_commanded_current`,0),z=this._entityVal(`number.sem_charger_${e}_minimum_current`,6),M=this._entityVal(`number.sem_charger_${e}_ev_battery_capacity_kwh`,40),E=this._entityVal(`number.sem_charger_${e}_ev_kwh_per_100km`,18),D=`select.sem_charger_${e}_charge_mode`,F=this._stateAttrs(D),I=this._stateStr(D)||"min_plus_solar",A=F.options||["solar_only","solar_plus_battery","solar_plus_cheap","min_plus_solar","always_max","off"],N=!1!==F.tariff_available,B=F.modes_needing_tariff||[],R=e=>!N&&B.includes(e),T=this._stateAttrs("sensor.sem_battery_spendable_kwh"),P="learning"===T.phase,L=(this._t("charge_mode_battery_learning_info")||"").replace(/\{n\}/g,T.nights_sealed??"?").replace(/\{total\}/g,T.nights_required??"?"),U={solar_only:this._t("charge_mode_solar_only"),solar_plus_battery:this._t("charge_mode_solar_plus_battery"),solar_plus_cheap:this._t("charge_mode_solar_plus_cheap"),min_plus_solar:this._t("charge_mode_min_plus_solar"),always_max:this._t("charge_mode_always_max"),off:this._t("charge_mode_off")},O=Math.round(this._entityVal("number.sem_battery_buffer_soc",70)),H=Math.round(this._entityVal("number.sem_battery_priority_soc",30)),j=e=>(this._t(e)||"").replace(/\{buffer\}/g,O).replace(/\{priority\}/g,H),G=j(`charge_mode_hint_${I}_surplus`),q=j(`charge_mode_hint_${I}_overnight`),V=j(`charge_mode_hint_${I}_battery`),Y=`select.sem_charger_${e}_ev_target_type`,X=this._stateStr(Y)||"kwh",Z=this._stateAttrs(Y).options||["kwh"],J="soc"===X,Q=J?`number.sem_charger_${e}_target_soc`:`number.sem_charger_${e}_daily_ev_target`,ee=J?`number.sem_charger_${e}_target_soc_max`:`number.sem_charger_${e}_daily_ev_target_max`,te=`time.sem_charger_${e}_target_time`,ie=this._stateStr(te),se=ie?ie.slice(0,5):"—",re=this._stateAttrs(`${this._prefix}charging_state`),ae=!1===re.ev_deadline_reachable,oe=re.ev_next_cheap_window;let ne="";if(oe)try{const e=new Date(oe);isNaN(e)||(ne=e.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:this._hass?.config?.time_zone||void 0}))}catch(e){}const le="solar_plus_cheap"===I&&ne,ce=`select.sem_charger_${e}_phase_mode`,de=!!this._hass?.states?.[ce],pe=(re.per_charger_phases||{})[e]||{},he=this._stateStr(ce)||"auto",_e=this._stateAttrs(ce).options||["auto","1","3"],ue={auto:this._t("phase_mode_auto"),1:this._t("phase_mode_1"),3:this._t("phase_mode_3")};let me="";me="stopping"===pe.switch_state?this._t("phase_status_stopping"):"settling"===pe.switch_state?this._t("phase_status_settling"):pe.active_phases?(this._t("phase_status_measured")||"{n}-phase measured").replace("{n}",pe.active_phases):pe.believed_phases?(this._t("phase_status_believed")||"{n}-phase").replace("{n}",pe.believed_phases):this._t("phase_status_unknown");const fe=this._entityVal(Q,J?80:10),ve=J?Math.max(0,(fe-c)/100*M):Math.max(0,fe-n),ye=E>0?Math.round(ve/E*100):null,be=Z.length>1?W`<select class="ct-unit" .value=${X}
+            </div>`}_rangeHandleStart(e,t,i,s,r,a){e.stopPropagation(),e.preventDefault();const o=e.currentTarget.closest(".range-track");if(!o)return;const n="min"===t?i:s,l="min"===t?s:i,c=this._hass?.states[n],d=parseFloat(c?.attributes?.step)||(a>50?1:.5),p=a-r||1,h=e=>{const i=o.getBoundingClientRect();let s=(e-i.left)/(i.width||1);s=Math.max(0,Math.min(1,s));let n=Math.round((r+s*p)/d)*d;const c=this._entityVal(l,"min"===t?a:r);return n="min"===t?Math.min(n,c):Math.max(n,c),Math.max(r,Math.min(a,n))},_=e=>{this._freezeEntity(n,h(e.clientX)),this.requestUpdate()},g=e=>{window.removeEventListener("pointermove",_),window.removeEventListener("pointerup",g),window.removeEventListener("pointercancel",g),this._setNumber(n,h(e.clientX))};window.addEventListener("pointermove",_),window.addEventListener("pointerup",g),window.addEventListener("pointercancel",g)}_renderChargerSection(e,t){const i=kt[t%kt.length],s=this._val(`charger_${e}_power`,0),r=this._val(`charger_${e}_session_energy_external`,0),a=this._val(`charger_${e}_session_energy`,0),o=r>0?r:a,n=this._val(`charger_${e}_daily_energy`,0),l=this._val("energy_ev_solar_percentage",0),{soc:c,isEstimate:d}=function(e,t,i,s){const r=null!=e?e:s<=1?t??null:null;return null!=r?{soc:r,isEstimate:!1}:null!=i?{soc:i,isEstimate:!0}:{soc:null,isEstimate:!1}}(this._val(`charger_${e}_vehicle_soc`,null),this._val("vehicle_soc",null),this._val(`charger_${e}_estimated_soc`,null),this._chargers.length),p=this._stateAttrs(`sensor.sem_charger_${e}_estimated_soc`),h=p.energy_accounted_soc,_=!0===p.estimate_stop_active,g=this._val(`charger_${e}_vehicle_soc`,null),u=p.vehicle_soc_last??g;let m=null;const f=Date.parse(p.vehicle_soc_last_at??"");Number.isNaN(f)||(m=Math.round((Date.now()-f)/6e4));const v=e=>(this._t(e)||"").replace(/\{soc\}/g,null!=u?Math.round(u):"—").replace(/\{age\}/g,null!=m?m:"—").replace(/\{est\}/g,null!=h?Math.round(h):"—"),y=null!=u&&null!=h&&null!=m&&m>=5&&(h-u>=1||null==g),b=this._chargerName(e),x=this._hass?.states[`binary_sensor.sem_charger_${e}_connected`],$="on"===x?.state,w=s>50,k=(this._stateAttrs(`${this._prefix}charging_state`).per_charger_stop_war||{})[e],S=this._t(function({isCharging:e,isConnected:t,standDown:i}){return e&&i&&!0===i.standing_down?"charger_status_stood_down":e?"charging":t?"connected":"idle"}({isCharging:w,isConnected:$,standDown:k})),C=this._val(`charger_${e}_commanded_current`,0),z=this._entityVal(`number.sem_charger_${e}_minimum_current`,6),M=this._entityVal(`number.sem_charger_${e}_ev_battery_capacity_kwh`,40),E=this._entityVal(`number.sem_charger_${e}_ev_kwh_per_100km`,18),D="select.sem_pause_duration",F=this._stateAttrs(D),I=this._stateStr(D)||"1_hour",A=F.options||[],N=`button.sem_charger_${e}_pause_charging`,B=!!this._hass?.states?.[N],R=`select.sem_charger_${e}_charge_mode`,T=this._stateAttrs(R),P=this._stateStr(R)||"min_plus_solar",L=T.options||["solar_only","solar_plus_battery","solar_plus_cheap","min_plus_solar","always_max","off"],U=!1!==T.tariff_available,O=T.modes_needing_tariff||[],H=e=>!U&&O.includes(e),j=this._stateAttrs("sensor.sem_battery_spendable_kwh"),G="learning"===j.phase,q=(this._t("charge_mode_battery_learning_info")||"").replace(/\{n\}/g,j.nights_sealed??"?").replace(/\{total\}/g,j.nights_required??"?"),V={solar_only:this._t("charge_mode_solar_only"),solar_plus_battery:this._t("charge_mode_solar_plus_battery"),solar_plus_cheap:this._t("charge_mode_solar_plus_cheap"),min_plus_solar:this._t("charge_mode_min_plus_solar"),always_max:this._t("charge_mode_always_max"),off:this._t("charge_mode_off")},Y=Math.round(this._entityVal("number.sem_battery_buffer_soc",70)),X=Math.round(this._entityVal("number.sem_battery_priority_soc",30)),Z=e=>(this._t(e)||"").replace(/\{buffer\}/g,Y).replace(/\{priority\}/g,X),J=Z(`charge_mode_hint_${P}_surplus`),Q=Z(`charge_mode_hint_${P}_overnight`),ee=Z(`charge_mode_hint_${P}_battery`),te=`select.sem_charger_${e}_ev_target_type`,ie=this._stateStr(te)||"kwh",se=this._stateAttrs(te).options||["kwh"],re="soc"===ie,ae=re?`number.sem_charger_${e}_target_soc`:`number.sem_charger_${e}_daily_ev_target`,oe=re?`number.sem_charger_${e}_target_soc_max`:`number.sem_charger_${e}_daily_ev_target_max`,ne=`time.sem_charger_${e}_target_time`,le=this._stateStr(ne),ce=le?le.slice(0,5):"—",de=this._stateAttrs(`${this._prefix}charging_state`),pe=!1===de.ev_deadline_reachable,he=de.ev_next_cheap_window;let _e="";if(he)try{const e=new Date(he);isNaN(e)||(_e=e.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:this._hass?.config?.time_zone||void 0}))}catch(e){}const ue="solar_plus_cheap"===P&&_e,me=`select.sem_charger_${e}_phase_mode`,fe=!!this._hass?.states?.[me],ve=(de.per_charger_phases||{})[e]||{},ye=this._stateStr(me)||"auto",be=this._stateAttrs(me).options||["auto","1","3"],xe={auto:this._t("phase_mode_auto"),1:this._t("phase_mode_1"),3:this._t("phase_mode_3")};let $e="";$e="stopping"===ve.switch_state?this._t("phase_status_stopping"):"settling"===ve.switch_state?this._t("phase_status_settling"):ve.active_phases?(this._t("phase_status_measured")||"{n}-phase measured").replace("{n}",ve.active_phases):ve.believed_phases?(this._t("phase_status_believed")||"{n}-phase").replace("{n}",ve.believed_phases):this._t("phase_status_unknown");const we=this._entityVal(ae,re?80:10),ke=re?Math.max(0,(we-c)/100*M):Math.max(0,we-n),Se=E>0?Math.round(ke/E*100):null,Ce=se.length>1?W`<select class="ct-unit" .value=${ie}
                     @click=${e=>e.stopPropagation()}
-                    @change=${e=>this._selectOption(Y,e.target.value)}>
-                    ${Z.map(e=>W`<option value=${e} ?selected=${e===X}>${"soc"===e?"%":"kWh"}</option>`)}
-                </select>`:W`<span class="ct-unit-static">${J?"%":"kWh"}</span>`;return W`
+                    @change=${e=>this._selectOption(te,e.target.value)}>
+                    ${se.map(e=>W`<option value=${e} ?selected=${e===ie}>${"soc"===e?"%":"kWh"}</option>`)}
+                </select>`:W`<span class="ct-unit-static">${re?"%":"kWh"}</span>`;return W`
             <div class="charger-section">
                 <div class="charger-header">
                     <div class="charger-dot" style="background:${i}"></div>
@@ -3464,11 +3464,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <div class="ct-title">
                         <ha-icon icon="mdi:target" style="--mdc-icon-size:14px;color:#8DC892"></ha-icon>
                         ${this._t("charge_target")}
-                        ${null!=ye&&ye>0?W`<span class="ct-range">· +${ye} km</span>`:K}
+                        ${null!=Se&&Se>0?W`<span class="ct-range">· +${Se} km</span>`:K}
                         <span class="ct-spacer"></span>
-                        ${be}
+                        ${Ce}
                     </div>
-                    ${this._renderRangeSlider(Q,ee,J)}
+                    ${this._renderRangeSlider(ae,oe,re)}
                     <!-- #277 Phase B.2: one named Charge mode selector
                          replaces the legacy ev_grid_charging + nested
                          ev_tariff_mode toggles. Options come from the HA
@@ -3481,22 +3481,44 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <span class="ct-label">${this._t("charge_mode")}</span>
                         <span class="ct-ctl">
                             <select class="ct-mode-select"
-                                    .value=${I}
+                                    .value=${P}
                                     @click=${e=>e.stopPropagation()}
-                                    @change=${e=>this._selectOption(D,e.target.value)}>
-                                ${A.map(e=>W`
-                                    <option value=${e} ?selected=${e===I}
-                                            ?disabled=${R(e)}>
-                                        ${U[e]||e}${R(e)?` — ${this._t("charge_mode_needs_tariff")}`:""}
+                                    @change=${e=>this._selectOption(R,e.target.value)}>
+                                ${L.map(e=>W`
+                                    <option value=${e} ?selected=${e===P}
+                                            ?disabled=${H(e)}>
+                                        ${V[e]||e}${H(e)?` — ${this._t("charge_mode_needs_tariff")}`:""}
                                     </option>`)}
                             </select>
                         </span>
                     </div>
-                    ${"solar_plus_battery"===I&&P?W`
+                    ${B?W`
+                    <div class="ct-row">
+                        <span class="ct-label">${this._t("pause_charging_for")}</span>
+                        <span class="ct-ctl ct-pause">
+                            <select class="ct-mode-select ct-pause-select"
+                                    .value=${I}
+                                    @click=${e=>e.stopPropagation()}
+                                    @change=${e=>this._selectOption(D,e.target.value)}>
+                                ${A.map(e=>W`
+                                    <option value=${e} ?selected=${e===I}>
+                                        ${this._t(`pause_duration_${e}`)||e}
+                                    </option>`)}
+                            </select>
+                            <button class="ct-pause-btn"
+                                    @click=${e=>{e.stopPropagation(),this._pressButton(N)}}
+                                    title=${this._t("pause_charging_hint")}>
+                                <ha-icon icon="mdi:pause-octagon-outline" style="--mdc-icon-size:15px"></ha-icon>
+                                ${this._t("pause_charging")}
+                            </button>
+                        </span>
+                    </div>
+                    `:K}
+                    ${"solar_plus_battery"===P&&G?W`
                     <div class="ct-subhint">
                         <div class="ct-hint-row">
                             <ha-icon icon="mdi:school-outline" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
-                            <span class="ct-hint-text">${L}</span>
+                            <span class="ct-hint-text">${q}</span>
                         </div>
                     </div>
                     `:K}
@@ -3504,40 +3526,40 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <div class="ct-subhint">
                         <div class="ct-hint-row">
                             <span class="ct-hint-label">${this._t("hint_label_surplus")}:</span>
-                            <span class="ct-hint-text">${G}</span>
+                            <span class="ct-hint-text">${J}</span>
                         </div>
                         <div class="ct-hint-row">
                             <span class="ct-hint-label">${this._t("hint_label_overnight")}:</span>
-                            <span class="ct-hint-text">${q}</span>
+                            <span class="ct-hint-text">${Q}</span>
                         </div>
                         <div class="ct-hint-row">
                             <span class="ct-hint-label">${this._t("hint_label_battery")}:</span>
-                            <span class="ct-hint-text">${V}</span>
+                            <span class="ct-hint-text">${ee}</span>
                         </div>
-                        ${le?W`
+                        ${ue?W`
                             <div class="ct-hint-row ct-hint-extra">
                                 <span class="ct-hint-label">${this._t("ev_next_cheap")}:</span>
-                                <span class="ct-hint-text"><b style="color:#8DC892">${ne}</b></span>
+                                <span class="ct-hint-text"><b style="color:#8DC892">${_e}</b></span>
                             </div>
                         `:K}
                     </div>
-                    `:le?W`
+                    `:ue?W`
                         <div class="ct-cheap-hint">
                             <span class="ct-hint-label">${this._t("ev_next_cheap")}:</span>
-                            <b style="color:#8DC892">${ne}</b>
+                            <b style="color:#8DC892">${_e}</b>
                         </div>
                     `:K}
-                    ${de?W`
+                    ${fe?W`
                     <div class="ct-row">
                         <span class="ct-label">${this._t("phase_mode")}</span>
                         <span class="ct-ctl">
                             <select class="ct-mode-select"
-                                    .value=${he}
+                                    .value=${ye}
                                     @click=${e=>e.stopPropagation()}
-                                    @change=${e=>this._selectOption(ce,e.target.value)}>
-                                ${_e.map(e=>W`
-                                    <option value=${e} ?selected=${e===he}>
-                                        ${ue[e]||e}
+                                    @change=${e=>this._selectOption(me,e.target.value)}>
+                                ${be.map(e=>W`
+                                    <option value=${e} ?selected=${e===ye}>
+                                        ${xe[e]||e}
                                     </option>`)}
                             </select>
                         </span>
@@ -3546,20 +3568,20 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="ct-hint-row">
                             <span class="ct-hint-text">
                                 <ha-icon icon="mdi:sine-wave" style="--mdc-icon-size:12px;color:#8DC892"></ha-icon>
-                                ${me}
+                                ${$e}
                             </span>
                         </div>
                     </div>
                     `:K}
                     <div class="ct-row clickable"
-                        @click=${()=>this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:te}}))}>
+                        @click=${()=>this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:ne}}))}>
                         <span class="ct-label">${this._t("ev_charge_by")}</span>
                         <span class="ct-ctl ct-time">
                             <ha-icon icon="mdi:clock-end" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
-                            ${se}
+                            ${ce}
                         </span>
                     </div>
-                    ${ae?W`
+                    ${pe?W`
                         <div class="ct-warn">
                             <ha-icon icon="mdi:clock-alert" style="--mdc-icon-size:14px;color:#f06292"></ha-icon>
                             <span>${this._t("ev_deadline_unreachable_short")}</span>

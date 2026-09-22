@@ -14,6 +14,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import SEMCoordinator
+from .coordinator.charge_pause import (   # (#980)
+    DEFAULT_PAUSE_DURATION, PAUSE_DURATIONS,
+)
 from .coordinator.install_modules import Module, keeps, presence_of
 
 type SEMConfigEntry = ConfigEntry[SEMCoordinator]
@@ -112,7 +115,20 @@ def _has_battery(coordinator: SEMCoordinator) -> bool:
 SELECT_TYPES = [
     # ev_charging_mode and ev_target_type are PER-CHARGER only (#255) — the global
     # duplicates were removed (seeded per-charger by the v3→v4 migration). The old
-    # global entities are removed from the registry below. No global selects remain.
+    # global entities are removed from the registry below.
+    #
+    # (#980) How long the per-charger Pause buttons pause for. GLOBAL on
+    # purpose: the duration is a choice you make in the moment, not a
+    # property of a charger, and a copy per charger would be the same
+    # answer typed twice on a two-charger install. Each charger keeps its
+    # OWN button, so pausing one and leaving the other running still works
+    # — you just do not set the duration twice.
+    SelectEntityDescription(
+        key="pause_duration",
+        options=list(PAUSE_DURATIONS.keys()),
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:timer-pause-outline",
+    ),
 ]
 
 
@@ -310,13 +326,20 @@ class SEMSelectEntity(CoordinatorEntity, SelectEntity):
         if self._is_target_type:
             has_soc = bool(self.coordinator.config.get("vehicle_soc_entity"))
             return _target_type_options(has_soc)
-        return list(EV_CHARGING_MODES.keys())
+        # (#980) A description that declares its own options owns them. The
+        # EV-mode fallback below predates there being any other global
+        # select, and silently handing a pause dropdown the charging modes
+        # is the kind of wrong list that renders and does nothing.
+        declared = list(self.entity_description.options or [])
+        return declared or list(EV_CHARGING_MODES.keys())
 
     @property
     def _default_option(self) -> str:
         """Return the default option for this entity."""
         if self._is_target_type:
             return "kwh"
+        if self.entity_description.key == "pause_duration":
+            return DEFAULT_PAUSE_DURATION
         return "auto"
 
     @property
