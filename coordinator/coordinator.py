@@ -7803,20 +7803,19 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             export_guard_enabled=bool(getattr(_fs, "export_guard_enabled", False)),
             sink_verdicts=dict(getattr(_fs, "sink_verdicts", None) or {}),
             ev_morning_window_open=bool(getattr(_fs, "morning_window_open", False)),
-            # (#1003) The peak layer's four numbers, the same class as the
-            # export axis above and found the same way. The battery decider
-            # hands part of the house's draw to the meter (the #879 hold, the
-            # #620 clamp) and could not see the ceiling it has to stay under:
-            # these rode build_view's charger context from #864/#906 on, and
-            # never this second producer. Bug class: two producers of one
-            # context, a field threaded through one of them.
+            # (#1003) The ceiling, and whether this cycle could see. Same
+            # class as the export axis above and found the same way: the
+            # battery decider hands part of the house's draw to the meter (the
+            # #879 hold, the #620 clamp) and could not see the limit it has to
+            # stay under, because these rode build_view's charger context from
+            # #864/#818 on and never this second producer. Bug class: two
+            # producers of one context, a field threaded through one of them.
             peak_slot_allowed_w=getattr(_fs, "peak_slot_allowed_w", None),
-            grid_import_w=float(getattr(power, "grid_import_power", 0.0) or 0.0),
-            # (#906) unread is not zero — the hold needs to know.
-            grid_import_known=not bool(
-                getattr(power, "grid_power_unavailable", False)),
-            battery_discharge_w=float(
-                getattr(power, "battery_discharge_power", 0.0) or 0.0),
+            # (#818) any dark steering read moves the energy balance, and
+            # ``home_consumption_power`` IS that balance's residual — so the
+            # floor that reads it must know when it is not a measurement.
+            inputs_degraded=bool(getattr(power, "inputs_degraded", False)),
+            dark_inputs=tuple(getattr(power, "dark_inputs", ()) or ()),
         )
 
         # 2. Source per-battery iteration. Multi-battery installs
@@ -11300,8 +11299,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             _LOGGER.warning(
                 "Peak slot guard FAILED this cycle — the 15-minute peak cap "
                 "is not being applied, and this is NOT the slider's MAX "
-                "off-switch. Charging offers are uncapped until it recovers "
-                "(#864).", exc_info=True,
+                "off-switch. Charging offers are uncapped until it recovers, "
+                "and the battery holds that give the house to the meter stop "
+                "covering it (#864/#1003).", exc_info=True,
             )
             allowed = None
         self._peak_slot_allowed_w = allowed

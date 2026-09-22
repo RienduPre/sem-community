@@ -83,30 +83,31 @@ def peak_cover_floor_w(view: "BatteryView", limit_w: float, n: int) -> float:
     lets the grid fund the cheap-hours loads. Both save cents. Going over the
     limit costs far more — a capacity tariff bills the whole month on one bad
     15-minute slot — so every one of those limits gets a floor: the watts the
-    meter may not buy, which the pack has to cover instead.
+    meter may not buy for the HOUSE, which the pack has to cover instead.
 
-    Bounded by ``home_consumption_w``, the house load the pack may serve. That
-    figure already excludes the car (the balance subtracts ``ev_power``), so a
-    car that breaks the limit by itself never drains the pack here — the
-    charger's own peak clamp is what answers for the car. Split by ``n`` like
-    the limit it floors (#531/#691), so N batteries cover the excess once.
+    Only the house. ``home_consumption_w`` excludes the car (the balance
+    subtracts ``ev_power``), and the trigger is the house's own import, not
+    the meter's total — so a car that breaks the limit by itself neither
+    raises this floor nor drains the pack, and the charger's own clamp is
+    what answers for the car. Split by ``n`` like the limit it floors
+    (#531/#691), so N batteries cover the excess once, and never lowering.
 
-    Returns ``limit_w`` untouched when no ceiling is configured, when the meter
-    could not be read this cycle (#906/#925 — a dark meter is no evidence
-    either way), and when the import already fits.
+    Returns ``limit_w`` untouched when no ceiling is configured, and on a
+    cycle that cannot see. ``home_consumption_w`` is the energy balance's
+    residual, so a dark grid, battery or solar read moves it — and #818's
+    rule for exactly that is that a blind cycle is not steered on.
     """
     f = view.fleet
     allowed_w = getattr(f, "peak_slot_allowed_w", None)
-    if allowed_w is None or not bool(getattr(f, "grid_import_known", True)):
+    if allowed_w is None or bool(getattr(f, "inputs_degraded", False)):
         return float(limit_w)
-    cover_w = min(
-        max(0.0, float(view.home_consumption_w or 0.0)),
-        cover_for_peak_w(
-            allowed_w,
-            float(getattr(f, "grid_import_w", 0.0) or 0.0),
-            float(getattr(f, "battery_discharge_w", 0.0) or 0.0),
-        ),
-    ) / max(1, int(n or 1))
+    house_w = max(0.0, float(view.home_consumption_w or 0.0))
+    # ``cover_for_peak_w`` cannot exceed the house it is derived from; the
+    # bound is written anyway, because "never more than the house" is the
+    # invariant that keeps the pack out of the car.
+    cover_w = min(house_w, cover_for_peak_w(
+        allowed_w, house_w, float(getattr(f, "solar_w", 0.0) or 0.0),
+    )) / max(1, int(n or 1))
     return max(float(limit_w), cover_w)
 
 
@@ -432,27 +433,37 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
     if _house_v is not None and getattr(_house_v, "state", "") == "held":
         _f = view.fleet
         _allowed = getattr(_f, "peak_slot_allowed_w", None)
-        # (#906/#925) A meter that could not be read is 0.0 from the reader,
-        # and reading that as "the house is buying nothing" is the optimistic
-        # direction. A hold that cannot see the meter cannot show the slot is
-        # safe, so it does not hold: fall through and let the pack cover the
-        # house, exactly as it did before this sink existed.
-        _blind = (_allowed is not None
-                  and not bool(getattr(_f, "grid_import_known", True)))
-        if not _blind:
-            _n = max(1, int(getattr(_f, "battery_count", 1) or 1))
-            _cover_w = peak_cover_floor_w(view, 0.0, _n)
-            _why = f"house sink held — {getattr(_house_v, 'reason', '')}"
-            if _cover_w > 0.0:
-                _why = (
-                    f"{_why}; the meter may buy {float(_allowed):.0f} W this "
-                    f"quarter hour, so the pack covers {_cover_w:.0f} W"
-                )
+        _n = max(1, int(getattr(_f, "battery_count", 1) or 1))
+        if _allowed is not None and bool(getattr(_f, "inputs_degraded", False)):
+            # A hold that cannot see cannot show the slot is safe, so it does
+            # not hold: cover the house, as the pack did before this sink
+            # existed. Still LIMIT_DISCHARGE and not NORMAL — #818 blocks a
+            # FLIP between those two on a blind cycle, so a hold released as
+            # NORMAL is never written and the 0 W stands through exactly the
+            # blindness that released it.
             return BatteryDecision(
                 battery_id=rt.battery_id, intent=BatteryIntent.LIMIT_DISCHARGE,
-                discharge_limit_w=_cover_w,
-                reason=_why,
+                discharge_limit_w=max(0.0, float(view.home_consumption_w or 0.0)) / _n,
+                # CAUSE: `_f.inputs_degraded` is the branch condition one line
+                # up, and `_f.dark_inputs` is the reader's own list of which
+                # reads were dark — the names printed are those, never a guess.
+                reason=("house sink not held — a dark "
+                        f"{', '.join(getattr(_f, 'dark_inputs', ()) or ('input',))} "
+                        "read cannot show the meter is under its limit"),
             )
+        _cover_w = peak_cover_floor_w(view, 0.0, _n)
+        _why = f"house sink held — {getattr(_house_v, 'reason', '')}"
+        if _cover_w > 0.0:
+            _why = (
+                f"{_why}; the meter may buy {float(_allowed):.0f} W for the "
+                f"rest of this quarter hour, so the pack covers "
+                f"{_cover_w:.0f} W"
+            )
+        return BatteryDecision(
+            battery_id=rt.battery_id, intent=BatteryIntent.LIMIT_DISCHARGE,
+            discharge_limit_w=_cover_w,
+            reason=_why,
+        )
 
     # ─── LIMIT_DISCHARGE branch (unified solar gate) ───
     # The home battery must NEVER be drained to charge the EV when there
@@ -541,9 +552,11 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
             gf_w = max(0.0, float(getattr(view, "grid_funded_load_w", 0.0) or 0.0))
             home_w = max(0.0, view.home_consumption_w - gf_w) / n
             # (#1003) the grid-funded slice goes to the meter, and the meter
-            # has a ceiling. Floored, never lowered; the car is not in this
+            # has a limit. Floored, never lowered; the car is not in this
             # figure, so this never feeds the car.
-            home_w = peak_cover_floor_w(view, home_w, n)
+            _floored_w = peak_cover_floor_w(view, home_w, n)
+            _peak_raised = _floored_w > home_w
+            home_w = _floored_w
             if not getattr(f, "battery_soc_known", True):
                 # (#983) ``below_buffer`` is a disjunction, and the unread
                 # arm has no comparison in it: printing "SoC unknown < buffer
@@ -564,14 +577,16 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
                     f"ev plugged in + solar surplus {surplus_w:.0f}W < gate "
                     f"{gate_w:.0f}W"
                 )
-            if gf_w > 0:
+            if gf_w > 0 and not _peak_raised:
                 why += f" (excl. {gf_w:.0f}W grid-funded load)"
             return BatteryDecision(
                 battery_id=rt.battery_id,
                 intent=BatteryIntent.LIMIT_DISCHARGE,
                 discharge_limit_w=home_w,
                 reason=(
-                    f"{why} → discharge limit {home_w:.0f} W (home/{n} across fleet)"
+                    f"{why} → discharge limit {home_w:.0f} W "
+                    + ("raised to the house's share of the peak limit"
+                       if _peak_raised else f"(home/{n} across fleet)")
                 ),
             )
 
@@ -592,15 +607,20 @@ def decide_battery(view: "BatteryView") -> BatteryDecision:
             home_w = max(0.0, view.home_consumption_w - gf_w) / n
             # (#1003) same floor as its sibling above: the grid funds these
             # loads to save cents, and the peak limit outranks that.
-            home_w = peak_cover_floor_w(view, home_w, n)
+            _floored_w = peak_cover_floor_w(view, home_w, n)
+            _peak_raised = _floored_w > home_w
+            home_w = _floored_w
             return BatteryDecision(
                 battery_id=rt.battery_id,
                 intent=BatteryIntent.LIMIT_DISCHARGE,
                 discharge_limit_w=home_w,
                 reason=(
                     f"grid-funded load(s) {gf_w:.0f}W running (cheap-hours "
-                    f"top-up) → discharge limit {home_w:.0f} W (home/{n} "
-                    f"across fleet) so the grid feeds them"
+                    f"top-up) → discharge limit {home_w:.0f} W "
+                    + ("raised to the house's share of the peak limit — the "
+                       "grid may not buy the rest"
+                       if _peak_raised else
+                       f"(home/{n} across fleet) so the grid feeds them")
                 ),
             )
 
