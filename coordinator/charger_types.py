@@ -558,7 +558,14 @@ class ChargerDecision:
     """(#899) Battery-charge watts this decision credited to the car
     ("redirect"). Carried so the loop can check it against the meter
     next cycle — sustained grid import with a redirect in the budget means
-    the pack did not yield, and the redirect is dropped for the session."""
+    the pack did not yield, and the redirect is dropped for the session.
+
+    ALL of them, by whichever route: the forecast redirect and the #576
+    position reclaim both spend the pack's charging watts on the same bet,
+    and round 1 recorded only the first. The reclaim is the route a stock
+    install takes (charger seeds at priority 3, pack at 100), so the check
+    ran for a year on the rarer of the two and read zero on the common one.
+    A route that adds pack watts here and does not say so is the bug."""
     bridgeable: bool = True
     """For an IDLE decision: is this a TRANSIENT dip worth holding the
     contactor through (a passing cloud while real surplus / battery
@@ -1094,16 +1101,24 @@ class ChargerView:
     999 (bottom) so a view built without it never spuriously reclaims."""
 
     wpa_table: Mapping[int, float] = field(default_factory=dict)
-    redirect_allowed: bool = True
-    """(#899) False once the meter has contradicted this session's battery
-    redirect (see ``PerChargerState.redirect_vetoed``): ``solar_only``
-    credits no redirect until the next plug-in."""
     """(#846) Measured watts-per-amp per commanded setpoint for the phase
     count SEM believes — ``{amps: W/A}``, empty until earned. Every
     watts→amps conversion in ``decide()`` reads it through
     ``predict_watts``/``amps_from_watts``: nameplate where the table is
     silent, the car's own response where it has spoken. A typed field, not
-    a ``config`` key, for the same reason as ``plan`` below."""
+    a ``config`` key, for the same reason as ``plan`` below.
+
+    (This docstring spent #899 round 1 orphaned below ``redirect_allowed``,
+    which was inserted between the field and its own text.)"""
+
+    redirect_allowed: bool = True
+    """(#899) False once the meter has contradicted this session's battery
+    credit (see ``PerChargerState.redirect_vetoed``). Until the car is
+    unplugged the pack's charging watts are off the table for this charger
+    by EVERY route: the forecast redirect, and the #576 position reclaim
+    that ``_ev_reclaims`` gates — so the modes that delegate their day path
+    to ``solar_only``, the Zone 3/4 budget, and the stability bridge's own
+    surplus read all follow it."""
 
     plan: PlanVerdict = field(default_factory=PlanVerdict)
     """(#638) What the PLANNING layer decided for this charger this cycle.

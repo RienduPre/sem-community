@@ -935,6 +935,39 @@ route from entry to actuation can skip it. Placement, not logic, is the fix both
 **Sweep question:** for each guard — *list every `return` between it and the actuator. Which of
 them returns the caller's object rather than a rewritten one?* And: *is the branch predicate the
 same value the guard is protecting against, or a smoothed/derived proxy of it?*
+**Third instance (#899 round 2, 23.09.2026) — the branch the guard skipped was the DEFAULT one.**
+The home battery's charging watts reach an EV budget by two routes: the forecast redirect, and the
+#576 position rule, which simply stops subtracting them once the car outranks the pack. #899 gave
+the redirect a meter check — three cycles of grid import with pack watts in the budget and they
+stop being counted for the plug-in — and wrote it into the redirect branch of
+`decide.SolarOnlyMode`. The position branch handed the same watts through untouched, and recorded
+`redirect_w=0`, so the strike rule (`redirect_w > 0`) could not arm on it *at all*. Priority seeds
+decide which branch an install takes: a charger seeds at 3 (5 from the config flow), the pack at
+100, so the unguarded branch is the one a stock install takes every sunny day. Ten months of a
+check that could only fire on the rarer route; koen71's Huawei pack kept its 2700 W, the meter
+bought them, no strike ever landed. Reproduced on develop at beta.37 with his own numbers: `bare=2700W
++ redirect=0W → 11A`, ten importing cycles, zero strikes. **Closure, same as both earlier times:**
+the gate moved above the split, into `_ev_reclaims` — every caller of it and of
+`self_consumption_surplus_w` now honours the veto, including the three modes that delegate their
+day path to `solar_only` and the stability bridge's own surplus read. The DECLARING half had the
+same shape and the same sweep: `MinPlusSolarMode._decide_day` Zone 3/4 (and `solar_plus_battery`
+through it) reach the reclaim via `_battery_assist_split`, spent the pack's watts and stamped
+`redirect_w=0`; caught by the review, fixed in the same change. The Min-floor branch beside it
+stays at 0 deliberately and says so — that branch BUYS grid on purpose, so import there is not
+evidence about the pack. Two more one-branch guards in the same function fell out: an unread SOC
+turned the position reclaim off and sent the cycle to the forecast redirect, which credited 1350 W
+off the reader's 0.0 SOC fallback (#875's rule, honoured by one door); and observer mode struck on
+commands it never sent. **Guard:** `tests/test_899_reclaim_is_metered_too.py` — an oracle, not a
+case list: run the cycle twice, once as it is and once with the pack's charge power moved into the
+house, and the budget a CHARGE gained over that counterfactual must equal the watts it declared,
+over every mode as well as every shape. A new route that spends pack watts and stays quiet fails it
+without anyone naming the route. **Open for Guido, named not closed:** the veto is judged on the
+FLEET meter (`view.fleet.grid_import_w`) against a PER-CHARGER credit, so a sibling charger's
+deliberate grid draw can veto a charger whose pack is yielding perfectly — class 3, pre-existing,
+but round 1 could not reach it on a stock install and round 2 can. It also latches until the car is
+physically unplugged, and an install with no grid sensor reads 0.0 for ever, so the check is a
+silent no-op there. `diagnostics.charger_adapters[cid].battery_reclaim` now carries `vetoed` and
+`strikes` so a dump can at least say it happened. Refs #899 #576 #938 #925 #875.
 
 ### 30. Backend-honoured config key with no editable surface — GUARDED
 **Symptom:** a setting the runtime genuinely reads and acts on, which the user can never see or
