@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Ekvivalent stromů letos"
+      },
+      "house_meter_power": {
+        "name": "Domovní měřič"
+      },
+      "house_meter_gap": {
+        "name": "Rozdíl měřiče"
       }
     },
     "binary_sensor": {

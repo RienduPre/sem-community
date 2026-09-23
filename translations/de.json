@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Bäume-Äquivalent Dieses Jahr"
+      },
+      "house_meter_power": {
+        "name": "Hauszähler"
+      },
+      "house_meter_gap": {
+        "name": "Abweichung Hauszähler"
       }
     },
     "binary_sensor": {

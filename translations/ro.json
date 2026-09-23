@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Echivalent copaci anul acesta"
+      },
+      "house_meter_power": {
+        "name": "Contor casă"
+      },
+      "house_meter_gap": {
+        "name": "Diferență contor"
       }
     },
     "binary_sensor": {

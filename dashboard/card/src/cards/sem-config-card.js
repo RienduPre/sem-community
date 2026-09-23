@@ -252,6 +252,9 @@ const STRUCTURAL_KEYS = new Set([
     // Read at SensorReader construction (#592/#597) → backend reloads on
     // set_option; staging batches the three into one Apply/reload.
     'grid_power_sensor', 'solar_production_sensor', 'battery_power_sensor',
+    // (#891) the fourth source. Read at SensorReader construction like the
+    // three above, so structural like them.
+    'house_power_sensor',
     'heat_pump_relay1_entity', 'heat_pump_relay2_entity',
     // (#801) the ON/OFF values of a text/number/select contact — read at
     // HeatPumpController construction, so structural like the entity itself.
@@ -1285,6 +1288,15 @@ class SEMConfigCard extends SEMLitBase {
             ${this._renderPicker('battery_power_sensor', 'config_battery_power_sensor',
                 'sensor', 'power', opts, 'config_help_battery_power_sensor')}
             ${this._sourceUnavailableWarning('battery_power_sensor', opts, T)}
+            ${/* (#891) The house as the inverter measures it. SEM works its
+                  own figure out from the other four, and on a hybrid that
+                  sum carries the inverter's conversion losses. Naming a
+                  sensor here publishes both and the difference; SEM's own
+                  number is unchanged, which is why there is no question
+                  about the car. */ ''}
+            ${this._renderPicker('house_power_sensor', 'config_house_power_sensor',
+                'sensor', 'power', opts, 'config_help_house_power_sensor')}
+            ${this._sourceUnavailableWarning('house_power_sensor', opts, T)}
         `;
     }
 
@@ -1292,7 +1304,8 @@ class SEMConfigCard extends SEMLitBase {
     _sensorSourcesSubtitle() {
         const opts = this._options || {};
         const n = ['grid_power_sensor', 'solar_production_sensor',
-                   'battery_power_sensor'].filter((k) => opts[k]).length;
+                   'battery_power_sensor', 'house_power_sensor']
+            .filter((k) => opts[k]).length;
         if (!n) return this._t('config_sources_all_auto');
         return `${n} ${this._t('config_sources_overridden')}`;
     }

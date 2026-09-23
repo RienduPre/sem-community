@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "今年等效植树"
+      },
+      "house_meter_power": {
+        "name": "房屋电表"
+      },
+      "house_meter_gap": {
+        "name": "房屋电表差值"
       }
     },
     "binary_sensor": {

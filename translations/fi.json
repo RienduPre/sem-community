@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Puuvastaavuus tänä vuonna"
+      },
+      "house_meter_power": {
+        "name": "Talomittari"
+      },
+      "house_meter_gap": {
+        "name": "Talomittarin ero"
       }
     },
     "binary_sensor": {

@@ -1562,15 +1562,8 @@
     "plan_expensive_detail_plain": "do {end} · prům. {price} {currency}/kWh",
     "price_level_flat": "Žádný cenový rozdíl",
     "price_level_no_prices": "Nejsou dostupné ceny",
-    "pause_charging_for": "Pozastavit na",
-    "pause_charging": "Pauza",
-    "pause_charging_hint": "Nastaví režim této nabíječky na Vypnuto na zvolenou dobu a pak jej vrátí. Dřívější ukončení: nastavte režim nabíjení sami.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 hodina",
-    "pause_duration_2_hours": "2 hodiny",
-    "pause_duration_4_hours": "4 hodiny",
-    "pause_duration_8_hours": "8 hodin",
-    "pause_duration_12_hours": "12 hodin"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3135,15 +3128,8 @@
     "plan_expensive_detail_plain": "til {end} · gns. {price} {currency}/kWh",
     "price_level_flat": "Ingen prisforskel",
     "price_level_no_prices": "Ingen priser tilgængelige",
-    "pause_charging_for": "Pause i",
-    "pause_charging": "Pause",
-    "pause_charging_hint": "Sætter denne laders tilstand til Fra i den valgte tid og derefter tilbage. Sæt selv ladetilstanden for at slutte tidligere.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 time",
-    "pause_duration_2_hours": "2 timer",
-    "pause_duration_4_hours": "4 timer",
-    "pause_duration_8_hours": "8 timer",
-    "pause_duration_12_hours": "12 timer"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4708,15 +4694,8 @@
     "plan_expensive_detail_plain": "bis {end} · Ø {price} {currency}/kWh",
     "price_level_flat": "Kein Preisunterschied",
     "price_level_no_prices": "Keine Preise verfügbar",
-    "pause_charging_for": "Pausieren für",
-    "pause_charging": "Pause",
-    "pause_charging_hint": "Setzt den Modus dieser Wallbox für die gewählte Zeit auf Aus und danach zurück auf den jetzigen. Zum früheren Beenden den Lademodus selbst setzen.",
-    "pause_duration_30_minutes": "30 Min.",
-    "pause_duration_1_hour": "1 Std.",
-    "pause_duration_2_hours": "2 Std.",
-    "pause_duration_4_hours": "4 Std.",
-    "pause_duration_8_hours": "8 Std.",
-    "pause_duration_12_hours": "12 Std."
+    "config_house_power_sensor": "Hausverbrauch-Sensor",
+    "config_help_house_power_sensor": "Ihr Wechselrichter liefert den Hausverbrauch eventuell direkt (z. B. Fronius SolarNet „Leistung Verbrauch“). Sonst rechnet SEM ihn aus Solar, Netz, Batterie und EV aus, und bei einem Hybrid steckt in dieser Summe auch der Wandlungsverlust — 30 bis 60 W bei einem Fronius GEN24. Leer lassen für das bisherige Verhalten."
   },
   "en": {
     "% of limit": "% of limit",
@@ -6281,15 +6260,8 @@
     "plan_expensive_detail_plain": "until {end} · avg {price} {currency}/kWh",
     "price_level_flat": "No price difference",
     "price_level_no_prices": "No prices available",
-    "pause_charging_for": "Pause for",
-    "pause_charging": "Pause",
-    "pause_charging_hint": "Sets this charger's mode to Off for the chosen time, then back to what it is now. Set the Charge Mode yourself to end it sooner.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 hour",
-    "pause_duration_2_hours": "2 hours",
-    "pause_duration_4_hours": "4 hours",
-    "pause_duration_8_hours": "8 hours",
-    "pause_duration_12_hours": "12 hours"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works its own figure out from solar, grid, battery and EV, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Name a sensor here and SEM publishes both numbers and the difference between them. Its own figure is unchanged, so nothing it decides changes either."
   },
   "es": {
     "% of limit": "% del límite",
@@ -7854,15 +7826,8 @@
     "plan_expensive_detail_plain": "hasta {end} · med. {price} {currency}/kWh",
     "price_level_flat": "Sin diferencia de precio",
     "price_level_no_prices": "Sin precios disponibles",
-    "pause_charging_for": "Pausar durante",
-    "pause_charging": "Pausa",
-    "pause_charging_hint": "Pone el modo de este cargador en Apagado durante el tiempo elegido y luego lo devuelve. Cambia el modo de carga tú mismo para terminar antes.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 hora",
-    "pause_duration_2_hours": "2 horas",
-    "pause_duration_4_hours": "4 horas",
-    "pause_duration_8_hours": "8 horas",
-    "pause_duration_12_hours": "12 horas"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9427,15 +9392,8 @@
     "plan_expensive_detail_plain": "klo {end} asti · ka. {price} {currency}/kWh",
     "price_level_flat": "Ei hintaeroa",
     "price_level_no_prices": "Hintoja ei saatavilla",
-    "pause_charging_for": "Keskeytä ajaksi",
-    "pause_charging": "Tauko",
-    "pause_charging_hint": "Asettaa tämän latausaseman tilaksi Pois valituksi ajaksi ja palauttaa sen sitten. Aseta lataustila itse lopettaaksesi aiemmin.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 tunti",
-    "pause_duration_2_hours": "2 tuntia",
-    "pause_duration_4_hours": "4 tuntia",
-    "pause_duration_8_hours": "8 tuntia",
-    "pause_duration_12_hours": "12 tuntia"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -11000,15 +10958,8 @@
     "plan_expensive_detail_plain": "jusqu'à {end} · moy. {price} {currency}/kWh",
     "price_level_flat": "Aucun écart de prix",
     "price_level_no_prices": "Aucun prix disponible",
-    "pause_charging_for": "Pause pendant",
-    "pause_charging": "Pause",
-    "pause_charging_hint": "Met le mode de cette borne sur Arrêt pendant la durée choisie, puis le rétablit. Réglez vous-même le mode de charge pour terminer plus tôt.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 heure",
-    "pause_duration_2_hours": "2 heures",
-    "pause_duration_4_hours": "4 heures",
-    "pause_duration_8_hours": "8 heures",
-    "pause_duration_12_hours": "12 heures"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12573,15 +12524,8 @@
     "plan_expensive_detail_plain": "{end}-ig · átl. {price} {currency}/kWh",
     "price_level_flat": "Nincs árkülönbség",
     "price_level_no_prices": "Nincsenek elérhető árak",
-    "pause_charging_for": "Szüneteltetés ennyi ideig",
-    "pause_charging": "Szünet",
-    "pause_charging_hint": "A töltő módját a választott időre Ki állásba teszi, majd visszaállítja. Korábbi befejezéshez állítsa be a töltési módot saját kezűleg.",
-    "pause_duration_30_minutes": "30 perc",
-    "pause_duration_1_hour": "1 óra",
-    "pause_duration_2_hours": "2 óra",
-    "pause_duration_4_hours": "4 óra",
-    "pause_duration_8_hours": "8 óra",
-    "pause_duration_12_hours": "12 óra"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "it": {
     "% of limit": "% del limite",
@@ -14146,15 +14090,8 @@
     "plan_expensive_detail_plain": "fino alle {end} · media {price} {currency}/kWh",
     "price_level_flat": "Nessuna differenza di prezzo",
     "price_level_no_prices": "Nessun prezzo disponibile",
-    "pause_charging_for": "Pausa per",
-    "pause_charging": "Pausa",
-    "pause_charging_hint": "Imposta la modalità di questa colonnina su Off per il tempo scelto, poi la ripristina. Cambia tu la modalità di ricarica per finire prima.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 ora",
-    "pause_duration_2_hours": "2 ore",
-    "pause_duration_4_hours": "4 ore",
-    "pause_duration_8_hours": "8 ore",
-    "pause_duration_12_hours": "12 ore"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15719,15 +15656,8 @@
     "plan_expensive_detail_plain": "tot {end} · gem. {price} {currency}/kWh",
     "price_level_flat": "Geen prijsverschil",
     "price_level_no_prices": "Geen prijzen beschikbaar",
-    "pause_charging_for": "Pauzeren voor",
-    "pause_charging": "Pauze",
-    "pause_charging_hint": "Zet de modus van deze lader op Uit voor de gekozen tijd en daarna terug. Stel de laadmodus zelf in om eerder te stoppen.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 uur",
-    "pause_duration_2_hours": "2 uur",
-    "pause_duration_4_hours": "4 uur",
-    "pause_duration_8_hours": "8 uur",
-    "pause_duration_12_hours": "12 uur"
+    "config_house_power_sensor": "Huisverbruik-sensor",
+    "config_help_house_power_sensor": "Je omvormer publiceert het huisverbruik mogelijk rechtstreeks (bijvoorbeeld Fronius SolarNet 'Leistung Verbrauch'). Anders rekent SEM het uit zon, net, accu en EV, en bij een hybride zit in die som ook het omzettingsverlies — 30 tot 60 W bij een Fronius GEN24. Leeg laten voor het huidige gedrag."
   },
   "no": {
     "% of limit": "% av grense",
@@ -17292,15 +17222,8 @@
     "plan_expensive_detail_plain": "til {end} · snitt {price} {currency}/kWh",
     "price_level_flat": "Ingen prisforskjell",
     "price_level_no_prices": "Ingen priser tilgjengelig",
-    "pause_charging_for": "Pause i",
-    "pause_charging": "Pause",
-    "pause_charging_hint": "Setter laderens modus til Av i valgt tid og deretter tilbake. Sett lademodus selv for å avslutte tidligere.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 time",
-    "pause_duration_2_hours": "2 timer",
-    "pause_duration_4_hours": "4 timer",
-    "pause_duration_8_hours": "8 timer",
-    "pause_duration_12_hours": "12 timer"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "pl": {
     "% of limit": "% limitu",
@@ -18865,15 +18788,8 @@
     "plan_expensive_detail_plain": "do {end} · śr. {price} {currency}/kWh",
     "price_level_flat": "Brak różnicy cen",
     "price_level_no_prices": "Brak dostępnych cen",
-    "pause_charging_for": "Wstrzymaj na",
-    "pause_charging": "Pauza",
-    "pause_charging_hint": "Ustawia tryb tej ładowarki na Wyłączony na wybrany czas, a potem go przywraca. Ustaw tryb ładowania samodzielnie, aby zakończyć wcześniej.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 godz.",
-    "pause_duration_2_hours": "2 godz.",
-    "pause_duration_4_hours": "4 godz.",
-    "pause_duration_8_hours": "8 godz.",
-    "pause_duration_12_hours": "12 godz."
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20438,15 +20354,8 @@
     "plan_expensive_detail_plain": "até {end} · méd. {price} {currency}/kWh",
     "price_level_flat": "Sem diferença de preço",
     "price_level_no_prices": "Sem preços disponíveis",
-    "pause_charging_for": "Pausar durante",
-    "pause_charging": "Pausa",
-    "pause_charging_hint": "Coloca o modo deste carregador em Desligado durante o tempo escolhido e depois repõe-no. Defina o modo de carregamento para terminar antes.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 hora",
-    "pause_duration_2_hours": "2 horas",
-    "pause_duration_4_hours": "4 horas",
-    "pause_duration_8_hours": "8 horas",
-    "pause_duration_12_hours": "12 horas"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "ro": {
     "% of limit": "% din limită",
@@ -22011,15 +21920,8 @@
     "plan_expensive_detail_plain": "până la {end} · med. {price} {currency}/kWh",
     "price_level_flat": "Fără diferență de preț",
     "price_level_no_prices": "Niciun preț disponibil",
-    "pause_charging_for": "Pauză pentru",
-    "pause_charging": "Pauză",
-    "pause_charging_hint": "Pune modul acestui încărcător pe Oprit pentru timpul ales, apoi îl readuce. Setează singur modul de încărcare pentru a termina mai devreme.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 oră",
-    "pause_duration_2_hours": "2 ore",
-    "pause_duration_4_hours": "4 ore",
-    "pause_duration_8_hours": "8 ore",
-    "pause_duration_12_hours": "12 ore"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23584,15 +23486,8 @@
     "plan_expensive_detail_plain": "till {end} · snitt {price} {currency}/kWh",
     "price_level_flat": "Ingen prisskillnad",
     "price_level_no_prices": "Inga priser tillgängliga",
-    "pause_charging_for": "Pausa i",
-    "pause_charging": "Paus",
-    "pause_charging_hint": "Sätter laddarens läge till Av under vald tid och återställer det sedan. Ställ in laddläget själv för att avsluta tidigare.",
-    "pause_duration_30_minutes": "30 min",
-    "pause_duration_1_hour": "1 timme",
-    "pause_duration_2_hours": "2 timmar",
-    "pause_duration_4_hours": "4 timmar",
-    "pause_duration_8_hours": "8 timmar",
-    "pause_duration_12_hours": "12 timmar"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25157,14 +25052,7 @@
     "plan_expensive_detail_plain": "至 {end} · 平均 {price} {currency}/kWh",
     "price_level_flat": "无价格差异",
     "price_level_no_prices": "无可用价格",
-    "pause_charging_for": "暂停",
-    "pause_charging": "暂停",
-    "pause_charging_hint": "将此充电桩的模式设为“关闭”并持续所选时长，之后恢复原状。想提前结束，请自行设置充电模式。",
-    "pause_duration_30_minutes": "30 分钟",
-    "pause_duration_1_hour": "1 小时",
-    "pause_duration_2_hours": "2 小时",
-    "pause_duration_4_hours": "4 小时",
-    "pause_duration_8_hours": "8 小时",
-    "pause_duration_12_hours": "12 小时"
+    "config_house_power_sensor": "House power sensor",
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
   }
 }

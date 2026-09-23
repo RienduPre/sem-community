@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Equivalente Alberi Quest'Anno"
+      },
+      "house_meter_power": {
+        "name": "Contatore casa"
+      },
+      "house_meter_gap": {
+        "name": "Scarto contatore casa"
       }
     },
     "binary_sensor": {
