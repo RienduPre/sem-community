@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.38] — 23.09.2026
+
 - ✨ **SEM can show the house figure your inverter reports** (#891, by @SandmanNCL). Name the sensor and SEM publishes it beside its own, with the difference.
 
 # [2.1.0-beta.37] — 22.09.2026
