@@ -3982,7 +3982,16 @@ pipeline with the guard's command on the fleet state and asserts the adapter was
 the pre-fix coordinator (5 of 8).
 **Sweep question:** for any field added to a context dataclass — *how many call sites construct
 that class, and did the field reach all of them?* `call_sites(ClassName)` answers it in one line.
-Refs #955 #921 #358 #924.
+**Second instance (#1003, 22.09.2026):** the peak axis — `peak_slot_allowed_w`, and the #818
+`inputs_degraded` / `dark_inputs` pair beside it — reached `build_view`'s charger context from #864
+on and never `_run_battery_pipeline`'s. The battery decider read the dataclass defaults, so the
+#879 house hold could not have seen a limit if it had asked. Same class, same two producers, a
+different axis: the #955 guard pinned the export fields BY NAME, and naming the fields is what let
+the next axis through. `tests/test_1003_the_hold_yields_to_the_peak.py` pins the peak three the
+same way, and the same way is still name-level — a producer passing `peak_slot_allowed_w=None`
+satisfies it. **Open for Guido:** the guard that would end this class is a coverage rule, not a
+field list — every field of `FleetContext` that any decider READS must be passed by every producer,
+derived from the dataclass rather than enumerated. Refs #955 #921 #358 #924 #1003.
 
 ### 94. An observer surface that cannot tell "decided to write" from "still holding" — GUARDED
 **Symptom:** the rig shows a perfect `limit_export` row with the right service and the right device
@@ -4557,3 +4566,69 @@ the same cycle — right, but worth a deliberate look. (4) No orphan sweep: dele
 leaves its Repair until restart, which every per-charger repair in SEM shares. (5) `implausible`
 stays mute — a Repair there needs field evidence about what actually produces it.
 Refs #967 #966 #939 #846 #804 #744 #944.
+
+### 107. A saving that spends someone else's limit — a hold that hands the meter a bill — GUARDED
+**Symptom:** a feature that is *supposed* to import does, on purpose, and the month's capacity
+charge goes up. Nothing in the logs is wrong: the hold engaged in the hour it was built for, the
+saving it names is real, and the peak layer — which is *senior to every mode of every device*
+(#864, 29.08) — was never asked, because the new layer does not command an import, it merely
+declines to prevent one. **Root shape:** SEM's peak defence bounds every command that *creates*
+import: the EV offer (`decide.clamp_to_peak_slot`), the cheap-hours top-up
+(`surplus_controller` → `clamp_import_command`), the battery's own night charge (its
+`peak_limit_w`). A saving-shaped feature creates import from the other side — by removing a cover
+that was already there — and that side had no clamp. The economics make the omission look safe
+("we only pay the spot price for an hour we chose"), and the cost is invisible for up to a month:
+a capacity tariff bills the WORST 15-minute slot, so one bad quarter hour costs more than the
+feature saves in a season. **Where it lives:** every `LIMIT_DISCHARGE` that lowers the pack's cover
+on purpose — the #879 house sink (`decide_battery`, the reported instance), the #620 grid-funded
+clamp beside it, and the EV protection clamp's own `- gf_w` subtraction; the #926 battery-headroom
+hold (assessed: it holds CHARGE headroom, which lowers import, so it is not this class); anything
+future that answers "keep the energy where it is". **Live catch (#1003, found by review of the
+peak layers, not from a report — `battery_house_sink_enabled` is off by default, so no install was
+exposed).** **Closure:** one floor under every such limit — `decide_battery.peak_cover_floor_w`,
+over `peak_guard.cover_for_peak_w`, the mirror of `clamp_import_command`: what a command may ADD
+and what a hold must GIVE BACK read one slot budget.
+**The trigger is the HOUSE'S OWN import (`home − solar`), never the meter's total**, and an
+adversarial review is what separated them. Sized from the total, a 9 kW car and a 400 W house
+under a 6 kW limit tell the pack to cover its whole house load for a breach that is entirely the
+car's — and the charger's clamp, which computes its own headroom as `allowance − (meter − own
+draw)`, then reads the lowered meter as room and takes exactly the watts the pack freed. Two
+layers sized against one allowance from the same total is a *free fixed point*: total import
+unchanged, peak unchanged, pack drained into the car in the cheap hour the user asked to keep it
+(the #545 shape, class 80's "which term carries the invariant" asked about a meter). The house's
+own draw is the one quantity with nobody else to answer for it; the car, the pack's own charging
+and the cheap-hours loads each already have a clamp of their own against the same number.
+Bounded by `home_consumption_w` (which excludes the car), split across the fleet like the limit it
+floors, never lowering one. A cycle that cannot see does not hold at all: `home_consumption_w` IS
+the energy balance's residual, so any dark read moves it (#818), and the release is issued as
+`LIMIT_DISCHARGE` at the house cover rather than `NORMAL` — `actuate_battery` refuses a FLIP
+between those two on a degraded cycle, so a release spelled `NORMAL` is never written and the 0 W
+stands through exactly the blindness that released it. **Guard:**
+`tests/test_1003_the_hold_yields_to_the_peak.py` — the reported case through the real decider, the
+pre-fix 0 W pinned so the plumbing cannot rot back quietly, the car-alone case, the sun-first
+subtraction, the fleet split, the dark house figure built by the REAL `calculate_derived` (not
+hand-fed) and the release proven to reach the adapter through `actuate_battery`'s own degraded
+guard, the clamped balance, both sibling clamps, and `call_sites("FleetContext")` over the peak
+axis. **Sweep question:** for every feature whose
+benefit is a price — *what does it make the meter buy, and who bounds that?* And for every layer
+sized against a shared allowance — *does it subtract the draws that answer for themselves, or the
+whole meter?* A layer that never issues an import command can still be the reason for one.
+**Residuals (for Guido), all one shape — the floor is promised and may not be delivered, and
+nothing says so at runtime:** (1) `#900`'s `DISCHARGE_LIMIT_LOWER_DWELL_CYCLES` makes LOWERING wait
+six cycles and resets the streak on every raise, so an input that blips once a minute (the #818
+motivation names 8-15 % of cycles on a Huawei modbus) pins the limit at the release value and the
+#879 hold never comes back. Safe direction, dead feature; the seam that would fix it is a
+`follows_load` flag on `BatteryDecision` read by `actuate_battery` — a change to the actuator's
+contract, so it is a call, not a sweep. (2) The #531 fleet split divides the cover by the battery
+count, so an empty or unreachable pack silently under-covers — the split's failure mode is
+over-injection, and on a floor it is a breached limit. (3) The cover is not bounded by
+`battery_max_discharge_power`: a 12 kW house under a 3 kW allowance asks 9 kW of a 5 kW pack, the
+adapter clips it, and the reason still says the pack covers 9 kW. (4) `battery_adapters/deye.py`
+records "discharge limiting is not implemented", so on Deye this whole floor is a no-op —
+pre-existing, but this is the first feature where that silence is a billed peak rather than a
+missed saving. (5) A fresh `PeakSlotTracker` after a restart reports `imported_kwh=0, elapsed_s=0`
+mid-slot and grants the full target as the remaining average, so the cover under-sizes for up to
+15 minutes after every restart — #864's own shape, which #1003 now leans a billed guarantee on.
+**Neighbour:** class 93 is the other half of this instance — the peak numbers had ridden
+`build_view`'s charger context since #864 and never the battery pipeline's own, so the decider read
+`None` and could not have asked. Refs #1003 #879 #620 #864 #818 #545 #955.
