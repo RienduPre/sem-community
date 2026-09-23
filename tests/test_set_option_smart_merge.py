@@ -267,6 +267,10 @@ class TestStructuralKeysVisibility:
             "battery_soc_sensor",
             # #592/#597 power-sensor overrides (read at SensorReader construction)
             "solar_production_sensor", "battery_power_sensor", "grid_power_sensor",
+            # (#891) the fourth source. It also decides whether the two
+            # house-meter sensors exist, so naming one must reload or the
+            # entities do not appear until the next restart.
+            "house_power_sensor",
             # #593 hardware battery cycles sensor
             "battery_cycles_sensor",
             "heat_pump_relay1_entity", "heat_pump_relay2_entity",
