@@ -74,9 +74,24 @@ def _cw(watts) -> int:
 def _ev_reclaims(view: ChargerView) -> bool:
     """#576 P2.2 — does this charger reclaim battery-charge power? (Above the
     battery in the one list, SOC ≥ reserve floor, battery not commanded.)
-    (#875) Never from a pack whose SOC has not been read."""
+    (#875) Never from a pack whose SOC has not been read.
+
+    (#899 round 2) And never once the METER has disproved it. The car can be
+    handed the pack's charging watts by two routes: this position rule, and
+    the forecast redirect below. #899 gave the redirect a meter check — three
+    cycles of grid import with pack watts in the budget and they stop being
+    counted for the rest of the plug-in — and wrote that check into the
+    redirect branch only. The position rule is the OTHER branch of the same
+    split, and it is the one almost every install takes: a charger seeds at
+    priority 3, the pack at 100, so any pack above the reserve floor outranks
+    nothing and the car simply gets its watts. On koen71's Huawei the pack
+    does not yield them, the meter buys them, and with the credit recorded as
+    zero the check could not strike once. The gate belongs here, above the
+    split, so no route to the budget can skip it (bug class 29)."""
     f = view.fleet
     if not getattr(f, "battery_soc_known", True):
+        return False
+    if not getattr(view, "redirect_allowed", True):
         return False
     return ev_reclaims_battery_charge(
         soc=f.battery_soc,
@@ -177,7 +192,8 @@ def fleet_soc_zone(f: FleetContext) -> int:
     return soc_zone(f.battery_soc, f.auto_start_soc, f.buffer_soc, f.priority_soc)
 
 
-def self_consumption_surplus_w(view: ChargerView) -> float:
+def self_consumption_surplus_w(view: ChargerView, *,
+                               allow_reclaim: bool = True) -> float:
     """Pure surplus = solar - home (- battery_charge unless Zone 4)
     (- solar_committed_w by higher-priority chargers).
 
@@ -189,6 +205,13 @@ def self_consumption_surplus_w(view: ChargerView) -> float:
     subtracted so the second charger in the per-charger loop sees
     only the surplus NOT already claimed by charger A. Prevents
     over-allocation of solar in multi-charger fleets.
+
+    (#899 round 2) ``allow_reclaim=False`` asks the same question with the
+    #576 position reclaim switched off — the surplus the car would have if
+    the pack kept every watt it is charging with. The difference between the
+    two answers is what this cycle credited the car FROM the pack, which is
+    the number the meter check has to judge (``SolarOnlyMode``). Callers that
+    just want the surplus leave it alone.
     """
     f = view.fleet
     # #743 — granted curtailment watts count exactly like measured
@@ -203,9 +226,23 @@ def self_consumption_surplus_w(view: ChargerView) -> float:
     # ≥ the reserve floor AND the battery isn't under a command. Otherwise the
     # battery keeps its charge (subtract it). Replaces the old fixed
     # ``auto_start_soc`` (90 %) gate with the position rule the loads use.
-    if not _ev_reclaims(view):
+    if not (allow_reclaim and _ev_reclaims(view)):
         available -= f.battery_charge_w
     return max(0.0, available)
+
+
+def reclaimed_pack_w(view: ChargerView) -> float:
+    """(#899 round 2) Watts of the pack's own charge this cycle's bare
+    surplus handed to the car — the #576 position reclaim, measured rather
+    than assumed. Exactly what the surplus gained by not subtracting the
+    pack's charge power, so it is right whatever else is in the sum.
+
+    The decision carries it beside the forecast redirect, because both are
+    the same watts on the same bet: the pack will take less because the car
+    is taking more. The meter is what settles that bet, and it can only
+    settle a number it is given."""
+    return max(0.0, self_consumption_surplus_w(view)
+               - self_consumption_surplus_w(view, allow_reclaim=False))
 
 
 def _battery_assist_split(view: ChargerView) -> tuple[float, float]:
@@ -676,6 +713,11 @@ class SolarOnlyMode(ModeStrategy):
         # battery_charge_w when SOC < auto_start_soc — the battery
         # has priority on solar in that band.
         bare_surplus_w = self_consumption_surplus_w(view)
+        # (#899 round 2) …and when it does NOT subtract it, these are the
+        # pack's watts, sitting inside "bare" where the meter check could
+        # not see them. Measured here, added to the redirect below, and
+        # carried on the decision as one number the meter can judge.
+        pack_reclaim_w = reclaimed_pack_w(view)
 
         # Forecast-aware battery_charge redirect. The v1.6.x
         # ``calculate_canonical_ev_budget(SOLAR_ONLY)`` branch added
@@ -698,9 +740,17 @@ class SolarOnlyMode(ModeStrategy):
         # whose redirect the METER already contradicted (sustained import
         # with a redirect in the budget: the pack did not yield) is vetoed
         # until the next plug-in — ``view.redirect_allowed``.
+        # (#899 round 2) …and a THIRD: a pack whose SOC has not been read.
+        # #875 put that rule in ``_ev_reclaims``, and an unread SOC there
+        # returns False — which sent the cycle down this branch instead,
+        # where ``battery_redirect_w`` was handed the reader's 0.0 fallback
+        # and credited 1350 W of an unread pack. The guard that denies one
+        # door has to deny the other, or it just moves the traffic.
         from .flow_calculator import battery_redirect_w as _redirect
         redirect_w = 0.0 if (
-            _ev_reclaims(view) or not getattr(view, "redirect_allowed", True)
+            _ev_reclaims(view)
+            or not getattr(view, "redirect_allowed", True)
+            or not getattr(f, "battery_soc_known", True)
         ) else _redirect(
             f.battery_charge_w, f.battery_soc,
             f.battery_capacity_kwh, f.forecast_remaining_kwh,
@@ -720,6 +770,20 @@ class SolarOnlyMode(ModeStrategy):
             if isinstance(cfg, dict) else self.VOLTAGE_FALLBACK
         min_w = int(predict_watts(view.wpa_table, min_amps, phases * voltage))
 
+        # (#899 round 2) Say it, wherever the answer lands — both returns
+        # below. A budget that just lost the pack's watts needs a sentence,
+        # or the reader sees a 3800 W sun and a car that stopped, or dropped
+        # 10 A, for no stated reason.
+        _vetoed = "" if getattr(view, "redirect_allowed", True) else (
+            " [battery kept its charge — the grid paid, so SEM stopped "
+            "counting it]"
+        )
+        # …and name the pack watts that ARE in the budget. Round 1 printed
+        # "redirect=0W" over a budget carrying 2700 W of the pack, which is
+        # the line that made this look closed for ten months. Silent when
+        # there are none, so the common case reads exactly as before.
+        _pack_term = f" + battery={_cw(pack_reclaim_w)}W" if pack_reclaim_w else ""
+
         if surplus_w < min_w:
             return ChargerDecision(
                 charger_id=cid, mode="solar_only",
@@ -727,8 +791,9 @@ class SolarOnlyMode(ModeStrategy):
                 budget_w=surplus_w,
                 reason=(
                     f"solar_only: surplus={_cw(surplus_w)}W "
-                    f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W) "
-                    f"< min={min_w}W (={min_amps}A) — idle"
+                    f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W"
+                    f"{_pack_term}) "
+                    f"< min={min_w}W (={min_amps}A) — idle{_vetoed}"
                 ),
             )
 
@@ -739,12 +804,15 @@ class SolarOnlyMode(ModeStrategy):
             charger_id=cid, mode="solar_only",
             intent=ChargerIntent.CHARGE_AT_AMPS,
             commanded_amps=amps, budget_w=surplus_w,
-            redirect_w=float(redirect_w),   # (#899) checked against the meter
+            # (#899) checked against the meter — BOTH doors, or the check
+            # is blind on the one nearly every install uses.
+            redirect_w=float(redirect_w + pack_reclaim_w),
             reason=(
                 f"solar_only: surplus={_cw(surplus_w)}W "
-                f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W) "
+                f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W"
+                f"{_pack_term}) "
                 f"→ {amps}A (solar={_cw(f.solar_w)}W, home={_cw(f.home_w)}W, "
-                f"batt_chg={_cw(f.battery_charge_w)}W)"
+                f"batt_chg={_cw(f.battery_charge_w)}W){_vetoed}"
             ),
         )
 
@@ -981,6 +1049,12 @@ class MinPlusSolarMode(ModeStrategy):
                 intent=ChargerIntent.CHARGE_AT_AMPS,
                 commanded_amps=amps, budget_w=budget_w,
                 assist_w=_assist_share(amps),
+                # (#899 round 2) Deliberately 0, and this is the one branch
+                # where that is the truth. The floor BUYS grid on purpose —
+                # the Min guarantee outranks the sun here — so import proves
+                # nothing about whether the pack yielded, and declaring pack
+                # watts would strike on the mode doing its job.
+                redirect_w=0.0,
                 reason=(
                     f"{mode_name} day Zone {zone}: Min floor engaged "
                     f"({remaining:.1f} kWh remaining > "
@@ -995,6 +1069,13 @@ class MinPlusSolarMode(ModeStrategy):
                 intent=ChargerIntent.CHARGE_AT_AMPS,
                 commanded_amps=amps, budget_w=budget_w,
                 assist_w=_assist_share(amps),
+                # (#899 round 2) Zone 3/4 reaches the same position reclaim
+                # through ``_battery_assist_split``, so it spends the pack's
+                # charging watts exactly as ``solar_only`` does and owes the
+                # meter the same number. ``assist_w`` stays out of it: a
+                # DISCHARGE the user asked for is a different bet, and the
+                # meter has nothing to say about it.
+                redirect_w=reclaimed_pack_w(view),
                 reason=(
                     f"{mode_name} day Zone {zone}: budget={_cw(budget_w)}W "
                     f"→ {amps}A (solar surplus + capped battery assist)"

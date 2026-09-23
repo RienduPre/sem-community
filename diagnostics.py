@@ -470,6 +470,19 @@ async def async_get_config_entry_diagnostics(
                 }
             except Exception:  # noqa: BLE001 — a dump never fails on a field
                 entry_info["phases"] = None
+            # (#899 round 2) Whether this charger has stopped being credited
+            # the home battery's charging watts, and how close it is. The
+            # veto latches until the car is unplugged and until now left no
+            # trace anywhere: a user asking "why did my car stop in full
+            # sun?" sent a dump that could not answer it.
+            try:
+                _st = (getattr(coordinator, "_pcc_store", None) or {}).get(str(cid))
+                entry_info["battery_reclaim"] = {
+                    "vetoed": bool(getattr(_st, "redirect_vetoed", False)),
+                    "strikes": int(getattr(_st, "redirect_strikes", 0) or 0),
+                } if _st is not None else None
+            except Exception:  # noqa: BLE001 — a dump never fails on a field
+                entry_info["battery_reclaim"] = None
             charger_adapter_info[cid] = entry_info
 
     # Battery control observability (#523) — the battery-side mirror of

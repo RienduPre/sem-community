@@ -3955,6 +3955,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             from .per_charger_context import note_redirect_outcome
                             if not view.power.connected:
                                 _pstate.reset_session()
+                            elif self._observer_mode:
+                                # (#899 round 2) Observer writes nothing, so
+                                # the car is not drawing what this decision
+                                # offered and the meter is answering about
+                                # somebody else. Striking here would latch a
+                                # veto off a command SEM never gave, and the
+                                # user would find it waiting when they hand
+                                # control back.
+                                pass
                             else:
                                 note_redirect_outcome(
                                     _pstate,
