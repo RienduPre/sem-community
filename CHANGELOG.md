@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.39] — 23.09.2026
+
+- 🐛 **Solar only no longer buys from the grid while the battery takes the sun** (#899). SEM stops counting watts the battery keeps.
+
 # [2.1.0-beta.38] — 23.09.2026
 
 - ✨ **SEM can show the house figure your inverter reports** (#891, by @SandmanNCL). Name the sensor and SEM publishes it beside its own, with the difference.
