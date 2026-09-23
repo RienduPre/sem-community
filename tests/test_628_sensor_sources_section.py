@@ -22,7 +22,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 _CARD = _ROOT / "dashboard" / "card" / "src" / "cards" / "sem-config-card.js"
 _TRANSLATIONS = _ROOT / "dashboard" / "translations.json"
 
-_KEYS = ("grid_power_sensor", "solar_production_sensor", "battery_power_sensor")
+_KEYS = ("grid_power_sensor", "solar_production_sensor", "battery_power_sensor",
+         "house_power_sensor")   # (#891) the fourth source
 
 
 @pytest.mark.unit
@@ -34,7 +35,7 @@ class TestSensorSourcesSection:
         m = re.search(r"id: 'sensor_sources'.*?docs: '([^']+)'", src, re.S)
         assert m and "#sensor-source-overrides" in m.group(1)
 
-    def test_all_three_pickers_render_in_the_section(self):
+    def test_every_picker_renders_in_the_section(self):
         src = _CARD.read_text(encoding="utf-8")
         m = re.search(r"_renderSensorSources\(T\) \{(.*?)\n    \}", src, re.S)
         assert m, "_renderSensorSources not found"
@@ -42,7 +43,9 @@ class TestSensorSourcesSection:
         for key in _KEYS:
             assert f"'{key}'" in body, f"{key} picker missing from the section"
         # failure honesty: every picker carries its unavailable-override warning
-        assert body.count("_sourceUnavailableWarning") == 3
+        # Derived, not a literal: a picker added without its warning is the
+        # #696 defect — an override that stops reporting must be SEEN.
+        assert body.count("_sourceUnavailableWarning") == len(_KEYS)
 
     def test_keys_are_card_structural(self):
         src = _CARD.read_text(encoding="utf-8")

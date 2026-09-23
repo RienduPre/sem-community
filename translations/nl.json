@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Bomen Equivalent Dit Jaar"
+      },
+      "house_meter_power": {
+        "name": "Huismeter"
+      },
+      "house_meter_gap": {
+        "name": "Verschil huismeter"
       }
     },
     "binary_sensor": {

@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Trær tilsvarende i år"
+      },
+      "house_meter_power": {
+        "name": "Husmåler"
+      },
+      "house_meter_gap": {
+        "name": "Husmåler-avvik"
       }
     },
     "binary_sensor": {

@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Équivalent Arbres Cette Année"
+      },
+      "house_meter_power": {
+        "name": "Compteur maison"
+      },
+      "house_meter_gap": {
+        "name": "Écart compteur maison"
       }
     },
     "binary_sensor": {

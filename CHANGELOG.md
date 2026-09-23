@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **SEM can show the house figure your inverter reports** (#891, by @SandmanNCL). Name the sensor and SEM publishes it beside its own, with the difference.
+
 - ✨ **Pause a charger for a while** (#980). Pick a time, press Pause, the charge mode goes Off and comes back on its own.
 
 - ✨ **A load set by watts now gets the watts** (#880). SEM wrote nothing to a Number control before, so it read 0 W for ever.

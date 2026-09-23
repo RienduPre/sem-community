@@ -1365,6 +1365,12 @@
       },
       "yearly_trees_equivalent": {
         "name": "Idei faegyenérték"
+      },
+      "house_meter_power": {
+        "name": "Házmérő"
+      },
+      "house_meter_gap": {
+        "name": "Házmérő eltérés"
       }
     },
     "binary_sensor": {

@@ -4835,6 +4835,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             _sv = getattr(self, "_sink_verdicts", None) or {}
             result["sink_verdicts"] = {k: v.to_dict() for k, v in _sv.items()
                                        if hasattr(v, "to_dict")}
+            # (#891) Both None when no house sensor is named, which is every
+            # install until somebody picks one. The sensors are not created
+            # then either, so nothing publishes a hole.
+            result["house_meter_power"] = getattr(self, "_house_meter_w", None)
+            result["house_meter_gap"] = getattr(self, "_house_meter_gap_w", None)
             result["battery_last_night_surplus_kwh"] = _pe.get("battery_last_night_surplus_kwh")
             result["battery_last_night_date"] = _pe.get("battery_last_night_date")
             result["forecast_trust_d1"] = _pe.get("forecast_trust_d1")
@@ -11389,6 +11394,17 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # Enum → its string value; absent → "normal" (fresh install / LM off).
         _peak_state = str(getattr(_peak_state, "value", _peak_state)
                           or "normal").lower()
+
+        # (#891) The house as the inverter measures it, beside SEM's own
+        # figure, and the difference. PUBLISHED ONLY — nothing below reads
+        # these, and ``home_consumption_power`` is untouched. Two dashboards
+        # showing the same house disagreed; that was the complaint.
+        from .house_meter import house_gap_w, read_house_meter
+        _meter = read_house_meter(
+            self.hass, self.config.get("house_power_sensor"))
+        self._house_meter_w = _meter
+        self._house_meter_gap_w = house_gap_w(
+            float(getattr(power, "home_consumption_power", 0.0) or 0.0), _meter)
 
         # (#864) The slot-budget allowance — the PREVENTIVE peak bound.
         self._compute_peak_slot_allowance(power)

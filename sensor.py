@@ -265,6 +265,27 @@ SENSOR_TYPES = [
         native_unit_of_measurement=UnitOfPower.WATT,
         suggested_display_precision=0,
     ),
+    # (#891) Only when a house sensor is named — see ``install_modules``.
+    # What the inverter says the house is drawing, beside SEM's own figure,
+    # and what the two differ by. SEM's number is unchanged and still the
+    # one every decision uses: these are for the person comparing two
+    # dashboards, which was the complaint.
+    SensorEntityDescription(
+        key="house_meter_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        suggested_display_precision=0,
+    ),
+    SensorEntityDescription(
+        key="house_meter_gap",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:scale-balance",
+    ),
     SensorEntityDescription(
         key="grid_power",
         device_class=SensorDeviceClass.POWER,
@@ -2000,6 +2021,14 @@ async def async_setup_entry(
     # ABSENT module's leftovers from the registry.
     presence = presence_of(coordinator)
     static_descriptions = kept_descriptions("sensor", SENSOR_TYPES, presence)
+    # (#891) The two house-meter sensors depend on a SETTING, not on
+    # hardware, so the module table cannot answer for them. No sensor
+    # named, no entities — and because the same list feeds the stale sweep
+    # below, un-naming one removes them again.
+    if not (coordinator.config or {}).get("house_power_sensor"):
+        static_descriptions = [d for d in static_descriptions
+                               if d.key not in ("house_meter_power",
+                                                "house_meter_gap")]
     _LOGGER.info("Got coordinator, creating %d sensors", len(static_descriptions))
 
     sensors = [

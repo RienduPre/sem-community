@@ -77,6 +77,24 @@ def _uid(entry, platform, key):
     return f"sem_{key}"
 
 
+def _setting_gated_keys() -> set:
+    """(#891) Entities that depend on a SETTING, not on hardware.
+
+    This file's model is that a static description is either module-gated
+    (absent when the module is) or core (always there). A third kind exists:
+    the two house-meter sensors appear only when somebody names a house
+    power sensor, which the module table cannot express.
+
+    Read out of ``sensor.py``'s own gate rather than listed here — delete
+    the gate and these stop being exempt, which is the point of deriving.
+    """
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent
+           / "sensor.py").read_text(encoding="utf-8")
+    m = re.search(r'house_power_sensor.*?d\.key not in \(([^)]*)\)', src, re.S)
+    return set(re.findall(r'"([a-z_0-9]+)"', m.group(1))) if m else set()
+
 def _registered(hass, entry, platform, key):
     return er.async_get(hass).async_get_entity_id(
         platform, DOMAIN, _uid(entry, platform, key)) is not None
@@ -89,9 +107,12 @@ async def test_a_minimal_install_builds_the_core_and_nothing_else(
     entry = _minimal_entry()
     coordinator = await _setup(hass, entry)
     assert coordinator.setup_presence == {m: Presence.ABSENT for m in Module}
+    setting_gated = _setting_gated_keys()
     wrong = []
     for platform, descriptions in _static_lists().items():
         for d in descriptions:
+            if d.key in setting_gated:
+                continue     # neither core nor module — see below
             is_module = (platform, d.key) in ENTITY_MODULES
             if _registered(hass, entry, platform, d.key) is is_module:
                 wrong.append((platform, d.key, "exists" if is_module else "missing"))

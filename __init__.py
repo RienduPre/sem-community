@@ -268,6 +268,10 @@ _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
     # set_option change must reload for it to take effect; without this the
     # override only applied on the next full restart.
     "solar_production_sensor", "battery_power_sensor", "grid_power_sensor",
+    # (#891) the fourth source. It also decides whether the two house-meter
+    # SENSORS exist at all, so naming one has to reload or the entities do
+    # not appear until the next restart.
+    "house_power_sensor",
     # #593: hardware battery lifetime-cycle sensor (preferred over the estimate).
     "battery_cycles_sensor",
     "heat_pump_relay1_entity", "heat_pump_relay2_entity",
