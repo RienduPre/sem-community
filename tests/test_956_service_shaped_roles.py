@@ -436,3 +436,32 @@ class TestALoneFieldIsTheCurrentOnlyIfItSaysSo:
     def test_a_lone_current_like_field_is(self):
         assert hd._current_field(("charge_current_a",)) == "charge_current_a"
         assert hd._current_field(("current",)) == "current"
+
+
+@pytest.mark.unit
+class TestTheRealZaptecShapeThroughTheRealReport:
+    """The reviewer's probe, checked in: the REAL _discover_zaptec and the
+    REAL committed roster (zaptec lists available_current AND
+    charger_max_current) through build_detection_report, unpatched."""
+
+    def _zaptec_without_its_number(self):
+        d = "charger-99"
+        def e(eid, dc=None, uid=None):
+            return SimpleNamespace(entity_id=eid, platform="zaptec", device_id=d,
+                                   original_device_class=dc, disabled_by=None,
+                                   unique_id=uid or eid.split(".", 1)[1], translation_key=None)
+        return [e("binary_sensor.zaptec_home_cable_connected", "plug"),
+                e("binary_sensor.zaptec_home_charging", "battery_charging"),
+                e("button.zaptec_home_resume_charging"),
+                e("number.zaptec_home_available_current", "current", "inst_available_current"),
+                e("sensor.zaptec_home_total_charge_power", "power")]
+
+    def test_the_start_stop_only_charger_is_kept_and_nothing_is_offered(self):
+        rep = hd.build_detection_report(hass=_hass_with({}),
+                                        registry=_reg(self._zaptec_without_its_number()))
+        rows = [c for c in rep["chargers"] if c["platform"] == "zaptec"]
+        assert len(rows) == 1
+        assert "button.zaptec_home_resume_charging" in str(rows[0]["mapped"]["ev_start_stop_entity"])
+        assert "ev_current_control_entity" not in rows[0]["mapped"]
+        assert rows[0]["control"] == "start/stop only"
+        assert not any(m["platform"] == "zaptec" for m in rep["near_misses"])

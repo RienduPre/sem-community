@@ -2455,6 +2455,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             control = mapping.get("ev_charger_service")
             control = (f"service: {control}" if control
                        else "number entity" if mapping.get("ev_current_control_entity")
+                       # (ruflo pass 2) a start/stop-only charger is a known
+                       # shape, not an unknown control — say so
+                       else "start/stop only" if mapping.get("ev_start_stop_entity")
                        else "see mapping")
             row = {
                 "platform": str(dev_entities[0].platform or platform),
