@@ -573,6 +573,8 @@ async def async_get_config_entry_diagnostics(
     _report = data.get("detection_report") or {}
     detection = {k: _report.get(k) for k in
                  ("census", "chargers", "near_misses", "disagreements",
+                  # (#887) cars found on a transport platform, named as cars
+                  "vehicles",
                   # (#964) what the unit grouping could attribute to no box
                   "unattributed")
                  if _report.get(k) is not None}
