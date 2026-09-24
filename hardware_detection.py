@@ -1682,6 +1682,20 @@ def _entry_matches_declared(entry, keys, exact_only=()) -> Optional[str]:
     return None
 
 
+_CURRENT_FIELDS = ("current", "max_current", "charging_current", "amps",
+                   "ampere", "amp", "current_a")
+
+
+def _current_field(fields) -> Optional[str]:
+    """(#956) The one field of a current-setting service SEM writes the
+    amperes into — by the integration's own word, or the only field there
+    is. None when the service has no such field."""
+    for want in _CURRENT_FIELDS:
+        if want in fields:
+            return want
+    return fields[0] if len(fields) == 1 else None
+
+
 def _services_of(hass):
     """(#956) A callback answering "which services does this domain offer
     right now", or None when that cannot be asked (no hass, not running).
@@ -1734,8 +1748,14 @@ def propose_roles_from_roster(dev_entities, domain: str, *,
             # service registry, the way entities are intersected with the
             # entity registry. Unaskable → nothing, and nothing invented.
             if services_of is None:
-                _LOGGER.debug("roster: %s offers %s as a service; the service "
-                              "registry could not be asked", domain, role)
+                # (ruflo, 24.09) an UNKNOWN is a value the card can show,
+                # not an empty dict indistinguishable from "absent".
+                out[role] = {"service": None, "matched_key": None,
+                             "source": "roster", "config_key": None,
+                             "action": "unaskable",
+                             "reason": "the service registry could not be "
+                                       "asked yet (HA still starting)",
+                             "candidates": list(keys), "judged": False}
                 continue
             live = services_of(domain)
             for key in keys:
@@ -1746,10 +1766,32 @@ def propose_roles_from_roster(dev_entities, domain: str, *,
                         pck = _lex.SERVICE_CONFIG_KEY_FOR_ROLE.get(role)
                     except Exception:  # noqa: BLE001
                         pck = None
-                    out[role] = {"service": key, "matched_key": key,
-                                 "source": "roster", "config_key": None,
-                                 "action": "per_charger",
-                                 "per_charger_key": pck, "judged": True}
+                    meta = (body.get("services") or {}).get(key) or {}
+                    fields = tuple(meta.get("fields") or ())
+                    target = meta.get("target")
+                    param = _current_field(fields)
+                    extra = [f for f in fields if f != param]
+                    prop = {"service": key, "matched_key": key,
+                            "source": "roster", "config_key": None,
+                            "action": "per_charger",
+                            "per_charger_key": pck, "judged": True,
+                            "param": param, "fields": list(fields),
+                            "target": target}
+                    # (ruflo, 24.09) go-eCharger's set_max_current wants a
+                    # charger_name SEM cannot fill; a targeted service wants
+                    # an entity_id the charger factory does not pass. Either
+                    # is a proposal SEM must not turn into a one-click add.
+                    why = []
+                    if not param:
+                        why.append("no field SEM can send the current in")
+                    if extra:
+                        why.append("fields SEM cannot fill: " + ", ".join(extra))
+                    if target:
+                        why.append(f"the service targets a {target}")
+                    if why:
+                        prop["action"] = "needs_hand_wiring"
+                        prop["reason"] = "; ".join(why)
+                    out[role] = prop
                     break
             continue
         # (#810) Collect EVERY match, then choose deterministically. Taking
@@ -1882,9 +1924,18 @@ def charger_from_near_miss(dev_entities, platform: str,
     service = control.get("service")
     if not current and not service:
         return {}
-    # (#956) the control may be a service — KEBA's shape, SEM's own wallbox
-    out: Dict[str, Any] = ({"ev_current_control_entity": current} if current
-                           else {"ev_charger_service": service})
+    if current:
+        out: Dict[str, Any] = {"ev_current_control_entity": current}
+    else:
+        # (#956) the control may be a service — KEBA's shape, SEM's own
+        # wallbox. (ruflo, 24.09) Offered ONLY as the charger factory can
+        # drive it: a global service with the one field the current goes
+        # in. Anything else is a proposal to wire by hand, and the
+        # proposal row says why.
+        if control.get("action") != "per_charger" or not control.get("param"):
+            return {}
+        out = {"ev_charger_service": service,
+               "ev_service_param_name": control["param"]}
     for e in dev_entities:
         eid = str(e.entity_id)
         dc = str(getattr(e, "original_device_class", "") or "")
@@ -1975,7 +2026,8 @@ def propose_for_installed(registry, *, limit_per_domain: int = 8,
                      services_of=services_of).items()
                  # An entity SEM already drives is not news; nor is a role SEM
                  # resolves by itself every time it looks.
-                 if b.get("entity") not in used and b.get("action") != "automatic"}
+                 if (b.get("entity") or b.get("service")) not in used
+                 and b.get("action") != "automatic"}
         if not roles:
             continue
         out.append({
@@ -2288,6 +2340,18 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
             apply_charger_discovery_guards(mapping, dev_entities)
+            # (ruflo, 24.09 / #956) a hand-written brand function that finds
+            # sensors but NO control claimed the device and the roster never
+            # got to speak — go-eCharger's box has no current number, only a
+            # service. When the roster can name a control, this is a near
+            # miss with an offer, not a charger with "see mapping".
+            if (mapping and not mapping.get("ev_current_control_entity")
+                    and not mapping.get("ev_charger_service")):
+                _ctl = propose_roles_from_roster(
+                    dev_entities, platform, services_of=_services_of(hass)
+                ).get("ev_current_control") or {}
+                if _ctl.get("entity") or _ctl.get("service"):
+                    mapping = {}
             # (#804 B4c) the report path re-runs discovery per DEVICE, so the
             # installation-sibling threshold scan from the config path never
             # fires here — attach the same suggestion so the diagnostics

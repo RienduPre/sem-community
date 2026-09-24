@@ -1134,7 +1134,11 @@ class SEMConfigCard extends SEMLitBase {
                 case 'pair_incomplete': return fill('config_proposed_pair_incomplete',
                     { missing: (p.missing_role || []).join(', ') });
                 case 'per_charger': return this._t('config_proposed_per_charger');
-                default: return '';
+                // (#956) a service the registry could not be asked about, or
+                // one SEM cannot drive as-is — the reason travels with the row
+                case 'unaskable':
+                case 'needs_hand_wiring': return p.reason || '';
+                default: return p.reason || '';
             }
         };
         const useButton = (p, entity, fieldKey) => {
@@ -1151,7 +1155,7 @@ class SEMConfigCard extends SEMLitBase {
         const proposalRow = (role, p) => {
             // (#956) a proposal may name a SERVICE instead of an entity
             // (KEBA's set_current); it renders the same, lands per charger.
-            const what = p.entity || p.service;
+            const what = p.entity || p.service || (p.candidates || []).join(' / ') || '';
             const already = this._options?.[p.config_key] === p.entity;
             const reason = whyNoButton(p);
             // (#915) the runners-up: a brand that declares several keys for

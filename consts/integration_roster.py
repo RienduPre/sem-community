@@ -30,7 +30,7 @@ from typing import Any, Dict, Final
 SCHEMA: Final = 1
 
 
-ROSTER_META: Final[Dict[str, Any]] = {'generated_at': '2026-09-24T22:07:25Z', 'sources': {'core_analytics': 'https://analytics.home-assistant.io/data.json', 'core_index': 'https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/generated/integrations.json', 'custom_installs': 'https://analytics.home-assistant.io/custom_integrations.json', 'hacs': 'https://data-v2.hacs.xyz/integration/data.json', 'website': 'https://www.home-assistant.io/integrations.json'}, 'install_floor': 50, 'candidates': 1365, 'kept': 198, 'with_roles': 64, 'roles_mined': 181}
+ROSTER_META: Final[Dict[str, Any]] = {'generated_at': '2026-09-24T22:33:37Z', 'sources': {'core_analytics': 'https://analytics.home-assistant.io/data.json', 'core_index': 'https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/generated/integrations.json', 'custom_installs': 'https://analytics.home-assistant.io/custom_integrations.json', 'hacs': 'https://data-v2.hacs.xyz/integration/data.json', 'website': 'https://www.home-assistant.io/integrations.json'}, 'install_floor': 50, 'candidates': 1365, 'kept': 198, 'with_roles': 64, 'roles_mined': 181}
 
 #: domain -> what the ecosystem says this integration is.
 ROSTER: Final[Dict[str, Dict[str, Any]]] = {
@@ -284,7 +284,7 @@ ROLE_VOCAB: Final[Dict[str, Dict[str, Dict[str, Any]]]] = {
         'grid_power': {'platform': 'sensor', 'keys': ('site_grid_power',), 'options': ()},
     },
     'ev_charger_modbus': {
-        'ev_current_control': {'platform': 'service', 'keys': ('ev_charger_modbus.set_charging_current',), 'options': ()},
+        'ev_current_control': {'platform': 'service', 'keys': ('ev_charger_modbus.set_charging_current',), 'options': (), 'services': {'ev_charger_modbus.set_charging_current': {'fields': ('current',), 'target': 'entity'}}},
     },
     'evcc_intg': {
         'vehicle_range': {'platform': 'sensor', 'keys': ('configvehicle_range', 'vehiclerange'), 'options': ()},
@@ -298,7 +298,7 @@ ROLE_VOCAB: Final[Dict[str, Dict[str, Dict[str, Any]]]] = {
         'grid_power': {'platform': 'sensor', 'keys': ('power_grid',), 'options': ()},
     },
     'goecharger': {
-        'ev_current_control': {'platform': 'service', 'keys': ('goecharger.set_max_current',), 'options': ()},
+        'ev_current_control': {'platform': 'service', 'keys': ('goecharger.set_max_current',), 'options': (), 'services': {'goecharger.set_max_current': {'fields': ('charger_name', 'max_current'), 'target': None}}},
     },
     'goecharger_api2': {
         'ev_current_control': {'platform': 'number', 'keys': ('amp',), 'options': (), 'exact_only': ('amp',)},
@@ -345,7 +345,7 @@ ROLE_VOCAB: Final[Dict[str, Dict[str, Dict[str, Any]]]] = {
         'battery_soc': {'platform': 'sensor', 'keys': ('battery_soc',), 'options': ()},
     },
     'keba': {
-        'ev_current_control': {'platform': 'service', 'keys': ('keba.set_current',), 'options': ()},
+        'ev_current_control': {'platform': 'service', 'keys': ('keba.set_current',), 'options': (), 'services': {'keba.set_current': {'fields': ('current',), 'target': None}}},
     },
     'marstek_venus_energy_manager': {
         'battery_charge_limit': {'platform': 'number', 'keys': ('max_charge_power', 'system_max_charge_power'), 'options': (), 'exact_only': ('max_charge_power',)},

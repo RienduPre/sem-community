@@ -490,10 +490,17 @@ def mine_services(text: str, domain: str) -> Dict[str, Dict[str, dict]]:
         if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9_]{2,60}", name):
             continue
         fields = ()
-        if isinstance(body, dict) and isinstance(body.get("fields"), dict):
-            fields = tuple(sorted(str(f)[:_MAX_OPTION_LEN]
-                                  for f in body["fields"])[:_MAX_OPTIONS])
-        out[f"{domain}.{name}"] = {"options": (), "fields": fields}
+        target = None
+        if isinstance(body, dict):
+            if isinstance(body.get("fields"), dict):
+                fields = tuple(sorted(str(f)[:_MAX_OPTION_LEN]
+                                      for f in body["fields"])[:_MAX_OPTIONS])
+            # (ruflo, 24.09) a service that TARGETS something needs an
+            # entity or device in the call; a global one (KEBA) does not.
+            tgt = body.get("target")
+            if isinstance(tgt, dict):
+                target = "entity" if "entity" in tgt else "device" if "device" in tgt else "other"
+        out[f"{domain}.{name}"] = {"options": (), "fields": fields, "target": target}
     return {SERVICE_PLATFORM: out} if out else {}
 
 
@@ -535,6 +542,8 @@ def mine_vocabulary(repo: str, domain: str, origin: str, *,
             entry = {"options": opts}
             if body.get("fields"):
                 entry["fields"] = tuple(body["fields"])[:_MAX_OPTIONS]
+            if body.get("target"):
+                entry["target"] = str(body["target"])[:20]
             out.setdefault(plat, {})[key] = entry
     return out
 
@@ -644,7 +653,12 @@ def _match_role(rules: Dict[str, Dict[str, Any]], platform: str,
     if platform == SERVICE_PLATFORM:
         # (#956) services are matched by their own table — the entity rules
         # are keyed by role and a role can only carry one platform there.
-        rules = getattr(_lexicon_module(), "SERVICE_ROLE_RULES", {}) or {}
+        # (ruflo, 24.09) …but ONLY the roles this KIND may carry: a vehicle
+        # integration's ``set_charging_current`` service (kia_uvo declares
+        # one) is the car's cloud API, never a wallbox control. The caller's
+        # ``rules`` are already kind-scoped; the service table is cut to them.
+        service_rules = getattr(_lexicon_module(), "SERVICE_ROLE_RULES", {}) or {}
+        rules = {r: v for r, v in service_rules.items() if r in rules}
     for role, rule in rules.items():
         # (#941) a table key has no platform of its own; the rule's is used
         if platform != TABLE_PLATFORM and rule["platform"] != platform:
@@ -779,10 +793,23 @@ def roles_from_vocabulary(vocab: Dict[str, Dict[str, dict]], lexicon,
             # the shipped roster never says ``any`` and the runtime
             # intersection still asks for a number where SEM writes one.
             eff = rules[role]["platform"] if platform == TABLE_PLATFORM else platform
+            if platform == SERVICE_PLATFORM:
+                eff = SERVICE_PLATFORM
             slot = roles.setdefault(
                 role, {"platform": eff, "keys": [], "options": []})
             if slot["platform"] != eff:
-                continue
+                # (ruflo, 24.09) an ENTITY beats a SERVICE for the same role,
+                # whatever the platform names sort like — "number" < "service"
+                # held by accident, "service" < "switch" would not.
+                if slot["platform"] == SERVICE_PLATFORM:
+                    roles[role] = slot = {"platform": eff, "keys": [], "options": []}
+                else:
+                    continue
+            if eff == SERVICE_PLATFORM:
+                slot.setdefault("services", {})[key] = {
+                    "fields": tuple(body.get("fields") or ()),
+                    "target": body.get("target"),
+                }
             slot["keys"].append(key)
             for opt in body.get("options") or ():
                 if opt not in slot["options"]:
@@ -836,6 +863,13 @@ def roles_from_vocabulary(vocab: Dict[str, Dict[str, dict]], lexicon,
                 "options": tuple(v["options"])}
         if exact_only:
             body["exact_only"] = exact_only
+        if v.get("services"):
+            # (#956) what each service takes: its fields and whether it
+            # targets an entity — the runtime decides from these whether
+            # SEM can drive it or only name it.
+            body["services"] = {k: {"fields": tuple(m.get("fields") or ()),
+                                    "target": m.get("target")}
+                                for k, m in sorted(v["services"].items())}
         out[r] = body
     return out
 
