@@ -455,6 +455,48 @@ _REGISTER_KEY = re.compile(r'^\s*"([a-z0-9_]{3,80})":\s*RegisterInfo\(', re.M)
 TABLE_PLATFORM = "any"
 
 
+SERVICE_PLATFORM = "service"
+
+
+def _service_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
+    """(#956) Where an integration declares its services."""
+    if origin == "core":
+        yield ("https://raw.githubusercontent.com/home-assistant/core/dev/"
+               f"homeassistant/components/{domain}/services.yaml")
+        return
+    if not repo:
+        return
+    for branch in ("main", "master"):
+        for prefix in (f"custom_components/{domain}/", ""):
+            yield f"https://raw.githubusercontent.com/{repo}/{branch}/{prefix}services.yaml"
+
+
+def mine_services(text: str, domain: str) -> Dict[str, Dict[str, dict]]:
+    """(#956) The services an integration declares, as ``<domain>.<name>``
+    keys under the ``service`` platform, each with its field names. A
+    capability that arrives as a service is the author's choice, not a
+    fact about the capability — and until this, half of what a brand can
+    do was invisible to the roster (KEBA declares no current entity at all;
+    it offers ``keba.set_current``). A broken file is nothing, not a crash."""
+    try:
+        import yaml  # HA's own dependency; the crawler runs beside it
+        data = yaml.safe_load(text)
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, dict] = {}
+    for name, body in data.items():
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9_]{2,60}", name):
+            continue
+        fields = ()
+        if isinstance(body, dict) and isinstance(body.get("fields"), dict):
+            fields = tuple(sorted(str(f)[:_MAX_OPTION_LEN]
+                                  for f in body["fields"])[:_MAX_OPTIONS])
+        out[f"{domain}.{name}"] = {"options": (), "fields": fields}
+    return {SERVICE_PLATFORM: out} if out else {}
+
+
 def _table_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
     """Where a register table lives, for a HACS repo (core has strings)."""
     if origin == "core" or not repo:
@@ -490,11 +532,30 @@ def mine_vocabulary(repo: str, domain: str, origin: str, *,
                 continue
             opts = tuple(str(o)[:_MAX_OPTION_LEN]
                          for o in (body.get("options") or ())[:_MAX_OPTIONS])
-            out.setdefault(plat, {})[key] = {"options": opts}
+            entry = {"options": opts}
+            if body.get("fields"):
+                entry["fields"] = tuple(body["fields"])[:_MAX_OPTIONS]
+            out.setdefault(plat, {})[key] = entry
     return out
 
 
 def _mine_vocabulary_raw(repo: str, domain: str, origin: str, *,
+                    offline: bool) -> Dict[str, Dict[str, dict]]:
+    """Entities (below) plus, beside them, the services the integration
+    declares (#956) — additive, never instead: ABL has both."""
+    out = _mine_entity_vocabulary_raw(repo, domain, origin, offline=offline)
+    for url in _service_urls(repo, domain, origin):
+        raw = _get(url, f"svc_{domain}_{_url_key(url)}", offline=offline)
+        if not raw:
+            continue
+        svc = mine_services(raw.decode("utf-8", "replace"), domain)
+        if svc:
+            out.setdefault(SERVICE_PLATFORM, {}).update(svc[SERVICE_PLATFORM])
+            break
+    return out
+
+
+def _mine_entity_vocabulary_raw(repo: str, domain: str, origin: str, *,
                     offline: bool) -> Dict[str, Dict[str, dict]]:
     """The entity vocabulary an integration DECLARES, per platform.
 
@@ -561,9 +622,29 @@ def _mine_vocabulary_raw(repo: str, domain: str, origin: str, *,
     return out
 
 
+_LEXICON = None
+
+
+def _lexicon_module():
+    """The lexicon, loaded the way the main path loads it (kept for
+    _match_role, which is called with the RULES and not the module)."""
+    global _LEXICON
+    if _LEXICON is None:
+        spec = importlib.util.spec_from_file_location(
+            "role_lexicon", ROOT / "consts" / "role_lexicon.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _LEXICON = mod
+    return _LEXICON
+
+
 def _match_role(rules: Dict[str, Dict[str, Any]], platform: str,
                 key: str) -> Optional[str]:
     """First rule whose platform, ``any`` and ``not`` clauses all agree."""
+    if platform == SERVICE_PLATFORM:
+        # (#956) services are matched by their own table — the entity rules
+        # are keyed by role and a role can only carry one platform there.
+        rules = getattr(_lexicon_module(), "SERVICE_ROLE_RULES", {}) or {}
     for role, rule in rules.items():
         # (#941) a table key has no platform of its own; the rule's is used
         if platform != TABLE_PLATFORM and rule["platform"] != platform:

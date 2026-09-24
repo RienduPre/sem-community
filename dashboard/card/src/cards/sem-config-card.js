@@ -1149,6 +1149,9 @@ class SEMConfigCard extends SEMLitBase {
                 ${st && st !== 'ok' && st !== 'saving' ? html`<span style="opacity:.7"> ${st}</span>` : nothing}`;
         };
         const proposalRow = (role, p) => {
+            // (#956) a proposal may name a SERVICE instead of an entity
+            // (KEBA's set_current); it renders the same, lands per charger.
+            const what = p.entity || p.service;
             const already = this._options?.[p.config_key] === p.entity;
             const reason = whyNoButton(p);
             // (#915) the runners-up: a brand that declares several keys for
@@ -1159,7 +1162,7 @@ class SEMConfigCard extends SEMLitBase {
             return html`
             <div class="row">
                 <span class="lbl">${role}</span>
-                <span style="font-family:monospace;font-size:0.85em">${p.entity}
+                <span style="font-family:monospace;font-size:0.85em">${what}
                     <span style="opacity:.6"> · ${p.matched_key}</span>
                 </span>
             </div>

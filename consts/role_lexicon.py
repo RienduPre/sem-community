@@ -443,6 +443,28 @@ SEM_CONFIG_KEY_FOR_ROLE: Final[Dict[str, str]] = {
 #: pair for exclusivity (#661); the roster refuses to propose half of it.
 PAIRED_ROLES: Final[tuple] = (("grid_import_power", "grid_export_power"),)
 
+#: (#956) Roles a brand may offer as a SERVICE instead of an entity. Keyed
+#: like ROLE_RULES; matched against ``<domain>.<service>`` keys the crawler
+#: mines from services.yaml. Whether a capability arrives as an entity or a
+#: service is the integration author's choice — KEBA declares no current
+#: entity and offers ``keba.set_current``; ABL offers both. An entity wins
+#: when both exist (SEM's number-entity path), the service is the fallback.
+SERVICE_ROLE_RULES: Final[Dict[str, Dict[str, Any]]] = {
+    "ev_current_control": {
+        "platform": "service",
+        "any": (r"\.set_current$", r"\.set_charging_current$",
+                r"\.set_max_current$", r"\.set_charge_current$",
+                r"\.set_amps?$"),
+        "not": (r"failsafe", r"limit", r"phase"),
+    },
+}
+
+#: (#956) the PER-CHARGER config key a service proposal lands in — the same
+#: key the KEBA path has always used.
+SERVICE_CONFIG_KEY_FOR_ROLE: Final[Dict[str, str]] = {
+    "ev_current_control": "ev_charger_service",
+}
+
 #: Roles that live INSIDE a charger's own config, not at the top level.
 #: Offering a one-click accept for these would write a charger's entity into
 #: an install-wide key, so they are reported with a pointer to the EV

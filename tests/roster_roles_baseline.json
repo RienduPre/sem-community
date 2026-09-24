@@ -123,6 +123,11 @@
         "site_grid_power"
       ]
     },
+    "ev_charger_modbus": {
+      "ev_current_control": [
+        "ev_charger_modbus.set_charging_current"
+      ]
+    },
     "evcc_intg": {
       "vehicle_range": [
         "configvehicle_range",
@@ -147,6 +152,11 @@
       ],
       "grid_power": [
         "power_grid"
+      ]
+    },
+    "goecharger": {
+      "ev_current_control": [
+        "goecharger.set_max_current"
       ]
     },
     "goecharger_api2": {
@@ -254,6 +264,11 @@
     "idm_heatpump": {
       "battery_soc": [
         "battery_soc"
+      ]
+    },
+    "keba": {
+      "ev_current_control": [
+        "keba.set_current"
       ]
     },
     "marstek_venus_energy_manager": {
@@ -545,6 +560,9 @@
       ]
     },
     "v2c_cloud": {
+      "battery_power": [
+        "battery_power"
+      ],
       "ev_charge_mode": [
         "charge_mode"
       ]

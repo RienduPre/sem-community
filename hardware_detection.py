@@ -1682,9 +1682,29 @@ def _entry_matches_declared(entry, keys, exact_only=()) -> Optional[str]:
     return None
 
 
+def _services_of(hass):
+    """(#956) A callback answering "which services does this domain offer
+    right now", or None when that cannot be asked (no hass, not running).
+    None is an UNKNOWN: the caller proposes nothing and says why, never
+    "no". Read live from HA's own registry — never guessed from a roster."""
+    if hass is None or not bool(getattr(hass, "is_running", True)):
+        return None
+    services = getattr(hass, "services", None)
+    if services is None or not hasattr(services, "async_services"):
+        return None
+
+    def _of(domain: str) -> set:
+        try:
+            return set((services.async_services() or {}).get(str(domain), {}) or ())
+        except Exception:  # noqa: BLE001
+            return set()
+    return _of
+
+
 def propose_roles_from_roster(dev_entities, domain: str, *,
                               state_of=None,
-                              strategy_values=None) -> Dict[str, Any]:
+                              strategy_values=None,
+                              services_of=None) -> Dict[str, Any]:
     """(#915) Role proposals for ONE device, as an INTERSECTION.
 
     The roster says what an integration calls things; ``dev_entities`` is
@@ -1709,6 +1729,29 @@ def propose_roles_from_roster(dev_entities, domain: str, *,
     for role, body in vocab.items():
         keys = tuple(body.get("keys", ()))
         want_domain = str(body.get("platform") or "")
+        if want_domain == "service":
+            # (#956) a service-shaped capability: intersected with HA's live
+            # service registry, the way entities are intersected with the
+            # entity registry. Unaskable → nothing, and nothing invented.
+            if services_of is None:
+                _LOGGER.debug("roster: %s offers %s as a service; the service "
+                              "registry could not be asked", domain, role)
+                continue
+            live = services_of(domain)
+            for key in keys:
+                name = key.split(".", 1)[1] if "." in key else key
+                if name in live:
+                    try:
+                        from .consts import role_lexicon as _lex
+                        pck = _lex.SERVICE_CONFIG_KEY_FOR_ROLE.get(role)
+                    except Exception:  # noqa: BLE001
+                        pck = None
+                    out[role] = {"service": key, "matched_key": key,
+                                 "source": "roster", "config_key": None,
+                                 "action": "per_charger",
+                                 "per_charger_key": pck, "judged": True}
+                    break
+            continue
         # (#810) Collect EVERY match, then choose deterministically. Taking
         # the first entity the registry happened to yield meant that a brand
         # declaring four target-SOC keys got whichever one iteration order
@@ -1834,10 +1877,14 @@ def charger_from_near_miss(dev_entities, platform: str,
     is still the honest line.
     """
     proposed = proposed or {}
-    current = (proposed.get("ev_current_control") or {}).get("entity")
-    if not current:
+    control = proposed.get("ev_current_control") or {}
+    current = control.get("entity")
+    service = control.get("service")
+    if not current and not service:
         return {}
-    out: Dict[str, Any] = {"ev_current_control_entity": current}
+    # (#956) the control may be a service — KEBA's shape, SEM's own wallbox
+    out: Dict[str, Any] = ({"ev_current_control_entity": current} if current
+                           else {"ev_charger_service": service})
     for e in dev_entities:
         eid = str(e.entity_id)
         dc = str(getattr(e, "original_device_class", "") or "")
@@ -1859,7 +1906,7 @@ def charger_from_near_miss(dev_entities, platform: str,
     # control the offer is built around, if a guard just took it away.
     if "ev_charging_power_sensor" not in out:
         return {}
-    if "ev_current_control_entity" not in out:
+    if "ev_current_control_entity" not in out and "ev_charger_service" not in out:
         return {}
     out["id"] = f"{platform}_{str(getattr(dev_entities[0], 'device_id', '') or 'device')}"[:48]
     out["name"] = (describe_domain(platform) or {}).get("name") or platform
@@ -1888,7 +1935,7 @@ def _role_action(role: str) -> Dict[str, Any]:
 
 def propose_for_installed(registry, *, limit_per_domain: int = 8,
                           configured_entities=None, state_of=None,
-                          strategy_values=None) -> list:
+                          strategy_values=None, services_of=None) -> list:
     """(#915) Every INSTALLED integration the roster has vocabulary for, with
     the controls it declares matched against this box's own entities.
 
@@ -1924,7 +1971,8 @@ def propose_for_installed(registry, *, limit_per_domain: int = 8,
     for dom, ents in sorted(by_domain.items()):
         roles = {r: b for r, b in propose_roles_from_roster(
                      ents[:400], dom, state_of=state_of,
-                     strategy_values=strategy_values).items()
+                     strategy_values=strategy_values,
+                     services_of=services_of).items()
                  # An entity SEM already drives is not news; nor is a role SEM
                  # resolves by itself every time it looks.
                  if b.get("entity") not in used and b.get("action") != "automatic"}
@@ -2219,7 +2267,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 # earns the line only if something about it is actually
                 # energy-shaped — a power sensor with a plug or a current
                 # control (the census rule), or a role the roster proposed.
-                _proposed = propose_roles_from_roster(dev_entities, platform)
+                _proposed = propose_roles_from_roster(
+                    dev_entities, platform, services_of=_services_of(hass))
                 if (platform in _TRANSPORT_PLATFORMS and not _proposed
                         and not _census_energy_shaped(dev_entities)):
                     continue
@@ -2362,7 +2411,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             else None)
         report["roster_proposals"] = propose_for_installed(
             registry, configured_entities=configured_entities,
-            state_of=_state_of, strategy_values=strategy_values)
+            state_of=_state_of, strategy_values=strategy_values,
+            services_of=_services_of(hass))
         # (#915) whether proposals were judged against live states, so the
         # coordinator can rebuild an unjudged (boot-time) report once HA is up
         report["judged"] = bool(_state_of is not None)

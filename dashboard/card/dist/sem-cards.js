@@ -7462,22 +7462,22 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ${"saving"===s?this._t("config_proposed_using"):this._t("config_proposed_use")}
                 </button>
                 ${"ok"===s?W`<span style="opacity:.7"> ✓</span>`:K}
-                ${s&&"ok"!==s&&"saving"!==s?W`<span style="opacity:.7"> ${s}</span>`:K}`},l=(e,t)=>{const i=this._options?.[t.config_key]===t.entity,s=o(t),r=(t.alternatives||[]).filter(e=>e&&e.entity);return W`
+                ${s&&"ok"!==s&&"saving"!==s?W`<span style="opacity:.7"> ${s}</span>`:K}`},l=(e,t)=>{const i=t.entity||t.service,s=this._options?.[t.config_key]===t.entity,r=o(t),a=(t.alternatives||[]).filter(e=>e&&e.entity);return W`
             <div class="row">
                 <span class="lbl">${e}</span>
-                <span style="font-family:monospace;font-size:0.85em">${t.entity}
+                <span style="font-family:monospace;font-size:0.85em">${i}
                     <span style="opacity:.6"> · ${t.matched_key}</span>
                 </span>
             </div>
             <div class="row" style="margin:-6px 0 6px">
                 <span class="lbl"></span>
                 <span>
-                    ${"set_option"!==t.action||i?K:n(t,t.entity,"prop_"+e)}
-                    ${i?W`<span style="opacity:.7">${this._t("config_proposed_already")}</span>`:K}
-                    ${s?W`<span style="opacity:.7">${s}</span>`:K}
+                    ${"set_option"!==t.action||s?K:n(t,t.entity,"prop_"+e)}
+                    ${s?W`<span style="opacity:.7">${this._t("config_proposed_already")}</span>`:K}
+                    ${r?W`<span style="opacity:.7">${r}</span>`:K}
                 </span>
             </div>
-            ${r.map((i,s)=>W`
+            ${a.map((i,s)=>W`
                 <div class="row" style="margin:-6px 0 6px">
                     <span class="lbl" style="opacity:.6">${this._t("config_proposed_or")}</span>
                     <span style="font-family:monospace;font-size:0.85em">${i.entity}

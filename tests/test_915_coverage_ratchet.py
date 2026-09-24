@@ -411,8 +411,6 @@ class TestTheMatrixAndTheRosterAgree:
         "openwbmqtt": "archived predecessor — 47 installs",
         "grott": "a Growatt MQTT proxy — 407 installs, no store entry",
         "mqtt": "a transport, opaque by construction",
-        # (#808) added by URL, 11 installs in analytics — under the roster floor
-        "ev_charger_modbus": "HACS custom repo (matfroh/ABL_emh1_modbus) — 11 installs",
         "homekit_controller": "a transport, opaque by construction",
     }
 
@@ -596,8 +594,14 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
                         "as SEM's own discovery says",
     }
 
-    def _offers(self, doms, role):
-        return any(role in roster.ROLE_VOCAB.get(d, {}) for d in doms)
+    def _offers(self, doms, role, platform=None):
+        """(#956) a role may be offered as an entity OR as a service; a
+        claim about a NUMBER is only derived from a number offer."""
+        for d in doms:
+            body = roster.ROLE_VOCAB.get(d, {}).get(role)
+            if body and (platform is None or body.get("platform") == platform):
+                return True
+        return False
 
     def test_every_inverter_discharge_claim_is_derived_or_explained(self):
         unexplained = []
@@ -644,7 +648,7 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
                     ) + list(row.get("also_domains") or ())
             if "number" not in row.get("control", "") or not doms:
                 continue
-            if self._offers(doms, "ev_current_control"):
+            if self._offers(doms, "ev_current_control", platform="number"):
                 continue
             if row["brand"] not in self.CURRENT_NOT_DECLARED:
                 unexplained.append(row["brand"])
@@ -655,8 +659,9 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
         for row in self.matrix.CHARGERS:
             doms = ([row["domain_token"]] if row.get("domain_token") else []
                     ) + list(row.get("also_domains") or ())
+            # (#956) a SERVICE offer agrees with a service-based row (KEBA)
             if "number" not in row.get("control", "") and self._offers(
-                    doms, "ev_current_control"):
+                    doms, "ev_current_control", platform="number"):
                 wrong.append(row["brand"])
         assert not wrong, f"{wrong}: Zaptec was this on 06.09 — the row was stale"
 
@@ -673,7 +678,7 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
             row = by_brand[brand]
             doms = ([row["domain_token"]] if row.get("domain_token") else []
                     ) + list(row.get("also_domains") or ())
-            if self._offers(doms, "ev_current_control"):
+            if self._offers(doms, "ev_current_control", platform="number"):
                 stale.append(brand)
         assert not stale, f"{stale} derives its control now — drop the exemption"
 
