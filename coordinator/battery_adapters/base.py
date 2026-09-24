@@ -560,6 +560,69 @@ class BatteryControlAdapter(ABC):
             and not getattr(self, "_forcible_charging", False)
         )
 
+    # ── (#809/#869) the setpoint model: how SEM's signed watts reach the wire ──
+    SETPOINT_MODELS = ("signed", "inverted", "direction_select")
+
+    def _setpoint_model(self) -> str:
+        m = str((self._config or {}).get("battery_setpoint_model") or "signed")
+        return m if m in self.SETPOINT_MODELS else "signed"
+
+    def _setpoint_to_wire(self, watts: float) -> float:
+        m = self._setpoint_model()
+        if m == "inverted":
+            return -watts
+        if m == "direction_select":
+            return abs(watts)
+        return watts
+
+    def _setpoint_from_wire(self, wire: float, sign: float) -> float:
+        m = self._setpoint_model()
+        if m == "inverted":
+            return -wire
+        if m == "direction_select":
+            return sign * abs(wire)
+        return wire
+
+    async def _direction_ready(self, watts: float) -> bool:
+        """``direction_select`` only: True when the select READS the
+        direction ``watts`` needs. Otherwise write it (once per wanted
+        value) and answer False — the number waits for the next cycle,
+        which is when a Modbus-backed select shows what it took (#978)."""
+        if self._setpoint_model() != "direction_select" or watts == 0:
+            return True
+        ent = str(self._config.get("battery_power_direction_entity") or "")
+        if not ent:
+            if not getattr(self, "_direction_missing_said", False):
+                self._direction_missing_said = True
+                _LOGGER.warning(
+                    "Battery: setpoint model is direction_select but no "
+                    "direction select is configured "
+                    "(battery_power_direction_entity) — nothing written",
+                )
+            return False
+        want = str(self._config.get(
+            "battery_direction_discharge_value" if watts > 0
+            else "battery_direction_charge_value")
+            or ("discharge" if watts > 0 else "charge"))
+        st = self._hass.states.get(ent)
+        if st is not None and str(getattr(st, "state", "")) == want:
+            return True
+        sent = getattr(self, "_direction_sent", None)
+        if sent is None:
+            sent = self._direction_sent = {}
+        if sent.get(ent) != want:
+            try:
+                await self._hass.services.async_call(
+                    "select", "select_option",
+                    {"entity_id": ent, "option": want}, blocking=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = f"direction select write failed: {exc}"
+                return False
+            sent[ent] = want
+        self._last_error = f"waiting for {ent} to read {want}"
+        return False
+
     async def _write_force_discharge(self, watts: float) -> bool:
         """De-dup'd write of the battery power setpoint. ``watts`` is a
         SIGNED setpoint on a bidirectional control entity: ``> 0`` =
@@ -605,16 +668,26 @@ class BatteryControlAdapter(ABC):
         st = self._hass.states.get(self._force_discharge_entity)
         attrs = getattr(st, "attributes", None) if st is not None else None
         _requested = watts
+        # (#809/#869) SEM's sign is + = discharge, − = charge. The WIRE
+        # value is what the entity takes: the same (``signed``), its mirror
+        # (``inverted`` — Victron's ESS grid setpoint, + = import), or a
+        # magnitude behind a charge/discharge select (``direction_select``
+        # — Anker Solix). The clamp applies to the wire value: an unsigned
+        # entity has min 0, and clamping SEM's −4400 against that is the
+        # bug this exists to avoid.
+        sign = 1.0 if watts >= 0 else -1.0
+        wire = self._setpoint_to_wire(watts)
         if isinstance(attrs, dict):
             # (#749) the entity's min/max are NATIVE units — scale them to
             # watts so the clamp, the de-dup and every log stay in W; only
             # the service-call value converts back at the boundary.
             lo = attrs.get("min")
             if isinstance(lo, (int, float)):
-                watts = max(float(lo) * scale, watts)
+                wire = max(float(lo) * scale, wire)
             hi = attrs.get("max")
             if isinstance(hi, (int, float)):
-                watts = min(float(hi) * scale, watts)
+                wire = min(float(hi) * scale, wire)
+        watts = self._setpoint_from_wire(wire, sign)
         # #531: a silent clamp hides a real mismatch (fleet power > a single
         # unit's setpoint range). Surface it once per clamped write so the
         # cause is visible in the log instead of a mysteriously-capped battery.
@@ -672,11 +745,16 @@ class BatteryControlAdapter(ABC):
             domain = self._force_discharge_entity.split(".", 1)[0]
             if domain not in ("number", "input_number"):
                 domain = "number"
+            # (#869) a direction select is written first and READ back
+            # before the number goes out — the #978 rule, the strategy's
+            # shape. Until it reads, the write is withheld, not sent blind.
+            if not await self._direction_ready(watts):
+                return False
             await self._hass.services.async_call(
                 domain, "set_value",
                 # (#749) the one place watts become the entity's native unit.
                 {"entity_id": self._force_discharge_entity,
-                 "value": watts / scale},
+                 "value": wire / scale},
                 blocking=True,
             )
             self._last_force_discharge_w = watts

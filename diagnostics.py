@@ -527,6 +527,11 @@ async def async_get_config_entry_diagnostics(
                     "battery_force_discharge_control_entity") or None,
                 "battery_force_discharge_entities": full_cfg.get(
                     "battery_force_discharge_entities"),
+                # (#809/#869) which way SEM's signed watts reach the wire
+                "battery_setpoint_model": full_cfg.get(
+                    "battery_setpoint_model") or "signed",
+                "battery_power_direction_entity": full_cfg.get(
+                    "battery_power_direction_entity") or None,
             },
             "scheduler": {
                 "enabled": getattr(sched, "enabled", None),

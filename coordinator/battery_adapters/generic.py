@@ -71,8 +71,11 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         # switch-based GenericChargeAdapter can't drive them. When this flag is
         # set, force-charge writes ``-power`` to that same setpoint (gated by
         # strategy → active), mirroring force-discharge's ``+power``.
+        # (#869) a direction select is two directions by construction.
         self._setpoint_bidirectional = bool(
-            config.get("battery_setpoint_bidirectional", False),
+            config.get("battery_setpoint_bidirectional", False)
+            or (str(config.get("battery_setpoint_model") or "") == "direction_select"
+                and config.get("battery_power_direction_entity")),
         )
         # #523: the user's own strategy before SEM took control (e.g. a Sessy
         # running ``nom``/``roi`` for self-consumption). Captured when SEM
