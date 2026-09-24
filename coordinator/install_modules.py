@@ -64,6 +64,9 @@ BATTERY_WIRING_KEYS: tuple[str, ...] = (
     "battery_force_discharge_entities",
     "battery_strategy_control_entity",
     "battery_strategy_entities",
+    # (#869) the charge/discharge direction select a direction_select
+    # setpoint needs — wired, it is evidence of a battery like the rest.
+    "battery_power_direction_entity",
     # An explicit platform is a choice; its default "auto" is not (see
     # _DEFAULT_VALUES below).
     "battery_charge_platform",
