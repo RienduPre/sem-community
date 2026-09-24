@@ -445,6 +445,31 @@ def _source_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
 
 
 _MAX_KEY_LEN = 80
+
+#: (#941) Integrations that declare entities as a REGISTER TABLE name them by
+#: key and decide the platform elsewhere (hass-victron: 877 rows of
+#: ``"settings_ess_acpowersetpoint": RegisterInfo(...)`` in const.py, entity
+#: ids ``victron_<key>``). Such keys are mined under the platform ``any``;
+#: the lexicon rule that claims one supplies the platform SEM needs.
+_REGISTER_KEY = re.compile(r'^\s*"([a-z0-9_]{3,80})":\s*RegisterInfo\(', re.M)
+TABLE_PLATFORM = "any"
+
+
+def _table_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
+    """Where a register table lives, for a HACS repo (core has strings)."""
+    if origin == "core" or not repo:
+        return
+    for branch in ("main", "master"):
+        for prefix in (f"custom_components/{domain}/", ""):
+            yield f"https://raw.githubusercontent.com/{repo}/{branch}/{prefix}const.py"
+
+
+def mine_register_table(text: str) -> Dict[str, Dict[str, dict]]:
+    """The keys a register table declares, under the ``any`` platform."""
+    keys = _REGISTER_KEY.findall(text)
+    if not keys:
+        return {}
+    return {TABLE_PLATFORM: {k: {"options": ()} for k in keys}}
 _MAX_OPTIONS = 24
 _MAX_OPTION_LEN = 60
 
@@ -521,6 +546,18 @@ def _mine_vocabulary_raw(repo: str, domain: str, origin: str, *,
             text))
         for key in keys:
             out.setdefault(plat, {}).setdefault(key, {"options": ()})
+    if out:
+        return out
+    # (#941) Third and last: a register table. Only for a repo the two
+    # passes above read nothing from — the victron integration's 1987
+    # installs were invisible because its vocabulary is a table.
+    for url in _table_urls(repo, domain, origin):
+        raw = _get(url, f"tbl_{domain}_{_url_key(url)}", offline=offline)
+        if not raw:
+            continue
+        out = mine_register_table(raw.decode("utf-8", "replace"))
+        if out:
+            return out
     return out
 
 
@@ -528,7 +565,8 @@ def _match_role(rules: Dict[str, Dict[str, Any]], platform: str,
                 key: str) -> Optional[str]:
     """First rule whose platform, ``any`` and ``not`` clauses all agree."""
     for role, rule in rules.items():
-        if rule["platform"] != platform:
+        # (#941) a table key has no platform of its own; the rule's is used
+        if platform != TABLE_PLATFORM and rule["platform"] != platform:
             continue
         if any(re.search(p, key, re.I) for p in rule.get("not", ())):
             continue
@@ -656,9 +694,13 @@ def roles_from_vocabulary(vocab: Dict[str, Dict[str, dict]], lexicon,
             role = _match_role(rules, platform, key)
             if not role:
                 continue
+            # (#941) a table key takes the platform its rule requires, so
+            # the shipped roster never says ``any`` and the runtime
+            # intersection still asks for a number where SEM writes one.
+            eff = rules[role]["platform"] if platform == TABLE_PLATFORM else platform
             slot = roles.setdefault(
-                role, {"platform": platform, "keys": [], "options": []})
-            if slot["platform"] != platform:
+                role, {"platform": eff, "keys": [], "options": []})
+            if slot["platform"] != eff:
                 continue
             slot["keys"].append(key)
             for opt in body.get("options") or ():

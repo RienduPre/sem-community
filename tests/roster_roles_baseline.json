@@ -549,6 +549,38 @@
         "charge_mode"
       ]
     },
+    "victron": {
+      "battery_capacity_spec": [
+        "battery_capacity"
+      ],
+      "battery_discharge_limit": [
+        "settings_ess_maxdischargepower"
+      ],
+      "battery_power": [
+        "battery_power"
+      ],
+      "battery_power_setpoint": [
+        "settings_ess_acpowersetpoint"
+      ],
+      "battery_soc": [
+        "battery_soc"
+      ],
+      "battery_strategy": [
+        "acsystem_ess_mode",
+        "multi_ess_mode",
+        "settings_dynamicess_mode",
+        "settings_ess_mode"
+      ],
+      "ev_charge_mode": [
+        "charger_mode",
+        "evcharger_mode"
+      ],
+      "ev_current_control": [
+        "evcharger_current",
+        "evcharger_maxcurrent",
+        "evcharger_setcurrent"
+      ]
+    },
     "victron_ble": {
       "solar_power": [
         "solar_power"
@@ -566,6 +598,9 @@
       ],
       "battery_power": [
         "battery_power"
+      ],
+      "battery_power_setpoint": [
+        "hub4_ac_grid_setpoint"
       ],
       "battery_soc": [
         "battery_soc"
@@ -609,6 +644,9 @@
       ],
       "battery_power": [
         "battery_power"
+      ],
+      "battery_power_setpoint": [
+        "hub4_ac_grid_setpoint"
       ],
       "battery_soc": [
         "battery_soc"

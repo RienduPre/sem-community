@@ -270,3 +270,14 @@ class TestTheEVCurrentRuleKnowsWhatItIsLookingFor:
     ])
     def test_a_current_that_is_not_a_charger_control_does_not(self, key, why):
         assert self._role(key) != "ev_current_control", why
+
+
+@pytest.mark.unit
+def test_victron_register_table_is_rediscovered():
+    """#941 — the third Victron integration declares its entities in a
+    register table. The miner must re-find what #809's reporter wired by
+    hand (the ESS grid setpoint) and what any battery install needs."""
+    assert "settings_ess_acpowersetpoint" in _keys("victron", "battery_power_setpoint")
+    assert "settings_ess_maxdischargepower" in _keys("victron", "battery_discharge_limit")
+    assert "battery_soc" in _keys("victron", "battery_soc")
+    assert "battery_power" in _keys("victron", "battery_power")

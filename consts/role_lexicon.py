@@ -102,6 +102,16 @@ ROLE_RULES: Final[Dict[str, Dict[str, Any]]] = {
     # the line: "nothing in SEM may ever WRITE a policy selector, that
     # boundary is the user's". One role for both would have offered to bind
     # Victron's `system_ess_mode` to the key the adapter writes.
+    # (#941/#809) a signed power SETPOINT: the number SEM writes its
+    # requested watts to (Victron's ESS grid setpoint; Sessy's power
+    # setpoint). A limit caps, a setpoint commands — different roles, and
+    # the per-phase, reactive and microgrid variants are none of SEM's.
+    "battery_power_setpoint": {
+        "platform": "number",
+        "any": (r"acpowersetpoint$", r"^power_setpoint$", r"grid_setpoint$"),
+        "not": (r"reactive", r"frequency", r"voltage", r"microgrid",
+                r"_l[123]_", r"setpoint2", r"limit", r"max", r"min"),
+    },
     "battery_power_strategy": {
         "platform": "select",
         "any": (r"^battery_strategy$", r"^power_strategy$"),
@@ -157,7 +167,11 @@ ROLE_RULES: Final[Dict[str, Dict[str, Any]]] = {
         "platform": "select",
         "any": (r"^ev_charg(e|ing)_mode", r"charger_mode",
                 r"^charg(e|ing)_mode$"),
-        "not": (r"battery", r"ctrl", r"inverter", r"output", r"^ac_", r"^dc_"),
+        # (#941) ``charger_mode`` also sits inside ``evcharger_model`` (a
+        # model number) and ``solarcharger_mode`` (the MPPT) — Victron's
+        # register table declares both beside the real ``evcharger_mode``.
+        "not": (r"battery", r"ctrl", r"inverter", r"output", r"^ac_", r"^dc_",
+                r"model", r"solarcharger", r"mppt"),
     },
     # ── read-side specs (they widen _SPEC_REGISTRY_KEYS, nothing else) ─
     "battery_capacity_spec": {
@@ -409,6 +423,7 @@ SEM_CONFIG_KEY_FOR_ROLE: Final[Dict[str, str]] = {
     "battery_target_soc": "battery_target_soc_entity",
     "battery_power_strategy": "battery_strategy_control_entity",
     "battery_force_charge": "battery_force_charge_switch",
+    "battery_power_setpoint": "battery_force_discharge_control_entity",
     # the read side — SensorReader's own key names (#915: writing the
     # dashboard-shaped names instead read 0 W from a live inverter)
     "solar_power": "solar_production_sensor",
