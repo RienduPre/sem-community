@@ -66,6 +66,7 @@
 | OpenWB 2.x | `openwb2mqtt` / `openwbmqtt` | number entity | 🧩 implemented | — |
 | Peblar Rocksolid | `peblar` | number entity | 🧩 implemented | — |
 | V2C Trydan | `v2c` | number entity | 🧩 implemented | — |
+| Wallbox (MQTT bridge) | `mqtt` | number entity + switch (community MQTT bridge) | 🧩 implemented | #984/#985 (RienduPre) two Pulsar Plus behind the bridge; mapped from his entity lists, live confirm pending |
 | Zaptec | `zaptec` | service-based / number entity (available_current) | 🧩 implemented | disc. 103 (coppe218) reports a Zaptec Go2 under test; no entities or values shown yet |
 
 ## Vehicles

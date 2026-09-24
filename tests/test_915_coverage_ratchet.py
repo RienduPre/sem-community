@@ -578,6 +578,7 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
         # keys, so the roster cannot mine a current control it does offer.
         "ABL eMH1": "names hardcoded in source; number.<device>_charging_current is real",
         "JuiceBox 48": "JuiceBoxProxy over plain MQTT — opaque by construction",
+        "Wallbox (MQTT bridge)": "community MQTT bridge — opaque by construction",
         "Fronius / go-e Wattpilot": "HACS custom repo, not in the store index",
         "go-eCharger (HTTP)": "declares no number keys (names set in code)",
         "ChargePoint": "declares no number keys",

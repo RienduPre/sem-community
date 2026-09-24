@@ -224,6 +224,11 @@ CHARGERS = [
      "evidence": "#700/#748 (jappish84) switch.garo_laddbox — its 6 A floor "
                  "drove the fix, confirmed on v1.7.6-beta.14; brand-detected "
                  "with the floor carried since #816"},
+    {"brand": "Wallbox (MQTT bridge)", "domain_token": "mqtt",
+     "control": "number entity + switch (community MQTT bridge)",
+     "status": "implemented",
+     "evidence": "#984/#985 (RienduPre) two Pulsar Plus behind the bridge; "
+                 "mapped from his entity lists, live confirm pending"},
     {"brand": "JuiceBox 48", "domain_token": "mqtt",
      "control": "number entity (JuiceBoxProxy - MQTT)",
      "status": "tested-live",

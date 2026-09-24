@@ -2697,6 +2697,34 @@ _BRAND_HINTS: Dict[str, List[_ROLE]] = {
         {"role": "ev_charging_sensor", "domain": "sensor",
          "names": ("_state",)},
     ],
+    # (#984/#985) Wallbox Pulsar behind the community MQTT bridge — the
+    # native ``wallbox`` platform is a different row. Every rule requires
+    # the wallbox naming (the JuiceBox rule for a shared platform), and the
+    # bridge publishes per-phase power, power-boost power and nine
+    # ``*_status`` sensors beside the ones SEM wants: hence the "not"s.
+    "wallbox_mqtt": [
+        {"role": "ev_charging_power_sensor", "domain": "sensor",
+         "device_class": "power", "names": ("wallbox",),
+         "names2": ("charging_power",), "not": ("_l1", "_l2", "_l3", "boost")},
+        {"role": "ev_total_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("wallbox",),
+         "names2": ("cumulative_added_energy",), "not": ("boost", "ecosmart")},
+        {"role": "ev_session_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("wallbox",),
+         "names2": ("added_energy",),
+         "not": ("cumulative", "boost", "ecosmart", "internal_meter")},
+        {"role": "ev_charging_sensor", "domain": "sensor",
+         "names": ("wallbox",), "names2": ("_status",),
+         "not": ("ocpp", "powerboost", "ecosmart", "connectivity", "schedule",
+                 "mid_", "external_meter", "control_pilot", "m2w")},
+        {"role": "ev_connected_sensor", "domain": "binary_sensor",
+         "device_class": "plug", "names": ("wallbox",)},
+        {"role": "ev_current_control_entity", "domain": "number",
+         "device_class": "current", "names": ("wallbox",),
+         "names2": ("max_charging_current",)},
+        {"role": "ev_start_stop_entity", "domain": "switch",
+         "names": ("wallbox",), "names2": ("charging_enable",)},
+    ],
     "wattpilot": [
         {"role": "ev_charging_power_sensor", "domain": "sensor",
          "device_class": "power"},
@@ -2766,6 +2794,29 @@ def _discover_juicebox(entities) -> Dict[str, str]:
             and "ev_session_energy_sensor" not in result):
         return {}
     return result
+
+
+def _discover_wallbox_mqtt(entities) -> Dict[str, str]:
+    """(#984/#985) Wallbox behind the community MQTT bridge. Identity:
+    power AND an energy counter AND the current control, all wallbox-named
+    — a plug publishing power over mqtt is not a charger, and a unit
+    without its control is a meter SEM cannot drive."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["wallbox_mqtt"])
+    if not {"ev_charging_power_sensor", "ev_current_control_entity"} <= result.keys():
+        return {}
+    if not ({"ev_total_energy_sensor", "ev_session_energy_sensor"} & result.keys()):
+        return {}
+    return result
+
+
+def _discover_mqtt_brands(entities) -> Dict[str, str]:
+    """The mqtt platform is everyone's platform: each brand row on it has
+    its own identity gate, and the first gate that opens names the box."""
+    for fn in (_discover_juicebox, _discover_wallbox_mqtt):
+        found = fn(entities)
+        if found:
+            return found
+    return {}
 
 
 def _discover_abl_emh1(entities) -> Dict[str, str]:
@@ -3126,7 +3177,8 @@ _EV_CHARGER_PLATFORMS = [
     ("garo_wallbox", _discover_garo),
     # (#816) JuiceBoxProxy publishes over plain MQTT — the discover fn's
     # identity gate is what keeps this from claiming unrelated mqtt devices.
-    ("mqtt", _discover_juicebox),
+    # (#984) …and Wallbox's bridge. Both gates live in _discover_mqtt_brands.
+    ("mqtt", _discover_mqtt_brands),
 ]
 
 
