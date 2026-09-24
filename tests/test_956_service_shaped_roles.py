@@ -378,3 +378,61 @@ class TestAControlLessBrandFunctionFallsThroughToTheRoster:
             rep = hd.build_detection_report(hass=None, registry=_reg(self._goe_box()))
         assert any(c["platform"] == "goecharger" and c["control"] == "see mapping"
                    for c in rep["chargers"])
+
+
+# ── (ruflo pass 2, 24.09.2026) the fall-through must not wipe an honest charger ──
+
+@pytest.mark.unit
+class TestAStartStopOnlyChargerIsNotWipedByTheRoster:
+    """Zaptec reports its resume button ALONE when the only current-like
+    number is the site's available_current (#804 — never SEM's throttle).
+    The roster's zaptec vocabulary lists that very key. The fall-through
+    must leave such a mapping as the charger it honestly is, not turn it
+    into a near miss whose one-click offer is the wrong-scope number."""
+
+    def _box(self):
+        d = "charger-99"
+        return [SimpleNamespace(entity_id="binary_sensor.brand_cable", platform="fakebrand", device_id=d,
+                                original_device_class="plug", disabled_by=None, unique_id="a", translation_key=None),
+                SimpleNamespace(entity_id="sensor.brand_power", platform="fakebrand", device_id=d,
+                                original_device_class="power", disabled_by=None, unique_id="b", translation_key=None),
+                # the roster matches by translation_key or unique_id SUFFIX
+                SimpleNamespace(entity_id="number.brand_available_current", platform="fakebrand", device_id=d,
+                                original_device_class="current", disabled_by=None,
+                                unique_id="charger99_available_current", translation_key=None),
+                SimpleNamespace(entity_id="button.brand_resume", platform="fakebrand", device_id=d,
+                                original_device_class=None, disabled_by=None, unique_id="d", translation_key=None)]
+
+    def _roster(self):
+        return _fake_roster({"fakebrand": {"ev_current_control": {
+            "platform": "number", "keys": ("available_current",), "options": ()}}})
+
+    def test_a_deliberate_start_stop_only_mapping_stays_a_charger(self):
+        def discover(ents):   # the honest shape: a start/stop, no current control
+            return {"ev_start_stop_entity": "button.brand_resume",
+                    "ev_charging_power_sensor": "sensor.brand_power"}
+        with patch.object(hd, "_EV_CHARGER_PLATFORMS", [("fakebrand", discover)]), \
+             patch.object(hd, "_roster", return_value=self._roster()):
+            rep = hd.build_detection_report(hass=_hass_with({}), registry=_reg(self._box()))
+        rows = [c for c in rep["chargers"] if c["platform"] == "fakebrand"]
+        assert rows and "ev_start_stop_entity" in rows[0]["mapped"]
+        assert not any(m["platform"] == "fakebrand" for m in rep["near_misses"])
+
+    def test_a_sensors_only_mapping_still_falls_through(self):
+        def discover(ents):
+            return {"ev_charging_power_sensor": "sensor.brand_power"}
+        with patch.object(hd, "_EV_CHARGER_PLATFORMS", [("fakebrand", discover)]), \
+             patch.object(hd, "_roster", return_value=self._roster()):
+            rep = hd.build_detection_report(hass=_hass_with({}), registry=_reg(self._box()))
+        assert not any(c["platform"] == "fakebrand" for c in rep["chargers"])
+        miss = [m for m in rep["near_misses"] if m["platform"] == "fakebrand"]
+        assert miss and miss[0]["proposed_roles"]["ev_current_control"]["entity"] == "number.brand_available_current"
+
+
+class TestALoneFieldIsTheCurrentOnlyIfItSaysSo:
+    def test_energy_is_not_amperes(self):
+        assert hd._current_field(("energy",)) is None
+
+    def test_a_lone_current_like_field_is(self):
+        assert hd._current_field(("charge_current_a",)) == "charge_current_a"
+        assert hd._current_field(("current",)) == "current"

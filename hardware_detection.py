@@ -1693,7 +1693,11 @@ def _current_field(fields) -> Optional[str]:
     for want in _CURRENT_FIELDS:
         if want in fields:
             return want
-    return fields[0] if len(fields) == 1 else None
+    # (ruflo pass 2) a lone field is the current only if it SAYS so —
+    # set_energy(energy) has one field and it is not amperes.
+    if len(fields) == 1 and any(w in fields[0] for w in ("current", "amp")):
+        return fields[0]
+    return None
 
 
 def _services_of(hass):
@@ -2345,8 +2349,15 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             # got to speak — go-eCharger's box has no current number, only a
             # service. When the roster can name a control, this is a near
             # miss with an offer, not a charger with "see mapping".
+            # (ruflo pass 2) …and a mapping that carries a START/STOP control
+            # is a deliberate, honest charger — Zaptec reports its resume
+            # button ALONE when the only current-like number is the site's
+            # available_current (#804: never SEM's throttle). Wiping that
+            # would let the roster offer the wrong-scope number one click
+            # away. Only a sensors-only mapping falls through.
             if (mapping and not mapping.get("ev_current_control_entity")
-                    and not mapping.get("ev_charger_service")):
+                    and not mapping.get("ev_charger_service")
+                    and not mapping.get("ev_start_stop_entity")):
                 _ctl = propose_roles_from_roster(
                     dev_entities, platform, services_of=_services_of(hass)
                 ).get("ev_current_control") or {}
