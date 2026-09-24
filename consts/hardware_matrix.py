@@ -45,7 +45,7 @@ DISCHARGE_DECLARED = "declared"
 #: the detection list could drift apart with nothing noticing. A row with no
 #: token is a path rather than an integration: the generic matcher, or a
 #: brand that is only a request.
-UNTOKENED_CHARGER_ROWS: tuple = ("Generic / manual", "ABL eMH1")
+UNTOKENED_CHARGER_ROWS: tuple = ("Generic / manual",)
 
 #: (#915) The same idea for the other three tables: ``domains`` is the HA
 #: integration domain (or domains — one brand, several integrations) a row is
@@ -234,6 +234,11 @@ CHARGERS = [
      "control": "number entity",
      "status": "tested-live",
      "evidence": "#802 (HorizonKane, ha-wattpilot fork — confirmed working)"},
+    {"brand": "NRGkick", "domain_token": "nrgkick",
+     "control": "number entity + switch",
+     "status": "implemented",
+     "evidence": "#917 (aleho) named the control surface; mapped from "
+                 "core's own keys, no live confirm yet"},
     {"brand": "go-eCharger (HTTP)", "domain_token": "goecharger",
      "control": "number entity",
      "status": "implemented", "evidence": ""},
@@ -289,8 +294,11 @@ CHARGERS = [
      "status": "implemented",
      "evidence": "the documented manual-config path; #752 (praun) uses it to "
                  "steer a Tesla's own BLE amp number behind an Easee"},
-    {"brand": "ABL eMH1", "control": "Modbus ASCII (quirk: '>' start symbol)",
-     "status": "requested", "evidence": "#808 (interface spec attached)"},
+    {"brand": "ABL eMH1", "domain_token": "ev_charger_modbus",
+     "control": "number entity + switch (matfroh/ABL_emh1_modbus, Modbus ASCII)",
+     "status": "implemented",
+     "evidence": "#808 (janklostermann) found the integration; mapped from "
+                 "its source, nobody has the hardware on a bench yet"},
 ]
 
 # Vehicles are not controlled by SEM directly — they matter because their

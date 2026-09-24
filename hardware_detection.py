@@ -2666,6 +2666,37 @@ _BRAND_HINTS: Dict[str, List[_ROLE]] = {
         {"role": "ev_current_control_entity", "domain": "number",
          "names": ("juicebox",), "names2": ("current", "amp")},
     ],
+    # (#917) NRGkick, core integration. Keys are core's own translation keys
+    # (strings.json), so the row survives any rename of the device. The box
+    # publishes a dozen power-class sensors (per phase, apparent, peak) and
+    # two numbers: every rule NAMES the key it wants.
+    "nrgkick": [
+        {"role": "ev_current_control_entity", "domain": "number",
+         "names": ("current_set",)},
+        {"role": "ev_start_stop_entity", "domain": "switch",
+         "names": ("charging_enabled",)},
+        {"role": "ev_charging_power_sensor", "domain": "sensor",
+         "device_class": "power", "names": ("total_active_power",)},
+        {"role": "ev_session_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("charged_energy",), "not": ("total",)},
+        {"role": "ev_total_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("total_charged_energy",)},
+        {"role": "ev_charging_sensor", "domain": "sensor",
+         "names": ("status",)},
+    ],
+    # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus. The integration
+    # names entities in plain English with the user's device name in front,
+    # so the rules match the tail the source writes, never the head.
+    "ev_charger_modbus": [
+        {"role": "ev_current_control_entity", "domain": "number",
+         "names": ("charging_current",)},
+        {"role": "ev_start_stop_entity", "domain": "switch",
+         "names": ("charging_enable",)},
+        {"role": "ev_charging_power_sensor", "domain": "sensor",
+         "device_class": "power"},
+        {"role": "ev_charging_sensor", "domain": "sensor",
+         "names": ("_state",)},
+    ],
     "wattpilot": [
         {"role": "ev_charging_power_sensor", "domain": "sensor",
          "device_class": "power"},
@@ -2737,6 +2768,15 @@ def _discover_juicebox(entities) -> Dict[str, str]:
     return result
 
 
+def _discover_abl_emh1(entities) -> Dict[str, str]:
+    """(#808) ABL eMH1 through ev_charger_modbus — a data row, gated on the
+    current control like the other brand rows SEM can drive."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["ev_charger_modbus"])
+    if "ev_current_control_entity" not in result:
+        return {}
+    return result
+
+
 def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     """Apply a brand's data rows: each role takes the LAST matching entity
     (the same last-wins the hand-written loops had), a rule matches on
@@ -2760,7 +2800,32 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
             names2 = rule.get("names2")
             if names2 and not any(n in eid for n in names2):
                 continue
+            # (#917/#984) a NEGATIVE any-of, for siblings that share the
+            # positive words: ``total_charged_energy`` beside
+            # ``charged_energy``, ``charging_power_l1`` beside
+            # ``charging_power``. Substring rules cannot say "not" otherwise.
+            not_names = rule.get("not")
+            if not_names and any(n in eid for n in not_names):
+                continue
             result[rule["role"]] = eid
+    return result
+
+
+def _discover_nrgkick(entities) -> Dict[str, str]:
+    """(#917) NRGkick — a data row, plus the phase-count number offered as
+    the #804 phase switch: it takes 1 or 3, so the values are the counts."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["nrgkick"])
+    # Identity: the current control. A device on the brand's own platform
+    # that only reports is not a charger SEM can drive.
+    if "ev_current_control_entity" not in result:
+        return {}
+    for entry in entities:
+        eid = str(entry.entity_id)
+        if eid.startswith("number.") and eid.endswith("phase_count"):
+            result["_suggested_phase_switch"] = {
+                "entity": eid, "value_1p": "1", "value_3p": "3",
+            }
+            break
     return result
 
 
@@ -3053,6 +3118,10 @@ _EV_CHARGER_PLATFORMS = [
     # (#802/#814) data-row brands need no function — the generic matcher
     # applies their _BRAND_HINTS rows.
     ("wattpilot", lambda ents: _discover_from_hints(ents, _BRAND_HINTS["wattpilot"])),
+    # (#917) NRGkick — a data row plus the phase-count offer.
+    ("nrgkick", _discover_nrgkick),
+    # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus.
+    ("ev_charger_modbus", _discover_abl_emh1),
     # (#816) GARO's custom integration domain.
     ("garo_wallbox", _discover_garo),
     # (#816) JuiceBoxProxy publishes over plain MQTT — the discover fn's

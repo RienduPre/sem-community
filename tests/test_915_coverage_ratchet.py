@@ -411,6 +411,8 @@ class TestTheMatrixAndTheRosterAgree:
         "openwbmqtt": "archived predecessor — 47 installs",
         "grott": "a Growatt MQTT proxy — 407 installs, no store entry",
         "mqtt": "a transport, opaque by construction",
+        # (#808) added by URL, 11 installs in analytics — under the roster floor
+        "ev_charger_modbus": "HACS custom repo (matfroh/ABL_emh1_modbus) — 11 installs",
         "homekit_controller": "a transport, opaque by construction",
     }
 
@@ -572,6 +574,9 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
     #: Charger rows saying "number entity" whose integration declares no
     #: current-control key upstream.
     CURRENT_NOT_DECLARED = {
+        # (#808) the integration names entities in Python, not translation
+        # keys, so the roster cannot mine a current control it does offer.
+        "ABL eMH1": "names hardcoded in source; number.<device>_charging_current is real",
         "JuiceBox 48": "JuiceBoxProxy over plain MQTT — opaque by construction",
         "Fronius / go-e Wattpilot": "HACS custom repo, not in the store index",
         "go-eCharger (HTTP)": "declares no number keys (names set in code)",
