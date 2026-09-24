@@ -2170,6 +2170,51 @@ def build_integration_census(hass=None, registry=None, config_domains=None,
     }
 
 
+#: (#887) OnStar2MQTT's own EV vocabulary (src/mqtt.js, read 24.09.2026):
+#: the diagnostic elements EV_BATTERY_LEVEL / EV_RANGE / EV_CHARGE_STATE /
+#: EV_PLUG_STATE and their ``ev_charging_`` metrics twins. Matched as
+#: entity-id TAILS, never by make or model — a 2019 Traverse (ICE) carries
+#: none of them, which is exactly how the reporter tells the two apart.
+_VEHICLE_TAILS = {
+    "vehicle_soc_entity": ("sensor", ("_ev_battery_level", "_ev_charging_battery_level")),
+    "vehicle_range_entity": ("sensor", ("_ev_range", "_ev_charging_range")),
+    "ev_connected_sensor": ("binary_sensor", ("_ev_plug_state", "_ev_charging_plug_state")),
+    "ev_charging_sensor": ("binary_sensor", ("_ev_charge_state", "_ev_charging_charge_state")),
+}
+
+
+def vehicle_from_device(dev_entities) -> Dict[str, Any]:
+    """(#887) A CAR on a transport platform, named as a car. Azlinon's
+    OnStar vehicles came up as "entities present, no role matched — please
+    report": SEM had no idea of a vehicle over MQTT, and the one thing it
+    could say was wrong. Identity is the bridge's own EV vocabulary with at
+    least a state of charge or a range; the answer is the SOC/range/plug
+    sources SEM charges TOWARDS (``vehicle_soc_entity`` & co.). Report data
+    and a proposal — never bound by itself. ``{}`` when this is not a car."""
+    out: Dict[str, Any] = {}
+    for role, (domain, tails) in _VEHICLE_TAILS.items():
+        for tail in tails:                       # the plain element first
+            for e in dev_entities:
+                eid = str(getattr(e, "entity_id", ""))
+                if eid.startswith(f"{domain}.") and eid.endswith(tail):
+                    out.setdefault(role, eid)
+                    break
+            if role in out:
+                break
+    if "vehicle_soc_entity" not in out and "vehicle_range_entity" not in out:
+        return {}
+    # the name is the bridge's own stem: sensor.2024_chevrolet_blazer_ev_ev_range
+    first = out.get("vehicle_soc_entity") or out["vehicle_range_entity"]
+    stem = first.split(".", 1)[1]
+    for tails in (t for _, t in _VEHICLE_TAILS.values()):
+        for tail in tails:
+            if stem.endswith(tail):
+                stem = stem[: -len(tail)]
+                break
+    out["name"] = stem.replace("_", " ").strip().title() or "vehicle"
+    return out
+
+
 def build_detection_report(hass: Optional[HomeAssistant] = None,
                            registry=None, configured_entities=None,
                            strategy_values=None) -> Dict[str, Any]:
@@ -2205,6 +2250,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         "scanned_platforms": [p for p, _ in _EV_CHARGER_PLATFORMS],
         "chargers": [],
         "near_misses": [],
+        # (#887) cars found on a transport platform, named as cars
+        "vehicles": [],
         "disabled_ignored": [],
         # (#964) entities of a device-less platform that no unit could claim
         # — dropped from the role walk on purpose, never silently.
@@ -2267,6 +2314,16 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 # earns the line only if something about it is actually
                 # energy-shaped — a power sensor with a plug or a current
                 # control (the census rule), or a role the roster proposed.
+                # (#887) a CAR is not a near miss and not unknown hardware
+                _vehicle = vehicle_from_device(dev_entities)
+                if _vehicle:
+                    report["vehicles"].append({
+                        "platform": platform,
+                        "device_id": device_id,
+                        "note": "vehicle",
+                        **_vehicle,
+                    })
+                    continue
                 _proposed = propose_roles_from_roster(
                     dev_entities, platform, services_of=_services_of(hass))
                 if (platform in _TRANSPORT_PLATFORMS and not _proposed
