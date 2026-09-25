@@ -52,6 +52,7 @@ def adapter_for(hass, config: dict) -> BatteryControlAdapter:
     if (
         config.get("battery_strategy_control_entity")
         or config.get("battery_setpoint_bidirectional")
+        or config.get("battery_power_direction_entity")   # (#869)
     ):
         return GenericBatteryAdapter(hass, config)
 
@@ -98,7 +99,8 @@ def _pinnable(config: dict) -> bool:
     if platform != "generic":
         return False
     return not (config.get("battery_strategy_control_entity")
-                or config.get("battery_setpoint_bidirectional"))
+                or config.get("battery_setpoint_bidirectional")
+                or config.get("battery_power_direction_entity"))
 
 
 def pinned_generic_pending(hass, config: dict) -> bool:

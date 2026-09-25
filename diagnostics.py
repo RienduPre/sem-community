@@ -527,6 +527,11 @@ async def async_get_config_entry_diagnostics(
                     "battery_force_discharge_control_entity") or None,
                 "battery_force_discharge_entities": full_cfg.get(
                     "battery_force_discharge_entities"),
+                # (#809/#869) which way SEM's signed watts reach the wire
+                "battery_setpoint_model": full_cfg.get(
+                    "battery_setpoint_model") or "signed",
+                "battery_power_direction_entity": full_cfg.get(
+                    "battery_power_direction_entity") or None,
             },
             "scheduler": {
                 "enabled": getattr(sched, "enabled", None),
@@ -568,6 +573,8 @@ async def async_get_config_entry_diagnostics(
     _report = data.get("detection_report") or {}
     detection = {k: _report.get(k) for k in
                  ("census", "chargers", "near_misses", "disagreements",
+                  # (#887) cars found on a transport platform, named as cars
+                  "vehicles",
                   # (#964) what the unit grouping could attribute to no box
                   "unattributed")
                  if _report.get(k) is not None}

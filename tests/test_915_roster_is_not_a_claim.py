@@ -152,9 +152,16 @@ class TestTheBoundaries:
     def test_every_role_body_has_keys_on_its_declared_platform(self):
         rules = {**lexicon.ROLE_RULES, **lexicon.READ_ROLE_RULES,
                  **lexicon.VEHICLE_ROLE_RULES}
+        service_rules = getattr(lexicon, "SERVICE_ROLE_RULES", {})
         for domain, roles in roster.ROLE_VOCAB.items():
             for role, body in roles.items():
                 assert body["keys"], (domain, role)
+                if body["platform"] == "service":
+                    # (#956) a capability offered as a service: its own rule
+                    # table, and every key is ``<this domain>.<service>``
+                    assert role in service_rules, (domain, role)
+                    assert all(k.startswith(f"{domain}.") for k in body["keys"]), (domain, role)
+                    continue
                 assert body["platform"] == rules[role]["platform"], (domain, role)
 
     def test_the_roster_is_dated_and_names_its_sources(self):

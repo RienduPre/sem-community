@@ -572,7 +572,11 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
     #: Charger rows saying "number entity" whose integration declares no
     #: current-control key upstream.
     CURRENT_NOT_DECLARED = {
+        # (#808) the integration names entities in Python, not translation
+        # keys, so the roster cannot mine a current control it does offer.
+        "ABL eMH1": "names hardcoded in source; number.<device>_charging_current is real",
         "JuiceBox 48": "JuiceBoxProxy over plain MQTT — opaque by construction",
+        "Wallbox (MQTT bridge)": "community MQTT bridge — opaque by construction",
         "Fronius / go-e Wattpilot": "HACS custom repo, not in the store index",
         "go-eCharger (HTTP)": "declares no number keys (names set in code)",
         "ChargePoint": "declares no number keys",
@@ -590,8 +594,14 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
                         "as SEM's own discovery says",
     }
 
-    def _offers(self, doms, role):
-        return any(role in roster.ROLE_VOCAB.get(d, {}) for d in doms)
+    def _offers(self, doms, role, platform=None):
+        """(#956) a role may be offered as an entity OR as a service; a
+        claim about a NUMBER is only derived from a number offer."""
+        for d in doms:
+            body = roster.ROLE_VOCAB.get(d, {}).get(role)
+            if body and (platform is None or body.get("platform") == platform):
+                return True
+        return False
 
     def test_every_inverter_discharge_claim_is_derived_or_explained(self):
         unexplained = []
@@ -638,7 +648,7 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
                     ) + list(row.get("also_domains") or ())
             if "number" not in row.get("control", "") or not doms:
                 continue
-            if self._offers(doms, "ev_current_control"):
+            if self._offers(doms, "ev_current_control", platform="number"):
                 continue
             if row["brand"] not in self.CURRENT_NOT_DECLARED:
                 unexplained.append(row["brand"])
@@ -649,8 +659,9 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
         for row in self.matrix.CHARGERS:
             doms = ([row["domain_token"]] if row.get("domain_token") else []
                     ) + list(row.get("also_domains") or ())
+            # (#956) a SERVICE offer agrees with a service-based row (KEBA)
             if "number" not in row.get("control", "") and self._offers(
-                    doms, "ev_current_control"):
+                    doms, "ev_current_control", platform="number"):
                 wrong.append(row["brand"])
         assert not wrong, f"{wrong}: Zaptec was this on 06.09 — the row was stale"
 
@@ -667,7 +678,7 @@ class TestTheMatrixControlClaimsAgreeWithTheRoster:
             row = by_brand[brand]
             doms = ([row["domain_token"]] if row.get("domain_token") else []
                     ) + list(row.get("also_domains") or ())
-            if self._offers(doms, "ev_current_control"):
+            if self._offers(doms, "ev_current_control", platform="number"):
                 stale.append(brand)
         assert not stale, f"{stale} derives its control now — drop the exemption"
 

@@ -296,6 +296,9 @@ class TestStructuralKeysVisibility:
             "battery_strategy_entities",
             "battery_strategy_control_entity",
             "battery_setpoint_bidirectional",
+        # (#809/#869) the setpoint model and its direction select
+        "battery_setpoint_model", "battery_power_direction_entity",
+        "battery_direction_discharge_value", "battery_direction_charge_value",
             # (#923) module wiring the install-modules oracle reads — adding
             # hardware through set_option must reload to create its entities
             "ev_charging_power_sensor", "ev_power_sensor", "heat_pumps",

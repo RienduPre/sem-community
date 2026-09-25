@@ -270,3 +270,25 @@ class TestTheEVCurrentRuleKnowsWhatItIsLookingFor:
     ])
     def test_a_current_that_is_not_a_charger_control_does_not(self, key, why):
         assert self._role(key) != "ev_current_control", why
+
+
+@pytest.mark.unit
+def test_victron_register_table_is_rediscovered():
+    """#941 — the third Victron integration declares its entities in a
+    register table. The miner must re-find what #809's reporter wired by
+    hand (the ESS grid setpoint) and what any battery install needs."""
+    assert "settings_ess_acpowersetpoint" in _keys("victron", "battery_power_setpoint")
+    assert "settings_ess_maxdischargepower" in _keys("victron", "battery_discharge_limit")
+    assert "battery_soc" in _keys("victron", "battery_soc")
+    assert "battery_power" in _keys("victron", "battery_power")
+
+
+@pytest.mark.unit
+def test_keba_offers_its_current_control_as_a_service():
+    """#956 — SEM's own production wallbox declares no current entity; it
+    offers ``keba.set_current``. The miner must re-find it from
+    services.yaml, on the service platform, and nothing else from that
+    file (set_failsafe, set_energy, enable, disable are not the control)."""
+    body = roster.ROLE_VOCAB["keba"]["ev_current_control"]
+    assert body["platform"] == "service"
+    assert body["keys"] == ("keba.set_current",)

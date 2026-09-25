@@ -268,6 +268,10 @@ const STRUCTURAL_KEYS = new Set([
     // #550 — structural TOGGLES: reload the entry too, so they stage + commit on
     // Apply like the pickers (a live flip would reload and discard staged edits).
     'battery_discharge_protection_enabled', 'battery_setpoint_bidirectional',
+    // (#809/#869) the setpoint model and its direction select are read at
+    // adapter construction, like the flag above.
+    'battery_setpoint_model', 'battery_power_direction_entity',
+    'battery_direction_discharge_value', 'battery_direction_charge_value',
 ]);
 
 class SEMConfigCard extends SEMLitBase {
@@ -1130,7 +1134,11 @@ class SEMConfigCard extends SEMLitBase {
                 case 'pair_incomplete': return fill('config_proposed_pair_incomplete',
                     { missing: (p.missing_role || []).join(', ') });
                 case 'per_charger': return this._t('config_proposed_per_charger');
-                default: return '';
+                // (#956) a service the registry could not be asked about, or
+                // one SEM cannot drive as-is — the reason travels with the row
+                case 'unaskable':
+                case 'needs_hand_wiring': return p.reason || '';
+                default: return p.reason || '';
             }
         };
         const useButton = (p, entity, fieldKey) => {
@@ -1145,6 +1153,9 @@ class SEMConfigCard extends SEMLitBase {
                 ${st && st !== 'ok' && st !== 'saving' ? html`<span style="opacity:.7"> ${st}</span>` : nothing}`;
         };
         const proposalRow = (role, p) => {
+            // (#956) a proposal may name a SERVICE instead of an entity
+            // (KEBA's set_current); it renders the same, lands per charger.
+            const what = p.entity || p.service || (p.candidates || []).join(' / ') || '';
             const already = this._options?.[p.config_key] === p.entity;
             const reason = whyNoButton(p);
             // (#915) the runners-up: a brand that declares several keys for
@@ -1155,7 +1166,7 @@ class SEMConfigCard extends SEMLitBase {
             return html`
             <div class="row">
                 <span class="lbl">${role}</span>
-                <span style="font-family:monospace;font-size:0.85em">${p.entity}
+                <span style="font-family:monospace;font-size:0.85em">${what}
                     <span style="opacity:.6"> · ${p.matched_key}</span>
                 </span>
             </div>
@@ -1474,6 +1485,24 @@ class SEMConfigCard extends SEMLitBase {
                 ${this._renderOptionToggle('battery_setpoint_bidirectional',
                     'config_battery_bidirectional', opts,
                     'config_help_battery_bidirectional', false)}
+                ${''/* (#809/#869) how SEM's signed watts reach the wire:
+                    signed (default) · inverted (Victron ESS grid setpoint)
+                    · direction_select (Anker: a charge/discharge select and
+                    an unsigned watt number). Setup fields, not knobs. */}
+                ${this._renderTextOption('battery_setpoint_model',
+                    'config_setpoint_model', opts,
+                    'config_help_setpoint_model', 'signed')}
+                ${opts['battery_setpoint_model'] === 'direction_select' ? html`
+                    ${this._renderPicker('battery_power_direction_entity',
+                        'config_direction_entity', 'select', null, opts,
+                        'config_help_direction_entity')}
+                    ${this._renderTextOption('battery_direction_discharge_value',
+                        'config_direction_val_discharge', opts,
+                        'config_help_direction_values', 'discharge')}
+                    ${this._renderTextOption('battery_direction_charge_value',
+                        'config_direction_val_charge', opts,
+                        'config_help_direction_values', 'charge')}
+                ` : nothing}
             ` : nothing}
             ${''/* Battery→grid arbitrage UI is deactivated for the stable
                release (drained a real battery to its reserve floor when a

@@ -1563,7 +1563,14 @@
     "price_level_flat": "Žádný cenový rozdíl",
     "price_level_no_prices": "Nejsou dostupné ceny",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Model požadované hodnoty",
+    "config_help_setpoint_model": "Jak watty SEM dorazí do entity. signed (výchozí): + vybíjení, − nabíjení. inverted: zrcadlo, např. síťová žádaná hodnota ESS Victron. direction_select: výběr nabíjení/vybíjení plus číslo wattů bez znaménka, např. Anker Solix.",
+    "config_direction_entity": "Výběr směru nabíjení/vybíjení",
+    "config_help_direction_entity": "Entita select, která určuje směr výkonu baterie. SEM ji nastaví před zápisem wattů a čeká na zpětné čtení.",
+    "config_direction_val_discharge": "Směr: hodnota vybíjení",
+    "config_direction_val_charge": "Směr: hodnota nabíjení",
+    "config_help_direction_values": "Texty voleb vašeho výběru směru. Výchozí jsou Ankerovy (discharge / charge)."
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3129,7 +3136,14 @@
     "price_level_flat": "Ingen prisforskel",
     "price_level_no_prices": "Ingen priser tilgængelige",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Setpunktmodel",
+    "config_help_setpoint_model": "Hvordan SEM's watt når entiteten. signed (standard): + afladning, − opladning. inverted: spejlet, f.eks. Victrons ESS-netsetpunkt. direction_select: et oplad/aflad-valg plus et wattal uden fortegn, f.eks. Anker Solix.",
+    "config_direction_entity": "Retningsvalg oplad/aflad",
+    "config_help_direction_entity": "Select-entiteten der angiver batteriets effektretning. SEM sætter den før wattallet skrives og venter på tilbagelæsning.",
+    "config_direction_val_discharge": "Retning: værdi for afladning",
+    "config_direction_val_charge": "Retning: værdi for opladning",
+    "config_help_direction_values": "Valgteksterne i dit retningsvalg. Standard er Ankers (discharge / charge)."
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4695,7 +4709,14 @@
     "price_level_flat": "Kein Preisunterschied",
     "price_level_no_prices": "Keine Preise verfügbar",
     "config_house_power_sensor": "Hausverbrauch-Sensor",
-    "config_help_house_power_sensor": "Ihr Wechselrichter liefert den Hausverbrauch eventuell direkt (z. B. Fronius SolarNet „Leistung Verbrauch“). Sonst rechnet SEM ihn aus Solar, Netz, Batterie und EV aus, und bei einem Hybrid steckt in dieser Summe auch der Wandlungsverlust — 30 bis 60 W bei einem Fronius GEN24. Leer lassen für das bisherige Verhalten."
+    "config_help_house_power_sensor": "Ihr Wechselrichter liefert den Hausverbrauch eventuell direkt (z. B. Fronius SolarNet „Leistung Verbrauch“). Sonst rechnet SEM ihn aus Solar, Netz, Batterie und EV aus, und bei einem Hybrid steckt in dieser Summe auch der Wandlungsverlust — 30 bis 60 W bei einem Fronius GEN24. Leer lassen für das bisherige Verhalten.",
+    "config_setpoint_model": "Sollwert-Modell",
+    "config_help_setpoint_model": "Wie SEMs Watt die Entität erreichen. signed (Standard): + Entladen, − Laden. inverted: gespiegelt, z. B. Victrons ESS-Netzsollwert. direction_select: ein Laden/Entladen-Select plus eine vorzeichenlose Watt-Zahl, z. B. Anker Solix.",
+    "config_direction_entity": "Laden/Entladen-Richtungs-Select",
+    "config_help_direction_entity": "Das Select, das die Richtung des Batteriestroms bestimmt. SEM setzt es vor dem Schreiben der Watt-Zahl und wartet, bis es zurückgelesen wird.",
+    "config_direction_val_discharge": "Richtung: Wert für Entladen",
+    "config_direction_val_charge": "Richtung: Wert für Laden",
+    "config_help_direction_values": "Die Optionstexte Ihres Richtungs-Selects. Standard sind die von Anker (discharge / charge)."
   },
   "en": {
     "% of limit": "% of limit",
@@ -6261,7 +6282,14 @@
     "price_level_flat": "No price difference",
     "price_level_no_prices": "No prices available",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works its own figure out from solar, grid, battery and EV, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Name a sensor here and SEM publishes both numbers and the difference between them. Its own figure is unchanged, so nothing it decides changes either."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works its own figure out from solar, grid, battery and EV, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Name a sensor here and SEM publishes both numbers and the difference between them. Its own figure is unchanged, so nothing it decides changes either.",
+    "config_setpoint_model": "Setpoint model",
+    "config_help_setpoint_model": "How SEM's watts reach the entity. signed (default): + discharge, − charge. inverted: the mirror, e.g. Victron's ESS grid setpoint. direction_select: a charge/discharge select plus an unsigned watt number, e.g. Anker Solix.",
+    "config_direction_entity": "Charge/discharge direction select",
+    "config_help_direction_entity": "The select entity that says which way the battery moves power. SEM sets it before writing the watt number, and waits until it reads back.",
+    "config_direction_val_discharge": "Direction: discharge value",
+    "config_direction_val_charge": "Direction: charge value",
+    "config_help_direction_values": "The option strings of your direction select. Defaults are Anker's (discharge / charge)."
   },
   "es": {
     "% of limit": "% del límite",
@@ -7827,7 +7855,14 @@
     "price_level_flat": "Sin diferencia de precio",
     "price_level_no_prices": "Sin precios disponibles",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Modelo de consigna",
+    "config_help_setpoint_model": "Cómo llegan los vatios de SEM a la entidad. signed (por defecto): + descarga, − carga. inverted: el espejo, p. ej. la consigna de red ESS de Victron. direction_select: un selector carga/descarga más un número de vatios sin signo, p. ej. Anker Solix.",
+    "config_direction_entity": "Selector de sentido carga/descarga",
+    "config_help_direction_entity": "La entidad select que indica el sentido de la potencia de la batería. SEM la fija antes de escribir los vatios y espera su relectura.",
+    "config_direction_val_discharge": "Sentido: valor descarga",
+    "config_direction_val_charge": "Sentido: valor carga",
+    "config_help_direction_values": "Los textos de opción de su selector de sentido. Por defecto los de Anker (discharge / charge)."
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9393,7 +9428,14 @@
     "price_level_flat": "Ei hintaeroa",
     "price_level_no_prices": "Hintoja ei saatavilla",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Asetusarvon malli",
+    "config_help_setpoint_model": "Miten SEM:n watit päätyvät entiteettiin. signed (oletus): + purku, − lataus. inverted: peilikuva, esim. Victronin ESS-verkkoasetusarvo. direction_select: lataus/purku-valinta ja etumerkitön wattiluku, esim. Anker Solix.",
+    "config_direction_entity": "Lataus/purku-suunnan valinta",
+    "config_help_direction_entity": "Select-entiteetti, joka kertoo akun tehon suunnan. SEM asettaa sen ennen wattiluvun kirjoitusta ja odottaa takaisinlukua.",
+    "config_direction_val_discharge": "Suunta: purun arvo",
+    "config_direction_val_charge": "Suunta: latauksen arvo",
+    "config_help_direction_values": "Suuntavalintasi vaihtoehtotekstit. Oletuksena Ankerin (discharge / charge)."
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -10959,7 +11001,14 @@
     "price_level_flat": "Aucun écart de prix",
     "price_level_no_prices": "Aucun prix disponible",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Modèle de consigne",
+    "config_help_setpoint_model": "Comment les watts de SEM atteignent l'entité. signed (défaut) : + décharge, − charge. inverted : le miroir, p. ex. la consigne réseau ESS Victron. direction_select : un sélecteur charge/décharge plus un nombre de watts sans signe, p. ex. Anker Solix.",
+    "config_direction_entity": "Sélecteur de sens charge/décharge",
+    "config_help_direction_entity": "L'entité select qui indique le sens du courant de la batterie. SEM la règle avant d'écrire les watts et attend sa relecture.",
+    "config_direction_val_discharge": "Sens : valeur décharge",
+    "config_direction_val_charge": "Sens : valeur charge",
+    "config_help_direction_values": "Les libellés d'option de votre sélecteur de sens. Par défaut ceux d'Anker (discharge / charge)."
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12525,7 +12574,14 @@
     "price_level_flat": "Nincs árkülönbség",
     "price_level_no_prices": "Nincsenek elérhető árak",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Alapjel-modell",
+    "config_help_setpoint_model": "Hogyan éri el a SEM wattja az entitást. signed (alap): + kisütés, − töltés. inverted: a tükörkép, pl. a Victron ESS hálózati alapjele. direction_select: egy töltés/kisütés választó plusz egy előjel nélküli wattszám, pl. Anker Solix.",
+    "config_direction_entity": "Töltés/kisütés irányválasztó",
+    "config_help_direction_entity": "A select entitás, amely az akkumulátor teljesítményirányát adja meg. A SEM a wattszám írása előtt beállítja, és megvárja a visszaolvasást.",
+    "config_direction_val_discharge": "Irány: kisütés értéke",
+    "config_direction_val_charge": "Irány: töltés értéke",
+    "config_help_direction_values": "Az irányválasztó opciószövegei. Alapértelmezés az Ankeré (discharge / charge)."
   },
   "it": {
     "% of limit": "% del limite",
@@ -14091,7 +14147,14 @@
     "price_level_flat": "Nessuna differenza di prezzo",
     "price_level_no_prices": "Nessun prezzo disponibile",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Modello del setpoint",
+    "config_help_setpoint_model": "Come i watt di SEM raggiungono l'entità. signed (predefinito): + scarica, − carica. inverted: lo specchio, es. il setpoint di rete ESS Victron. direction_select: un selettore carica/scarica più un numero di watt senza segno, es. Anker Solix.",
+    "config_direction_entity": "Selettore direzione carica/scarica",
+    "config_help_direction_entity": "L'entità select che indica la direzione della potenza della batteria. SEM la imposta prima di scrivere i watt e attende la rilettura.",
+    "config_direction_val_discharge": "Direzione: valore scarica",
+    "config_direction_val_charge": "Direzione: valore carica",
+    "config_help_direction_values": "Le stringhe di opzione del selettore di direzione. Predefinite quelle di Anker (discharge / charge)."
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15657,7 +15720,14 @@
     "price_level_flat": "Geen prijsverschil",
     "price_level_no_prices": "Geen prijzen beschikbaar",
     "config_house_power_sensor": "Huisverbruik-sensor",
-    "config_help_house_power_sensor": "Je omvormer publiceert het huisverbruik mogelijk rechtstreeks (bijvoorbeeld Fronius SolarNet 'Leistung Verbrauch'). Anders rekent SEM het uit zon, net, accu en EV, en bij een hybride zit in die som ook het omzettingsverlies — 30 tot 60 W bij een Fronius GEN24. Leeg laten voor het huidige gedrag."
+    "config_help_house_power_sensor": "Je omvormer publiceert het huisverbruik mogelijk rechtstreeks (bijvoorbeeld Fronius SolarNet 'Leistung Verbrauch'). Anders rekent SEM het uit zon, net, accu en EV, en bij een hybride zit in die som ook het omzettingsverlies — 30 tot 60 W bij een Fronius GEN24. Leeg laten voor het huidige gedrag.",
+    "config_setpoint_model": "Setpoint-model",
+    "config_help_setpoint_model": "Hoe SEM's watt de entiteit bereikt. signed (standaard): + ontladen, − laden. inverted: gespiegeld, bv. Victrons ESS-netsetpoint. direction_select: een laden/ontladen-select plus een watt-getal zonder teken, bv. Anker Solix.",
+    "config_direction_entity": "Laad/ontlaad-richting select",
+    "config_help_direction_entity": "De select-entiteit die zegt in welke richting de batterij vermogen stuurt. SEM zet die vóór het schrijven van het watt-getal en wacht tot hij teruggelezen is.",
+    "config_direction_val_discharge": "Richting: waarde voor ontladen",
+    "config_direction_val_charge": "Richting: waarde voor laden",
+    "config_help_direction_values": "De optieteksten van uw richting-select. Standaard die van Anker (discharge / charge)."
   },
   "no": {
     "% of limit": "% av grense",
@@ -17223,7 +17293,14 @@
     "price_level_flat": "Ingen prisforskjell",
     "price_level_no_prices": "Ingen priser tilgjengelig",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Settpunktmodell",
+    "config_help_setpoint_model": "Hvordan SEMs watt når entiteten. signed (standard): + utlading, − lading. inverted: speilet, f.eks. Victrons ESS-nettsettpunkt. direction_select: et lad/lad ut-valg pluss et wattall uten fortegn, f.eks. Anker Solix.",
+    "config_direction_entity": "Retningsvalg lad/lad ut",
+    "config_help_direction_entity": "Select-entiteten som angir batteriets effektretning. SEM setter den før wattallet skrives og venter til den leses tilbake.",
+    "config_direction_val_discharge": "Retning: verdi for utlading",
+    "config_direction_val_charge": "Retning: verdi for lading",
+    "config_help_direction_values": "Alternativtekstene i retningsvalget ditt. Standard er Ankers (discharge / charge)."
   },
   "pl": {
     "% of limit": "% limitu",
@@ -18789,7 +18866,14 @@
     "price_level_flat": "Brak różnicy cen",
     "price_level_no_prices": "Brak dostępnych cen",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Model wartości zadanej",
+    "config_help_setpoint_model": "Jak waty SEM trafiają do encji. signed (domyślnie): + rozładowanie, − ładowanie. inverted: odbicie, np. wartość zadana sieci ESS Victron. direction_select: wybór ładowanie/rozładowanie plus liczba watów bez znaku, np. Anker Solix.",
+    "config_direction_entity": "Wybór kierunku ładowanie/rozładowanie",
+    "config_help_direction_entity": "Encja select określająca kierunek mocy baterii. SEM ustawia ją przed zapisem watów i czeka na odczyt.",
+    "config_direction_val_discharge": "Kierunek: wartość rozładowania",
+    "config_direction_val_charge": "Kierunek: wartość ładowania",
+    "config_help_direction_values": "Teksty opcji Twojego wyboru kierunku. Domyślnie Ankera (discharge / charge)."
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20355,7 +20439,14 @@
     "price_level_flat": "Sem diferença de preço",
     "price_level_no_prices": "Sem preços disponíveis",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Modelo do setpoint",
+    "config_help_setpoint_model": "Como os watts do SEM chegam à entidade. signed (padrão): + descarga, − carga. inverted: o espelho, p. ex. o setpoint de rede ESS da Victron. direction_select: um seletor carga/descarga mais um número de watts sem sinal, p. ex. Anker Solix.",
+    "config_direction_entity": "Seletor de direção carga/descarga",
+    "config_help_direction_entity": "A entidade select que indica a direção da potência da bateria. O SEM define-a antes de escrever os watts e espera pela releitura.",
+    "config_direction_val_discharge": "Direção: valor descarga",
+    "config_direction_val_charge": "Direção: valor carga",
+    "config_help_direction_values": "Os textos de opção do seu seletor de direção. Por padrão os da Anker (discharge / charge)."
   },
   "ro": {
     "% of limit": "% din limită",
@@ -21921,7 +22012,14 @@
     "price_level_flat": "Fără diferență de preț",
     "price_level_no_prices": "Niciun preț disponibil",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Model de referință",
+    "config_help_setpoint_model": "Cum ajung wații SEM la entitate. signed (implicit): + descărcare, − încărcare. inverted: oglinda, de ex. referința de rețea ESS Victron. direction_select: un selector încărcare/descărcare plus un număr de wați fără semn, de ex. Anker Solix.",
+    "config_direction_entity": "Selector direcție încărcare/descărcare",
+    "config_help_direction_entity": "Entitatea select care indică direcția puterii bateriei. SEM o setează înainte de a scrie wații și așteaptă recitirea.",
+    "config_direction_val_discharge": "Direcție: valoare descărcare",
+    "config_direction_val_charge": "Direcție: valoare încărcare",
+    "config_help_direction_values": "Textele opțiunilor selectorului de direcție. Implicit cele Anker (discharge / charge)."
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23487,7 +23585,14 @@
     "price_level_flat": "Ingen prisskillnad",
     "price_level_no_prices": "Inga priser tillgängliga",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "Börvärdesmodell",
+    "config_help_setpoint_model": "Hur SEM:s watt når entiteten. signed (standard): + urladdning, − laddning. inverted: spegeln, t.ex. Victrons ESS-nätbörvärde. direction_select: ett ladda/ladda ur-val plus ett wattal utan tecken, t.ex. Anker Solix.",
+    "config_direction_entity": "Riktningsval ladda/ladda ur",
+    "config_help_direction_entity": "Select-entiteten som anger batteriets effektriktning. SEM sätter den innan wattalet skrivs och väntar tills den läses tillbaka.",
+    "config_direction_val_discharge": "Riktning: värde för urladdning",
+    "config_direction_val_charge": "Riktning: värde för laddning",
+    "config_help_direction_values": "Alternativtexterna i ditt riktningsval. Standard är Ankers (discharge / charge)."
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25053,6 +25158,13 @@
     "price_level_flat": "无价格差异",
     "price_level_no_prices": "无可用价格",
     "config_house_power_sensor": "House power sensor",
-    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour."
+    "config_help_house_power_sensor": "Your inverter may publish the house load directly (Fronius SolarNet 'Leistung Verbrauch', for example). SEM works it out from solar, grid, battery and EV otherwise, and on a hybrid that sum also carries the inverter's conversion losses — 30 to 60 W on a Fronius GEN24. Leave empty to keep today's behaviour.",
+    "config_setpoint_model": "设定值模型",
+    "config_help_setpoint_model": "SEM 的瓦数如何到达实体。signed（默认）：+ 放电，− 充电。inverted：镜像，例如 Victron 的 ESS 电网设定值。direction_select：一个充电/放电选择器加一个无符号瓦数，例如 Anker Solix。",
+    "config_direction_entity": "充电/放电方向选择器",
+    "config_help_direction_entity": "指示电池功率方向的选择器实体。SEM 在写入瓦数前设置它，并等待回读。",
+    "config_direction_val_discharge": "方向：放电值",
+    "config_direction_val_charge": "方向：充电值",
+    "config_help_direction_values": "方向选择器的选项文本。默认为 Anker 的（discharge / charge）。"
   }
 }

@@ -168,6 +168,8 @@ reaches the supported-hardware list after someone confirms it on real hardware.
 | `battery_max_discharge_power` | 5000W | Maximum battery discharge rate (500-10000W) |
 | `battery_discharge_control_entity` | — | Number entity to control inverter discharge limit |
 | `battery_force_discharge_control_entity` | — | **(v1.7.3)** Number entity to control battery force-discharge power (per-battery, all brands) |
+| `battery_setpoint_model` | `signed` | **(2.2)** How SEM's signed watts reach that entity: `signed`, `inverted` (Victron ESS), `direction_select` (Anker Solix) |
+| `battery_power_direction_entity` | — | **(2.2)** The charge/discharge select a `direction_select` setpoint needs; `battery_direction_discharge_value` / `battery_direction_charge_value` name its options (default *discharge* / *charge*) |
 
 ### Notification Settings
 
@@ -556,6 +558,16 @@ The discharge *rate* is not per-battery: **`number.sem_battery_max_discharge_pow
 **Zero-config Huawei:** If you have a Huawei inverter, SEM auto-detects the discharge limit entity and uses it to enforce force-discharge at no extra config.
 
 **Other brands:** set `battery_force_discharge_control_entity` in the options flow to a number entity on your inverter (e.g. Growatt's max discharge power, SolaX's force-discharge current).
+
+**Which way the number counts** (`battery_setpoint_model`, Config tab → Battery). SEM's own sign is + = discharge, − = charge. Some setpoints count the other way, and some have no sign at all:
+
+| model | discharge | charge | example |
+|---|---|---|---|
+| `signed` (default) | +W | −W | Sessy, most inverters |
+| `inverted` | −W | +W | Victron ESS grid setpoint (+ = import) |
+| `direction_select` | select ← *discharge*, then W | select ← *charge*, then W | Anker Solix (a charge/discharge select and an unsigned watt number) |
+
+For `direction_select` also name the select (`battery_power_direction_entity`) and, if your select uses other words than *discharge* / *charge*, the two values. SEM sets the select first and writes the watts only once the select reads back the direction.
 
 ### Forecast-Led Spending (v2.1)
 

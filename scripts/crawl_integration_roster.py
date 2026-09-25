@@ -445,6 +445,80 @@ def _source_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
 
 
 _MAX_KEY_LEN = 80
+
+#: (#941) Integrations that declare entities as a REGISTER TABLE name them by
+#: key and decide the platform elsewhere (hass-victron: 877 rows of
+#: ``"settings_ess_acpowersetpoint": RegisterInfo(...)`` in const.py, entity
+#: ids ``victron_<key>``). Such keys are mined under the platform ``any``;
+#: the lexicon rule that claims one supplies the platform SEM needs.
+_REGISTER_KEY = re.compile(r'^\s*"([a-z0-9_]{3,80})":\s*RegisterInfo\(', re.M)
+TABLE_PLATFORM = "any"
+
+
+SERVICE_PLATFORM = "service"
+
+
+def _service_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
+    """(#956) Where an integration declares its services."""
+    if origin == "core":
+        yield ("https://raw.githubusercontent.com/home-assistant/core/dev/"
+               f"homeassistant/components/{domain}/services.yaml")
+        return
+    if not repo:
+        return
+    for branch in ("main", "master"):
+        for prefix in (f"custom_components/{domain}/", ""):
+            yield f"https://raw.githubusercontent.com/{repo}/{branch}/{prefix}services.yaml"
+
+
+def mine_services(text: str, domain: str) -> Dict[str, Dict[str, dict]]:
+    """(#956) The services an integration declares, as ``<domain>.<name>``
+    keys under the ``service`` platform, each with its field names. A
+    capability that arrives as a service is the author's choice, not a
+    fact about the capability — and until this, half of what a brand can
+    do was invisible to the roster (KEBA declares no current entity at all;
+    it offers ``keba.set_current``). A broken file is nothing, not a crash."""
+    try:
+        import yaml  # HA's own dependency; the crawler runs beside it
+        data = yaml.safe_load(text)
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, dict] = {}
+    for name, body in data.items():
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9_]{2,60}", name):
+            continue
+        fields = ()
+        target = None
+        if isinstance(body, dict):
+            if isinstance(body.get("fields"), dict):
+                fields = tuple(sorted(str(f)[:_MAX_OPTION_LEN]
+                                      for f in body["fields"])[:_MAX_OPTIONS])
+            # (ruflo, 24.09) a service that TARGETS something needs an
+            # entity or device in the call; a global one (KEBA) does not.
+            tgt = body.get("target")
+            if isinstance(tgt, dict):
+                target = "entity" if "entity" in tgt else "device" if "device" in tgt else "other"
+        out[f"{domain}.{name}"] = {"options": (), "fields": fields, "target": target}
+    return {SERVICE_PLATFORM: out} if out else {}
+
+
+def _table_urls(repo: str, domain: str, origin: str) -> Iterable[str]:
+    """Where a register table lives, for a HACS repo (core has strings)."""
+    if origin == "core" or not repo:
+        return
+    for branch in ("main", "master"):
+        for prefix in (f"custom_components/{domain}/", ""):
+            yield f"https://raw.githubusercontent.com/{repo}/{branch}/{prefix}const.py"
+
+
+def mine_register_table(text: str) -> Dict[str, Dict[str, dict]]:
+    """The keys a register table declares, under the ``any`` platform."""
+    keys = _REGISTER_KEY.findall(text)
+    if not keys:
+        return {}
+    return {TABLE_PLATFORM: {k: {"options": ()} for k in keys}}
 _MAX_OPTIONS = 24
 _MAX_OPTION_LEN = 60
 
@@ -465,11 +539,32 @@ def mine_vocabulary(repo: str, domain: str, origin: str, *,
                 continue
             opts = tuple(str(o)[:_MAX_OPTION_LEN]
                          for o in (body.get("options") or ())[:_MAX_OPTIONS])
-            out.setdefault(plat, {})[key] = {"options": opts}
+            entry = {"options": opts}
+            if body.get("fields"):
+                entry["fields"] = tuple(body["fields"])[:_MAX_OPTIONS]
+            if body.get("target"):
+                entry["target"] = str(body["target"])[:20]
+            out.setdefault(plat, {})[key] = entry
     return out
 
 
 def _mine_vocabulary_raw(repo: str, domain: str, origin: str, *,
+                    offline: bool) -> Dict[str, Dict[str, dict]]:
+    """Entities (below) plus, beside them, the services the integration
+    declares (#956) — additive, never instead: ABL has both."""
+    out = _mine_entity_vocabulary_raw(repo, domain, origin, offline=offline)
+    for url in _service_urls(repo, domain, origin):
+        raw = _get(url, f"svc_{domain}_{_url_key(url)}", offline=offline)
+        if not raw:
+            continue
+        svc = mine_services(raw.decode("utf-8", "replace"), domain)
+        if svc:
+            out.setdefault(SERVICE_PLATFORM, {}).update(svc[SERVICE_PLATFORM])
+            break
+    return out
+
+
+def _mine_entity_vocabulary_raw(repo: str, domain: str, origin: str, *,
                     offline: bool) -> Dict[str, Dict[str, dict]]:
     """The entity vocabulary an integration DECLARES, per platform.
 
@@ -521,14 +616,52 @@ def _mine_vocabulary_raw(repo: str, domain: str, origin: str, *,
             text))
         for key in keys:
             out.setdefault(plat, {}).setdefault(key, {"options": ()})
+    if out:
+        return out
+    # (#941) Third and last: a register table. Only for a repo the two
+    # passes above read nothing from — the victron integration's 1987
+    # installs were invisible because its vocabulary is a table.
+    for url in _table_urls(repo, domain, origin):
+        raw = _get(url, f"tbl_{domain}_{_url_key(url)}", offline=offline)
+        if not raw:
+            continue
+        out = mine_register_table(raw.decode("utf-8", "replace"))
+        if out:
+            return out
     return out
+
+
+_LEXICON = None
+
+
+def _lexicon_module():
+    """The lexicon, loaded the way the main path loads it (kept for
+    _match_role, which is called with the RULES and not the module)."""
+    global _LEXICON
+    if _LEXICON is None:
+        spec = importlib.util.spec_from_file_location(
+            "role_lexicon", ROOT / "consts" / "role_lexicon.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _LEXICON = mod
+    return _LEXICON
 
 
 def _match_role(rules: Dict[str, Dict[str, Any]], platform: str,
                 key: str) -> Optional[str]:
     """First rule whose platform, ``any`` and ``not`` clauses all agree."""
+    if platform == SERVICE_PLATFORM:
+        # (#956) services are matched by their own table — the entity rules
+        # are keyed by role and a role can only carry one platform there.
+        # (ruflo, 24.09) …but ONLY the roles this KIND may carry: a vehicle
+        # integration's ``set_charging_current`` service (kia_uvo declares
+        # one) is the car's cloud API, never a wallbox control. The caller's
+        # ``rules`` are already kind-scoped; the service table is cut to them.
+        service_rules = getattr(_lexicon_module(), "SERVICE_ROLE_RULES", {}) or {}
+        rules = {r: v for r, v in service_rules.items() if r in rules}
     for role, rule in rules.items():
-        if rule["platform"] != platform:
+        # (#941) a table key has no platform of its own; the rule's is used
+        if platform != TABLE_PLATFORM and rule["platform"] != platform:
             continue
         if any(re.search(p, key, re.I) for p in rule.get("not", ())):
             continue
@@ -656,10 +789,27 @@ def roles_from_vocabulary(vocab: Dict[str, Dict[str, dict]], lexicon,
             role = _match_role(rules, platform, key)
             if not role:
                 continue
+            # (#941) a table key takes the platform its rule requires, so
+            # the shipped roster never says ``any`` and the runtime
+            # intersection still asks for a number where SEM writes one.
+            eff = rules[role]["platform"] if platform == TABLE_PLATFORM else platform
+            if platform == SERVICE_PLATFORM:
+                eff = SERVICE_PLATFORM
             slot = roles.setdefault(
-                role, {"platform": platform, "keys": [], "options": []})
-            if slot["platform"] != platform:
-                continue
+                role, {"platform": eff, "keys": [], "options": []})
+            if slot["platform"] != eff:
+                # (ruflo, 24.09) an ENTITY beats a SERVICE for the same role,
+                # whatever the platform names sort like — "number" < "service"
+                # held by accident, "service" < "switch" would not.
+                if slot["platform"] == SERVICE_PLATFORM:
+                    roles[role] = slot = {"platform": eff, "keys": [], "options": []}
+                else:
+                    continue
+            if eff == SERVICE_PLATFORM:
+                slot.setdefault("services", {})[key] = {
+                    "fields": tuple(body.get("fields") or ()),
+                    "target": body.get("target"),
+                }
             slot["keys"].append(key)
             for opt in body.get("options") or ():
                 if opt not in slot["options"]:
@@ -713,6 +863,13 @@ def roles_from_vocabulary(vocab: Dict[str, Dict[str, dict]], lexicon,
                 "options": tuple(v["options"])}
         if exact_only:
             body["exact_only"] = exact_only
+        if v.get("services"):
+            # (#956) what each service takes: its fields and whether it
+            # targets an entity — the runtime decides from these whether
+            # SEM can drive it or only name it.
+            body["services"] = {k: {"fields": tuple(m.get("fields") or ()),
+                                    "target": m.get("target")}
+                                for k, m in sorted(v["services"].items())}
         out[r] = body
     return out
 

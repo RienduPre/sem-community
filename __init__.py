@@ -316,6 +316,12 @@ _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
     # #523 AC-coupled bidirectional setpoint (charge = negative on the
     # force-discharge entity) — read at adapter construction.
     "battery_setpoint_bidirectional",
+    # (#809/#869) the setpoint model and its direction select — read at
+    # adapter construction like the flag above.
+    "battery_setpoint_model",
+    "battery_power_direction_entity",
+    "battery_direction_discharge_value",
+    "battery_direction_charge_value",
     # (#923) ...plus every module wiring key the install-modules oracle
     # reads (MODULE_EVIDENCE_KEYS, joined below): setting one through
     # set_option must reload, or the module's entities wait for the next

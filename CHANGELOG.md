@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- ✨ **NRGkick chargers are found on their own** (#917, by @aleho). SEM reads the charger's own keys; no manual setup.
+
+- ✨ **ABL eMH1 is found on its own** (#808, by @janklostermann) through matfroh's Modbus integration.
+
+- ✨ **Wallbox behind the MQTT bridge is found, two units too** (#984, #985, by @RienduPre).
+
+- ✨ **SEM knows the victron integration's words** (#941). Its settings are proposed instead of picked by hand.
+
+- ✨ **Two more ways to write a battery setpoint** (#809 by @Eguliker, #869 by @coppe218): inverted sign, or a direction select plus watts.
+
+- ✨ **What a brand offers as a service now counts** (#956). KEBA's set_current is proposed like an entity.
+
+- ✨ **A GM car over OnStar is a car, not unknown hardware** (#887, by @Azlinon).
+
 # [2.1.0-beta.39] — 23.09.2026
 
 - 🐛 **Solar only no longer buys from the grid while the battery takes the sun** (#899). SEM stops counting watts the battery keeps.

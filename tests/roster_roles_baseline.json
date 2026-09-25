@@ -123,6 +123,11 @@
         "site_grid_power"
       ]
     },
+    "ev_charger_modbus": {
+      "ev_current_control": [
+        "ev_charger_modbus.set_charging_current"
+      ]
+    },
     "evcc_intg": {
       "vehicle_range": [
         "configvehicle_range",
@@ -147,6 +152,11 @@
       ],
       "grid_power": [
         "power_grid"
+      ]
+    },
+    "goecharger": {
+      "ev_current_control": [
+        "goecharger.set_max_current"
       ]
     },
     "goecharger_api2": {
@@ -254,6 +264,11 @@
     "idm_heatpump": {
       "battery_soc": [
         "battery_soc"
+      ]
+    },
+    "keba": {
+      "ev_current_control": [
+        "keba.set_current"
       ]
     },
     "marstek_venus_energy_manager": {
@@ -545,8 +560,43 @@
       ]
     },
     "v2c_cloud": {
+      "battery_power": [
+        "battery_power"
+      ],
       "ev_charge_mode": [
         "charge_mode"
+      ]
+    },
+    "victron": {
+      "battery_capacity_spec": [
+        "battery_capacity"
+      ],
+      "battery_discharge_limit": [
+        "settings_ess_maxdischargepower"
+      ],
+      "battery_power": [
+        "battery_power"
+      ],
+      "battery_power_setpoint": [
+        "settings_ess_acpowersetpoint"
+      ],
+      "battery_soc": [
+        "battery_soc"
+      ],
+      "battery_strategy": [
+        "acsystem_ess_mode",
+        "multi_ess_mode",
+        "settings_dynamicess_mode",
+        "settings_ess_mode"
+      ],
+      "ev_charge_mode": [
+        "charger_mode",
+        "evcharger_mode"
+      ],
+      "ev_current_control": [
+        "evcharger_current",
+        "evcharger_maxcurrent",
+        "evcharger_setcurrent"
       ]
     },
     "victron_ble": {
@@ -566,6 +616,9 @@
       ],
       "battery_power": [
         "battery_power"
+      ],
+      "battery_power_setpoint": [
+        "hub4_ac_grid_setpoint"
       ],
       "battery_soc": [
         "battery_soc"
@@ -609,6 +662,9 @@
       ],
       "battery_power": [
         "battery_power"
+      ],
+      "battery_power_setpoint": [
+        "hub4_ac_grid_setpoint"
       ],
       "battery_soc": [
         "battery_soc"

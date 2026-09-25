@@ -1682,9 +1682,47 @@ def _entry_matches_declared(entry, keys, exact_only=()) -> Optional[str]:
     return None
 
 
+_CURRENT_FIELDS = ("current", "max_current", "charging_current", "amps",
+                   "ampere", "amp", "current_a")
+
+
+def _current_field(fields) -> Optional[str]:
+    """(#956) The one field of a current-setting service SEM writes the
+    amperes into — by the integration's own word, or the only field there
+    is. None when the service has no such field."""
+    for want in _CURRENT_FIELDS:
+        if want in fields:
+            return want
+    # (ruflo pass 2) a lone field is the current only if it SAYS so —
+    # set_energy(energy) has one field and it is not amperes.
+    if len(fields) == 1 and any(w in fields[0] for w in ("current", "amp")):
+        return fields[0]
+    return None
+
+
+def _services_of(hass):
+    """(#956) A callback answering "which services does this domain offer
+    right now", or None when that cannot be asked (no hass, not running).
+    None is an UNKNOWN: the caller proposes nothing and says why, never
+    "no". Read live from HA's own registry — never guessed from a roster."""
+    if hass is None or not bool(getattr(hass, "is_running", True)):
+        return None
+    services = getattr(hass, "services", None)
+    if services is None or not hasattr(services, "async_services"):
+        return None
+
+    def _of(domain: str) -> set:
+        try:
+            return set((services.async_services() or {}).get(str(domain), {}) or ())
+        except Exception:  # noqa: BLE001
+            return set()
+    return _of
+
+
 def propose_roles_from_roster(dev_entities, domain: str, *,
                               state_of=None,
-                              strategy_values=None) -> Dict[str, Any]:
+                              strategy_values=None,
+                              services_of=None) -> Dict[str, Any]:
     """(#915) Role proposals for ONE device, as an INTERSECTION.
 
     The roster says what an integration calls things; ``dev_entities`` is
@@ -1709,6 +1747,57 @@ def propose_roles_from_roster(dev_entities, domain: str, *,
     for role, body in vocab.items():
         keys = tuple(body.get("keys", ()))
         want_domain = str(body.get("platform") or "")
+        if want_domain == "service":
+            # (#956) a service-shaped capability: intersected with HA's live
+            # service registry, the way entities are intersected with the
+            # entity registry. Unaskable → nothing, and nothing invented.
+            if services_of is None:
+                # (ruflo, 24.09) an UNKNOWN is a value the card can show,
+                # not an empty dict indistinguishable from "absent".
+                out[role] = {"service": None, "matched_key": None,
+                             "source": "roster", "config_key": None,
+                             "action": "unaskable",
+                             "reason": "the service registry could not be "
+                                       "asked yet (HA still starting)",
+                             "candidates": list(keys), "judged": False}
+                continue
+            live = services_of(domain)
+            for key in keys:
+                name = key.split(".", 1)[1] if "." in key else key
+                if name in live:
+                    try:
+                        from .consts import role_lexicon as _lex
+                        pck = _lex.SERVICE_CONFIG_KEY_FOR_ROLE.get(role)
+                    except Exception:  # noqa: BLE001
+                        pck = None
+                    meta = (body.get("services") or {}).get(key) or {}
+                    fields = tuple(meta.get("fields") or ())
+                    target = meta.get("target")
+                    param = _current_field(fields)
+                    extra = [f for f in fields if f != param]
+                    prop = {"service": key, "matched_key": key,
+                            "source": "roster", "config_key": None,
+                            "action": "per_charger",
+                            "per_charger_key": pck, "judged": True,
+                            "param": param, "fields": list(fields),
+                            "target": target}
+                    # (ruflo, 24.09) go-eCharger's set_max_current wants a
+                    # charger_name SEM cannot fill; a targeted service wants
+                    # an entity_id the charger factory does not pass. Either
+                    # is a proposal SEM must not turn into a one-click add.
+                    why = []
+                    if not param:
+                        why.append("no field SEM can send the current in")
+                    if extra:
+                        why.append("fields SEM cannot fill: " + ", ".join(extra))
+                    if target:
+                        why.append(f"the service targets a {target}")
+                    if why:
+                        prop["action"] = "needs_hand_wiring"
+                        prop["reason"] = "; ".join(why)
+                    out[role] = prop
+                    break
+            continue
         # (#810) Collect EVERY match, then choose deterministically. Taking
         # the first entity the registry happened to yield meant that a brand
         # declaring four target-SOC keys got whichever one iteration order
@@ -1834,10 +1923,23 @@ def charger_from_near_miss(dev_entities, platform: str,
     is still the honest line.
     """
     proposed = proposed or {}
-    current = (proposed.get("ev_current_control") or {}).get("entity")
-    if not current:
+    control = proposed.get("ev_current_control") or {}
+    current = control.get("entity")
+    service = control.get("service")
+    if not current and not service:
         return {}
-    out: Dict[str, Any] = {"ev_current_control_entity": current}
+    if current:
+        out: Dict[str, Any] = {"ev_current_control_entity": current}
+    else:
+        # (#956) the control may be a service — KEBA's shape, SEM's own
+        # wallbox. (ruflo, 24.09) Offered ONLY as the charger factory can
+        # drive it: a global service with the one field the current goes
+        # in. Anything else is a proposal to wire by hand, and the
+        # proposal row says why.
+        if control.get("action") != "per_charger" or not control.get("param"):
+            return {}
+        out = {"ev_charger_service": service,
+               "ev_service_param_name": control["param"]}
     for e in dev_entities:
         eid = str(e.entity_id)
         dc = str(getattr(e, "original_device_class", "") or "")
@@ -1859,7 +1961,7 @@ def charger_from_near_miss(dev_entities, platform: str,
     # control the offer is built around, if a guard just took it away.
     if "ev_charging_power_sensor" not in out:
         return {}
-    if "ev_current_control_entity" not in out:
+    if "ev_current_control_entity" not in out and "ev_charger_service" not in out:
         return {}
     out["id"] = f"{platform}_{str(getattr(dev_entities[0], 'device_id', '') or 'device')}"[:48]
     out["name"] = (describe_domain(platform) or {}).get("name") or platform
@@ -1888,7 +1990,7 @@ def _role_action(role: str) -> Dict[str, Any]:
 
 def propose_for_installed(registry, *, limit_per_domain: int = 8,
                           configured_entities=None, state_of=None,
-                          strategy_values=None) -> list:
+                          strategy_values=None, services_of=None) -> list:
     """(#915) Every INSTALLED integration the roster has vocabulary for, with
     the controls it declares matched against this box's own entities.
 
@@ -1924,10 +2026,12 @@ def propose_for_installed(registry, *, limit_per_domain: int = 8,
     for dom, ents in sorted(by_domain.items()):
         roles = {r: b for r, b in propose_roles_from_roster(
                      ents[:400], dom, state_of=state_of,
-                     strategy_values=strategy_values).items()
+                     strategy_values=strategy_values,
+                     services_of=services_of).items()
                  # An entity SEM already drives is not news; nor is a role SEM
                  # resolves by itself every time it looks.
-                 if b.get("entity") not in used and b.get("action") != "automatic"}
+                 if (b.get("entity") or b.get("service")) not in used
+                 and b.get("action") != "automatic"}
         if not roles:
             continue
         out.append({
@@ -2122,6 +2226,51 @@ def build_integration_census(hass=None, registry=None, config_domains=None,
     }
 
 
+#: (#887) OnStar2MQTT's own EV vocabulary (src/mqtt.js, read 24.09.2026):
+#: the diagnostic elements EV_BATTERY_LEVEL / EV_RANGE / EV_CHARGE_STATE /
+#: EV_PLUG_STATE and their ``ev_charging_`` metrics twins. Matched as
+#: entity-id TAILS, never by make or model — a 2019 Traverse (ICE) carries
+#: none of them, which is exactly how the reporter tells the two apart.
+_VEHICLE_TAILS = {
+    "vehicle_soc_entity": ("sensor", ("_ev_battery_level", "_ev_charging_battery_level")),
+    "vehicle_range_entity": ("sensor", ("_ev_range", "_ev_charging_range")),
+    "ev_connected_sensor": ("binary_sensor", ("_ev_plug_state", "_ev_charging_plug_state")),
+    "ev_charging_sensor": ("binary_sensor", ("_ev_charge_state", "_ev_charging_charge_state")),
+}
+
+
+def vehicle_from_device(dev_entities) -> Dict[str, Any]:
+    """(#887) A CAR on a transport platform, named as a car. Azlinon's
+    OnStar vehicles came up as "entities present, no role matched — please
+    report": SEM had no idea of a vehicle over MQTT, and the one thing it
+    could say was wrong. Identity is the bridge's own EV vocabulary with at
+    least a state of charge or a range; the answer is the SOC/range/plug
+    sources SEM charges TOWARDS (``vehicle_soc_entity`` & co.). Report data
+    and a proposal — never bound by itself. ``{}`` when this is not a car."""
+    out: Dict[str, Any] = {}
+    for role, (domain, tails) in _VEHICLE_TAILS.items():
+        for tail in tails:                       # the plain element first
+            for e in dev_entities:
+                eid = str(getattr(e, "entity_id", ""))
+                if eid.startswith(f"{domain}.") and eid.endswith(tail):
+                    out.setdefault(role, eid)
+                    break
+            if role in out:
+                break
+    if "vehicle_soc_entity" not in out and "vehicle_range_entity" not in out:
+        return {}
+    # the name is the bridge's own stem: sensor.2024_chevrolet_blazer_ev_ev_range
+    first = out.get("vehicle_soc_entity") or out["vehicle_range_entity"]
+    stem = first.split(".", 1)[1]
+    for tails in (t for _, t in _VEHICLE_TAILS.values()):
+        for tail in tails:
+            if stem.endswith(tail):
+                stem = stem[: -len(tail)]
+                break
+    out["name"] = stem.replace("_", " ").strip().title() or "vehicle"
+    return out
+
+
 def build_detection_report(hass: Optional[HomeAssistant] = None,
                            registry=None, configured_entities=None,
                            strategy_values=None) -> Dict[str, Any]:
@@ -2157,6 +2306,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         "scanned_platforms": [p for p, _ in _EV_CHARGER_PLATFORMS],
         "chargers": [],
         "near_misses": [],
+        # (#887) cars found on a transport platform, named as cars
+        "vehicles": [],
         "disabled_ignored": [],
         # (#964) entities of a device-less platform that no unit could claim
         # — dropped from the role walk on purpose, never silently.
@@ -2193,6 +2344,25 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
             apply_charger_discovery_guards(mapping, dev_entities)
+            # (ruflo, 24.09 / #956) a hand-written brand function that finds
+            # sensors but NO control claimed the device and the roster never
+            # got to speak — go-eCharger's box has no current number, only a
+            # service. When the roster can name a control, this is a near
+            # miss with an offer, not a charger with "see mapping".
+            # (ruflo pass 2) …and a mapping that carries a START/STOP control
+            # is a deliberate, honest charger — Zaptec reports its resume
+            # button ALONE when the only current-like number is the site's
+            # available_current (#804: never SEM's throttle). Wiping that
+            # would let the roster offer the wrong-scope number one click
+            # away. Only a sensors-only mapping falls through.
+            if (mapping and not mapping.get("ev_current_control_entity")
+                    and not mapping.get("ev_charger_service")
+                    and not mapping.get("ev_start_stop_entity")):
+                _ctl = propose_roles_from_roster(
+                    dev_entities, platform, services_of=_services_of(hass)
+                ).get("ev_current_control") or {}
+                if _ctl.get("entity") or _ctl.get("service"):
+                    mapping = {}
             # (#804 B4c) the report path re-runs discovery per DEVICE, so the
             # installation-sibling threshold scan from the config path never
             # fires here — attach the same suggestion so the diagnostics
@@ -2219,7 +2389,18 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 # earns the line only if something about it is actually
                 # energy-shaped — a power sensor with a plug or a current
                 # control (the census rule), or a role the roster proposed.
-                _proposed = propose_roles_from_roster(dev_entities, platform)
+                # (#887) a CAR is not a near miss and not unknown hardware
+                _vehicle = vehicle_from_device(dev_entities)
+                if _vehicle:
+                    report["vehicles"].append({
+                        "platform": platform,
+                        "device_id": device_id,
+                        "note": "vehicle",
+                        **_vehicle,
+                    })
+                    continue
+                _proposed = propose_roles_from_roster(
+                    dev_entities, platform, services_of=_services_of(hass))
                 if (platform in _TRANSPORT_PLATFORMS and not _proposed
                         and not _census_energy_shaped(dev_entities)):
                     continue
@@ -2274,6 +2455,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             control = mapping.get("ev_charger_service")
             control = (f"service: {control}" if control
                        else "number entity" if mapping.get("ev_current_control_entity")
+                       # (ruflo pass 2) a start/stop-only charger is a known
+                       # shape, not an unknown control — say so
+                       else "start/stop only" if mapping.get("ev_start_stop_entity")
                        else "see mapping")
             row = {
                 "platform": str(dev_entities[0].platform or platform),
@@ -2362,7 +2546,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
             else None)
         report["roster_proposals"] = propose_for_installed(
             registry, configured_entities=configured_entities,
-            state_of=_state_of, strategy_values=strategy_values)
+            state_of=_state_of, strategy_values=strategy_values,
+            services_of=_services_of(hass))
         # (#915) whether proposals were judged against live states, so the
         # coordinator can rebuild an unjudged (boot-time) report once HA is up
         report["judged"] = bool(_state_of is not None)
@@ -2666,6 +2851,65 @@ _BRAND_HINTS: Dict[str, List[_ROLE]] = {
         {"role": "ev_current_control_entity", "domain": "number",
          "names": ("juicebox",), "names2": ("current", "amp")},
     ],
+    # (#917) NRGkick, core integration. Keys are core's own translation keys
+    # (strings.json), so the row survives any rename of the device. The box
+    # publishes a dozen power-class sensors (per phase, apparent, peak) and
+    # two numbers: every rule NAMES the key it wants.
+    "nrgkick": [
+        {"role": "ev_current_control_entity", "domain": "number",
+         "names": ("current_set",)},
+        {"role": "ev_start_stop_entity", "domain": "switch",
+         "names": ("charging_enabled",)},
+        {"role": "ev_charging_power_sensor", "domain": "sensor",
+         "device_class": "power", "names": ("total_active_power",)},
+        {"role": "ev_session_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("charged_energy",), "not": ("total",)},
+        {"role": "ev_total_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("total_charged_energy",)},
+        {"role": "ev_charging_sensor", "domain": "sensor",
+         "names": ("status",)},
+    ],
+    # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus. The integration
+    # names entities in plain English with the user's device name in front,
+    # so the rules match the tail the source writes, never the head.
+    "ev_charger_modbus": [
+        {"role": "ev_current_control_entity", "domain": "number",
+         "names": ("charging_current",)},
+        {"role": "ev_start_stop_entity", "domain": "switch",
+         "names": ("charging_enable",)},
+        {"role": "ev_charging_power_sensor", "domain": "sensor",
+         "device_class": "power"},
+        {"role": "ev_charging_sensor", "domain": "sensor",
+         "names": ("_state",)},
+    ],
+    # (#984/#985) Wallbox Pulsar behind the community MQTT bridge — the
+    # native ``wallbox`` platform is a different row. Every rule requires
+    # the wallbox naming (the JuiceBox rule for a shared platform), and the
+    # bridge publishes per-phase power, power-boost power and nine
+    # ``*_status`` sensors beside the ones SEM wants: hence the "not"s.
+    "wallbox_mqtt": [
+        {"role": "ev_charging_power_sensor", "domain": "sensor",
+         "device_class": "power", "names": ("wallbox",),
+         "names2": ("charging_power",), "not": ("_l1", "_l2", "_l3", "boost")},
+        {"role": "ev_total_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("wallbox",),
+         "names2": ("cumulative_added_energy",), "not": ("boost", "ecosmart")},
+        {"role": "ev_session_energy_sensor", "domain": "sensor",
+         "device_class": "energy", "names": ("wallbox",),
+         "names2": ("added_energy",),
+         "not": ("cumulative", "boost", "ecosmart", "internal_meter")},
+        {"role": "ev_charging_sensor", "domain": "sensor",
+         "names": ("wallbox",), "names2": ("_status",),
+         "not": ("ocpp", "powerboost", "ecosmart", "connectivity", "schedule",
+                 "mid_", "external_meter", "control_pilot", "m2w")},
+        {"role": "ev_connected_sensor", "domain": "binary_sensor",
+         "device_class": "plug", "names": ("wallbox",)},
+        {"role": "ev_current_control_entity", "domain": "number",
+         "device_class": "current", "names": ("wallbox",),
+         "names2": ("max_charging_current",)},
+        {"role": "ev_start_stop_entity", "domain": "switch",
+         "names": ("wallbox",), "names2": ("charging_enable",)},
+    ],
     "wattpilot": [
         {"role": "ev_charging_power_sensor", "domain": "sensor",
          "device_class": "power"},
@@ -2737,6 +2981,38 @@ def _discover_juicebox(entities) -> Dict[str, str]:
     return result
 
 
+def _discover_wallbox_mqtt(entities) -> Dict[str, str]:
+    """(#984/#985) Wallbox behind the community MQTT bridge. Identity:
+    power AND an energy counter AND the current control, all wallbox-named
+    — a plug publishing power over mqtt is not a charger, and a unit
+    without its control is a meter SEM cannot drive."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["wallbox_mqtt"])
+    if not {"ev_charging_power_sensor", "ev_current_control_entity"} <= result.keys():
+        return {}
+    if not ({"ev_total_energy_sensor", "ev_session_energy_sensor"} & result.keys()):
+        return {}
+    return result
+
+
+def _discover_mqtt_brands(entities) -> Dict[str, str]:
+    """The mqtt platform is everyone's platform: each brand row on it has
+    its own identity gate, and the first gate that opens names the box."""
+    for fn in (_discover_juicebox, _discover_wallbox_mqtt):
+        found = fn(entities)
+        if found:
+            return found
+    return {}
+
+
+def _discover_abl_emh1(entities) -> Dict[str, str]:
+    """(#808) ABL eMH1 through ev_charger_modbus — a data row, gated on the
+    current control like the other brand rows SEM can drive."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["ev_charger_modbus"])
+    if "ev_current_control_entity" not in result:
+        return {}
+    return result
+
+
 def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     """Apply a brand's data rows: each role takes the LAST matching entity
     (the same last-wins the hand-written loops had), a rule matches on
@@ -2760,7 +3036,32 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
             names2 = rule.get("names2")
             if names2 and not any(n in eid for n in names2):
                 continue
+            # (#917/#984) a NEGATIVE any-of, for siblings that share the
+            # positive words: ``total_charged_energy`` beside
+            # ``charged_energy``, ``charging_power_l1`` beside
+            # ``charging_power``. Substring rules cannot say "not" otherwise.
+            not_names = rule.get("not")
+            if not_names and any(n in eid for n in not_names):
+                continue
             result[rule["role"]] = eid
+    return result
+
+
+def _discover_nrgkick(entities) -> Dict[str, str]:
+    """(#917) NRGkick — a data row, plus the phase-count number offered as
+    the #804 phase switch: it takes 1 or 3, so the values are the counts."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["nrgkick"])
+    # Identity: the current control. A device on the brand's own platform
+    # that only reports is not a charger SEM can drive.
+    if "ev_current_control_entity" not in result:
+        return {}
+    for entry in entities:
+        eid = str(entry.entity_id)
+        if eid.startswith("number.") and eid.endswith("phase_count"):
+            result["_suggested_phase_switch"] = {
+                "entity": eid, "value_1p": "1", "value_3p": "3",
+            }
+            break
     return result
 
 
@@ -3053,11 +3354,16 @@ _EV_CHARGER_PLATFORMS = [
     # (#802/#814) data-row brands need no function — the generic matcher
     # applies their _BRAND_HINTS rows.
     ("wattpilot", lambda ents: _discover_from_hints(ents, _BRAND_HINTS["wattpilot"])),
+    # (#917) NRGkick — a data row plus the phase-count offer.
+    ("nrgkick", _discover_nrgkick),
+    # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus.
+    ("ev_charger_modbus", _discover_abl_emh1),
     # (#816) GARO's custom integration domain.
     ("garo_wallbox", _discover_garo),
     # (#816) JuiceBoxProxy publishes over plain MQTT — the discover fn's
     # identity gate is what keeps this from claiming unrelated mqtt devices.
-    ("mqtt", _discover_juicebox),
+    # (#984) …and Wallbox's bridge. Both gates live in _discover_mqtt_brands.
+    ("mqtt", _discover_mqtt_brands),
 ]
 
 
