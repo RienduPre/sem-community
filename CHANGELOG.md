@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **SEM now says when the wallbox restarts itself after a stop** (#1009). On a KEBA, Off and Pause hold about 10 minutes.
+
 - ✨ **A running pause is visible** (#980, by @RienduPre). The EV card counts down, names the mode it returns to, and picking a mode ends it.
 
 - 🐛 **The charge-mode select now shows a pause as Off** (#980). Before, it kept the old mode, so a pause looked like nothing happened.

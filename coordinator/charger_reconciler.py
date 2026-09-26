@@ -317,6 +317,18 @@ class ChargerReconciler:
         self._failsafe_gaps: list = []
         self._failsafe_reported: bool = False
         self._failsafe_interval_s: float = 0.0
+        # (#1009) the hands-off row's OWN stop anchor. ``_last_disable_issued_at``
+        # is shared with the OFF/IDLE rows and survives an Off episode that
+        # issued no stop (nothing was charging) — a gap measured from it
+        # would be from some earlier row's stop. Set only by this row's one
+        # stop, cleared when the mode leaves Off.
+        self._released_stop_at: float = 0.0
+        # (#1009) …and its OWN gap list. The OFF row's gaps come from stop-war
+        # rounds any DISABLE producer can start (VPP export pause, phase
+        # guard); mixing them with this row's would let a first Off episode
+        # pair with an older gap and speak early. One Repair per charger
+        # either way: the reported flag and interval stay shared.
+        self._released_gaps: list = []
         # (#823) A gap only counts if the stop actually TOOK in between —
         # the box settled and then returned. Continuous drawing against a
         # stop is a DIFFERENT fault (stop-not-taking, #548) and produced
@@ -500,7 +512,7 @@ class ChargerReconciler:
         self._note_contactor(False, now)            # (#940) anti-cycle clock
         return [Action(ActionKind.DISABLE)]
 
-    def _failsafe_action(self) -> List[Action]:
+    def _failsafe_action(self, gaps: Optional[list] = None) -> List[Action]:
         """(#823) Name a constant-interval self-re-enable, once.
 
         Two gaps within 2% (or 5 s) of each other is the signature — a
@@ -510,9 +522,10 @@ class ChargerReconciler:
         (72 s) would swallow a car timer's jitter and cry wolf (#611).
         The action only ever ACCOMPANIES the row's normal decision: naming
         the fault must not change the stop cadence."""
-        if self._failsafe_reported or len(self._failsafe_gaps) < 2:
+        gaps = self._failsafe_gaps if gaps is None else gaps
+        if self._failsafe_reported or len(gaps) < 2:
             return []
-        a, b = self._failsafe_gaps[-2], self._failsafe_gaps[-1]
+        a, b = gaps[-2], gaps[-1]
         mean = (a + b) / 2.0
         if mean <= 0 or abs(a - b) > max(5.0, 0.02 * mean):
             return []
@@ -520,6 +533,35 @@ class ChargerReconciler:
         self._failsafe_interval_s = round(mean, 1)
         return [Action(ActionKind.REPORT_FAILSAFE_SUSPECTED,
                        interval_s=self._failsafe_interval_s)]
+
+    def _observe_self_reenable(self, observed: "ObservedState", now: float) -> List[Action]:
+        """(#1009) While hands-off: record a stop→return gap, and name it.
+
+        Mirrors the OFF row's accounting (#823): a gap counts only when the
+        stop actually took (a settle was seen since the disable) and is
+        failsafe-scale (≥ 60 s). Recovery mirrors the other rows too: a stop
+        that has held quiet for twice the learned interval retires the
+        Repair. This row never answers with a DISABLE — hands-off holds.
+        """
+        anchor = self._released_stop_at
+        if not anchor:
+            return []                       # this episode issued no stop: nothing to measure
+        if not observed.charging:
+            self._failsafe_settled_since_disable = True
+            if (self._failsafe_reported and self._failsafe_interval_s
+                    and now - anchor > 2.0 * self._failsafe_interval_s):
+                self._failsafe_reported = False
+                self._released_gaps.clear()
+                self._failsafe_gaps.clear()
+                self._failsafe_interval_s = 0.0
+                return [Action(ActionKind.CLEAR_FAILSAFE_SUSPECTED)]
+            return []
+        if self._failsafe_settled_since_disable and now - anchor >= 60.0:
+            self._released_gaps.append(now - anchor)
+            del self._released_gaps[:-4]
+            self._failsafe_settled_since_disable = False
+            return self._failsafe_action(self._released_gaps)
+        return []
 
     def _end_stop_war(self) -> None:
         self._stop_war_rounds = 0
@@ -594,12 +636,24 @@ class ChargerReconciler:
                 self._enable_gave_up_at = 0.0
                 self._last_disable_at = now
                 self._last_disable_issued_at = now
+                self._released_stop_at = now                   # (#1009) gap anchor
+                self._failsafe_settled_since_disable = False
                 self._note_contactor(False, now)     # (#940) anti-cycle clock
                 return [Action(ActionKind.DISABLE)]
             self._released_stop_issued = True
-            return [Action(ActionKind.NONE)]
+            # (#1009) Observe-only, never a command: after OUR one stop, a
+            # box that comes back by itself is still worth NAMING. The "no
+            # failsafe naming" above was written believing the #740 dead-man
+            # OFF holds the box; on a KEBA it cannot (the integration's
+            # fallback floor is 6 A, the 0 A is refused without an error), so
+            # the charging failsafe SEM armed at start (#546, 600 s) brings
+            # the box back ~10 min after every Off or Pause (PROD 26.09.2026,
+            # twice, to the second). Same #823 signature, tolerance and
+            # Repair — one gap per Off episode, so it speaks on the second.
+            return [Action(ActionKind.NONE)] + self._observe_self_reenable(observed, now)
         # Left Off: the next Off selection is a fresh instruction to stop.
         self._released_stop_issued = False
+        self._released_stop_at = 0.0
         # (#823) Recovery: a reported failsafe whose LAST stop has now held
         # quiet for twice the learned interval means the user fixed the box —
         # retire the Repair and re-arm the recogniser, so a later relapse is
