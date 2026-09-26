@@ -375,3 +375,12 @@ battery for the rest — is not built.
 A house on a flat tariff still sees the price controls, which can do nothing
 there. Hiding a control this house cannot use is planned, not built.
 
+## KEBA: Off and Pause hold for about 10 minutes
+
+The KEBA's failsafe brings the box back at its fallback current (usually
+8 A) about 10 minutes after any stop, because the official integration will
+not accept a 0 A fallback and SEM arms that failsafe at every start on
+purpose (a dead controller must not strand the car). SEM stops once and
+does not fight the box; it raises a Repair instead. A stop only holds if
+SEM's arming is turned off (`keba_arm_failsafe: false` via `set_option`)
+and the box's own `Curr FS` is set to 0.

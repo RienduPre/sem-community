@@ -70,6 +70,11 @@ FAILSAFE_TIMEOUT_S = 600
 # turned off over UDP — so point it at 0 instead of fighting it.
 FAILSAFE_OFF_TIMEOUT_S = 10
 
+# #1009 — how long after asking for the dead-man's OFF SEM reads the box's
+# failsafe back. Brand integrations poll their box every few seconds; 30 s
+# is one honest look, not a heartbeat.
+FAILSAFE_READBACK_DELAY_S = 30
+
 #: (#935) How long a teardown will wait on a charger before giving up on it.
 #: ``hass.services.async_call`` is unbounded, and a removal that hangs on a
 #: stalled integration never completes — HA awaits ``async_remove_entry``
@@ -101,7 +106,7 @@ from ..consts.core import (
 )
 from ..coordinator.units import energy_state_to_kwh, power_state_to_watts
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -3053,16 +3058,90 @@ class CurrentControlDevice(ControllableDevice):
         if not domain or not self.hass.services.has_service(domain, "set_failsafe"):
             return
         try:
-            await self.send(domain, "set_failsafe", {"failsafe_timeout": FAILSAFE_OFF_TIMEOUT_S,
+            sent = await self.send(domain, "set_failsafe", {"failsafe_timeout": FAILSAFE_OFF_TIMEOUT_S,
                  "failsafe_fallback": 0, "failsafe_persist": 1})
+            # (#1009) "Asked", not "re-armed". A brand integration may floor
+            # the fallback at 6 A: the 0 A is then refused with no error, the
+            # box keeps the charging failsafe SEM armed at start (600 s /
+            # floor), and re-enables itself ~10 min after every stop (PROD
+            # 26.09.2026). The read-back says what the box actually did; a
+            # withheld (observer) write reads nothing back — the rigs share
+            # the real box and must not judge PROD's write.
             _LOGGER.info(
-                "%s: failsafe re-armed as dead-man's OFF (timeout=%ds, "
-                "fallback=0A, persisted) — the box holds the no while "
-                "SEM is away (#740)", self.name, FAILSAFE_OFF_TIMEOUT_S,
+                "%s: asked the box for a dead-man's OFF (failsafe timeout=%ds, "
+                "fallback 0 A, persisted); read-back in %ds says whether it "
+                "took (#740, #1009)", self.name, FAILSAFE_OFF_TIMEOUT_S,
+                FAILSAFE_READBACK_DELAY_S,
             )
+            if sent:
+                self._schedule_failsafe_readback()
         except Exception as e:  # noqa: BLE001
             _LOGGER.warning(
                 "Failed to arm the dead-man's-off failsafe: %s", e)
+
+    def _schedule_failsafe_readback(self) -> None:
+        """(#1009) One delayed look at the box's failsafe, after asking."""
+        try:
+            from homeassistant.helpers.event import async_call_later
+            async_call_later(self.hass, FAILSAFE_READBACK_DELAY_S,
+                             self._failsafe_readback)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("%s: failsafe read-back not scheduled: %s",
+                          self.name, e)
+
+    def _failsafe_readback_state(self):
+        """The box's failsafe entity, or None when there is nothing to read.
+
+        Brand-blind: any binary_sensor carrying ``fallback_current`` and
+        ``failsafe_timeout`` attributes whose id shares this charger's brand
+        token (``_brand_key``). None is "could not ask", never "the box
+        agreed" (#925).
+        """
+        brand = self._brand_key()
+        if not brand:
+            return None     # no token to match on: any sensor could be another charger's
+        try:
+            states = self.hass.states.async_all("binary_sensor")
+        except Exception:  # noqa: BLE001
+            return None
+        for st in states or []:
+            attrs = getattr(st, "attributes", None) or {}
+            if "fallback_current" not in attrs or "failsafe_timeout" not in attrs:
+                continue
+            if brand and brand not in str(getattr(st, "entity_id", "")):
+                continue
+            return st
+        return None
+
+    @callback
+    def _failsafe_readback(self, _now=None) -> None:
+        """(#1009) Say what the box did with the dead-man's OFF, once."""
+        st = self._failsafe_readback_state()
+        if st is None:
+            _LOGGER.debug("%s: no failsafe read-back entity — the dead-man's "
+                          "OFF cannot be verified", self.name)
+            return
+        attrs = getattr(st, "attributes", None) or {}
+        try:
+            fallback = float(attrs.get("fallback_current") or 0)
+            timeout = float(attrs.get("failsafe_timeout") or 0)
+        except (TypeError, ValueError):
+            return
+        if fallback <= 0:
+            self._deadman_refused_logged = False   # fixed: a relapse is worth saying again
+            _LOGGER.info("%s: dead-man's OFF confirmed on read-back (%s: "
+                         "%.0f s / 0 A)", self.name, st.entity_id, timeout)
+            return
+        if getattr(self, "_deadman_refused_logged", False):
+            return
+        self._deadman_refused_logged = True
+        _LOGGER.warning(
+            "%s: the box kept its failsafe at %.0f s / %.0f A (%s) — it "
+            "refuses a 0 A fallback, so Off and Pause are best-effort here: "
+            "it will resume by itself about %.0f s after a stop. The Repair "
+            "SEM raises for this charger says what to change (#1009)",
+            self.name, timeout, fallback, st.entity_id, timeout,
+        )
 
     def _energy_target_sensor_id(self) -> Optional[str]:
         """Entity id of the box's OWN energy-target register sensor, if the
