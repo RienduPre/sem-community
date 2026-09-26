@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.42] — 26.09.2026
+
 - ✨ **A running pause is visible** (#980, by @RienduPre). The EV card counts down, names the mode it returns to, and picking a mode ends it.
 
 - 🐛 **The charge-mode select now shows a pause as Off** (#980). Before, it kept the old mode, so a pause looked like nothing happened.
