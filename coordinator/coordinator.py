@@ -775,6 +775,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # (e.g. solar_only with surplus below the 3-phase 6 A floor —
         # the stall detector would otherwise falsely anchor SOC at 100 %).
         self._last_commanded_amps_fleet: int = 0
+        # (#1011) this cycle's DECIDED offer per charger — set even when the
+        # actuation is withheld (observer mode), unlike the actual setpoint.
+        # Keys the per-charger declined-start check: "SEM wanted to charge
+        # THIS charger and the car drew nothing."
+        self._last_commanded_amps_per_charger: Dict[str, int] = {}
         # (#638) Measured watts-per-amp EMA per charger. Nameplate
         # (phases × voltage) overstates cars that don't pull every phase to
         # the rail — PROD's Zoe draws ~485 W/A at 10 A against a 690 W/A
@@ -3868,6 +3873,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         # from "SEM commanding, EV refused → really full".
                         if decision.commanded_amps > self._last_commanded_amps_fleet:
                             self._last_commanded_amps_fleet = decision.commanded_amps
+                        # (#1011) per charger, this cycle's decided offer (set,
+                        # not max) — the signal the declined-start check reads,
+                        # available in observer mode where the write is withheld.
+                        self._last_commanded_amps_per_charger[cid] = int(
+                            decision.commanded_amps or 0)
                         # (#762) transition-gated — 833 identical idle
                         # lines per day on .175.
                         log_on_change(
@@ -12517,7 +12527,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # full); a real draw clears it via update_energy above, an
                 # unplug via reset_session. This is the per-charger home of the
                 # decline; the global block below is a deviceless fallback.
-                if charger_connected and charger_power < 50 and charger_setpoint >= 6:
+                _offered = max(int(charger_setpoint or 0),
+                               self._last_commanded_amps_per_charger.get(cid, 0))
+                if charger_connected and charger_power < 50 and _offered >= 6:
                     _dc = self._decline_stall_count.get(cid, 0) + 1
                     self._decline_stall_count[cid] = _dc
                     if _dc >= 18:  # ~3 min of 0 W while connected and offered

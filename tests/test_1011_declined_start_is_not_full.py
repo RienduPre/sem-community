@@ -231,6 +231,39 @@ class TestTheCoordinatorRecordsADeclineNotAFull:
         from custom_components.solar_energy_management.tests import ast_contracts
         assert ast_contracts.calls(self._fn(), "note_declined_start")
 
+    def test_the_decline_keys_on_the_decided_offer_not_the_withheld_write(self):
+        """Regression on the .175 proof (27.09): the observer rig withholds
+        set_current, so the actual setpoint reads 0 and a decline keyed on it
+        never fires. The check must read the DECIDED offer per charger, which
+        exists even when actuation is withheld. A read with no writer is dead
+        (#915), so pin the writer too."""
+        from custom_components.solar_energy_management.tests import ast_contracts
+        from custom_components.solar_energy_management.coordinator.coordinator import (
+            SEMCoordinator,
+        )
+        assert ast_contracts.reads_attribute(
+            self._fn(), "self", "_last_commanded_amps_per_charger"), (
+            "the declined-start check must read the decided offer, not the "
+            "withheld setpoint (#1011)")
+        # dict-item write (self._..._per_charger[cid] = ...) is a Subscript
+        # target, which assigns_attribute (attribute targets only) can't see —
+        # walk for it directly so a dead read (#915) is still caught.
+        import ast as _ast
+        import inspect as _inspect
+        import textwrap as _tw
+        tree = _ast.parse(_tw.dedent(_inspect.getsource(
+            SEMCoordinator._async_update_data)))
+        writes = [
+            n for n in _ast.walk(tree)
+            if isinstance(n, _ast.Assign)
+            for tgt in n.targets
+            if isinstance(tgt, _ast.Subscript)
+            and isinstance(tgt.value, _ast.Attribute)
+            and tgt.value.attr == "_last_commanded_amps_per_charger"
+        ]
+        assert writes, (
+            "the decide loop must record the decided offer per charger (#1011)")
+
     def test_the_coordinator_never_writes_a_full_charge_fact(self):
         import ast
         import inspect
