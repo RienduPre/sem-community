@@ -473,7 +473,7 @@ All SEM entities are removed automatically. Your Energy Dashboard and hardware s
 
 ## Recent Improvements
 
-### v2.1 — Forecast-led planning and spending (25.09.2026, beta.40)
+### v2.1.0 — Forecast-led planning and spending
 2.1 looks ahead. SEM forms an honest expectation of the energy that is coming and plans how to spend it. It also learns hardware it had never met. Everything new that acts is off by default, except the peak slot guard.
 
 **Planning and spending**
