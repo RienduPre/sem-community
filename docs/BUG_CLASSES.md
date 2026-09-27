@@ -4797,3 +4797,49 @@ minutes. Feeding it the commanded watts instead would also let a one-phase 32 A 
 and the night rate, the deadline current and the peak slot guard are all computed from the
 `ev_phases` CONFIG — changing the phase count under them changes arithmetic they own. That is a
 contract call across three layers, not a mechanical sweep. Refs #1008 #804 #105.
+
+### 110. A feed we append to, read through a fixed window — the one item the reader needs scrolls out — GUARDED
+**Symptom:** nobody could install SEM. HACS answered `404` on
+`releases/download/45438ef/solar_energy_management.zip` — a download from a commit sha, where no
+release can exist. Nine days, and it took a reporter to tell us (#1012).
+**Root shape:** HACS asks GitHub for ONE page of releases — thirty — and skips every pre-release
+unless the user ticked "show beta versions". We cut a beta per fix. Once thirty betas stood above
+v2.0.0 the newest full release had fallen off that page, so HACS had no version to offer: it fell
+back to the branch head's short commit sha, and `hacs.json`'s `zip_release` turned that into a
+request for a release ASSET at a sha. Both halves are ours — the cadence that fills the window,
+and nobody watching the window. 41 betas stood above the full release when it was reported.
+**The tell:** we append to something a reader consumes through a fixed window (a page, a
+`--limit`, "the newest N"), and something older than the window still has to be reachable. Ask
+what the reader must still see, and how fast we push it down.
+**Where it lives:** GitHub releases read by HACS at a page of 30 — the instance, and the only one
+with a user-facing cost. Swept: `scripts/mutation_audit.py` asked for the newest 60 closed bugs
+`--since` a date and reported as if that were all of them — widened, and it now says when the
+window filled. `enhancement-sponsor.yml` paginates, so its "note already posted?" check reads
+every comment. No other repo script decides anything from a windowed read.
+**The trap this fix walked into first, and the reason the tell is worth memorising.** The first cut
+read the releases with ONE `per_page=100` call. A token with write access sees drafts, so every
+beta the fix retired kept its slot in the fix's OWN view: at the measured rate (42 betas in 26
+days) that read would have filled up in about five weeks, reported "no full release at all",
+retired nothing, and let the live index climb past 30 again — #1012 rebuilt inside the fix for
+#1012, with a diagnostic saying the opposite of the truth. Found in review. It now reads every
+page and refuses to decide from a partial list.
+**Closure:** `scripts/hacs_release_window.py --retire` — the betas with the oldest `created_at`
+standing above the newest full release go back to draft until it sits at index 10, twenty slots
+inside the page (about twelve days of warning if a run ever fails; #1012 went unseen for nine).
+Picking by date, not by listed position, is deliberate: GitHub's order is its own, and two
+releases here are listed against their creation order — by date the release just published is
+provably the last one the picker could ever reach. A draft keeps its tag and its notes, and one
+`gh release edit <tag> --draft=false` puts it back; it does NOT keep its download, so anyone
+pinned to a retired beta must move to a live one. A full release is never touched, and betas-only
+retires nothing — it cannot conjure a release to save. Hung off `release: published`, which covers
+all three publishers, plus inline in `create-release.yml` — the GITHUB_TOKEN path fires no event,
+the same exception the download zip has.
+**Guard:** `tests/test_1012_hacs_release_window.py` — the reporter's state end to end through
+`main()` (retire, then re-read, and green only because a plain install works afterwards), the page
+edge at 29 and 30, oldest-by-date first whatever GitHub listed, a draft takes no slot, both release
+paths call the retire, and the two refusals before the only destructive call: a full release, and a
+tag already retired. Ten mutations of the picker, the exit code, the fetch and the refusals each
+fail a test.
+**Residual (for Guido).** The stable channel now offers v2.0.0 — a month and 41 betas old. This
+keeps it reachable; only cutting 2.1.0 makes it current. Nothing Guido already watches reports a
+failed run: the autopilot follows branch CI and the release asset, not this job. Refs #1012 #834.

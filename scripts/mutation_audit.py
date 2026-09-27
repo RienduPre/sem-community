@@ -235,10 +235,20 @@ def main() -> int:
 
     issues = list(a.issue)
     if a.since:
+        # The window is wide and it SAYS when it filled (#1012): a `--limit`
+        # that quietly returns the newest N turns "every bug since March" into
+        # "the last N bugs", and an audit that covers less than it claims is
+        # worse than no audit.
+        limit = 300
         r = sh(["gh", "issue", "list", "--state", "closed", "--label", "bug",
-                "--limit", "60", "--search", f"closed:>={a.since}",
+                "--limit", str(limit), "--search", f"closed:>={a.since}",
                 "--json", "number", "--jq", ".[].number"], cwd=REPO)
-        issues += r.stdout.split()
+        found = r.stdout.split()
+        if len(found) == limit:
+            print(f"warning: {limit} bugs came back — older ones since "
+                  f"{a.since} were not audited. Narrow --since.",
+                  file=sys.stderr)
+        issues += found
     if not issues:
         ap.error("give --issue N (repeatable) or --since YYYY-MM-DD")
 
