@@ -2380,6 +2380,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
     # live state (cards still read them) while excluding them from the recorder.
     _unrecorded_attributes = frozenset({
         "devices",
+        # (#1011) provenance of the SOC estimate — timestamps and labels
+        # for the card and diagnostics, no charting value
+        "anchor", "anchor_at", "start_declined_since", "start_declined_last",
         # (arc #921) live-card helpers, re-serialised every cycle
         "sink_verdicts",
         "export_guard",
@@ -2987,6 +2990,21 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 len("charger_"):-len("_estimated_soc")
             ]
             attrs.update({
+                # (#1011) the reference behind the number, and a refused
+                # start as its own fact — so a wrong anchor is visible here
+                # instead of only in the store.
+                "anchor": self.coordinator.data.get(
+                    f"charger_{cid_708}_estimated_soc_anchor"
+                ),
+                "anchor_at": self.coordinator.data.get(
+                    f"charger_{cid_708}_estimated_soc_anchor_at"
+                ),
+                "start_declined_since": self.coordinator.data.get(
+                    f"charger_{cid_708}_start_declined_since"
+                ),
+                "start_declined_last": self.coordinator.data.get(
+                    f"charger_{cid_708}_start_declined_last"
+                ),
                 "energy_accounted_soc": self.coordinator.data.get(
                     f"charger_{cid_708}_energy_accounted_soc"
                 ),

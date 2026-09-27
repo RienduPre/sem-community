@@ -35,6 +35,16 @@ from .units import power_unit_scale
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _now_iso() -> str:
+    """HA's clock, as the rest of the coordinator uses it (#1011). Imported
+    lazily: the module never touches hass at import time (#786)."""
+    try:
+        from homeassistant.util import dt as dt_util
+        return dt_util.now().isoformat()
+    except Exception:  # noqa: BLE001 — a detector unit test without HA
+        return datetime.now().astimezone().isoformat()
+
 # Buffer and detection constants
 BUFFER_SIZE = 120          # 120 samples × 10s = 20 minutes
 MIN_SAMPLES = 12           # At least 2 min of BMS-only data for regression
@@ -183,6 +193,18 @@ class EVTaperDetector:
         # SOC anchor: set True after first reliable SOC reference point
         # (taper detection, car API calibration, or first session bootstrap)
         self._soc_anchored: bool = False
+        # (#1011) WHICH reference set the estimate, and WHEN — so the sensor
+        # can say "taper, 16:57" instead of a bare number and a wrong anchor
+        # is visible on the card. Kinds: "sensor" (a vehicle SOC reading),
+        # "taper" (a completed charge), "session" (energy delivered:
+        # bootstrap or self-heal). Persisted with the estimate they explain.
+        self._anchor_kind: Optional[str] = None
+        self._anchor_at: Optional[str] = None
+        # (#1011) A start the car did not take. Its own fact, never an
+        # anchor: a stall says "declined", only a taper or a sensor says
+        # "full" (#983). First and latest instant of this plug-in.
+        self._start_declined_at: Optional[str] = None
+        self._start_declined_last_at: Optional[str] = None
         # #774 — energy delivered in excess of the deficit the anchor claimed
         # was left. Session-scoped and NOT persisted: it is evidence about the
         # reference currently held, and a restart drops both together.
@@ -393,6 +415,8 @@ class EVTaperDetector:
                 self._energy_since_full = 0.0
                 self._estimated_soc = 100.0
                 self._soc_anchored = True
+                self._anchor_kind = "taper"                       # (#1011)
+                self._anchor_at = timestamp.isoformat()
                 self._energy_over_anchor_kwh = 0.0  # fresh reference (#774)
                 # Snapshot hardware counter at full for drift-free tracking
                 if self._hw_total_last is not None:
@@ -522,6 +546,11 @@ class EVTaperDetector:
         """
         capacity = self._config.get("ev_battery_capacity_kwh", 40)
 
+        # (#1011) Energy actually flowing ends a declined start: the car
+        # accepted current again (preconditioning, its timer, a wake-up).
+        if ev_energy_increment_kwh and ev_energy_increment_kwh > 0.005:
+            self.clear_declined_start()
+
         # Always track hardware counter (even after full detection)
         if hw_total_energy_kwh is not None and hw_total_energy_kwh > 0:
             self._hw_total_last = hw_total_energy_kwh
@@ -618,6 +647,11 @@ class EVTaperDetector:
                 # energy-accounted SOC; the sensor always wins.
                 self._soc_anchor_value = vehicle_soc
                 self._soc_anchor_session_kwh = self._current_session_energy_kwh
+                # (#1011) stamped HERE, on a changed reading — not on every
+                # cycle's re-read, which would move a timestamp attribute
+                # each cycle and re-arm the #581 recorder churn.
+                self._anchor_kind = "sensor"
+                self._anchor_at = _now_iso()
             elif self._soc_anchor_value is None:
                 # #708 — session-start bootstrap: after a disconnect cleared
                 # the anchor, the first present reading anchors even without
@@ -628,6 +662,8 @@ class EVTaperDetector:
                 # entirely unguarded.
                 self._soc_anchor_value = vehicle_soc
                 self._soc_anchor_session_kwh = self._current_session_energy_kwh
+                self._anchor_kind = "sensor"                          # (#1011)
+                self._anchor_at = _now_iso()
             self._last_real_soc = vehicle_soc
             self._soc_anchored = True
             self._energy_over_anchor_kwh = 0.0  # fresh reference (#774)
@@ -759,6 +795,8 @@ class EVTaperDetector:
             self._estimated_soc = min(100.0, pre_charge_soc + soc_added)
             self._energy_since_full = (100.0 - self._estimated_soc) / 100.0 * capacity
             self._soc_anchored = True
+            self._anchor_kind = "session"                             # (#1011)
+            self._anchor_at = _now_iso()
             self._energy_over_anchor_kwh = 0.0  # fresh reference (#774)
             _LOGGER.info(
                 "SOC bootstrapped from first session: %.1f kWh delivered "
@@ -775,6 +813,7 @@ class EVTaperDetector:
         self._declining_phase = False
         self._full_detected = False
         self._full_confirm_count = 0
+        self.clear_declined_start()     # (#1011) a new plug-in, a new car
         self._settling_counter = 0
         self._last_setpoint = 0.0
         self._sem_has_offered = False  # #708 — withdrawal is session-scoped
@@ -803,9 +842,53 @@ class EVTaperDetector:
     # taper detector is display-only now (taper trend, estimated SOC,
     # battery health).
 
+    # ------------------------------------------------------------------
+    # (#1011) provenance of the estimate, and a refusal as its own fact
+    # ------------------------------------------------------------------
+
+    def set_anchor(self, kind: str, at: Optional[str]) -> None:
+        """Name the reference the estimate now rests on (see ``_anchor_kind``)."""
+        self._anchor_kind = kind
+        self._anchor_at = at
+
+    def note_declined_start(self, at: str) -> None:
+        """The car did not draw at an offered current. Recorded as exactly
+        that. Touches no anchor, no full-charge timestamp, no deficit: a
+        refusal is not evidence of a full pack — a departure timer, a
+        sleeping BMS and preconditioning refuse the same way, and #983's
+        install was at 54 % against 80 % when the old rule called it full.
+        On PROD 27.09.2026 that rule stamped a "full charge" on a day
+        nothing charged. Only a taper or a sensor may say full."""
+        if self._start_declined_at is None:
+            self._start_declined_at = at
+        self._start_declined_last_at = at
+
+    def clear_declined_start(self) -> None:
+        self._start_declined_at = None
+        self._start_declined_last_at = None
+
+    @property
+    def declined_start(self) -> bool:
+        """A start refused in this plug-in with nothing drawn since."""
+        return self._start_declined_at is not None
+
+    @property
+    def anchor_kind(self) -> Optional[str]:
+        return self._anchor_kind
+
+    @property
+    def anchor_at(self) -> Optional[str]:
+        return self._anchor_at
+
     def get_state(self) -> Dict[str, Any]:
         """Export persistent state for storage."""
         return {
+            # (#1011) the anchor's provenance persists with the estimate it
+            # explains. The DECLINE deliberately does not: a restart re-learns
+            # it within three minutes, while a stored one could outlive an
+            # unplug that happened while HA was down and brand a new car.
+            "anchor_kind": self._anchor_kind,
+            "anchor_at": self._anchor_at,
             "last_full_charge": self._last_full_timestamp,
             "energy_since_full": round(self._energy_since_full, 3),
             "estimated_soc": round(self._estimated_soc, 1),
@@ -819,6 +902,8 @@ class EVTaperDetector:
         """Restore persistent state from storage. (#440) ``consecutive_skips``
         is silently ignored on restore — older payloads remain compatible
         but the field is no longer tracked."""
+        self._anchor_kind = state.get("anchor_kind")                  # (#1011)
+        self._anchor_at = state.get("anchor_at")
         self._last_full_timestamp = state.get("last_full_charge")
         self._energy_since_full = state.get("energy_since_full", 0.0)
         self._estimated_soc = state.get("estimated_soc", 0.0)

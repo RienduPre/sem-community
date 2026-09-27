@@ -112,10 +112,20 @@ def plan_car_fullness(detector, drawing_w=None, handshake_w=500.0):
     still reads full, so #756's contract is untouched. Only a NUMBER may
     contradict the anchor: junk on the wire must not un-full a car.
     """
+    # (#1011) A standing DECLINED start counts the same way for the plan:
+    # a car that refuses current is no sink tonight, whatever its SOC.
+    # It is not called full — the estimate and the sensor say "declined"
+    # — but the booking it would earn under the peak cap would displace
+    # real loads for a phantom, the N1 lesson. The stall→full pin used to
+    # deliver this by mislabelling the car; the label is gone, the
+    # consequence stays, under its own name. Cleared by a real draw or an
+    # unplug (the detector), and the meter check below applies to it too.
     try:
-        if not getattr(detector, "still_full", False):
-            return None
+        still_full = bool(getattr(detector, "still_full", False))
+        declined = bool(getattr(detector, "declined_start", False))
     except Exception:  # noqa: BLE001 — an unreadable detector has no opinion
+        return None
+    if not still_full and not declined:
         return None
     if drawing_w is not None:
         try:
