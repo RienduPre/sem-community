@@ -1,0 +1,48 @@
+name: HACS release window
+
+# Keep a full release inside the page HACS reads (#1012).
+#
+# HACS asks GitHub for one page of releases — thirty — and skips pre-releases
+# unless the user ticked "show beta versions". SEM cuts a beta per fix, so
+# after thirty betas the newest full release had scrolled off that page. HACS
+# then had no version to offer, fell back to the branch head's short commit
+# sha, and — hacs.json declares zip_release — asked for a release asset at a
+# commit sha. Every plain install answered 404 for nine days before a reporter
+# told us.
+#
+# WHY HERE: releases are cut from three places (~/bin/sem-daily-beta.sh,
+# ~/bin/sem-autopilot.sh, create-release.yml). Hanging this off
+# `release: published` covers all three without any of them knowing it exists,
+# the same reasoning release-asset.yml gives.
+#
+# THE EXCEPTION: a release created with the default GITHUB_TOKEN does not fire
+# `release: published`, so create-release.yml calls the same script inline.
+#
+# The daily run only bites once this file reaches the default branch —
+# scheduled workflows run from there alone. The release trigger is the one
+# that works from develop.
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  window:
+    name: Keep a full release in view
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Retires what it must, then fails if a plain HACS install still
+      # finds no version — so the one thing that matters is checked after
+      # the change, not before it.
+      - name: Retire the oldest betas standing above the full release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/hacs_release_window.py --retire

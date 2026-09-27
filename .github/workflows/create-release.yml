@@ -132,3 +132,13 @@ jobs:
           bash scripts/build_release_zip.sh solar_energy_management.zip
           python3 scripts/verify_release_zip.py solar_energy_management.zip
           gh release upload "$TAG" solar_energy_management.zip --clobber
+
+      # Same reason as the zip above: this path does not fire
+      # `release: published`, so hacs-release-window.yml never runs for it and
+      # the newest full release would keep sinking out of the page HACS reads
+      # (#1012). Both paths call the same script.
+      - name: Keep a full release inside the page HACS reads
+        if: env.SKIP != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/hacs_release_window.py --retire
