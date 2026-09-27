@@ -794,6 +794,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         self._session_data_per_charger: Dict[str, SessionData] = {}
         self._last_ev_connected = False
         self._last_ev_connected_per_charger: Dict[str, bool] = {}
+        # (#1011) per-charger "0 W while connected and offered" counter, so a
+        # declined start is recorded on THIS charger's detector — the one the
+        # per-charger card and sensor read.
+        self._decline_stall_count: Dict[str, int] = {}
         # (#638) the plug debounce's own state — see
         # ``_confirm_ev_connection``. Keyed by charger id; ``""`` is the
         # flat/legacy fleet sensor.
@@ -12507,6 +12511,28 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     cid, charger_power, interval_hours,
                 )
 
+                # (#1011) A start THIS charger did not take is recorded on THIS
+                # charger's detector — connected, a real offer, no draw for
+                # ~3 min. Never a full charge (only a taper or a sensor says
+                # full); a real draw clears it via update_energy above, an
+                # unplug via reset_session. This is the per-charger home of the
+                # decline; the global block below is a deviceless fallback.
+                if charger_connected and charger_power < 50 and charger_setpoint >= 6:
+                    _dc = self._decline_stall_count.get(cid, 0) + 1
+                    self._decline_stall_count[cid] = _dc
+                    if _dc >= 18:  # ~3 min of 0 W while connected and offered
+                        _pcdet = self._ev_taper_detectors[cid]
+                        if not _pcdet.declined_start:
+                            _LOGGER.info(
+                                "Charger %s: start declined — connected, %d A "
+                                "offered, 0 W for 3+ min; recorded as declined, "
+                                "not full (#1011)", cid, int(charger_setpoint),
+                            )
+                        _pcdet.note_declined_start(now.isoformat())
+                        self._decline_stall_count[cid] = 0
+                else:
+                    self._decline_stall_count[cid] = 0
+
         # #589 Surface-B retirement: the primary charger's detector is now
         # resolved by the _ev_taper_detector property (computed from
         # _ev_taper_detectors[primary_id]) — no per-cycle swap. The former
@@ -12598,7 +12624,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # ``_ev_stalled_since_per_charger``). Demo of the v1.6.16
         # ``.as_fleet_total(reason)`` form — the reason rides in the
         # bytecode rather than a comment line above the read.
-        if (power.ev_connected and not power.ev_charging
+        if (not self._ev_devices                    # (#1011) per-charger loop owns it otherwise
+                and power.ev_connected and not power.ev_charging
                 and power.ev_power.as_fleet_total("legacy single-detector stall path") < 50
                 and self._last_commanded_amps_fleet >= 6):
             stall_count = getattr(self, '_full_stall_count', 0) + 1
