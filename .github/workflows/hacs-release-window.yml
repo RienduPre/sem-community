@@ -18,9 +18,11 @@ name: HACS release window
 # THE EXCEPTION: a release created with the default GITHUB_TOKEN does not fire
 # `release: published`, so create-release.yml calls the same script inline.
 #
-# The daily run only bites once this file reaches the default branch —
-# scheduled workflows run from there alone. The release trigger is the one
-# that works from develop.
+# Dormant until this file reaches the default branch: both `schedule` and
+# `workflow_dispatch` are only offered from there. The release trigger is the
+# one that works from develop, because a `release` event runs the workflow
+# from the tag's own commit — so the next beta cut from develop repairs the
+# window.
 
 on:
   release:
@@ -31,6 +33,12 @@ on:
 
 permissions:
   contents: write
+
+# Two publishes close together would otherwise both count from the same
+# snapshot, and the second would try to retire what the first already did.
+concurrency:
+  group: hacs-release-window
+  cancel-in-progress: false
 
 jobs:
   window:

@@ -137,8 +137,9 @@ jobs:
       # `release: published`, so hacs-release-window.yml never runs for it and
       # the newest full release would keep sinking out of the page HACS reads
       # (#1012). Both paths call the same script.
+      # No `if: SKIP` — this is repair, not part of cutting the release, so a
+      # re-run past a failure must still get it.
       - name: Keep a full release inside the page HACS reads
-        if: env.SKIP != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/hacs_release_window.py --retire

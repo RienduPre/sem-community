@@ -42,11 +42,12 @@ window = _load()
 
 def _beta(number: int) -> dict:
     return {"tag_name": f"v2.1.0-beta.{number}", "prerelease": True,
-            "draft": False}
+            "draft": False, "created_at": f"2026-09-01T00:{number:02d}:00Z"}
 
 
 def _full(name: str = "v2.0.0") -> dict:
-    return {"tag_name": name, "prerelease": False, "draft": False}
+    return {"tag_name": name, "prerelease": False, "draft": False,
+            "created_at": "2026-08-29T14:43:05Z"}
 
 
 def _feed(betas: int, *, full: bool = True) -> list[dict]:
@@ -60,12 +61,6 @@ def _feed(betas: int, *, full: bool = True) -> list[dict]:
 def test_the_guard_can_still_bite():
     """Keeping more betas than HACS reads would make the retire pointless."""
     assert window.KEEP < window.PAGE
-
-
-def test_hacs_reads_thirty():
-    """HACS calls the releases endpoint with no page size, so it gets
-    GitHub's default of thirty. The whole bug is that number."""
-    assert window.PAGE == 30
 
 
 def test_a_full_release_inside_the_page_is_installable():
@@ -119,7 +114,9 @@ def test_betas_only_retires_nothing():
 
 
 def test_one_run_is_bounded():
-    assert len(window.to_retire(_feed(500))) <= window.MAX_PER_RUN
+    """A literal on purpose: a bound that reads its own constant cannot
+    notice the constant being raised to a number that bounds nothing."""
+    assert len(window.to_retire(_feed(500))) <= 60
 
 
 def test_a_draft_takes_up_no_slot():
@@ -130,7 +127,9 @@ def test_a_draft_takes_up_no_slot():
         release["draft"] = True
     feed.append(_full())
     assert window.full_release_index(feed) == 21
-    assert window.to_retire(feed) == ["v2.1.0-beta.1"]
+    tags = window.to_retire(feed)
+    assert len(tags) == 21 - window.KEEP      # 41 - KEEP if drafts counted
+    assert tags[0] == "v2.1.0-beta.1"
 
 
 def test_an_older_full_release_does_not_count():
@@ -138,6 +137,118 @@ def test_an_older_full_release_does_not_count():
     the page and cannot save the install."""
     feed = _feed(41) + [_full("v1.7.9")]
     assert window.full_release_index(feed) == 41
+
+
+def test_the_oldest_goes_first_whatever_the_listed_order():
+    """GitHub lists releases in an order of its own — two in this repo are
+    listed against their creation order. Pick by date, so the release just
+    published is provably the last one this could ever touch."""
+    feed = _feed(41)
+    feed[35], feed[5] = feed[5], feed[35]      # GitHub's order, not ours
+    tags = window.to_retire(feed)
+    assert tags[0] == "v2.1.0-beta.1"
+    assert "v2.1.0-beta.41" not in tags
+
+
+# --- the exit code, which is the only thing CI reads ------------------------
+
+class _Fake:
+    """Stands in for GitHub: one fetch, one retire, no network."""
+
+    def __init__(self, feed):
+        self.feed = feed
+        self.retired = []
+
+    def fetch(self):
+        return list(self.feed)
+
+    def retire(self, tag):
+        self.retired.append(tag)
+        for release in self.feed:
+            if release["tag_name"] == tag:
+                release["draft"] = True
+        return f"retired {tag}"
+
+
+@pytest.fixture
+def github(monkeypatch):
+    def install(feed):
+        fake = _Fake(feed)
+        monkeypatch.setattr(window, "fetch_releases", fake.fetch)
+        monkeypatch.setattr(window, "retire", fake.retire)
+        return fake
+    return install
+
+
+def test_the_reported_state_ends_green(github):
+    """41 betas above v2.0.0 — the reporter's install. One run retires, and
+    the run only passes because a plain install works afterwards."""
+    fake = github(_feed(41))
+    assert window.main(["--retire"]) == 0
+    assert len(fake.retired) == 41 - window.KEEP
+
+
+def test_a_healthy_window_passes_without_touching_anything(github):
+    fake = github(_feed(window.KEEP))
+    assert window.main(["--retire"]) == 0
+    assert fake.retired == []
+
+
+def test_betas_only_fails_the_run(github):
+    """Nothing to retire and nothing to offer — the job must go red, not
+    quietly pass."""
+    fake = github(_feed(41, full=False))
+    assert window.main(["--retire"]) == 1
+    assert fake.retired == []
+
+
+def test_a_dry_run_changes_nothing_and_still_reports_broken(github):
+    fake = github(_feed(41))
+    assert window.main(["--retire", "--dry-run"]) == 1
+    assert fake.retired == []
+
+
+def test_check_alone_fails_on_the_reported_state(github):
+    github(_feed(41))
+    assert window.main(["--check"]) == 1
+
+
+def test_retiring_a_full_release_is_refused(monkeypatch):
+    """The last guard before the only destructive call. It re-reads the
+    release and stops if GitHub says it is not a pre-release."""
+    monkeypatch.setattr(window, "release_by_tag", lambda tag: _full(tag))
+    monkeypatch.setattr(window, "_gh", lambda *a: pytest.fail(
+        "edited a full release"))
+    with pytest.raises(SystemExit):
+        window.retire("v2.0.0")
+
+
+def test_an_already_retired_tag_is_left_alone(monkeypatch):
+    """GitHub answers 404 for a draft's tag. That is done, not an error —
+    two runs racing must not turn a release red."""
+    monkeypatch.setattr(window, "release_by_tag", lambda tag: None)
+    monkeypatch.setattr(window, "_gh", lambda *a: pytest.fail("edited it"))
+    assert "already retired" in window.retire("v2.1.0-beta.1")
+
+
+def test_the_fetch_reads_every_page(monkeypatch):
+    """This script's own drafts stay in its view, so a one-page read would
+    fill with them and then report no full release — #1012 inside the fix
+    for #1012."""
+    pages = {1: [_beta(n) for n in range(100, 0, -1)], 2: [_full()]}
+    asked = []
+
+    def fake_gh(*args):
+        asked.append(args[-1])
+        page = int(args[-1].rsplit("page=", 1)[1])
+        import json as _json
+        return _json.dumps(pages.get(page, []))
+
+    monkeypatch.setattr(window, "_gh", fake_gh)
+    monkeypatch.setattr(window, "repo", lambda: "owner/repo")
+    releases = window.fetch_releases()
+    assert len(asked) == 2
+    assert window.full_release_index(releases) == 100
 
 
 # --- the wiring ------------------------------------------------------------
@@ -154,7 +265,8 @@ def test_every_release_path_runs_the_retire(workflow):
 def test_the_release_event_triggers_it():
     spec = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "hacs-release-window.yml").read_text())
-    assert "published" in spec[True]["release"]["types"]
+    triggers = spec.get("on", spec.get(True))   # YAML 1.1 reads `on:` as True
+    assert "published" in triggers["release"]["types"]
 
 
 def test_the_window_matters_because_of_zip_release():

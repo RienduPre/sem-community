@@ -4816,15 +4816,30 @@ with a user-facing cost. Swept: `scripts/mutation_audit.py` asked for the newest
 `--since` a date and reported as if that were all of them — widened, and it now says when the
 window filled. `enhancement-sponsor.yml` paginates, so its "note already posted?" check reads
 every comment. No other repo script decides anything from a windowed read.
-**Closure:** `scripts/hacs_release_window.py --retire` — the oldest betas standing above the
-newest full release go back to draft until it sits at index 20, ten slots inside the page. A draft
-keeps its tag and its notes, and one `gh release edit <tag> --draft=false` puts one back; a full
-release is never touched, and betas-only retires nothing (it cannot conjure a release to save).
-Hung off `release: published`, which covers all three publishers, plus inline in
-`create-release.yml` — the GITHUB_TOKEN path fires no event, the same exception the download zip
-has.
-**Guard:** `tests/test_1012_hacs_release_window.py` — the reported state end to end, the page edge
-at 29 and 30, oldest first, never a full release, a draft takes no slot, bounded per run, and both
-release paths call the retire. Four mutations of the picker each fail a test.
+**The trap this fix walked into first, and the reason the tell is worth memorising.** The first cut
+read the releases with ONE `per_page=100` call. A token with write access sees drafts, so every
+beta the fix retired kept its slot in the fix's OWN view: at the measured rate (42 betas in 26
+days) that read would have filled up in about five weeks, reported "no full release at all",
+retired nothing, and let the live index climb past 30 again — #1012 rebuilt inside the fix for
+#1012, with a diagnostic saying the opposite of the truth. Found in review. It now reads every
+page and refuses to decide from a partial list.
+**Closure:** `scripts/hacs_release_window.py --retire` — the betas with the oldest `created_at`
+standing above the newest full release go back to draft until it sits at index 10, twenty slots
+inside the page (about twelve days of warning if a run ever fails; #1012 went unseen for nine).
+Picking by date, not by listed position, is deliberate: GitHub's order is its own, and two
+releases here are listed against their creation order — by date the release just published is
+provably the last one the picker could ever reach. A draft keeps its tag and its notes, and one
+`gh release edit <tag> --draft=false` puts it back; it does NOT keep its download, so anyone
+pinned to a retired beta must move to a live one. A full release is never touched, and betas-only
+retires nothing — it cannot conjure a release to save. Hung off `release: published`, which covers
+all three publishers, plus inline in `create-release.yml` — the GITHUB_TOKEN path fires no event,
+the same exception the download zip has.
+**Guard:** `tests/test_1012_hacs_release_window.py` — the reporter's state end to end through
+`main()` (retire, then re-read, and green only because a plain install works afterwards), the page
+edge at 29 and 30, oldest-by-date first whatever GitHub listed, a draft takes no slot, both release
+paths call the retire, and the two refusals before the only destructive call: a full release, and a
+tag already retired. Ten mutations of the picker, the exit code, the fetch and the refusals each
+fail a test.
 **Residual (for Guido).** The stable channel now offers v2.0.0 — a month and 41 betas old. This
-keeps it reachable; only cutting 2.1.0 makes it current. Refs #1012 #834.
+keeps it reachable; only cutting 2.1.0 makes it current. Nothing Guido already watches reports a
+failed run: the autopilot follows branch CI and the release asset, not this job. Refs #1012 #834.
