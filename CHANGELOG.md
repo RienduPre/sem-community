@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.45] — 27.09.2026
+
+- 🐛 **HACS could not install SEM at all** (#1012). Every beta pushed the stable release off the one page HACS reads.
+
 # [2.1.0-beta.44] — 27.09.2026
 
 - 🐛 **A car that declines a start is no longer recorded as full** (#1011). The SOC sensor names its anchor; retries wait longer each time.
