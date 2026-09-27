@@ -1610,6 +1610,12 @@ class SEMData:
             for cid, intel in per_charger_intel.items():
                 data.update({
                     f"charger_{cid}_estimated_soc": intel.get("estimated_soc", 0),
+                    # (#1011) which reference set the estimate, and a refused
+                    # start as its own fact (attributes, not entities)
+                    f"charger_{cid}_estimated_soc_anchor": intel.get("estimated_soc_anchor"),
+                    f"charger_{cid}_estimated_soc_anchor_at": intel.get("estimated_soc_anchor_at"),
+                    f"charger_{cid}_start_declined_since": intel.get("start_declined_since"),
+                    f"charger_{cid}_start_declined_last": intel.get("start_declined_last"),
                     # #383: real vehicle SOC reading per charger (None
                     # when no per-charger ``vehicle_soc_entity`` is
                     # configured). The card prefers this over the

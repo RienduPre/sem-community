@@ -775,6 +775,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # (e.g. solar_only with surplus below the 3-phase 6 A floor —
         # the stall detector would otherwise falsely anchor SOC at 100 %).
         self._last_commanded_amps_fleet: int = 0
+        # (#1011) this cycle's DECIDED offer per charger — set even when the
+        # actuation is withheld (observer mode), unlike the actual setpoint.
+        # Keys the per-charger declined-start check: "SEM wanted to charge
+        # THIS charger and the car drew nothing."
+        self._last_commanded_amps_per_charger: Dict[str, int] = {}
         # (#638) Measured watts-per-amp EMA per charger. Nameplate
         # (phases × voltage) overstates cars that don't pull every phase to
         # the rail — PROD's Zoe draws ~485 W/A at 10 A against a 690 W/A
@@ -794,6 +799,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         self._session_data_per_charger: Dict[str, SessionData] = {}
         self._last_ev_connected = False
         self._last_ev_connected_per_charger: Dict[str, bool] = {}
+        # (#1011) per-charger "0 W while connected and offered" counter, so a
+        # declined start is recorded on THIS charger's detector — the one the
+        # per-charger card and sensor read.
+        self._decline_stall_count: Dict[str, int] = {}
         # (#638) the plug debounce's own state — see
         # ``_confirm_ev_connection``. Keyed by charger id; ``""`` is the
         # flat/legacy fleet sensor.
@@ -3864,6 +3873,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         # from "SEM commanding, EV refused → really full".
                         if decision.commanded_amps > self._last_commanded_amps_fleet:
                             self._last_commanded_amps_fleet = decision.commanded_amps
+                        # (#1011) per charger, this cycle's decided offer (set,
+                        # not max) — the signal the declined-start check reads,
+                        # available in observer mode where the write is withheld.
+                        self._last_commanded_amps_per_charger[cid] = int(
+                            decision.commanded_amps or 0)
                         # (#762) transition-gated — 833 identical idle
                         # lines per day on .175.
                         log_on_change(
@@ -12507,6 +12521,30 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     cid, charger_power, interval_hours,
                 )
 
+                # (#1011) A start THIS charger did not take is recorded on THIS
+                # charger's detector — connected, a real offer, no draw for
+                # ~3 min. Never a full charge (only a taper or a sensor says
+                # full); a real draw clears it via update_energy above, an
+                # unplug via reset_session. This is the per-charger home of the
+                # decline; the global block below is a deviceless fallback.
+                _offered = max(int(charger_setpoint or 0),
+                               self._last_commanded_amps_per_charger.get(cid, 0))
+                if charger_connected and charger_power < 50 and _offered >= 6:
+                    _dc = self._decline_stall_count.get(cid, 0) + 1
+                    self._decline_stall_count[cid] = _dc
+                    if _dc >= 18:  # ~3 min of 0 W while connected and offered
+                        _pcdet = self._ev_taper_detectors[cid]
+                        if not _pcdet.declined_start:
+                            _LOGGER.info(
+                                "Charger %s: start declined — connected, %d A "
+                                "offered, 0 W for 3+ min; recorded as declined, "
+                                "not full (#1011)", cid, int(charger_setpoint),
+                            )
+                        _pcdet.note_declined_start(now.isoformat())
+                        self._decline_stall_count[cid] = 0
+                else:
+                    self._decline_stall_count[cid] = 0
+
         # #589 Surface-B retirement: the primary charger's detector is now
         # resolved by the _ev_taper_detector property (computed from
         # _ev_taper_detectors[primary_id]) — no per-cycle swap. The former
@@ -12598,24 +12636,32 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # ``_ev_stalled_since_per_charger``). Demo of the v1.6.16
         # ``.as_fleet_total(reason)`` form — the reason rides in the
         # bytecode rather than a comment line above the read.
-        if (power.ev_connected and not power.ev_charging
+        if (not self._ev_devices                    # (#1011) per-charger loop owns it otherwise
+                and power.ev_connected and not power.ev_charging
                 and power.ev_power.as_fleet_total("legacy single-detector stall path") < 50
-                and self._last_commanded_amps_fleet >= 6
-                and not self._ev_taper_detector._full_detected):
+                and self._last_commanded_amps_fleet >= 6):
             stall_count = getattr(self, '_full_stall_count', 0) + 1
             self._full_stall_count = stall_count
             if stall_count >= 18:  # ~3 minutes of 0W while connected
-                self._ev_taper_detector._full_detected = True
-                self._ev_taper_detector._last_full_timestamp = dt_util.now().isoformat()
-                self._ev_taper_detector._energy_since_full = 0.0
-                self._ev_taper_detector._estimated_soc = 100.0
-                self._ev_taper_detector._soc_anchored = True
-                if self._ev_taper_detector._hw_total_last is not None:
-                    self._ev_taper_detector._hw_total_at_full = self._ev_taper_detector._hw_total_last
+                # (#1011) A start the car did not take is recorded as exactly
+                # that — never as a full charge. This used to pin the
+                # estimate to 100 %, stamp "last full charge" and zero the
+                # deficit: on PROD 27.09.2026 it stamped a full charge on a
+                # day nothing charged (the box's total was unchanged since
+                # the real full the evening before), and on #983's install it
+                # called a 54 % pack full. A refusal has other causes; only a
+                # taper or a sensor may say full. The night plan still treats
+                # a declining car as no sink (ev_availability), under its own
+                # name.
+                det = self._ev_taper_detector
+                if not det.declined_start:
+                    _LOGGER.info(
+                        "EV start declined: car connected, %d A offered, 0 W "
+                        "for 3+ min — recorded as declined, not as full (#1011)",
+                        int(self._last_commanded_amps_fleet),
+                    )
+                det.note_declined_start(dt_util.now().isoformat())
                 self._full_stall_count = 0
-                _LOGGER.info(
-                    "EV full charge detected from stall: car connected, 0W for 3+ min → SOC 100%%"
-                )
         else:
             self._full_stall_count = 0
 
@@ -12635,6 +12681,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # the moving-but-wrong value it replaced. The stall→full anchor
             # below sets this for the same reason.
             self._ev_taper_detector._soc_anchored = True
+            self._ev_taper_detector.set_anchor("session", dt_util.now().isoformat())  # (#1011)
             estimated_soc = session_soc
             _LOGGER.warning(
                 "SOC self-healed: was 0%% after %.1f kWh session → %.0f%%",
@@ -12736,6 +12783,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
             result[cid] = {
                 "estimated_soc": round(soc, 1) if soc is not None else None,
+                # (#1011) provenance of the estimate + a refusal as its own
+                # fact — attributes of the estimated_soc sensor, no entities.
+                "estimated_soc_anchor": getattr(detector, "anchor_kind", None),
+                "estimated_soc_anchor_at": getattr(detector, "anchor_at", None),
+                "start_declined_since": getattr(detector, "_start_declined_at", None),
+                "start_declined_last": getattr(detector, "_start_declined_last_at", None),
                 # #383: surface the real per-charger vehicle SOC reading
                 # so each charger card can display its own car's SOC
                 # instead of falling back to the global ``sem_vehicle_soc``

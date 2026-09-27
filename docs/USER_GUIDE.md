@@ -1168,6 +1168,15 @@ The virtual SOC calibrates from more accurate sources when available:
 2. **Vehicle SOC entity** — calibrates from real car SOC if `vehicle_soc_entity` is configured
 3. **Session bootstrapping** — first charge session establishes initial estimate
 
+A start the car does not take is **not** a full charge. If SEM offers current
+and the car draws nothing for three minutes, SEM records a *declined start* —
+a departure timer, a sleeping charger and a full pack all look the same from
+the wallbox — and leaves the estimate as it was. The sensor's attributes say
+what the number rests on: `anchor` (`sensor`, `taper` or `session`),
+`anchor_at`, and `start_declined_since` / `start_declined_last`. The night
+plan treats a declining car as no load for that night, and SEM offers again
+after 20, then 40, then 80 minutes.
+
 ### Daily Consumption Learning
 
 An EWMA predictor (alpha=0.3) learns per-weekday hourly patterns separately:

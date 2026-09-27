@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **A car that declines a start is no longer recorded as full** (#1011). The SOC sensor names its anchor; retries wait longer each time.
+
 # [2.1.0-beta.43] — 26.09.2026
 
 - 🐛 **SEM now says when the wallbox restarts itself after a stop** (#1009). On a KEBA, Off and Pause hold about 10 minutes.

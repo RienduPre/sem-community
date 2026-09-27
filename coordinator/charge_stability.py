@@ -155,6 +155,12 @@ START_KICK_GIVEUP_S = 90.0
 # at 54 % against an 80 % target while SEM called it full.
 FULL_CAR_GIVEUP_STREAK = 3
 FULL_CAR_BACKOFF_S = 1200.0
+# (#1011) The wait GROWS with the refusals: 20 → 40 → 80 min, capped. A
+# fixed 20 min offered a full car a 2-minute ladder three times an hour
+# all day (PROD 27.09.2026: 14 current writes an hour to the box, every
+# hour from sunrise). Same doubling the stop-war ceasefire uses. Reset by
+# a real draw, an unplug, a mode change or DISABLE — unchanged.
+FULL_CAR_BACKOFF_MAX_FACTOR = 4
 
 # Once a car has drawn, treat a low/zero power reading as a transient and
 # HOLD the steady current for this long before concluding it really stopped.
@@ -444,7 +450,10 @@ class ChargeStability:
                     rem_f = float(rem)
                 except (TypeError, ValueError):
                     continue
-                if 0.0 < rem_f <= FULL_CAR_BACKOFF_S:
+                # (#1011) the wait can be up to the capped factor now; a
+                # bound at the base value silently dropped a 40/80-minute
+                # deadline on restart and the ladder fired at once.
+                if 0.0 < rem_f <= FULL_CAR_BACKOFF_S * FULL_CAR_BACKOFF_MAX_FACTOR:
                     self._giveup_backoff_until[str(cid)] = now_mono + rem_f
 
     def _reset(self, cid: str) -> None:
@@ -872,9 +881,12 @@ class ChargeStability:
                 self._giveup_streak[cid] = streak
                 backoff_note = ""
                 if streak >= FULL_CAR_GIVEUP_STREAK:
-                    self._giveup_backoff_until[cid] = now + FULL_CAR_BACKOFF_S
+                    factor = min(2 ** (streak - FULL_CAR_GIVEUP_STREAK),
+                                 FULL_CAR_BACKOFF_MAX_FACTOR)         # (#1011)
+                    backoff_s = FULL_CAR_BACKOFF_S * factor
+                    self._giveup_backoff_until[cid] = now + backoff_s
                     backoff_note = (
-                        f" — backing off {FULL_CAR_BACKOFF_S / 60.0:.0f} min "
+                        f" — backing off {backoff_s / 60.0:.0f} min "
                         f"after {streak} declined ladders"
                     )
                 return replace(
