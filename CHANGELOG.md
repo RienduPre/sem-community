@@ -20,11 +20,11 @@ The first stable release of the 2.1 line.
 - **One plan for the night** — battery and car charge by tomorrow's solar forecast, the house load and the price.
 - **The battery is used on purpose** — held for the night, used when that is cheaper than the grid, never sold at a loss.
 - **Stays under your grid limit** — a 15-minute budget at the meter.
-- **Car charging spread over the day**, not a morning spike.
-- **More chargers and inverters found on their own**: NRGkick, ABL, Wallbox over MQTT, Victron, OnStar.
+- **Battery charging spread over the day**, not a morning spike.
+- **More chargers and inverters found on their own**: NRGkick, ABL, Wallbox over MQTT, Victron.
 - **Pause a charger**, with a countdown on the EV card.
 
-Needs Home Assistant 2026.2.0 or newer. New features are off until you switch them on.
+Needs Home Assistant 2026.2.0 or newer. New features are off until you switch them on, except two: the peak guard, and modules — SEM removes the entities of hardware you do not have.
 
 # [2.1.0-beta.45] — 27.09.2026
 
