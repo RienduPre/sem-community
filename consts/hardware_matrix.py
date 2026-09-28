@@ -401,6 +401,15 @@ OTHER_DEVICES = [
      "integration": "custom", "status": "implemented",
      "evidence": "#807 (ab-elco-clal) import/export entities appear in a live "
                  "diagnostics dump; nothing confirmed about them"},
+    # (#1018) A battery pack behind another brand's inverter: SEM reads it
+    # through generic sensor patterns, not an integration of its own, so it
+    # is not an inverter row (no sign convention, no pipeline test). Listed
+    # because the README claims BYD and a claim needs a row with its status.
+    {"brand": "BYD (Battery-Box, behind another inverter)", "domains": [],
+     "integration": "generic patterns", "role": "battery pack",
+     "status": "implemented",
+     "evidence": "#564 bmu_temp pattern in hardware_detection.py and the "
+                 "rated_capacity pattern in config_flow.py; no live report yet"},
 ]
 
 TABLES = {

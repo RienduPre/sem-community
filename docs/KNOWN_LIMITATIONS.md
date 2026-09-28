@@ -12,6 +12,13 @@ Dashboard* in [SETUP_GUIDE.md](SETUP_GUIDE.md). What SEM still cannot do is
 guess a sensor for a system that publishes nothing recognisable — every field
 then falls back to a plain entity picker.
 
+## Modules remove the entities of hardware you do not have (2.1, #923)
+
+SEM builds only the modules your install has — battery, EV, heat pump, hot
+water. The entities of an absent module are removed at start and come back
+when the hardware is added. This runs without a switch; a house SEM cannot
+place keeps everything.
+
 ## Single instance only
 
 Only one SEM config entry is supported per Home Assistant instance. Creating a second entry will be rejected during the config flow.

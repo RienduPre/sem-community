@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 📝 **Seven Repair notices are short again** (#1018). Each says the one thing to do, in all 16 languages; the detail sits behind Learn more.
+
+- 🧪 **The README's battery and meter lines are checked against the hardware list** (#1018). BYD has its row.
+
 # [2.1.0-beta.48] — 28.09.2026
 
 - 🐛 **Diagnostics no longer include the notify service name or the entry title** (#1017). The service name often holds the phone owner's name.
