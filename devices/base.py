@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from ..consts.devices import names_a_reboot
 from ..utils.log_gate import log_on_change
 
 # #392: KEBA's failsafe watchdog (and similar device-side timers on other
@@ -2170,8 +2171,15 @@ class CurrentControlDevice(ControllableDevice):
         self.global_services: bool = True  # True = services don't need entity_id (KEBA-style)
         # Start/stop control — per-integration (#82)
         # Entities: switch/button/select entity_ids for start/stop
-        self.start_stop_entity: Optional[str] = None  # switch or button entity
-        self.charge_mode_entity: Optional[str] = None  # select entity (go-e, OpenWB)
+        # (#804) Assigned through the property below, which refuses a
+        # device-restart entity from ANY caller — config, discovery, retry.
+        self._reboot_entity_refused: bool = False
+        #: (#804) The "nothing opened the contactor" warning is a standing
+        #: FACT about the configuration, not an event: said once per device,
+        #: not once per cycle for the life of the session.
+        self._no_stop_warned: bool = False
+        self._start_stop_entity: Optional[str] = None  # switch or button entity
+        self._charge_mode_entity: Optional[str] = None  # select (go-e, OpenWB)
         self.charge_mode_start: Optional[str] = None  # select option for "start"
         self.charge_mode_stop: Optional[str] = None  # select option for "stop"
         # Service-based start/stop (Easee action_command)
@@ -2237,6 +2245,65 @@ class CurrentControlDevice(ControllableDevice):
     def device_type(self) -> DeviceType:
         return DeviceType.CURRENT_CONTROL
 
+    def _is_reboot_entity(self, entity_id: str) -> bool:
+        """(#804) The saved-config twin of the discovery rule. HA's own
+        ``restart`` device class first — it says the same thing in every
+        language — then the words, for integrations that declare no class."""
+        device_class = None
+        try:
+            attrs = getattr(self.hass.states.get(entity_id), "attributes", None)
+            if isinstance(attrs, dict):
+                device_class = attrs.get("device_class")
+        except Exception:  # noqa: BLE001 — a probe, never fatal
+            device_class = None
+        return names_a_reboot(entity_id, device_class)
+
+    def _refuse_reboot(self, entity_id: Optional[str], role: str) -> bool:
+        if not entity_id or not self._is_reboot_entity(entity_id):
+            return False
+        if not self._reboot_entity_refused:
+            self._reboot_entity_refused = True
+            _LOGGER.warning(
+                "%s: %s restarts the charger, so SEM will not use it as the "
+                "%s — pressing it would reboot the box, not start the car. "
+                "Name the entity that starts and stops charging under "
+                "Configuration → EV chargers (#804).",
+                self.name, entity_id, role)
+        return True
+
+    @property
+    def charge_mode_entity(self) -> Optional[str]:
+        return self._charge_mode_entity
+
+    @charge_mode_entity.setter
+    def charge_mode_entity(self, entity_id: Optional[str]) -> None:
+        if self._refuse_reboot(entity_id, "charge-mode control"):
+            self._charge_mode_entity = None
+            return
+        self._charge_mode_entity = entity_id
+
+    @property
+    def start_stop_entity(self) -> Optional[str]:
+        return self._start_stop_entity
+
+    @start_stop_entity.setter
+    def start_stop_entity(self, entity_id: Optional[str]) -> None:
+        """(#804) The one door for the charger's start/stop entity, so a
+        device RESTART cannot come through any of them.
+
+        @HorizonKane's stored config named ``button.…_neustart`` — detection
+        had matched "start" inside the German word for restart — and SEM
+        pressed it to resume charging, rebooting the charger each time. The
+        word rule is also applied at discovery; here it covers what is
+        already SAVED, which no detection fix reaches. Refusing leaves the
+        charger with no start/stop surface, which is the truth, and the
+        #627 repair then says so.
+        """
+        if self._refuse_reboot(entity_id, "charger's start/stop control"):
+            self._start_stop_entity = None
+            return
+        self._start_stop_entity = entity_id
+
     def _discrete_contactor_surfaces(self) -> tuple:
         """(#940) ``(can_open, can_close)`` — has SEM a DISCRETE mechanism
         for this charger, in each direction?
@@ -2265,12 +2332,17 @@ class CurrentControlDevice(ControllableDevice):
             if self.charge_mode_start:
                 can_close = True
         if self.start_stop_entity:
-            # Both directions, including a ``button.`` start: #804 B4a
-            # routes a button charger's STOP through the current write, but
-            # the press itself still closes a contactor, which is what the
-            # anti-cycle floor is counting. ``can_stop_charging`` has always
-            # answered True for any start/stop entity — unchanged here.
-            can_open = can_close = True
+            can_close = True
+            # (#804) A BUTTON only closes. #804 B4a routes a button
+            # charger's stop through the current write — there is no press
+            # that opens the contactor — so claiming the open side here was
+            # the #627 mutual delegation all over again: ``stop_session``
+            # deferred to the current write, ``_set_current(0)`` skipped it
+            # because the number's own minimum is 6 A, and the capability
+            # probe said SEM could stop a box nothing could stop. The anti-
+            # cycle floor still counts the press: it reads BOTH sides.
+            if str(self.start_stop_entity).split(".", 1)[0] != "button":
+                can_open = True
         if self.charger_service:
             domain = str(self.charger_service).split(".", 1)[0]
             try:
@@ -2370,8 +2442,18 @@ class CurrentControlDevice(ControllableDevice):
         if self._discrete_contactor_surfaces()[0]:
             return True
         # Last resort: a 0 A write, which only stops the car if the control
-        # entity can express 0. ``_bound_to_entity_range`` returns the
-        # skip-flag for exactly that question.
+        # entity can express 0.
+        return self._zero_write_can_stop()
+
+    def _zero_write_can_stop(self) -> bool:
+        """Can a 0 A write actually stop this charger?
+
+        The exact predicate that made the write unreachable in #627 —
+        ``_bound_to_entity_range``'s skip flag — plus #976's persisted-limit
+        refusal. Kept apart from ``can_stop_charging`` because the button
+        branch of ``stop_session`` rides THIS question alone: a press cannot
+        open a contactor, so "some other surface could" is no answer for it.
+        """
         entity = self.current_entity_id or self.charger_service_entity_id
         if not entity:
             return False
@@ -3568,7 +3650,15 @@ class CurrentControlDevice(ControllableDevice):
                     # soft pause — and the button exists to come BACK, via
                     # ensure_enabled. Pressing a guessed id is worse than
                     # pressing nothing.
-                    stop_method = "current-0 (button surface: stop rides the current write)"
+                    # …and only when that write can actually land. On a box
+                    # whose current number stops at 6 A the 0 A write is
+                    # skipped (#487), so naming a stop method here recorded
+                    # a park debt for a stop that never happened and hid the
+                    # #627 repair. Say nothing fired, and the warning below
+                    # plus ``can_stop_charging`` tell the truth.
+                    if self._zero_write_can_stop():
+                        stop_method = ("current-0 (button surface: stop rides "
+                                       "the current write)")
             elif self.charger_service:
                 # KEBA-style fallback
                 domain = self.charger_service.split(".", 1)[0]
@@ -3687,18 +3777,21 @@ class CurrentControlDevice(ControllableDevice):
             self._current_setpoint = 0.0
             self._last_write_at = 0.0  # #392: reset heartbeat tracker on session stop
 
-            if stop_method is None:
+            if stop_method is None and not self._no_stop_warned:
+                self._no_stop_warned = True
                 # No brand-specific stop fired — relying on _set_current(0) alone.
                 # That works on Wallbox / Easee / go-e / OpenEVSE (firmware treats
                 # 0 A as pause) but NOT on KEBA (0 A is "minimum", contactor stays
                 # closed; needs keba.disable). Warning so this case is visible in
                 # PROD logs the next time the bug class re-emerges.
                 _LOGGER.warning(
-                    "stop_session(%s): no brand-specific stop mechanism "
-                    "configured (stop_service=None, charge_mode_entity=None, "
-                    "start_stop_entity=None, charger_service=None). Relying on "
-                    "_set_current(0) alone — confirm your charger firmware "
-                    "treats 0 A as a stop signal, not as a minimum hold.",
+                    "stop_session(%s): no mechanism opened the contactor — "
+                    "no stop service, no charge-mode stop option, no "
+                    "start/stop switch (a button only starts), no "
+                    "<domain>.disable. Relying on _set_current(0) alone — "
+                    "confirm your charger firmware treats 0 A as a stop "
+                    "signal, not as a minimum hold, and that its current "
+                    "entity can be written to 0.",
                     self.name,
                 )
             else:
