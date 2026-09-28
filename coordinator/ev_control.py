@@ -839,7 +839,9 @@ class EVControlMixin:
         from dataclasses import replace
 
         from .charger_types import ChargerIntent
-        from .ev_phase_sequencer import PhaseAutoPlanner, PhaseSwitchSequencer
+        from .ev_phase_sequencer import (
+            STOP_WAIT_S, PhaseAutoPlanner, PhaseSwitchSequencer,
+        )
         from .ev_phases import (
             estimate_active_phases, phase_switch_command,
             resolve_switch_values, validate_phase_switch_entity,
@@ -951,6 +953,22 @@ class EVControlMixin:
                      believed_phases=believed, charging=cp.charging,
                      capability_ready=ready)
         self._phase_switch_states[cid] = r.state
+
+        # (#804) The box kept drawing through the stop. That is not a slow
+        # cycle, it is a charger SEM cannot open, and asking again every few
+        # minutes holds every charge command hostage for the session. Mark
+        # the target not-taking now — a new target or a replug clears it.
+        # Never in observer mode: there SEM sends no stop at all, so a box
+        # that keeps drawing is SEM's own doing and blaming it would be a lie.
+        if r.gave_up and desired is not None and not self._observer_mode:
+            _LOGGER.warning(
+                "#804 %s: gave up switching to %sp — the charger still drew "
+                "%.0f W %.0f s after SEM stopped it. Phase switching needs a "
+                "stop SEM can actually make (start/stop switch, charge-mode "
+                "stop option, or a current entity that accepts 0 A).",
+                cid, desired, cp.power_w, STOP_WAIT_S)
+            contra["target"] = desired
+            contra["count"] = PHASE_NOT_TAKING_AFTER
 
         if r.issue_switch is not None:
             value = v1 if r.issue_switch == 1 else v3

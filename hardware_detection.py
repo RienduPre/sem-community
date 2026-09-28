@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
+from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
+
 _LOGGER = logging.getLogger(__name__)
 
 # EV charger integration-specific patterns
@@ -970,6 +972,45 @@ def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
         result.pop("ev_current_control_entity", None)
 
 
+#: (#804) The roles SEM COMMANDS. A reboot entity in any of them is a
+#: power-cycle wearing a control's name.
+_CONTROL_ROLES = (
+    "ev_start_stop_entity",
+    "ev_charge_mode_entity",
+    "ev_current_control_entity",
+    "ev_phase_switch_entity",
+)
+
+
+def _reject_reboot_control(result: Dict[str, str], entities=None) -> None:
+    """(#804) Drop a device-RESTART entity from any control role.
+
+    @HorizonKane's Wattpilot published ``button.…_neustart`` and the brand
+    row's "start" hint matched the letters inside it, so SEM adopted the
+    reboot button as the charger's start/stop control: every enable
+    rebooted the box, and the stop that rides the current write was
+    skipped below the number's 6 A minimum. The word rule lives here, at
+    the choke point every registry path funnels through, so it holds for
+    the hand-written brands and the generic prober too — not only for the
+    row whose hint was wrong.
+
+    HA's own ``restart`` device class is asked first: it says the same
+    thing in every language, which a word list can never do — "Neu
+    starten", "Starta om" and "Start på nytt" all begin a word with
+    "start" and would otherwise pass.
+    """
+    classes = {str(getattr(e, "entity_id", "")):
+               getattr(e, "original_device_class", None)
+               for e in (entities or [])}
+    for role in _CONTROL_ROLES:
+        eid = result.get(role)
+        if eid and names_a_reboot(eid, classes.get(eid)):
+            _LOGGER.info(
+                "discovery: %s names a device restart — not adopting it as "
+                "%s (#804)", eid, role)
+            result.pop(role, None)
+
+
 def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     """Every brand-agnostic correction a freshly discovered charger config
     gets, at the one place all four REGISTRY discovery paths funnel through —
@@ -984,6 +1025,7 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     correction."""
     _reject_offline_current_control(result, entities)
     _reject_capability_sensor(result, entities)
+    _reject_reboot_control(result, entities)
 
 
 # ============================================================
@@ -3013,10 +3055,42 @@ def _discover_abl_emh1(entities) -> Dict[str, str]:
     return result
 
 
+def _name_hit(eid: str, hint: str) -> bool:
+    """Does ``hint`` name a SEGMENT of this entity id?
+
+    (#804) An entity id is a sequence of words, not a bag of letters, and a
+    plain ``in`` claims every longer word that happens to contain the hint.
+    The live catch: @HorizonKane's go-e box publishes
+    ``button.carport_wattpilot_91114903_neustart`` — the German RESTART
+    button — and the Wattpilot row's ``("start", "resume")`` matched it, so
+    SEM adopted a device reboot as the charging start/stop control. Every
+    language has one: restart, neustart, herstart, redemarrer.
+
+    A hit must therefore begin a word: at the start of the id, or right
+    after a separator. A hint that already begins with a separator
+    (``"_state"``) carries its own boundary and is matched as written.
+    """
+    if not hint:
+        return False
+    if hint[0] in "._-":
+        return hint in eid
+    start = 0
+    while True:
+        at = eid.find(hint, start)
+        if at < 0:
+            return False
+        if at == 0 or eid[at - 1] in "._-":
+            return True
+        start = at + 1
+
+
 def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     """Apply a brand's data rows: each role takes the LAST matching entity
     (the same last-wins the hand-written loops had), a rule matches on
-    domain, optional device_class, and optional any-of name hints."""
+    domain, optional device_class, and optional any-of name hints.
+
+    Name hints match on WORD boundaries (``_name_hit``); the ``not`` list
+    stays a plain substring, because a negative may be broad."""
     result: Dict[str, str] = {}
     for entry in entities:
         eid = str(entry.entity_id)
@@ -3027,14 +3101,19 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
                 continue
             if "device_class" in rule and dc != rule["device_class"]:
                 continue
+            # (#804) HA labels a reboot button ``restart`` in every
+            # language. A rule that did not ask for that class never wants
+            # it — the word hints are what matched it before.
+            if dc == REBOOT_DEVICE_CLASS and rule.get("device_class") != dc:
+                continue
             names = rule.get("names")
-            if names and not any(n in eid for n in names):
+            if names and not any(_name_hit(eid, n) for n in names):
                 continue
             # (#816) an optional SECOND any-of set, ANDed with the first —
             # "juicebox" AND "lifetime" — because brands on the shared mqtt
             # platform need conjunctions a single any-of cannot express.
             names2 = rule.get("names2")
-            if names2 and not any(n in eid for n in names2):
+            if names2 and not any(_name_hit(eid, n) for n in names2):
                 continue
             # (#917/#984) a NEGATIVE any-of, for siblings that share the
             # positive words: ``total_charged_energy`` beside

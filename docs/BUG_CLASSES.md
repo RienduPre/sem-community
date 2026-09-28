@@ -800,6 +800,20 @@ propagation through `observe()`, the reconciler row, the repair raise/clear, **a
 CHARGE rows stay untouched when `stop_controllable=False`. Refs #487 #548 #627.
 **Watch:** any new "SEM couldn't actually do X" should be a *computed capability on the device*,
 not a counter of failed attempts in the caller.
+**Re-opened by a new branch — #804 (@HorizonKane).** The closure holds only while the probe mirrors
+the dispatch, and #804 B4a added a branch to `stop_session` without adding it to the probe: a
+`button.` start/stop entity stops "through the current write", while
+`_discrete_contactor_surfaces` kept answering "this entity can open the contactor" for any
+start/stop entity at all. On a go-e — a start button beside a current number whose own minimum is
+6 A — the button claimed the stop, the current write was skipped, nothing opened, and the #627
+repair that exists to say so stayed silent because the capability said all was well. The park debt
+was recorded too, for a stop that sent nothing. **Closure:** a button CLOSES a contactor and does
+not open one — `can_close` only, so the probe falls through to the 0 A writability question it was
+built on; and the button branch of `stop_session` names a stop method only when that write can
+land. #940's anti-cycle floor is unaffected: it reads both sides. **Guard:**
+`tests/test_804_no_commands.py::TestAButtonOnlyCloses`. **Sweep question for this class:** when a
+dispatch chain grows a branch, does the capability that mirrors it grow the same branch — and does
+the new branch ACT, or does it defer? Refs #487 #627 #804.
 
 ### 26. Config key every test injects and production never writes — GUARDED
 **Symptom:** none, for years. The code reads `cfg.get("some_key", <literal>)`, every test
@@ -2642,6 +2656,21 @@ only ones in 171 rows, which is exactly why nothing looked wrong. **Closure:** a
 `tests/test_915_roster_at_runtime.py::TestSemDoesNotOfferToWriteTheseRegisters::test_a_substring_is_not_a_word`.
 **Sweep question:** every regex over an identifier — does it anchor to segment boundaries, and
 which real key would it match by accident? Refs #915 #810.
+**Second instance — #804 (@HorizonKane), the EV brand rows.** The closure above was applied to the
+battery lexicon's regexes and not to the OTHER matcher over identifiers: `_discover_from_hints`
+tests a brand's name hints with a plain `in`. The Wattpilot row hints `("start", "resume")` for the
+charging button, and the reporter's go-e publishes `button.carport_wattpilot_91114903_neustart` —
+the German RESTART button. SEM adopted a device reboot as the charger's start/stop control, so
+every enable power-cycled the box and every stop wrote nothing. Every language ships one of these
+words and every one of them contains "start": restart, neustart, herstart, genstart, omstart.
+**Closure:** a hit must BEGIN a segment (`_name_hit`) — the rows hint prefixes ("charg" for
+charging, "amp" for amperage), so the anchor is the start of a word, not both ends — plus
+`_reject_reboot_control` at `apply_charger_discovery_guards`, the choke point every registry path
+funnels through, so the hand-written brands and the generic prober are covered too. A SAVED config
+is reached by the `start_stop_entity` property setter, which refuses a reboot from any caller.
+**Guard:** `tests/test_804_no_commands.py::TestASubstringIsNotAWord` — the reporter's own entity id,
+the segment rule, and an oracle that feeds EVERY brand in `_EV_CHARGER_PLATFORMS` a device whose
+only button is a reboot and asserts no role takes it. Refs #804 #915.
 
 ### 68. A protection floor read as a target — the knob is not missed, it is INVERTED — GUARDED
 **Symptom:** five brands (Growatt, Sigen, Solis, Sungrow, Sunsynk) declare both halves of the SOC
@@ -4739,6 +4768,16 @@ the wire to one silent probe per 600 s and raises the Repair, but the intent is 
 the stop path re-enters every cycle. Closing it means deciding what a withdrawn register means for
 the state machine (record the stop that cannot be sent, or keep the flood), which is a contract
 call, not a mechanical guard. Refs #1005 #757 #589 #978 #840 #925.
+**The wait-shaped twin — #804 (@HorizonKane).** The same composition without a retry: a HOLD whose
+exit condition a permanent fault can never meet. The phase sequencer stops the charger before it
+switches (never switch under load) and waited for the draw to reach zero with no bound. On a box
+SEM could not actually stop, that wait never ended — and the hold replaces every charge command
+with DISABLE, so the charger was never commanded again for the rest of the session: "SEM sends no
+commands". **Closure:** `STOP_WAIT_S = 120 s` (a Zaptec opens in 3-15 s, measured), then the switch
+is given up and the target marked not-taking, which a new target or a replug clears. **Guard:**
+`tests/test_804_no_commands.py::TestTheHoldGivesUp`, including the end-to-end pass through the real
+control path. **Sweep question:** for every wait on hardware, what makes it end if the hardware
+never answers — and what is held hostage while it waits? Refs #804 #1005.
 
 ### 109. A field that means "not applicable" carries a number, and a new reader takes the number — GUARDED
 **Symptom:** a mode that says *unlimited* behaves as if it had nothing. coppe218's Zaptec on

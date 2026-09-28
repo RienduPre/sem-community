@@ -82,3 +82,40 @@ CONTACT_VALUE_SERVICES: Final[dict] = {
 SG_READY_CONTACT_DOMAINS: Final[list] = [
     "switch", "input_boolean",
 ] + list(CONTACT_VALUE_SERVICES)
+
+
+# (#804) A device RESTART is not a charging control.
+#
+# @HorizonKane's go-e Wattpilot publishes ``button.carport_wattpilot_
+# 91114903_neustart`` — the button that reboots the box. SEM adopted it as
+# the charger's start/stop control, so every attempt to resume charging
+# rebooted the hardware and every stop wrote nothing. Each language ships
+# one of these words, and each one of them contains "start".
+REBOOT_WORDS: Final = (
+    "restart", "neustart", "neu_starten", "herstart", "genstart", "omstart",
+    "starta_om", "start_pa_nytt", "reboot", "redemarrer", "redemarrage",
+    "reiniciar", "reinicio", "riavvia", "riavvio", "uruchom_ponownie",
+    "ujrainditas", "uudelleenkaynnistys", "repornire",
+)
+
+#: The device class Home Assistant puts on a restart button
+#: (``ButtonDeviceClass.RESTART``). It is the same in every language, which
+#: a word list can never be — so it is asked FIRST and the words are the
+#: fallback for integrations that declare no class.
+REBOOT_DEVICE_CLASS: Final = "restart"
+
+
+def names_a_reboot(entity_id: str, device_class: object = None) -> bool:
+    """True when this entity is a device restart.
+
+    ``device_class`` is the authoritative answer when the integration
+    declares one: HA labels these buttons ``restart`` whatever the user's
+    language. The words are the fallback, read on the entity id because
+    that is where the label lands when no class is set. Used to keep a
+    reboot out of every charger CONTROL role — a press SEM makes to start
+    a car must never power-cycle the charger.
+    """
+    if isinstance(device_class, str) and device_class.lower() == REBOOT_DEVICE_CLASS:
+        return True
+    lowered = str(entity_id or "").lower()
+    return any(word in lowered for word in REBOOT_WORDS)
