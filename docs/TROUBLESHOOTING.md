@@ -558,7 +558,7 @@ Update to SEM v1.2.0 or newer. This issue does not occur on v1.2.0+.
 1. Verify the hot water entity is configured in SEM: check **Settings > Devices & Services > Solar Energy Management > Configure**
 2. Confirm the entity exists and is available in **Developer Tools > States** — search for your `water_heater.*`, `climate.*`, or `switch.*` entity
 3. Check that the device control mode is set to `surplus` (not `peak_only` or `off`) — SEM will not activate devices in `peak_only` or `off` mode
-4. Verify sufficient solar surplus: `sensor.sem_surplus_available` should exceed the heater's minimum power threshold
+4. Verify sufficient solar surplus: `binary_sensor.sem_surplus_available` should be **on** — it turns on when the surplus covers the heater's minimum power
 5. If using a `water_heater` or `climate` entity, check that the current temperature sensor is reporting correctly — SEM needs accurate temperature readings to decide when to heat
 
 ---

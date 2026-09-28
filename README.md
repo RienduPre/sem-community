@@ -323,7 +323,7 @@ SEM creates 70+ sensors organized by category:
 
 **Solar Inverters:** Huawei Solar, SolaX, DEYE/Sunsynk, Growatt, Sofar, Solis, Fronius, SMA, SolarEdge, Enphase, GoodWe, Tesla Powerwall, Kostal Plenticore, Sungrow, Victron, Sonnenbatterie, E3DC, GivEnergy, Fox ESS, Alpha ESS, Senec, RCT Power, KSTAR, FENECON Home — or any inverter with HA sensors. SEM reads from the HA Energy Dashboard and auto-detects both grid and battery sign conventions.
 
-**Batteries:** Any battery exposed through a supported inverter integration, plus standalone systems: Sessy (NL), Huawei LUNA2000, Tesla Powerwall, Sonnen, BYD, Pylontech, and others work automatically. Battery capacity is auto-detected from the inverter.. Since 2.1 the generic adapter also writes a mirrored setpoint (Victron ESS) or a direction select plus watts (Anker Solix).
+**Batteries:** Any battery exposed through a supported inverter integration, plus standalone systems: Sessy (NL), Huawei LUNA2000, Tesla Powerwall, Sonnen, BYD and others work automatically. Battery capacity is auto-detected from the inverter.. Since 2.1 the generic adapter also writes a mirrored setpoint (Victron ESS) or a direction select plus watts (Anker Solix).
 
 **Battery discharge control auto-detected for:** Huawei Solar, SolaX (solax-modbus), DEYE/Sunsynk (ha-solarman), Growatt, Sofar, Solis, GoodWe, SolarEdge (solaredge-modbus-multi), Enphase (IQ Battery), Tesla Powerwall, Victron, Kostal Plenticore, Sungrow
 
@@ -341,7 +341,7 @@ SEM creates 70+ sensors organized by category:
 
 **Heat Pumps:** Any SG-Ready compatible heat pump controllable via HA
 
-**Smart Meters:** Shelly EM/Pro, Discovergy, or any HA-compatible meter
+**Smart Meters:** Shelly EM/Pro or any HA-compatible meter
 
 ---
 
@@ -474,7 +474,7 @@ All SEM entities are removed automatically. Your Energy Dashboard and hardware s
 ## Recent Improvements
 
 ### v2.1 — Forecast-led planning and spending (25.09.2026, beta.40)
-2.1 looks ahead. SEM forms an honest expectation of the energy that is coming and plans how to spend it. It also learns hardware it had never met. Everything new that acts is off by default, except the peak slot guard.
+2.1 looks ahead. SEM forms an honest expectation of the energy that is coming and plans how to spend it. It also learns hardware it had never met. Everything new that acts is off by default, with two exceptions: the peak slot guard (which also keeps the battery covering the house while a peak is near), and modules — SEM removes the entities of hardware your house does not have.
 
 **Planning and spending**
 
