@@ -37,6 +37,7 @@ def entry():
         "target_peak_limit": 5.0,
         "ev_connected_sensor": "binary_sensor.keba_connected",
         "ev_charging_sensor": "binary_sensor.keba_charging",
+        "mobile_notification_service": "notify.mobile_app_guidos_iphone",
     }
     entry.options = {
         "update_interval": 10,
@@ -266,3 +267,18 @@ async def test_diagnostics_includes_recent_logs(mock_hass, entry, coordinator):
     assert "recent_logs" in result
     assert isinstance(result["recent_logs"], list)
     assert any("success: True" in line for line in result["recent_logs"])
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_hides_the_notify_service_and_the_title(
+    mock_hass, entry, coordinator,
+):
+    """(#1017) ``notify.mobile_app_<device>`` carries the phone owner's
+    name; the entry title is free text. Neither belongs in a file people
+    attach to a public issue."""
+    mock_hass.data["solar_energy_management"] = {entry.entry_id: coordinator}
+    result = await async_get_config_entry_diagnostics(mock_hass, entry)
+    cfg = result["config_entry"]
+    assert cfg["data"]["mobile_notification_service"] == "**REDACTED**"
+    assert "title" not in cfg
+    assert "guidos_iphone" not in str(result)

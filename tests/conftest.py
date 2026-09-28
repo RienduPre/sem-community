@@ -847,3 +847,17 @@ def sem_multi_wallbox_config_entry():
         options={},
         title="SEM Test (multi-Wallbox v12.1)",
     )
+
+@pytest.fixture(autouse=True)
+def _reset_log_gate():
+    """(#1017) ``log_on_change`` remembers the last line per key for the
+    whole process. Without a reset, a warning a test expects can be
+    swallowed because an earlier test already emitted the same text —
+    order-dependent, invisible until it is not. Every test starts clean.
+    """
+    from custom_components.solar_energy_management.utils.log_gate import (
+        reset_log_gate,
+    )
+    reset_log_gate()
+    yield
+    reset_log_gate()

@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Diagnostics no longer include the notify service name or the entry title** (#1017). The service name often holds the phone owner's name.
+
+- 🐛 **A lying plug sensor and a rejected battery control write are logged once, not every cycle** (#1017).
+
 # [2.1.0-beta.47] — 28.09.2026
 
 - 🐛 **A restart button is never used to start charging** (#804, by @HorizonKane). SEM had adopted the go-e reboot button, so nothing it sent reached the car.

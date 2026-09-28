@@ -211,6 +211,10 @@ REDACT_CONFIG_KEYS = {
     "discharge_control_entity",
     "force_discharge_entity",
     "pause_switch_entity",
+    # (#1017, 28.09 stable audit) A notify service id is usually
+    # ``notify.mobile_app_<device name>`` and the Companion App names the
+    # device after its owner — a person's name in every diagnostics file.
+    "mobile_notification_service",
 }
 
 
@@ -586,7 +590,8 @@ async def async_get_config_entry_diagnostics(
         "config_entry": {
             "entry_id": entry.entry_id,
             "version": entry.version,
-            "title": entry.title,
+            # (#1017) no title: it is free text a user may have set to
+            # anything, and nothing in the file needs it.
             "data": async_redact_data(dict(entry.data), REDACT_CONFIG_KEYS),
             "options": async_redact_data(dict(entry.options), REDACT_CONFIG_KEYS),
         },
