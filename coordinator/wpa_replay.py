@@ -133,19 +133,16 @@ def feed_learner(learner, charger_id: str, phases: int, voltage: float,
 async def read_series(hass, entity_id: str, days: int) -> List[Tuple[float, float]]:
     """``[(ts, value)]`` of numeric states over the last ``days``, oldest
     first, including the state in force at the window's start."""
-    from datetime import timedelta
+    from .recorder_history import read_states
 
-    from homeassistant.components.recorder import get_instance
-    from homeassistant.components.recorder.history import state_changes_during_period
-    from homeassistant.util import dt as dt_util
-
-    end = dt_util.utcnow()
-    start = end - timedelta(days=int(days))
-    history = await get_instance(hass).async_add_executor_job(
-        state_changes_during_period, hass, start, end, str(entity_id), True,
-    )
+    states = await read_states(hass, entity_id, days)
+    if states is None:
+        # (#967) Not the same as an empty series: the caller reports a read
+        # failure by name, where "no history" would tell the user their
+        # charger has none.
+        raise RuntimeError(f"recorder could not answer for {entity_id}")
     out: List[Tuple[float, float]] = []
-    for st in history.get(entity_id, []):
+    for st in states:
         try:
             v = float(st.state)
         except (TypeError, ValueError):

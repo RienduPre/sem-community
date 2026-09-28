@@ -939,35 +939,21 @@ class EVTaperDetector:
         if not ev_power_entity:
             return None
 
-        try:
-            from homeassistant.components.recorder import get_instance
-            from homeassistant.components.recorder.history import state_changes_during_period
-            from homeassistant.util import dt as dt_util
-            from datetime import timedelta as _timedelta
+        from .recorder_history import read_states
 
-            end = dt_util.utcnow()
-            start = end - _timedelta(days=days)
-
-            history = await get_instance(hass).async_add_executor_job(
-                state_changes_during_period,
-                hass, start, end, str(ev_power_entity),
-            )
-
-            states = history.get(ev_power_entity, [])
-            if len(states) < 10:
-                _LOGGER.debug("EV history: only %d entries, skipping seed", len(states))
-                return None
-
-        except Exception as e:
-            _LOGGER.debug("Could not read EV history from recorder: %s", e)
-            # (HA Repairs, 2026-06-06) Surface a one-time Repair so the
-            # user knows EV / forecast bootstrap won't work until the
-            # recorder integration is healthy. Idempotent.
+        states = await read_states(hass, ev_power_entity, days)
+        if states is None:
+            # (HA Repairs, 2026-06-06) The recorder could not answer at all.
+            # Surface a one-time Repair so the user knows EV / forecast
+            # bootstrap won't work until the recorder is healthy. Idempotent.
             try:
                 from . import repair_issues as _ri
                 _ri.raise_no_recorder(hass)
             except Exception:  # noqa: BLE001
                 pass
+            return None
+        if len(states) < 10:
+            _LOGGER.debug("EV history: only %d entries, skipping seed", len(states))
             return None
 
         # Detect sensor unit to apply correct scale factor. Some EV power

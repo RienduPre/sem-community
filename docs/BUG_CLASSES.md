@@ -4843,3 +4843,49 @@ fail a test.
 **Residual (for Guido).** The stable channel now offers v2.0.0 — a month and 41 betas old. This
 keeps it reachable; only cutting 2.1.0 makes it current. Nothing Guido already watches reports a
 failed run: the autopilot follows branch CI and the release asset, not this job. Refs #1012 #834.
+
+### 111. Work of unknown length awaited inside setup — the host cancels it and NOTHING loads — GUARDED
+**Symptom:** the integration does not start. One line in the log, and no SEM at all:
+`Setup of config entry 'Solar Energy Management' ... cancelled` /
+`asyncio.exceptions.CancelledError: Global task timeout: Bootstrap stage 2 timeout` (#967,
+@alexmc1510). The trigger was adding one more power sensor to the Energy Dashboard.
+**Root shape:** Home Assistant gives all integrations one shared budget to start in, and
+`async_setup_entry` is inside it. SEM awaited the recorder there — 60 days of EV power history for
+the taper detector, 7 days per load for the rated-power seed, a `LIKE '%solar%'` statistics scan
+for the install date, another for the yearly totals — each a database read whose cost is the
+user's history, not ours. Every one of them was *called* "best effort, never blocks setup" in its
+own comment, and each was awaited. Two things make this class bite harder than a slow start:
+a cancel arrives as `CancelledError`, which is **not** an `Exception`, so every `except Exception`
+"this must never cost us the setup" handler on the way up passes it straight through; and the cost
+grows with the install, so it passes every test and every small system and fails on the big one.
+**The tell:** an await inside setup whose duration is set by data we do not own — a database, a
+network call, a device that answers when it feels like it. Ask what the biggest install costs,
+not the test one. A comment saying "never blocks setup" next to an `await` is the same tell.
+**Where it lives:** every recorder read. Swept in one change: `features/device_registry.py`
+(`_history_max_power`, the reported one), `coordinator/ev_taper_detector.py`
+(`async_seed_from_history`, 60 days), `energy_calculator.async_detect_install_date` and
+`seed_yearly_from_statistics` (both reached through the first update cycle, which setup awaits),
+and `wpa_replay` (already a task, now also held until after start so it does not compete with the
+boot). The backfill services are user-triggered and were never on this path.
+**Closure:** `coordinator/recorder_history.py` — one door. `run_after_start()` is how a caller asks
+for recorder work: it waits for `EVENT_HOMEASSISTANT_STARTED`, or puts the work on a task when HA
+is already running (a reload, where the started event never comes again). The work is never in
+setup's await chain, which is the whole property — on a reload it may still finish before setup
+returns, and that is fine, there is no start-up budget outside a boot. It hands back an unsubscribe
+and every caller keeps it: a fresh install reloads itself during the boot (the welcome notification
+writes an option), so a coordinator that forgets leaves a dead twin waiting to do the work as well.
+`read_states()` is the only entity-history query, and it is the cheap shape — the attributes stay
+in the database, and the window is never longer than the recorder keeps. That clamp reads
+`auto_purge` first: `keep_days` is what the purge deletes past, so on an install that purges by
+hand it says nothing about what the database holds. Nothing is dropped, only deferred: a load
+skipped during setup is not marked as tried, so the seed happens one pass later.
+**Guard:** `tests/test_967_no_recorder_during_setup.py` — a real Home Assistant, set to *starting*
+the way a boot is, with every door to the recorder wired to a list: setup must read it zero times.
+Both halves are pinned, because the cheap way to pass the first is to delete the work: a second
+test fires the started event and fails unless the reads happen AND both deferred seeds were handed
+their turn by name. Each half was verified by breaking it — remove the two gates and the first goes
+red, remove the hand-over and the second does. Plus: the four history APIs are read in one place
+only, and the query shape, the keep-days clamp and the hand-purged install each have a test.
+Statistics and the install-date sqlite read are not behind the door — they stay off the setup path
+by their caller's gate — but the oracle catches them anyway, because it patches the recorder's own
+entry points rather than SEM's. Refs #967.

@@ -305,21 +305,32 @@ class TestItIsPersistedAndReplayedAtBoot:
         assert "_schedule_wpa_replay()" in src
 
     def test_a_cold_learner_schedules_the_replay_once(self):
+        """(#967) Once — and for after Home Assistant has started, not now.
+        A replay reads days of history; during the boot that read competes
+        with every other integration coming up."""
+        from unittest.mock import patch
         from custom_components.solar_energy_management.tests.test_846_measured_wpa import _prod_coordinator  # noqa: E402
         c = _prod_coordinator()
         c.hass = _Hass()
-        c._schedule_wpa_replay()
-        c._schedule_wpa_replay()
-        assert len(c.hass.tasks) == 1
-        for t in c.hass.tasks:
-            t.close()
+        where = ("custom_components.solar_energy_management.coordinator"
+                 ".recorder_history.run_after_start")
+        with patch(where) as after_start:
+            c._schedule_wpa_replay()
+            c._schedule_wpa_replay()
+        assert after_start.call_count == 1
+        assert c.hass.tasks == []          # nothing started during the boot
 
     def test_a_warm_learner_schedules_nothing(self):
+        from unittest.mock import patch
         from custom_components.solar_energy_management.tests.test_846_measured_wpa import _drive, _prod_coordinator  # noqa: E402
         c = _prod_coordinator()
         c.hass = _Hass()
         _drive(c)
-        c._schedule_wpa_replay()
+        where = ("custom_components.solar_energy_management.coordinator"
+                 ".recorder_history.run_after_start")
+        with patch(where) as after_start:
+            c._schedule_wpa_replay()
+        assert after_start.call_count == 0
         assert c.hass.tasks == []
 
     def test_the_report_is_published_beside_the_table(self):
