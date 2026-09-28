@@ -97,6 +97,7 @@ Everything else SEM reads or switches: the SG-Ready and hot-water path, metered 
 | Shelly (EM / PM / Plug) | metered load, CT meter | `shelly` | ✅ tested live | #744 (Azlinon) small metered loads, #745 plug hardware state confirmed there; #685 an EM CT clamp meters a heat pump |
 | SwitchBot relay | hot water | `switchbot` | ✅ tested live | #560 (covuser) the hot-water entity picker was fixed on that relay and confirmed |
 | Tibber Pulse | grid meter + price feed | `tibber` | ✅ tested live | #120/#491 (RienduPre) the tibber_pulse price and consumption sensors on a running install |
+| BYD (Battery-Box, behind another inverter) | battery pack | `generic patterns` | 🧩 implemented | #564 bmu_temp pattern in hardware_detection.py and the rated_capacity pattern in config_flow.py; no live report yet |
 | Echelon meter | grid meter | `custom` | 🧩 implemented | #807 (ab-elco-clal) import/export entities appear in a live diagnostics dump; nothing confirmed about them |
 | Viessmann Vitocal 250-A / 252-A | heat pump / hot water | `vicare` | 🧩 implemented | #600 / disc. 599 (tlinnet) ViCare sensors mapped into SEM's fields; no actuation confirmed yet |
 | Buderus heat pump | heat pump (SG-Ready) | `ems-esp` | 📥 requested | #801 (HorizonKane) SG-Ready needs a command sent to EMS-ESP, not a relay flip |

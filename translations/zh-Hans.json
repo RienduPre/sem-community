@@ -1740,20 +1740,20 @@
       "description": "SEM 使用 **`{entity_id}`** 来对 **{name}** 执行{capability}，但该实体处于 `{reason}` 状态——每条指令都会丢失。请在**开发者工具 → 状态**中检查该实体并从源头修复，或在**设置 → 设备与服务 → SEM → 配置 → 充电桩 → 编辑**中重新指定。"
     },
     "battery_force_discharge_unsupported": {
-      "title": "Battery power setpoint cannot be written: {entity_id}",
-      "description": "SEM tried to write **{entity_id}** and the device refused every time: `{error}`.\n\nThe entity exists and SEM is addressing it correctly — the inverter's firmware simply does not implement writing that register. This usually means the entity you picked for *forcible discharge* in SEM's battery settings is readable but not writable on your hardware.\n\nSEM has stopped trying, so this will no longer fill your log. Two things follow: the routine safety write SEM makes when returning the battery to normal operation is skipped (harmless — there was nothing set to clear), and **battery-to-grid export cannot run** on this battery. Charging, discharge limits and everyday operation are unaffected.\n\n**If you do not use battery-to-grid export**, clear the forcible-discharge entity in SEM's battery settings and this notice goes away. **If you expected it to work**, the entity is likely the wrong one — or your inverter does not support commanded export. A restart makes SEM try again, so a firmware update or a corrected entity is picked up on its own."
+      "title": "无法写入电池功率设定值：{entity_id}",
+      "description": "SEM 尝试写入 **{entity_id}**，设备每次都拒绝：`{error}`。充电和放电限制仍然有效；电池向电网馈电不可用，SEM 已停止尝试。**如果你不使用电池馈电**，请在 SEM 的电池设置中清空强制放电实体。**如果你期望它工作**，实体可能选错了，或逆变器锁定了该寄存器——请阅读 `{error}`。重启后 SEM 会再次尝试。"
     },
     "charger_failsafe_suspected": {
-      "title": "Your wallbox undoes SEM's stop on a timer: {name}",
-      "description": "**{name}** re-enabled itself **{interval_s} seconds** after SEM stopped it — at least twice, with the same delay to the second, and with no command from SEM in between. That regularity is the signature of a charger-side **failsafe / controller-timeout fallback**, not of a car retrying.\n\nSEM will not fight it: re-issuing stops faster would strobe the contactor and the box would win anyway. Until it is fixed the charger may draw at its stored fallback current (often 6 A) whenever SEM stops it.\n\n**The fix is a one-time change on the wallbox itself.** Look for a failsafe or fallback-current setting in its configuration — on a KEBA these are `Curr FS` (fallback current) and `Tmo FS` (timeout) — and set the **fallback current to 0**, so a quiet controller means *stay off* rather than *charge at 6 A*. If your box is driven over Modbus, the setting usually lives in the same register block the integration already uses.\n\n**如果这是使用官方集成的 KEBA**，这个计时器是 SEM 自己设的：SEM 在每次启动时设置充电桩的失效保护（600 秒，充电下限），以便控制器失效时汽车仍能充电；每次停止时请求 0 A——KEBA 拒绝（其下限为 6 A）。请先关闭 SEM 的设置：服务 `solar_energy_management.set_option`，参数 `keba_arm_failsafe: false`。然后设置充电桩。在此之前，关闭和暂停只能维持约 {interval_s} 秒。"
+      "title": "你的充电桩用定时器撤销了 SEM 的停止：{name}",
+      "description": "**{name}** 在 SEM 停止后 **{interval_s} 秒** 自行重新开启，至少两次，每次延迟相同。这是充电桩自身的回退定时器——或是另一个按计划运行的控制器。SEM 不会与之对抗；因此每次停止后，充电桩可能以回退电流充电。**在充电桩上修复：**把回退电流设为 0。详情见“了解更多”。"
     },
     "charger_stop_war_stand_down": {
-      "title": "SEM stood down on {name} — the car is still charging",
-      "description": "**{name}** restarted itself every time SEM stopped it. So that the car is not strobed into a charging fault, SEM has stood down and **will not stop it for up to {minutes} minutes** — meanwhile the car is drawing **{power} W**, from the grid or from your house battery.\n\nTwo causes look identical from SEM's side:\n\n1. **The wallbox's own auto-start or authorization** closes the contactor again whenever the car retries. Turn off auto-start on the charger (or require authorization), or give SEM a stop mechanism the box respects.\n2. **Another controller** is commanding the same charger — a second SEM instance, a Home Assistant automation, or the vendor's app. Check this first if one could exist: if SEM's stops start holding the moment the other controller is silenced, that was it.\n\nThis notice clears itself as soon as the car stops drawing or SEM takes control again."
+      "title": "SEM 已对 {name} 让步——车辆仍在充电",
+      "description": "每次 SEM 停止 **{name}**，它都会自行重启。为避免车辆进入充电故障，SEM 在最多 **{minutes} 分钟** 内不会再停止它；期间它从电网或你的电池取 **{power} W**。两种原因看起来一样：充电桩自身的自动启动，或另一个控制同一充电桩的控制器。**修复：**关闭自动启动，或让另一个控制器停止。车辆停止或 SEM 重新接管后消失。"
     },
     "charger_phase_count_mismatch": {
-      "title": "{name}：实测功率与 {believed} 相不符",
-      "description": "SEM 用 **相数 × 电压** 把它下发的每一个充电电流换算成瓦。**{name}** 配置的是 **{believed}** 相，因此 1 A 本应换来 **{nominal} W**；但在 **{cycles}** 个稳定周期里，充电桩实际每安培只取用 **{watts_per_amp} W**，这与 **{measured}** 相吻合。\n\n这一个数字同时决定了 SEM 下发的电流、夜间规划器认为车辆所需的最小功率，以及峰值保护留出的余量。它不会自行纠正：只要两者相互矛盾，每一次测量都会落在可信区间之外而被丢弃，SEM 于是继续沿用电表早已否定的数值。\n\n**修复只需改一个设置。** 打开该充电桩的 *相数* 数值实体，把它设为 **{measured}**——这是电表在 SEM 下发的每一个电流下都测到的相数，也是 SEM 必须用来换算的相数。日后更换车辆或线路，SEM 会再次提醒。\n\n一旦设置与充电桩的实际取电相符，本提示会自动消失。"
+      "title": "{name}：测得的功率与 {believed} 相不符",
+      "description": "SEM 用 **相数 × 电压** 把安培换算为瓦。对 **{name}** 来说是 **{believed}**，所以每安培应得 **{nominal} W**——但在 **{cycles}** 个稳定周期内，充电桩每安培消耗 **{watts_per_amp} W**，与 **{measured}** 相符。这个数字决定 SEM 提供的电流以及夜间计划对车辆需求的假设。**修复：**打开充电桩的*相数*数值并设为 **{measured}**。一致后自动消失。"
     },
     "deye_system_work_mode_invalid": {
       "title": "Deye export control cannot be used: {entity_id}",
@@ -1776,12 +1776,12 @@
       "description": "SEM 已重建历史，但在恢复的 **{recovered}** 个夜晚中有 **{unbalanced}** 个只能测量*电池*提供的部分，而无法得知*电网*补充了多少，因为此安装没有 **{missing}** 传感器。\n\n在电池耗尽、由电网接手的夜晚，电池的数字只是故事的一部分。缺少该计量器时，这些夜晚会低估家庭的实际用电量，因此可支用电池量会**显示得偏低**。\n\n**该怎么做：** 在能源面板中为 **{missing}** 添加累计能量传感器（kWh，而非瓦特），然后再次按下**从历史记录重建**——当每个夜晚都能核算时，此提示会自动消失。实时测量的夜晚不受影响，并始终优先采用。"
     },
     "load_current_control_wrong_unit": {
-      "title": "某个负载被设置为电流控制，但其实体单位是瓦特",
-      "description": "**{name}** 被配置为*电流*控制，但 **{entity_id}** 期望的值单位是 **{unit}**。\n\n电流控制意味着**安培**——它是为电动车充电桩设计的，通常下发约 6–32 A 的电流。把以安培表示的余电写入一个期望瓦特的实体，无法表达您的本意，因此 SEM 选择不驱动该设备，而不是把数字写进错误的单位。此前它会注册该设备却从不写入——设备出现在您的充电桩列表中，而分配的余电始终为 0 W。\n\n**如果该设备确实是电流控制的**，请将设置指向它的安培实体。\n\n**如果它是可变功率负载**——AC-THOR、加热棒等——SEM 尚无法对其调节（#880）。在此之前，您仍可通过开关实体将其作为**开/关**式余电负载使用。"
+      "title": "某负载设为电流控制，但其实体的单位是瓦",
+      "description": "**{name}** 设为*电流*控制，但 **{entity_id}** 接受的单位是 **{unit}**。电流控制意味着安培，用于电动车充电桩，因此 SEM 不驱动该设备。**如果它确实是电流控制**，请把设置指向其安培实体。**如果它是可调功率负载**（AC-THOR、加热棒），暂时用开关实体把它当作开/关式余电负载使用；瓦特设定值的设备类型正在开发中。"
     },
     "load_shed_futile": {
       "title": "电网峰值由 SEM 不控制的负载造成",
-      "description": "电表读数为 **{grid_import_kw} kW**，目标为 **{target_kw} kW** — 即使 SEM 可以关闭的一切都已关闭，仍会剩下 **{uncontrolled_kw} kW**。\n\n**其中 {managed_charger_kw} kW 是 SEM 已经在管理的充电桩。** 充电桩的峰值由充电逻辑控制，不会在这里被卸载 — 因此即使 SEM 完全掌控它，它的用电仍计为未卸载。请先看这个数字。其余属于 SEM 未管理的设备：烤箱、自带控制器的热泵、接在 SEM 从未获得的充电桩上的电动车。\n\n卸载家中负载无法解决这个峰值，因此在此期间 SEM **不会**卸载任何设备（早期版本会一路关闭一个又一个回路，直到整个家一片漆黑）。\n\n**该怎么做：**如果充电桩的数字就是峰值，请降低该充电桩的限值或目标 — 再添加一次没有用，SEM 已经有它了。否则把负载交给 SEM（在 *电动车充电桩* 下添加充电桩，或添加带控制实体的设备），如果目标并非你合同的真实上限就调高它，或者为必须运行的负载接受这个峰值。一旦峰值重新可达，此问题会自行关闭。"
+      "description": "电表读数 **{grid_import_kw} kW**，目标为 **{target_kw} kW**。即使 SEM 可关闭的一切都已关闭，仍会剩下 **{uncontrolled_kw} kW**——其中 **{managed_charger_kw} kW** 是 SEM 已在管理的充电桩，其峰值由充电限制决定，而非甩负荷。因此在此期间 SEM 不会甩掉任何负载。**修复：**降低该充电桩的限制，把另一个负载交给 SEM，或提高目标。峰值可达后自动消失。"
     },
     "battery_platform_pinned_generic": {
       "title": "Battery platform pinned to Generic on a {brand} install",
@@ -1792,8 +1792,8 @@
       "description": "No grid power entity is configured and the Energy Dashboard gives none, so SEM matched entity names and found **{import_entity}** as a possible grid import meter and **{export_entity}** as a possible export meter — a name match, with no device evidence behind it. SEM will NOT steer on them until they agree with your grid energy counters, so grid power reads 0 for now. To skip the wait, open **Settings → Integrations → SEM → Configure → Sensors** and set **Grid import power** and **Grid export power** explicitly."
     },
     "battery_control_write_not_taken": {
-      "title": "A battery control write is not taken: {entity_id}",
-      "description": "SEM set **`{entity_id}`** to **{wanted}** and on the following cycles it still read **{seen}** — {strikes} times running. The service call did not fail; the register simply did not keep the value.\n\nA declared entity name cannot say whether a register accepts a write, expires it after a while, needs an enable switch first, or is a global setting the vendor says to leave alone — only the first write answers that, and this is the answer.\n\nOpen the entity in **Developer Tools → States** and set it by hand. If it does not hold, it is the wrong entity for this role: pick the right one in the Configuration card's battery pickers. If it holds by hand but not for SEM, tell us the brand and the entity — that is what turns a proposal into a supported row.\n\nThis clears itself the moment a write is reflected."
+      "title": "电池控制写入未生效：{entity_id}",
+      "description": "SEM 把 **`{entity_id}`** 设为 **{wanted}**；随后几个周期仍读到 **{seen}**，连续 {strikes} 次。调用没有失败——寄存器只是没有保留该值。**修复：**在开发者工具 → 状态中手动设置该实体。若不保持，说明它不是此角色的正确实体：在配置卡中另选一个。若手动能保持而 SEM 不能，请告诉我们品牌和实体。写入生效后即消失。"
     },
     "soc_zones_out_of_order": {
       "title": "Battery SOC zones are out of order",
