@@ -492,6 +492,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         self._wpa_learner = WattsPerAmpLearner()
         self._wpa_replay_report: Dict[str, Any] = {}
         self._wpa_replay_scheduled = False
+        self._wpa_replay_unsub = None
+        # (#967) True once Home Assistant has started. Every read of the
+        # recorder waits for it: setup waits for the first update cycle, and
+        # HA cancels a setup that overruns its start-up budget — the whole
+        # integration then fails to load, which is what @alexmc1510 saw.
+        self._recorder_seeds_ready = False
         self._ev_devices: Dict[str, Any] = {}  # All chargers keyed by charger_id (#112)
         # #589 Surface-A: these three are PROPERTIES backed by the current
         # PerChargerContext's durable state; the _default variants back them
@@ -2935,42 +2941,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 except (AttributeError, ValueError, TypeError) as e:
                     _LOGGER.debug("Flow accumulator restore skipped: %s", e)
 
-            # Seed EV intelligence from recorder history (improves cold starts
-            # and upgrades from older versions without EV intelligence data)
-            ev_power_entity = (
-                self._sensor_reader.config.ev_power_sensor
-                or (self._energy_dashboard_config.ev_power if self._energy_dashboard_config else None)
-            )
-            # Only seed if the detector doesn't already have good state
-            # (anchored SOC with a recent full charge detection)
-            needs_seed = ev_power_entity and not (
-                self._ev_taper_detector._soc_anchored
-                and self._ev_taper_detector._last_full_timestamp
-            )
-            if needs_seed:
-                try:
-                    seed_result = await self._ev_taper_detector.async_seed_from_history(
-                        self.hass, ev_power_entity, days=60,
-                    )
-                    if seed_result:
-                        if seed_result.get("improved"):
-                            self._storage.set_ev_intelligence_state(
-                                self._ev_taper_detector.get_state()
-                            )
-                        # Feed weekday consumption to predictor
-                        weekday_totals = seed_result.get("weekday_totals", {})
-                        if weekday_totals and hasattr(self, '_predictor') and self._predictor:
-                            for dow, avg_kwh in weekday_totals.items():
-                                # Only seed if predictor has no data for this weekday
-                                existing = self._predictor._ev_profile.predict(dow, 12)
-                                if existing is None or existing == 0:
-                                    self._predictor._ev_profile.update(dow, 12, avg_kwh)
-                                    _LOGGER.info(
-                                        "EV predictor seeded from history: weekday %d → %.1f kWh/day",
-                                        dow, avg_kwh,
-                                    )
-                except Exception as e:
-                    _LOGGER.debug("EV history seeding skipped: %s", e)
+            # (#967) The EV-intelligence seed reads 60 days of recorder
+            # history. It used to run right here, inside the first update —
+            # which setup waits for. Home Assistant cancels a setup that
+            # overruns its start-up budget, and SEM then does not load at
+            # all. It now runs from ``async_seed_from_recorder``, after HA
+            # has started.
 
             # Ensure battery discharge limit is restored after restart
             # (protects against stale limit left by previous run)
@@ -4243,7 +4219,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 )
 
             # Step 9a2: Detect system install date from statistics (runs once)
-            if self._energy_calculator._install_year_decimal is None:
+            # (#967) Both seeds below query the recorder, and the first update
+            # cycle is one setup waits for. They start on the first cycle
+            # AFTER Home Assistant has started instead.
+            if (
+                self._recorder_seeds_ready
+                and self._energy_calculator._install_year_decimal is None
+            ):
                 try:
                     await self._energy_calculator.async_detect_install_date(self.hass)
                 except Exception as e:
@@ -4258,7 +4240,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # and would never call in again — the floor re-check that heals it
             # would be unreachable on exactly the system that needs it.
             if (
-                self._energy_dashboard_config
+                self._recorder_seeds_ready
+                and self._energy_dashboard_config
                 and self._energy_calculator.yearly_seed_pending
             ):
                 try:
@@ -7233,6 +7216,63 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             )
         return dict(verdict)
 
+    async def async_seed_from_recorder(self) -> None:
+        """(#967) Everything SEM wants from the recorder at a cold start.
+
+        Called once Home Assistant has started, never from setup. A read of
+        the recorder can take minutes on a big database, and a setup that
+        takes too long is cancelled by Home Assistant — the integration then
+        does not load at all.
+        """
+        self._recorder_seeds_ready = True
+        await self._seed_ev_intelligence_from_history()
+
+    async def _seed_ev_intelligence_from_history(self) -> None:
+        """(#232/#967) Teach the taper detector what the car did before SEM
+        was watching — sessions, the last full charge, the weekday pattern.
+
+        Improves a cold start and an upgrade from a version without EV
+        intelligence. Skipped when the detector already holds an anchored
+        SOC with a full charge behind it.
+        """
+        if self._storage is None:
+            _LOGGER.debug("EV history seeding skipped: no storage yet")
+            return
+        ev_power_entity = (
+            self._sensor_reader.config.ev_power_sensor
+            or (self._energy_dashboard_config.ev_power
+                if self._energy_dashboard_config else None)
+        )
+        if not ev_power_entity:
+            return
+        if (self._ev_taper_detector._soc_anchored
+                and self._ev_taper_detector._last_full_timestamp):
+            return
+        try:
+            seed_result = await self._ev_taper_detector.async_seed_from_history(
+                self.hass, ev_power_entity, days=60,
+            )
+            if not seed_result:
+                return
+            if seed_result.get("improved"):
+                self._storage.set_ev_intelligence_state(
+                    self._ev_taper_detector.get_state()
+                )
+            # Feed weekday consumption to predictor
+            weekday_totals = seed_result.get("weekday_totals", {})
+            if weekday_totals and getattr(self, "_predictor", None):
+                for dow, avg_kwh in weekday_totals.items():
+                    # Only seed if predictor has no data for this weekday
+                    existing = self._predictor._ev_profile.predict(dow, 12)
+                    if existing is None or existing == 0:
+                        self._predictor._ev_profile.update(dow, 12, avg_kwh)
+                        _LOGGER.info(
+                            "EV predictor seeded from history: weekday %d → %.1f kWh/day",
+                            dow, avg_kwh,
+                        )
+        except Exception as e:  # noqa: BLE001 — a cold start, not a crash
+            _LOGGER.debug("EV history seeding skipped: %s", e)
+
     def _schedule_wpa_replay(self) -> None:
         """(#846) Once per boot: a charger the learner has never been fed
         for replays itself from SEM's own recorded series, in the
@@ -7251,7 +7291,28 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         if not cold:
             return
         self._wpa_replay_scheduled = True
-        self.hass.async_create_task(self._replay_wpa_from_history())
+        # (#967) After Home Assistant has started, not during. The task is
+        # not awaited either way, but a long replay competing with the boot
+        # slows every other integration down with it.
+        from .recorder_history import run_after_start
+        self._wpa_replay_unsub = run_after_start(
+            self.hass, self._replay_wpa_from_history, name="sem wpa replay",
+        )
+
+    def cancel_pending_recorder_work(self) -> None:
+        """(#967) Forget the replay if the entry goes away before HA starts.
+
+        SEM reloads itself during the boot on a fresh install (the welcome
+        notification writes an option). Without this, the coordinator being
+        torn down stays on the start event, and two of them replay — the
+        second one writing through a storage nobody owns any more.
+        """
+        unsub, self._wpa_replay_unsub = self._wpa_replay_unsub, None
+        if unsub is not None:
+            try:
+                unsub()
+            except Exception:  # noqa: BLE001 — teardown must finish
+                _LOGGER.debug("could not cancel the pending replay")
 
     async def _replay_wpa_from_history(self) -> None:
         from .wpa_replay import DEFAULT_LOOKBACK_DAYS, run_replay
