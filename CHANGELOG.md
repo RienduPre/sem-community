@@ -15,30 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [2.1.0] — DD.MM.2026
 
-The first stable release of the 2.1 line — the planner that decides *when*.
-Everything below shipped and soaked across the 2.1 betas since 29.08; this
-rolls it into one stable release. Per-beta detail stays in the sections
-beneath.
+The first stable release of the 2.1 line.
 
-### ✨ Highlights
-- **Forecast-led night planning** — one plan decides when the battery and the
-  car charge, from tomorrow's solar forecast, the house load and the price.
-- **Spend the battery on purpose** — hold it for the night, cover the house
-  when it is worth it, and never export when export costs money.
-- **Peak-aware** — a 15-minute meter budget keeps the whole house under your
-  grid limit.
-- **Charge pacing** — spread the car's charge across the day instead of a
-  morning spike.
-- **More hardware, found on its own** — NRGkick, ABL eMH1, Wallbox over MQTT,
-  Victron, OnStar and more, read from each integration's own words.
-- **Pause a charger** — a per-charger pause with a visible countdown.
-- **Says what it sees** — honest SOC anchors, clearer diagnostics, and Repairs
-  that link the exact next step.
+- **One plan for the night** — battery and car charge by tomorrow's solar forecast, the house load and the price.
+- **The battery is used on purpose** — held for the night, used when that is cheaper than the grid, never sold at a loss.
+- **Stays under your grid limit** — a 15-minute budget at the meter.
+- **Car charging spread over the day**, not a morning spike.
+- **More chargers and inverters found on their own**: NRGkick, ABL, Wallbox over MQTT, Victron, OnStar.
+- **Pause a charger**, with a countdown on the EV card.
 
-### 🔧 For everyone
-- **Requires Home Assistant 2026.2.0 or newer.**
-- New features ship off by default and wake on your switch; nothing changes
-  how your system runs until you turn it on.
+Needs Home Assistant 2026.2.0 or newer. New features are off until you switch them on.
 
 # [2.1.0-beta.45] — 27.09.2026
 
