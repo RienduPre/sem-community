@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.47] — 28.09.2026
+
+- 🐛 **A restart button is never used to start charging** (#804, by @HorizonKane). SEM had adopted the go-e reboot button, so nothing it sent reached the car.
+- 🐛 **SEM now says when it cannot stop a charger** (#804). A start button cannot open the contactor, and 0 A below the charger's minimum never lands.
+- 🐛 **A phase switch gives up if the charger will not stop** (#804). The wait for it held every charging command back for the whole session.
+
 # [2.1.0-beta.46] — 28.09.2026
 
 - 🐛 **SEM could fail to start at all** (#967, by @alexmc1510). Reading history during setup used up the time Home Assistant allows.
