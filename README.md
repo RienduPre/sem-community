@@ -692,6 +692,8 @@ SEM is free and open-source. If it saves you money on your energy bill, consider
 
 Your support helps keep SEM maintained, tested on real hardware, and free for everyone.
 
+Dutch or Belgian? [smart-energy-management.nl](https://smart-energy-management.nl) has articles on SEM and home energy management in Dutch, by long-time SEM user [@RienduPre](https://github.com/RienduPre).
+
 ---
 
 ## Contributing
