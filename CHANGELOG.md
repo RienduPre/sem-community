@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.1.0-beta.46] — 28.09.2026
+
+- 🐛 **SEM could fail to start at all** (#967, by @alexmc1510). Reading history during setup used up the time Home Assistant allows.
+
 # [2.1.0-beta.45] — 27.09.2026
 
 - 🐛 **HACS could not install SEM at all** (#1012). Every beta pushed the stable release off the one page HACS reads.
