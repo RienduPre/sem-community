@@ -545,7 +545,7 @@ def _bound_registry_names(tree: ast.AST, modules: set, getters: set) -> set:
         if isinstance(target, (ast.Tuple, ast.List)) \
                 and isinstance(value, (ast.Tuple, ast.List)) \
                 and len(target.elts) == len(value.elts):
-            for t, v in zip(target.elts, value.elts):
+            for t, v in zip(target.elts, value.elts, strict=True):
                 _mark(t, v)
             return
         if not holds:
