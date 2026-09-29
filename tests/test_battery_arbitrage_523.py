@@ -8,6 +8,7 @@ actuator of the scheduler's verdict; the Huawei adapter sells to grid.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -241,10 +242,15 @@ def test_huawei_autodetects_battery_device_zero_config():
     dev = MagicMock()
     dev.id = "batterydev123"
     dev.identifiers = {("huawei_solar", "BT2470369058/connected_energy_storage")}
-    reg = MagicMock()
-    reg.devices.values.return_value = [dev]
+    # (#1026) asked per config entry, not read off `reg.devices`
+    hass.config_entries.async_entries.return_value = [
+        SimpleNamespace(entry_id="huawei-entry")]
+    reg = MagicMock(spec=["async_get"])
     with patch(
         "homeassistant.helpers.device_registry.async_get", return_value=reg,
+    ), patch(
+        "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+        return_value=[dev],
     ):
         a = HuaweiBatteryAdapter(hass, {"battery_max_discharge_power": 4000})
     assert a._inverter_device_id == "batterydev123"

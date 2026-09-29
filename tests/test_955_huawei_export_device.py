@@ -34,10 +34,30 @@ class _State:
         self.attributes = {"maximum_power_watt": watt, "maximum_power_percent": percent}
 
 
+#: (#1026) The config entry the fake huawei_solar devices hang off. HA's
+#: device registry is no longer readable as a mapping, so the fake answers the
+#: two supported lookups instead: by id, and per config entry.
+HUAWEI_ENTRY = "huawei-config-entry"
+
+
+class _FakeRegistry:
+    def __init__(self, devices):
+        self._by_id = dict(devices)
+
+    def async_get(self, device_id):
+        return self._by_id.get(device_id)
+
+    def for_config_entry(self, entry_id):
+        return list(self._by_id.values()) if entry_id == HUAWEI_ENTRY else []
+
+
 def _registry(devices):
-    reg = SimpleNamespace(devices=devices)
-    return patch(
-        "homeassistant.helpers.device_registry.async_get", return_value=reg)
+    reg = _FakeRegistry(devices)
+    return patch.multiple(
+        "homeassistant.helpers.device_registry",
+        async_get=MagicMock(return_value=reg),
+        async_entries_for_config_entry=MagicMock(
+            side_effect=lambda r, entry_id: r.for_config_entry(entry_id)))
 
 
 def _prod_shaped():
@@ -56,6 +76,8 @@ def _prod_shaped():
 def _adapter(battery_device=BATT, config=None, mode="Unlimited"):
     a = HuaweiBatteryAdapter.__new__(HuaweiBatteryAdapter)
     a._hass = MagicMock()
+    a._hass.config_entries.async_entries.return_value = [
+        SimpleNamespace(entry_id=HUAWEI_ENTRY)]
     a._config = {"export_control_readback_entity": "sensor.apc", **(config or {})}
     a._inverter_device_id = battery_device
     # A READABLE mode by default: since the readback became three-state, an
