@@ -22,6 +22,9 @@ from __future__ import annotations
 
 import pytest
 
+from custom_components.solar_energy_management.coordinator import (
+    charge_stability as CSM,
+)
 from custom_components.solar_energy_management.coordinator.charge_stability import (
     ChargeStability,
     DEFAULT_DISABLE_DELAY_S,
@@ -216,3 +219,77 @@ class TestItSurvivesARestart:
         fresh = ChargeStability()
         fresh.restore_timers({"session_stops": {CID: "many", "x": -3}}, 10.0)
         assert fresh._session_stops == {}
+
+
+def _flicker(cs, *, hours=6.0, period=30.0, flap_s=300.0):
+    """Drive the real filter through a broken-cloud afternoon.
+
+    The surplus crosses the 6 A floor every ``flap_s`` seconds — the shape
+    @hoyte's cloudy day had — and we return how many interruptions the
+    plug-in spent. That is the quantity the charge point counts, and the only
+    unit this fix can honestly be measured in.
+    """
+    # The cloud must outlast the plain bridge, or the delay absorbs the whole
+    # day, the count is 0, and a green ceiling below would have measured
+    # nothing at all.
+    assert flap_s > DEFAULT_DISABLE_DELAY_S, (flap_s, DEFAULT_DISABLE_DELAY_S)
+    t = 1000.0
+    end = t + hours * 3600.0
+    drawing = False
+    owned = False
+    while t < end:
+        sunny = int((t - 1000.0) // flap_s) % 2 == 0
+        d = cs.filter(
+            _charge() if sunny else _idle(),
+            _view(power_w=1840.0 if drawing else 0.0,
+                  solar_w=3000.0 if sunny else 300.0),
+            _Adapter(), now_ts=t)
+        drawing = d.intent is ChargerIntent.CHARGE_AT_AMPS
+        owned = owned or CID in cs._sem_session
+        t += period
+    # #552: only a session SEM owns reaches the stop path that spends the
+    # budget. Without this, an ownership regression returns 0 and every
+    # ceiling below passes on a run that never stopped anything.
+    if not owned:
+        raise AssertionError("SEM never took the session")
+    return cs._session_stops.get(CID, 0)
+
+
+def _flicker_pair(monkeypatch, flap_s):
+    """The same afternoon with the widening, then without it."""
+    with_budget = _flicker(ChargeStability(), flap_s=flap_s)
+    monkeypatch.setattr(CSM, "SESSION_CHURN_PER_STOP", 0.0)
+    without = _flicker(ChargeStability(), flap_s=flap_s)
+    return with_budget, without
+
+
+@pytest.mark.unit
+class TestTheCountTheChargerKeeps:
+    """The pins above are in seconds; the Go 2's limit is in interruptions.
+
+    So each of these is a COUNT over a whole simulated afternoon, and each is
+    paired with the same afternoon with the widening neutralised — a bound on
+    its own would also be satisfied by a run that stopped nothing.
+    """
+
+    def _assert_pair(self, with_budget, without):
+        # the unbudgeted day must really churn past the free stops, else
+        # there is nothing here for the budget to improve
+        assert without > SESSION_STOP_BUDGET, without
+        # the free stops are still spent — the path is live, not short-circuited
+        assert with_budget >= SESSION_STOP_BUDGET, with_budget
+        # and the widening at least halves what the charge point counts
+        assert with_budget * 2 <= without, (with_budget, without)
+        # no runaway: the count stays near the budget, not near the cloud count
+        assert with_budget <= SESSION_STOP_BUDGET + 2 * SESSION_CHURN_MAX, (
+            with_budget)
+
+    def test_a_cloudy_afternoon_spends_far_fewer_interruptions(self, monkeypatch):
+        """Measured on this loop: 6 with the budget, 36 without it."""
+        self._assert_pair(*_flicker_pair(monkeypatch, 300.0))
+
+    def test_it_holds_on_a_slower_flicker_too(self, monkeypatch):
+        """A ten-minute cloud outlasts even the widened bridge, so this pair
+        moves for a different reason than the five-minute one — and the
+        widened hold must still be worth something. Measured: 9 against 18."""
+        self._assert_pair(*_flicker_pair(monkeypatch, 600.0))
