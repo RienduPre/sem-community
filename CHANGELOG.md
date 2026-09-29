@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **An OnStar car's charge level is found under its other name** (#887, by @Azlinon). A `…_charge_state` sensor in % now counts.
+
 # [2.1.0-beta.49] — 29.09.2026
 
 - 🐛 **The startup warning about the device registry is gone** (#1026). Huawei battery control would have stopped working in Home Assistant 2027.9.
