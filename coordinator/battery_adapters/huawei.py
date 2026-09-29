@@ -25,6 +25,63 @@ from ...utils.log_gate import log_on_change
 _LOGGER = logging.getLogger(__name__)
 
 
+def _huawei_identifiers(dev) -> list:
+    """Every ``huawei_solar`` identifier on ``dev``, sorted.
+
+    Sorted because the registry holds identifiers in a SET: picking "the
+    first" gives a different answer on different runs, and the answer here
+    decides which battery SEM commands.
+    """
+    out = []
+    for ident in getattr(dev, "identifiers", ()) or ():
+        try:
+            domain, value = ident
+        except (ValueError, TypeError):
+            continue
+        if domain == "huawei_solar":
+            out.append(str(value))
+    return sorted(out)
+
+
+def _huawei_solar_devices(hass, reg) -> list:
+    """Every ``huawei_solar`` device, asked the way Home Assistant supports.
+
+    (#1026) The two resolvers below used to read ``reg.devices``. In HA 2026.8
+    that became a view that logs a deprecation for every custom integration
+    that reads it as a mapping, and it is removed in 2027.9. Both resolvers
+    swallow their errors, so the removal would have arrived as "no Huawei
+    inverter found": forcible charge, forcible discharge and the feed-in cut
+    all quietly gone (bug class 48).
+
+    ``reg.async_get`` and ``async_entries_for_config_entry`` read the registry's
+    real containers, not that view — checked against HA's own source, so the
+    log line goes away rather than moving. Asking per config entry is also the
+    better question: only a ``huawei_solar`` device can ever match here, so
+    there is no reason to walk the whole fleet.
+
+    Nothing is caught here. A host lookup that changed shape must reach the
+    caller's WARNING, never be read as an empty house.
+    """
+    from homeassistant.helpers import device_registry as dr
+    out: list = []
+    seen: set = set()
+    for entry in hass.config_entries.async_entries("huawei_solar"):
+        entry_id = str(getattr(entry, "entry_id", "") or "")
+        if not entry_id:
+            continue
+        for dev in dr.async_entries_for_config_entry(reg, entry_id) or ():
+            dev_id = str(getattr(dev, "id", "") or "")
+            if dev_id and dev_id not in seen:
+                seen.add(dev_id)
+                out.append(dev)
+    # A stable order, which the old fleet walk had and a per-entry index does
+    # not: HA re-indexes a device on every update, so "the first battery" would
+    # otherwise move to another battery after the inverter reports a new
+    # firmware version.
+    out.sort(key=lambda d: (_huawei_identifiers(d), str(getattr(d, "id", ""))))
+    return out
+
+
 class HuaweiBatteryAdapter(BatteryControlAdapter):
     """Huawei battery control. Delegates forced charge to the
     existing :class:`HuaweiChargeAdapter` for backward compat."""
@@ -124,29 +181,26 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
             reg = dr.async_get(self._hass)
         except Exception:  # noqa: BLE001 — resolution never breaks a cycle
             return None
-
-        def _hw_ident(dev):
-            for ident in getattr(dev, "identifiers", ()) or ():
-                try:
-                    domain, value = ident
-                except (ValueError, TypeError):
+        try:
+            batt_id = str(getattr(self, "_inverter_device_id", "") or "")
+            if batt_id:
+                batt = reg.async_get(batt_id)
+                via = getattr(batt, "via_device_id", None) if batt else None
+                if via and _huawei_identifiers(reg.async_get(via)):
+                    return via
+            for dev in _huawei_solar_devices(self._hass, reg):
+                idents = _huawei_identifiers(dev)
+                if not idents or any("/" in i for i in idents):
                     continue
-                if domain == "huawei_solar":
-                    return str(value)
-            return None
-
-        batt_id = str(getattr(self, "_inverter_device_id", "") or "")
-        if batt_id:
-            batt = reg.devices.get(batt_id)
-            via = getattr(batt, "via_device_id", None) if batt else None
-            if via and _hw_ident(reg.devices.get(via)) is not None:
-                return via
-        for dev in reg.devices.values():
-            ident = _hw_ident(dev)
-            if ident is None or "/" in ident:
-                continue
-            if getattr(dev, "via_device_id", None) is None:
-                return dev.id
+                if getattr(dev, "via_device_id", None) is None:
+                    return dev.id
+        except Exception as err:  # noqa: BLE001
+            # (#1026, class 48) The old body read `reg.devices` and let the
+            # caller's silence cover anything that went wrong. A host lookup
+            # that changed shape must be said out loud, not read as "no
+            # Huawei inverter on this install".
+            _LOGGER.warning(
+                "Huawei: cannot resolve the inverter device: %s", err)
         return None
 
     async def command_limit_export(self, watts: float) -> None:
@@ -827,16 +881,13 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
         try:
             from homeassistant.helpers import device_registry as dr
             reg = dr.async_get(self._hass)
+        except Exception:  # noqa: BLE001 — detection must never break setup
+            return None
+        try:
             fallback = None
-            for dev in reg.devices.values():
-                for ident in getattr(dev, "identifiers", ()) or ():
-                    try:
-                        domain, value = ident
-                    except (ValueError, TypeError):
-                        continue
-                    if domain != "huawei_solar":
-                        continue
-                    v = str(value).lower()
+            for dev in _huawei_solar_devices(self._hass, reg):
+                for value in _huawei_identifiers(dev):
+                    v = value.lower()
                     if "connected_energy_storage" in v:
                         _LOGGER.info(
                             "Huawei battery device auto-detected: %s (%s)",
@@ -848,5 +899,11 @@ class HuaweiBatteryAdapter(BatteryControlAdapter):
             if fallback:
                 _LOGGER.info("Huawei battery device auto-detected: %s", fallback)
             return fallback
-        except Exception:  # noqa: BLE001 — detection must never break setup
+        except Exception as err:  # noqa: BLE001
+            # (#1026, class 48) This handler used to cover the registry read
+            # too, so a host lookup that stopped answering would have read as
+            # "this install has no Huawei battery" — and forcible charge and
+            # discharge would have gone quiet with nothing in the log.
+            _LOGGER.warning(
+                "Huawei: cannot find the battery device: %s", err)
             return None

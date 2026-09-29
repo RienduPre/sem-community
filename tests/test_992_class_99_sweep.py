@@ -183,7 +183,9 @@ class TestTheRepairsHedgeWhereTheyMust:
         it = _issue("load_shed_futile")
         assert "{managed_charger_kw}" in it["description"]
         assert "already manages" in it["description"]
-        assert "adding it again will not help" in it["description"]
+        # (#1018) The notice is short now. What it must still not do is send
+        # someone to add this charger — the fix it offers is the LIMIT.
+        assert "lower that charger" in it["description"]
         from custom_components.solar_energy_management.tests import ast_contracts
         sites = ast_contracts.call_sites("raise_load_shed_futile")
         assert sites, "nothing raises the futile-shed Repair"
@@ -194,7 +196,10 @@ class TestTheRepairsHedgeWhereTheyMust:
     def test_force_discharge_unsupported_does_not_blame_the_firmware_as_fact(self):
         d = _issue("battery_force_discharge_unsupported")["description"]
         assert "firmware simply does not implement" not in d
-        assert "ruled out ONE cause" in d and "{error}" in d
+        # (#1018) shorter, same hedge: a guess named as a guess, MORE than one
+        # cause, and the device's own words are what the reader is sent to.
+        assert "probably" in d and "{error}" in d
+        assert "or the inverter locks" in d
 
     def test_the_failsafe_repair_offers_the_second_controller(self):
         """Its sibling, raised from the same edge in the same function, has

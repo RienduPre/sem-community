@@ -135,7 +135,8 @@ class TestHuawei:
             hass, {"export_control_readback_entity":
                    "sensor.inverter_active_power_control"})
         a._inverter_device_id = "detected-battery"          # what __init__'s autodetect sets
-        reg = SimpleNamespace(devices={
+        # (#1026) asked by id, not read off `reg.devices`
+        devices = {
             "detected-battery": SimpleNamespace(
                 id="detected-battery",
                 identifiers={("huawei_solar", "SN123/battery_1")},
@@ -143,7 +144,8 @@ class TestHuawei:
             "the-inverter": SimpleNamespace(
                 id="the-inverter", identifiers={("huawei_solar", "SN123")},
                 via_device_id=None),
-        })
+        }
+        reg = SimpleNamespace(async_get=devices.get)
         with patch("homeassistant.helpers.device_registry.async_get", return_value=reg):
             await a.command_limit_export(0.0)
         assert ("huawei_solar", "set_zero_power_grid_connection",

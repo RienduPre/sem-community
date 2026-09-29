@@ -62,6 +62,8 @@ ROWS_WITH_NO_DOMAIN: dict = {
     "Mercedes EV": "Mercedes me — not in HACS's store index or core",
     "Chevrolet Blazer EV (2024)": "OnStar over MQTT",
     "Tesla": "tesla_ble over ESPHome, amps behind an Easee",
+    "BYD (Battery-Box, behind another inverter)":
+        "read through generic sensor patterns, not an integration of its own",
 }
 
 

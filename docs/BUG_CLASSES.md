@@ -2134,17 +2134,57 @@ generated, so it did not cover the fresh-install first view. **Closure:** migrat
 `async_register_static_paths([StaticPathConfig(url, path, cache)])`, and split the handler — the
 reload-duplicate (`RuntimeError`/`ValueError`) logs at debug, anything else logs at WARNING and
 continues (never swallowed silently, never blocking the resource registration below).
+**Second catch (#1026, Guido, PROD HA 2026.8, 28.09.2026) — caught at the WARNING stage, before
+the removal.** HA 2026.8 logged *"uses `device_registry.devices` as a mapping ... will stop working
+in Home Assistant 2027.9.0"* at every start. Four sites, all in
+`coordinator/battery_adapters/huawei.py`: the inverter resolver behind the feed-in cut
+(`reg.devices.get` twice, then a walk of every device in the house) and the zero-config battery
+autodetect (a second walk). The class shape is the same as #799 and the damage would have been
+worse: both resolvers return `None` inside a broad `except` — *"resolution never breaks a cycle"*,
+*"detection must never break setup"* — so on 2027.9 the raise would have read as **"there is no
+Huawei inverter on this install"**, and forcible charge, forcible discharge and the export cut
+would all have gone quiet on working hardware with nothing in the log. **Closure:** `reg.async_get(
+device_id)` for the two lookups, and `device_registry.async_entries_for_config_entry(reg, entry_id)`
+over the `huawei_solar` config entries for the two walks — the helpers HA's own message names, and
+both read the registry's real containers (`_device_data`, `_devices`) rather than the deprecation
+view, so the log line goes away instead of moving to another line. That was checked against HA's own
+source, not assumed: `devices` is now a `_DeprecatedDeviceRegistryItemsView` property whose `get`,
+`values`, `__getitem__`, string `__contains__` and proxied methods each report, and
+`async_entries_for_config_entry` deliberately bypasses it. The per-entry question is also the
+narrower one (only a `huawei_solar` device could ever match, so the fleet walk was never needed),
+both resolvers now WARN instead of reporting an empty house, and the per-entry order is sorted
+because HA re-indexes a device on every update — unsorted, "the first battery" would move to another
+battery after the inverter reported new firmware. Note SEM cannot use the message's other suggestion,
+iterating `reg.devices`: it yields device entries on 2026.8 and dict KEYS on the older versions SEM
+still supports. One accepted narrowing: a device carrying a `("huawei_solar", …)` identifier that is
+attached to some OTHER integration's config entry is now invisible. Only `huawei_solar` mints those
+identifiers.
 **Where else it lives:** every call into a HA host API with a removal schedule wrapped in a broad
 `except` — `hass.components.*`, `async_get_registry`, the singular `async_forward_entry_setup`,
 `async_add_job`. Swept 2026-08-18: `register_static_path` was the only *removed* API still called
-(one site); `async_forward_entry_setups` (plural, current) is already in use. **Guard:**
-`tests/test_frontend_resources.py::TestStaticPathServedViaAsyncApi` — a source lint that the
-removed `register_static_path(` call form never returns (mentioning the name in a comment is fine),
-plus a runtime assertion that the dashboard dir is actually served through
-`async_register_static_paths` with the right `/local` url_path. **Sweep question:** for every host
-API we call inside a `try/except`, has HA scheduled it for removal — and can the `except` clause tell
-"already done" apart from "this method no longer exists"? A comment on an `except` that names the one
-way it fires is a claim to verify, not a fact. Refs #799 #283 #785 #55.
+(one site); `async_forward_entry_setups` (plural, current) is already in use. Swept again 2026-09-29
+(#1026): the device registry was the only deprecated form still read; `hass.async_create_task` is
+current. **Watch:** the entity registry's `reg.entities.values()` is the same shape and SEM reads it
+at 17 production sites (`hardware_detection.py`, `config_flow.py`, `select.py`, `cleanup.py`,
+`__init__.py`, `huawei.py`). HA has NOT scheduled it — 2026.8 warns about the device registry only,
+and HA publishes no "every entity" helper to replace it — so it is a watch item, not a sweep.
+**Guard:** `tests/test_frontend_resources.py::TestStaticPathServedViaAsyncApi` — a source lint that
+the removed `register_static_path(` call form never returns (mentioning the name in a comment is
+fine), plus a runtime assertion that the dashboard dir is actually served through
+`async_register_static_paths` with the right `/local` url_path. Plus (#1026)
+`ast_contracts.host_registry_mapping_reads()`, pinned by
+`tests/test_1026_device_registry_is_asked_not_read.py`: no production file may read `devices` or
+`deleted_devices` off anything holding a host registry. It follows the binding through assignment,
+the walrus, tuple unpacking, `for`/`with` targets, a rename chain, `self._reg` across methods, the
+inline `dr.async_get(hass).devices` form, `getattr(reg, "devices")`, and a parameter named `reg` /
+`registry` inside the function that declares it — nine shapes, each pinned by its own case, so the
+list is measured rather than claimed. Scoping the parameter rule to its own function is what keeps
+SEM's own `UnifiedDeviceRegistry.devices` readable. Its blind spots, stated rather than implied: a
+registry pulled out of `hass.data` by hand, a parameter under some other name, and a file that names
+the `device_registry` module nowhere. **Sweep question:** for
+every host API we call inside a `try/except`, has HA scheduled it for removal — and can the `except`
+clause tell "already done" apart from "this method no longer exists"? A comment on an `except` that
+names the one way it fires is a claim to verify, not a fact. Refs #799 #1026 #283 #785 #55.
 
 ### 49. Config-flow entity picker offers a domain the runtime validator rejects — GUARDED
 **Symptom:** a field in the setup UI cannot be configured to a working value at all — the entity
