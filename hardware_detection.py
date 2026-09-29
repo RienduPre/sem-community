@@ -2299,16 +2299,34 @@ def vehicle_from_device(dev_entities) -> Dict[str, Any]:
                     break
             if role in out:
                 break
+    if "vehicle_soc_entity" not in out:
+        # (#887, 29.09) Azlinon's bridge publishes the charge level as a
+        # SENSOR ``…_charge_state`` in percent, not as ``…_ev_battery_level``.
+        # The same word on a BINARY sensor means "charging now", so the
+        # sensor counts only when it says it is a level: unit % or device
+        # class battery. No unit, no claim.
+        for e in dev_entities:
+            eid = str(getattr(e, "entity_id", ""))
+            if not (eid.startswith("sensor.") and eid.endswith("_charge_state")):
+                continue
+            unit = (getattr(e, "original_unit_of_measurement", None)
+                    or getattr(e, "unit_of_measurement", None))
+            dclass = (getattr(e, "original_device_class", None)
+                      or getattr(e, "device_class", None))
+            if str(unit or "").strip() == "%" or dclass == "battery":
+                out["vehicle_soc_entity"] = eid
+                break
     if "vehicle_soc_entity" not in out and "vehicle_range_entity" not in out:
         return {}
     # the name is the bridge's own stem: sensor.2024_chevrolet_blazer_ev_ev_range
-    first = out.get("vehicle_soc_entity") or out["vehicle_range_entity"]
-    stem = first.split(".", 1)[1]
-    for tails in (t for _, t in _VEHICLE_TAILS.values()):
-        for tail in tails:
-            if stem.endswith(tail):
-                stem = stem[: -len(tail)]
-                break
+    # — cut by the tail of the ROLE the entity was found under, so the
+    # ``…_charge_state`` level is not cut as ``…_ev_charge_state`` (#887).
+    role = "vehicle_range_entity" if "vehicle_range_entity" in out else "vehicle_soc_entity"
+    stem = out[role].split(".", 1)[1]
+    for tail in [*_VEHICLE_TAILS[role][1], "_charge_state"]:
+        if stem.endswith(tail):
+            stem = stem[: -len(tail)]
+            break
     out["name"] = stem.replace("_", " ").strip().title() or "vehicle"
     return out
 
