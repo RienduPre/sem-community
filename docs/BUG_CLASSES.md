@@ -4968,3 +4968,83 @@ only, and the query shape, the keep-days clamp and the hand-purged install each 
 Statistics and the install-date sqlite read are not behind the door — they stay off the setup path
 by their caller's gate — but the oracle catches them anyway, because it patches the recorder's own
 entry points rather than SEM's. Refs #967.
+
+### 112. Every guard bounds the RATE; the thing the peer counts is the COUNT — GUARDED
+**Symptom:** the pacing is provably right and the hardware refuses anyway. @hoyte's Zaptec Go 2
+(#975, 2.1.0-beta.20, solar+battery on a cloudy day) puts up *"Charging has been stopped too many
+times. Please reconnect the vehicle"* and stops charging for the rest of the plug-in. Nothing in
+SEM's log is wrong: every stop cleared the rolling median, the 2 A deadband, the 30 s cadence, the
+180 s disable delay and the post-stop settle, and each one was the correct answer to the surplus at
+that moment. **Root shape:** SEM's guards are all *rate*-shaped — a minimum interval, a dwell, a
+delay, a cycles-per-hour floor. The peer's consumable is *count*-shaped and scoped to a session:
+spent, never refilled, until the car is unplugged. A rate bounds an average over a window, so a
+long enough window spends any budget: no value of any delay bounds a count. That is why the fix for
+this class is never a bigger number — tuning the delay changes how long the afternoon takes to
+spend the budget, not whether it does. Measured on SEM's own loop: a six-hour afternoon whose surplus
+flickers every five minutes spends one interruption per cloud — **36** — against **6** once the
+widening is in. The 36 is the scenario's own cloud count, not an emergent number; what was emergent
+before the fix is that nothing in SEM counted them at all. The neighbouring
+machinery hides it exactly as in class 81, and not all of it even bounds speed: the rolling median
+and the 2 A deadband bound the signal's AMPLITUDE, the cadence and the disable delay bound the
+rate, and the post-stop settle clears on the car's own draw rather than on a clock. Five
+mechanisms, three shapes, and not one of them a number of stops. `_stop_war_rounds` *does* count —
+the BOX's restarts, not SEM's stops. **Where it lives:** any peer with a finite per-session or lifetime operation budget.
+The **closed precedent** is `ev_phase_sequencer`, which already carries both shapes —
+`AUTO_MIN_INTERVAL_S` for the rate and `AUTO_MAX_PER_SESSION` against `_session_switches`, reset by
+`new_session()` on a plug-cycle — so the stop path was the one actuator that had the rate half and
+not the count half. Assessed and **not** this class: the battery adapters' `_last_discharge_limit_w`
+hysteresis (a 100 W band, so the DISCHARGE-LIMIT register's write count follows the decision rather
+than the cycle — `_zero_setpoint()` and `_set_strategy()` run before that return, so the claim is
+about that one register); #536's enable backoff (already count-shaped — five attempts, then it stops and reports);
+`SwitchDevice`/`ClimateDevice` `min_on`/`min_off` (a rate over a relay's lifetime count, with no
+per-session latch on the other side that we know of).
+**Closure:** the hysteresis GROWS with the churn it has already caused, in `charge_stability` —
+`SESSION_STOP_BUDGET = 4` interruptions per plug-in are free, then each further stop MULTIPLIES *both*
+the enable delay and the TRANSIENT bridge by a factor that grows `SESSION_CHURN_PER_STOP` per stop,
+to a dimensionless `SESSION_CHURN_MAX = 4.0` — so the 180 s bridge reaches 720 s, not 4 s. The charger that flaps twice an hour never notices; the one being interrupted
+every few minutes ends up bridging through the clouds instead, which is what the reporter asked
+for. Three scoping decisions carry it: only a **disconnect** refunds the budget (a mode change or a
+restart must not — the charge point's own counter does not reset for either, so `session_stops`
+round-trips through `snapshot_timers`/`restore_timers` with a bounds check); the **structural** stop
+(#461) is excluded, because with the sun gone there is nothing to bridge to and the hold would
+import grid to keep a contactor closed — slack is for flicker, never for nightfall; and the widening
+is applied to the *delays*, not to a refusal, so nothing is swallowed and no retry budget is spent
+on a command that never went out (class 81(a)).
+**Guard:** `tests/test_975_session_interruption_budget.py` — the factor and both delays pinned, the
+two things that must not move (a structural idle still stops inside 120 s at maximum churn; a fresh
+plug-in starts a fresh budget), the restart round-trip and a corrupt blob. Around them a **count
+oracle**, the only pin written in the units the charge point actually uses: a six-hour flicker
+driven through the real `ChargeStability`, counting what one plug-in spends. Each count is asserted
+as a PAIR against the same afternoon with the widening neutralised, because a bound on its own is
+also satisfied by a run that stopped nothing — so each pair carries a floor (the free stops ARE
+spent; the unbudgeted day really does churn past them) as well as a ceiling, and `_flicker` raises
+if SEM never took the session (#552), the ownership regression that would otherwise report zero and
+pass. Be honest about what this buys: the count is a closed form in the constants, so it is not
+proof against a retune — it is proof that the factor is still WIRED to the real filter and that the
+increment site is still reached.
+**Sweep question:** for every limiter SEM owns, ask *what the peer is counting* — and whether our
+guard is written in the same units. If ours is "not more often than every N seconds" and theirs is
+"not more than K per session", the two do not constrain each other at all, and ours will look
+healthy in the log at the moment theirs runs out. Then ask where the count is spent: is the counter
+incremented at *every* site that makes the peer count, or only at the one the fix was written for?
+**Residuals (for Guido):** (1) `_session_stops` is incremented at exactly ONE site, and it is not
+only the discretionary stop: it sits above the `stop_for_short` branch, so it counts the structural
+stop (#461) and the peak EMERGENCY shed (`decide.py`, `bridgeable=False`) as well. Only the
+WIDENING excludes those; the COUNT includes them, which is the right way round. What the count
+misses is every session SEM ends from outside this filter — the #804 phase switch
+(`ev_control`, `reason="phase switch: … (#804)"`), the conductor-protection stop
+(`active_phase_guard._disable_decision`) and the VPP export pause (`vpp_dispatch`) are three
+separate producers, and none of them spends the budget. Assuming the charge point counts those as
+interruptions too — likely, and NOT verified against Zaptec's firmware — SEM's number is lower than
+the box's, which is the wrong direction for a budget. These are demands that must not be delayed
+(class 81(d)), so the answer is probably to *count* them without widening for them. (2) The budget is
+brand-blind and the 4 is a module constant: the Go 2's real limit is not documented and not
+configurable, so a charge point with a tighter one is still a report waiting to happen — and the
+budget's own size was never fitted to a measured device limit, only to the churn. (3) Class
+81(e) switches the anti-cycle floor off for a current-number-only surface on the premise that "a
+0 A write is a pilot-signal pause, not a relay cycle" — true about the relay, false about the
+SESSION, which is what this class counts; the budget now covers that surface at the stability
+layer, but 81(e)'s own reasoning still reads as though a pause were free.
+**Neighbour:** class 81 asked which thing a minimum interval limits, the repeat or the cycle; this
+is the next question in that line — a limit on the cycle is still not a limit on the count.
+Refs #975 #940 #893 #461 #552 #804.
