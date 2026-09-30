@@ -13553,11 +13553,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         coordinator uses, which the compressed-sun simulation moves."""
         import time as _time
 
-        from .hints import HINT_CATEGORIES, HintFacts
+        from .hints import HintFacts, enabled_categories
 
         now_mono = _time.monotonic() if now_mono is None else float(now_mono)
         cfg = self.config or {}
-        enabled = {c: bool(cfg.get(f"hint_{c}", False)) for c in HINT_CATEGORIES}
+        enabled = enabled_categories(cfg.get("hints", "off"))
 
         dark: dict = {}
         since = getattr(getattr(self, "_sensor_reader", None),
@@ -13605,13 +13605,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         )
 
     async def _evaluate_hints(self, power, energy, costs, performance, tariff_data) -> None:
-        """(#1019) Run the engine once per cycle. With every switch off
+        """(#1019) Run the engine once per cycle. With ``hints`` off
         nothing is built, nothing is stored. The engine's state is restored
         from the energy store on first use and written back on every run."""
-        from .hints import HINT_CATEGORIES, HintEngine
+        from .hints import HintEngine, enabled_categories
 
         cfg = self.config or {}
-        if not any(cfg.get(f"hint_{c}", False) for c in HINT_CATEGORIES):
+        if not any(enabled_categories(cfg.get("hints", "off")).values()):
             return
         engine = getattr(self, "_hint_engine", None)
         if engine is None:

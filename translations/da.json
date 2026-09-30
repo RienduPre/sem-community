@@ -1453,21 +1453,6 @@
       },
       "ev_morning_window_enabled": {
         "name": "Morgenvindue for elbilen"
-      },
-      "hint_silent_input": {
-        "name": "Tip: en sensor sender ikke længere"
-      },
-      "hint_night_load": {
-        "name": "Tip: et forbrug kørte hele natten"
-      },
-      "hint_grid_rise": {
-        "name": "Tip: netforbrug steg"
-      },
-      "hint_cheap_now": {
-        "name": "Tip: strømmen er billig, bilen venter"
-      },
-      "hint_weekly_summary": {
-        "name": "Ugeoversigt"
       }
     },
     "number": {
@@ -1631,6 +1616,14 @@
           "4_hours": "4 timer",
           "8_hours": "8 timer",
           "12_hours": "12 timer"
+        }
+      },
+      "hints": {
+        "name": "Tips",
+        "state": {
+          "off": "Fra",
+          "weekly": "Ugebesked",
+          "all": "Alle tips"
         }
       }
     },

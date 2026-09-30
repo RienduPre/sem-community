@@ -47,10 +47,7 @@ class TestSEMSwitches:
                         "battery_may_export", "battery_may_assist_ev",
                         # arc #921 — four switches, all default OFF, after the permissions
                         "export_guard_enabled", "export_guard_override_external",
-                        "battery_house_sink_enabled", "ev_morning_window_enabled",
-                        # #1019 — five hint categories, all default OFF
-                        "hint_silent_input", "hint_night_load", "hint_grid_rise",
-                        "hint_cheap_now", "hint_weekly_summary"]
+                        "battery_house_sink_enabled", "ev_morning_window_enabled"]
 
     # ``test_night_charging_default_off`` and
     # ``test_night_charging_existing_state_preserved`` removed in

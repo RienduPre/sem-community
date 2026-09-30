@@ -1638,14 +1638,15 @@ shows the row.
 
 ## Hints
 
-SEM can send a short sentence when something is off. Five categories,
-each its own switch on the Configuration tab under Notifications, all
-off until you turn one on. Every hint is one message per event, on its
+SEM can send a short sentence when something is off. One setting,
+**Hints** (`select.sem_hints`, Configuration tab → Notifications),
+decides which: **Off** (the default) sends none, **Weekly note** sends
+only the Sunday summary, **All hints** sends all five below. Every hint is one message per event, on its
 own phone channel (`sem_hints`) and as the event
 `solar_energy_management_notification` with `category: hint`, so an
 automation can use it without a phone.
 
-| switch | when | example |
+| hint | when | example |
 |---|---|---|
 | An input stopped sending | a sensor SEM reads has been silent for 15 minutes; again when it is back | "Solar power stopped sending 17 min ago." |
 | A load ran all night | at SEM's morning, when the night's draw was 1.5× the usual (and over 300 W) | "The house used 620 W all night, usually 210 W." |

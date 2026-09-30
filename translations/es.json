@@ -1453,21 +1453,6 @@
       },
       "ev_morning_window_enabled": {
         "name": "Ventana matinal del VE"
-      },
-      "hint_silent_input": {
-        "name": "Aviso: un sensor dejó de enviar"
-      },
-      "hint_night_load": {
-        "name": "Aviso: una carga estuvo toda la noche"
-      },
-      "hint_grid_rise": {
-        "name": "Aviso: subió el consumo de red"
-      },
-      "hint_cheap_now": {
-        "name": "Aviso: energía barata, coche parado"
-      },
-      "hint_weekly_summary": {
-        "name": "Resumen semanal"
       }
     },
     "number": {
@@ -1631,6 +1616,14 @@
           "4_hours": "4 horas",
           "8_hours": "8 horas",
           "12_hours": "12 horas"
+        }
+      },
+      "hints": {
+        "name": "Avisos",
+        "state": {
+          "off": "Apagado",
+          "weekly": "Nota semanal",
+          "all": "Todos los avisos"
         }
       }
     },

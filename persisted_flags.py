@@ -59,12 +59,6 @@ PERSISTED_FLAG_DEFAULTS: Final[Dict[str, bool]] = {
     "export_guard_override_external": False,
     "battery_house_sink_enabled": False,
     "ev_morning_window_enabled": False,
-    # (#1019) the five hint categories ship silent
-    "hint_silent_input": False,
-    "hint_night_load": False,
-    "hint_grid_rise": False,
-    "hint_cheap_now": False,
-    "hint_weekly_summary": False,
 }
 
 

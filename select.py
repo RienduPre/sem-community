@@ -129,6 +129,15 @@ SELECT_TYPES = [
         entity_category=EntityCategory.CONFIG,
         icon="mdi:timer-pause-outline",
     ),
+    # (#1019) Hints: one control for five categories. SEM cannot decide
+    # for a person whether they want messages, so it asks once — off by
+    # default; "weekly" is the Sunday note only; "all" is all five.
+    SelectEntityDescription(
+        key="hints",
+        options=["off", "weekly", "all"],
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:message-badge-outline",
+    ),
 ]
 
 
@@ -340,6 +349,8 @@ class SEMSelectEntity(CoordinatorEntity, SelectEntity):
             return "kwh"
         if self.entity_description.key == "pause_duration":
             return DEFAULT_PAUSE_DURATION
+        if self.entity_description.key == "hints":
+            return "off"
         return "auto"
 
     @property

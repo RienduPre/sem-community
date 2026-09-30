@@ -1453,21 +1453,6 @@
       },
       "ev_morning_window_enabled": {
         "name": "电动车晨间窗口"
-      },
-      "hint_silent_input": {
-        "name": "提示：某个传感器停止发送"
-      },
-      "hint_night_load": {
-        "name": "提示：某负载整夜运行"
-      },
-      "hint_grid_rise": {
-        "name": "提示：电网用电上升"
-      },
-      "hint_cheap_now": {
-        "name": "提示：电价便宜，车辆闲置"
-      },
-      "hint_weekly_summary": {
-        "name": "每周摘要"
       }
     },
     "number": {
@@ -1631,6 +1616,14 @@
           "4_hours": "4 小时",
           "8_hours": "8 小时",
           "12_hours": "12 小时"
+        }
+      },
+      "hints": {
+        "name": "提示",
+        "state": {
+          "off": "关闭",
+          "weekly": "每周摘要",
+          "all": "全部提示"
         }
       }
     },

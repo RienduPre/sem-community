@@ -1453,21 +1453,6 @@
       },
       "ev_morning_window_enabled": {
         "name": "Morgen-Fenster für das E-Auto"
-      },
-      "hint_silent_input": {
-        "name": "Hinweis: ein Sensor sendet nicht mehr"
-      },
-      "hint_night_load": {
-        "name": "Hinweis: Last lief die ganze Nacht"
-      },
-      "hint_grid_rise": {
-        "name": "Hinweis: Netzbezug gestiegen"
-      },
-      "hint_cheap_now": {
-        "name": "Hinweis: Strom günstig, Auto wartet"
-      },
-      "hint_weekly_summary": {
-        "name": "Wochenübersicht"
       }
     },
     "number": {
@@ -1631,6 +1616,14 @@
           "4_hours": "4 Stunden",
           "8_hours": "8 Stunden",
           "12_hours": "12 Stunden"
+        }
+      },
+      "hints": {
+        "name": "Hinweise",
+        "state": {
+          "off": "Aus",
+          "weekly": "Wochennotiz",
+          "all": "Alle Hinweise"
         }
       }
     },

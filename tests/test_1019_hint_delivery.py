@@ -99,7 +99,7 @@ def _coordinator():
     c.hass.config.language = "en"
     c.config = {
         "tariff_mode": "dynamic",
-        "hint_cheap_now": True, "hint_silent_input": True,
+        "hints": "all",
         "ev_chargers": [{"id": "keba", "name": "Garage"}, {"id": "wall2", "name": "Carport"}],
     }
     c.time_manager = MagicMock()
@@ -136,8 +136,7 @@ class TestCoordinatorFacts:
         c = _coordinator()
         facts = c._hint_facts(*_inputs(), now_mono=1200.0)
         assert facts.night is False
-        assert facts.enabled == {"silent_input": True, "night_load": False, "grid_rise": False,
-                                 "cheap_now": True, "weekly_summary": False}
+        assert all(facts.enabled.values())
         assert facts.home_w == 310.0
         assert facts.daily_import_kwh == 4.0
         assert facts.daily_cost == 1.5
@@ -179,9 +178,16 @@ class TestCoordinatorFacts:
         c2._notification_manager.notify_hint.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_nothing_is_evaluated_while_every_switch_is_off(self):
+    async def test_weekly_mode_sends_only_the_weekly_note(self):
         c = _coordinator()
-        c.config = {"ev_chargers": []}
+        c.config["hints"] = "weekly"
+        await c._evaluate_hints(*_inputs())
+        c._notification_manager.notify_hint.assert_not_awaited()   # only the weekly note may fire, and this is no Sunday night start
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_evaluated_while_hints_are_off(self):
+        c = _coordinator()
+        c.config = {"ev_chargers": [], "hints": "off"}
         await c._evaluate_hints(*_inputs())
         c._notification_manager.notify_hint.assert_not_awaited()
         assert c._hint_engine is None

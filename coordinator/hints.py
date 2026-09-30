@@ -1,7 +1,7 @@
 """(#1019) Hints — short sentences when something is off, and a weekly note.
 
-Five categories, each behind its own switch, all off until a person
-flips one. The engine is pure: it gets facts, returns hints, keeps a
+Five categories behind one select, ``hints`` (off / weekly / all), off
+until a person picks otherwise. The engine is pure: it gets facts, returns hints, keeps a
 small state the coordinator persists. Every hint carries an event key
 and fires once per key — a restart with the stored state repeats
 nothing.
@@ -27,7 +27,20 @@ HINT_CATEGORIES = (
     "weekly_summary",
 )
 
-HINT_SWITCH_KEYS = tuple(f"hint_{category}" for category in HINT_CATEGORIES)
+#: (#1019) the one select, ``hints``: off / weekly (the Sunday note only)
+#: / all (all five categories). Default off.
+HINT_MODES = ("off", "weekly", "all")
+DEFAULT_HINT_MODE = "off"
+
+
+def enabled_categories(mode) -> dict:
+    """Which categories the ``hints`` option turns on. Anything unknown
+    reads as off."""
+    if mode == "all":
+        return {c: True for c in HINT_CATEGORIES}
+    if mode == "weekly":
+        return {c: c == "weekly_summary" for c in HINT_CATEGORIES}
+    return {c: False for c in HINT_CATEGORIES}
 
 #: an input dark this long is "silent" (the Repair threshold, 15 min)
 SILENT_INPUT_S = 900

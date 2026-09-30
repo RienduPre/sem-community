@@ -1453,21 +1453,6 @@
       },
       "ev_morning_window_enabled": {
         "name": "Poranne okno EV"
-      },
-      "hint_silent_input": {
-        "name": "Wskazówka: czujnik przestał wysyłać"
-      },
-      "hint_night_load": {
-        "name": "Wskazówka: odbiornik pracował całą noc"
-      },
-      "hint_grid_rise": {
-        "name": "Wskazówka: pobór z sieci wzrósł"
-      },
-      "hint_cheap_now": {
-        "name": "Wskazówka: prąd tani, auto czeka"
-      },
-      "hint_weekly_summary": {
-        "name": "Podsumowanie tygodnia"
       }
     },
     "number": {
@@ -1631,6 +1616,14 @@
           "4_hours": "4 godziny",
           "8_hours": "8 godzin",
           "12_hours": "12 godzin"
+        }
+      },
+      "hints": {
+        "name": "Wskazówki",
+        "state": {
+          "off": "Wył.",
+          "weekly": "Notka tygodniowa",
+          "all": "Wszystkie wskazówki"
         }
       }
     },
