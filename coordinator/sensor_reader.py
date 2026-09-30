@@ -5208,6 +5208,21 @@ class SensorReader:
             self._export_limit_scanned_at = now
         self.detect_export_limit_entity(solar_anchor_entity)
         cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+        if isinstance(cached, str):
+            # The capability is "the entity exists and is enabled on the
+            # inverter" — a registry fact. A found entity that has since
+            # been removed is looked for again; a disabled one counts as
+            # missing (SEM cannot write it).
+            try:
+                entry = er.async_get(self.hass).async_get(cached)
+            except Exception:  # noqa: BLE001 — no registry, no answer
+                return None
+            if entry is None:
+                self.invalidate_export_limit_cache()
+                self.detect_export_limit_entity(solar_anchor_entity)
+                cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+            elif entry.disabled_by is not None:
+                return False if running else None
         if cached is _CYCLES_UNSET:
             return None
         if cached is None and not getattr(self, "_export_limit_read_running", False):

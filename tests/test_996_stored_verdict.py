@@ -182,13 +182,12 @@ async def test_a_restart_right_after_a_one_cycle_blip_keeps_the_rows(
     entry.add_to_hass(hass)
     assert _verdict(await _start(hass, entry, starting=False)) is Presence.PRESENT
 
-    # Solcast's forecast is unavailable for one cycle.
+    # Solcast's forecast is unavailable for one cycle: the reader cannot
+    # read it, but the integration is still installed — no miss at all.
     for entity_id in SOLCAST_ENTITIES.values():
         hass.states.async_set(entity_id, "unavailable")
     await _cycle(hass, entry)
-    # The blip really was a live miss (else this test proves nothing).
-    assert entry.runtime_data._capability_miss_streak.get("solar_forecast"), (
-        entry.runtime_data._forecast_reader._last_source_detection_path)
+    assert not entry.runtime_data._capability_miss_streak.get("solar_forecast")
     await _stop(hass, entry)
 
     _uninstall_solcast(hass)                       # and it loads late on the boot

@@ -492,6 +492,39 @@ class ForecastReader:
     def _last_source_detection_path(self, value: Optional[str]) -> None:
         self.__detection_path = value
 
+    def installed_answer(self) -> Optional[bool]:
+        """(#996) Does this house HAVE a forecast integration? A registry
+        fact — an enabled entity of Solcast, Forecast.Solar or Open-Meteo —
+        not "can I read a forecast right now". A cloud outage leaves the
+        entities registered and so cannot make the forecast rows ABSENT;
+        only removing or disabling the integration can. ``detection_answer``
+        and the live read keep driving control decisions as before.
+
+        True at any time; False only while Home Assistant is running (an
+        integration may register after SEM on a restart); None when the
+        registry cannot be read. A hit is cached 60 s — a full registry walk
+        per cycle is waste, and removal is judged over minutes anyway."""
+        now = self._mono_time()
+        cached = getattr(self, "_installed_cache", None)
+        if cached is not None and now - cached[0] < 60:
+            found = cached[1]
+        else:
+            try:
+                from homeassistant.helpers import entity_registry as er
+                entries = list(er.async_get(self.hass).entities.values())
+            except Exception:  # noqa: BLE001 — no registry, no answer
+                return None
+            found = any(
+                getattr(e, "platform", None) in FORECAST_PLATFORMS
+                and getattr(e, "disabled_by", None) is None
+                for e in entries)
+            # Only a hit is cached: a miss is looked at again next cycle, so
+            # an integration installed or enabled is seen at once.
+            self._installed_cache = (now, True) if found else None
+        if found:
+            return True
+        return False if ha_is_running(self.hass) else None
+
     def detection_answer(self) -> Optional[bool]:
         """(#996) Has SEM found a forecast integration? True when a source
         is in use, False when the ladder ran and found none, None when it

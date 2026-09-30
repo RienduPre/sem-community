@@ -35,6 +35,9 @@ def _stub(forecast_path=None, forecast_source=None, export_cache="unset",
     reader._source = forecast_source
     reader._none_read_while_running = read_running
     reader.detection_answer = lambda: ForecastReader.detection_answer(reader)
+    # The capability read has the same three answers; its registry side is
+    # tested on a real registry in test_996_outage_is_not_absence.
+    reader.installed_answer = reader.detection_answer
     sensors = MagicMock()
     if export_cache == "unset":
         sensors.export_limit_answer = lambda *_: None
@@ -110,7 +113,7 @@ class TestTheVerdict:
 
     def test_a_reader_that_raises_is_not_an_answer(self):
         stub = _stub(forecast_path="none_available", export_cache=None)
-        stub._forecast_reader.detection_answer = MagicMock(side_effect=RuntimeError("boom"))
+        stub._forecast_reader.installed_answer = MagicMock(side_effect=RuntimeError("boom"))
         stub._sensor_reader.export_limit_answer = MagicMock(side_effect=RuntimeError("boom"))
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.UNKNOWN
@@ -213,7 +216,7 @@ class TestAMissIsRememberedOnlyOnceItHolds:
     def _clock(self, monkeypatch):
         from custom_components.solar_energy_management.coordinator import coordinator as mod
         now = [1000.0]
-        monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
+        monkeypatch.setattr(mod, "_capability_clock", lambda: now[0])
         return now
 
     def test_one_missed_cycle_leaves_a_stored_present(self, monkeypatch):

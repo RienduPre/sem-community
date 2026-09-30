@@ -100,6 +100,12 @@ from ..analytics.energy_assistant import EnergyAssistant
 _LOGGER = logging.getLogger(__name__)
 
 
+def _capability_clock() -> float:
+    """(#996) The clock the capability miss streak is measured on — its own
+    name so a test can move it without moving the event loop's."""
+    return time.monotonic()
+
+
 def _f_or_none(value):
     """(#778) A float, or None — so "unconfigured" never reads as zero."""
     try:
@@ -1839,7 +1845,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             except Exception:  # noqa: BLE001 — no store is "nothing stored"
                 stored = {}
         changed = False
-        now = time.monotonic()
+        now = _capability_clock()
         for name, value in live.items():
             to_store = SEMCoordinator._confirmed_capability(self, name, value, now)
             if to_store is not None and storage is not None:
@@ -1896,7 +1902,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         reader = getattr(self, "_forecast_reader", None)
         if reader is not None:
             try:
-                facts["solar_forecast"] = reader.detection_answer()
+                # (#996) a registry fact — installed and enabled — never
+                # "readable right now": an outage must not make it ABSENT.
+                facts["solar_forecast"] = reader.installed_answer()
             except Exception:  # noqa: BLE001 — no answer is UNKNOWN, never a crash
                 pass
         sensors = getattr(self, "_sensor_reader", None)
