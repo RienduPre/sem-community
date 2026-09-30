@@ -5,8 +5,8 @@ restart (nothing asked yet, UNKNOWN), removed on the next options reload
 (asked while running, ABSENT), built again on the next restart — registry
 rows deleted and recreated over and over. SEM stores the last verdict each
 runtime capability had from a read taken while HA was running and falls
-back to it at setup. The start-up re-ask and the registry watch still
-correct it; a turn to ABSENT waits for the next setup."""
+back to it at setup. The coordinator's per-cycle check still corrects
+it; a turn to ABSENT waits for the next setup."""
 from __future__ import annotations
 
 import importlib.util
@@ -41,9 +41,16 @@ async def _start(hass, entry, *, starting):
     return entry.runtime_data
 
 
-async def _finish_boot(hass):
+async def _finish_boot(hass, entry):
     hass.set_state(CoreState.running)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+    await hass.async_block_till_done()
+    await _cycle(hass, entry)
+
+
+async def _cycle(hass, entry):
+    """One coordinator cycle — where the live runtime answers are read."""
+    await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
 
 
@@ -78,7 +85,7 @@ async def test_a_restart_after_a_stored_absent_builds_no_rows(
     hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED,
                           lambda e: removed.append(e.data) if e.data.get("action") == "remove" else None)
     assert _verdict(await _start(hass, entry, starting=True)) is Presence.ABSENT
-    await _finish_boot(hass)
+    await _finish_boot(hass, entry)
     assert _row(hass) is None
     assert not [r for r in removed if FORECAST_ROW in r.get("entity_id", "")
                 or "forecast" in r.get("entity_id", "")]
@@ -102,13 +109,13 @@ async def test_a_restart_after_a_stored_present_keeps_the_rows_through_the_race(
     assert reg.async_get(_row(hass)).name == "My forecast"
 
     _install_solcast(hass)
-    await _finish_boot(hass)
+    await _finish_boot(hass, entry)
     assert entry.runtime_data.install_presence()[Module.SOLAR_FORECAST] is Presence.PRESENT
     assert reg.async_get(_row(hass)).name == "My forecast"
 
 
 @pytest.mark.asyncio
-async def test_a_new_forecast_after_a_stored_absent_comes_back_through_the_watch(
+async def test_a_new_forecast_after_a_stored_absent_comes_back_in_the_next_cycle(
         hass, enable_custom_integrations, monkeypatch):
     _dashboard(monkeypatch)
     entry = _minimal_entry()
@@ -116,11 +123,11 @@ async def test_a_new_forecast_after_a_stored_absent_comes_back_through_the_watch
     await _start(hass, entry, starting=False)
     await _stop(hass, entry)
     assert _verdict(await _start(hass, entry, starting=True)) is Presence.ABSENT
-    await _finish_boot(hass)
+    await _finish_boot(hass, entry)
     assert _row(hass) is None
 
     _install_solcast(hass)                         # the user installs Solcast
-    await hass.async_block_till_done()
+    await _cycle(hass, entry)
     assert _verdict(entry.runtime_data) is Presence.PRESENT
     assert _row(hass) is not None
 
@@ -141,13 +148,13 @@ async def test_no_flip_flop_across_restart_reload_restart(
     await _start(hass, entry, starting=False)             # first run, asked while running
     await _stop(hass, entry)
     seen = [_verdict(await _start(hass, entry, starting=True))]   # restart
-    await _finish_boot(hass)
+    await _finish_boot(hass, entry)
     assert await hass.config_entries.async_reload(entry.entry_id)  # options reload
     await hass.async_block_till_done()
     seen.append(_verdict(entry.runtime_data))
     await _stop(hass, entry)
     seen.append(_verdict(await _start(hass, entry, starting=True)))  # restart again
-    await _finish_boot(hass)
+    await _finish_boot(hass, entry)
 
     assert seen == [Presence.ABSENT] * 3
     assert created == []

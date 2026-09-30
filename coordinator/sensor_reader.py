@@ -67,6 +67,10 @@ _SOC_NAME_KEYWORDS = ("soc", "state_of_charge", "batterieladung",
 # probes entirely). Curated per-brand keyword list, same maintenance
 # story as the battery-cycles autodetect (#593): a new brand's entity
 # name goes here, tests in test_743_export_limit_autodetect.py.
+# (#996) How often a missing export-limit entity is looked for again. The
+# scan reads one device's registry entries (an indexed lookup).
+EXPORT_LIMIT_RESCAN_S = 300.0
+
 EXPORT_LIMIT_KEYWORDS = (
     "export_limit",            # generic / GoodWe (grid_export_limit)
     "export_limitation",       # SolarEdge modbus packs
@@ -5189,12 +5193,19 @@ class SensorReader:
         False after it ran; None when there was no solar anchor to scan
         from — "could not ask" is UNKNOWN to the install-modules oracle,
         never ABSENT (#925)."""
+        import time as _time
         running = getattr(self.hass, "state", None) is CoreState.running
         cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
-        if (cached is None and running
-                and not getattr(self, "_export_limit_read_running", False)):
-            # The miss was read while HA was starting — look again now.
+        now = _time.monotonic()
+        if cached is None and running and (
+                not getattr(self, "_export_limit_read_running", False)
+                or now - getattr(self, "_export_limit_scanned_at", 0.0)
+                >= EXPORT_LIMIT_RESCAN_S):
+            # A miss is looked at again: once HA is running, then at most
+            # every EXPORT_LIMIT_RESCAN_S — an entity may be renamed to an
+            # export-limit word, or enabled, on the inverter's device.
             self.invalidate_export_limit_cache()
+            self._export_limit_scanned_at = now
         self.detect_export_limit_entity(solar_anchor_entity)
         cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
         if cached is _CYCLES_UNSET:

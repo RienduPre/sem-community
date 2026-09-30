@@ -1823,9 +1823,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         """(#996) The two capability answers only the entity registry can
         give: a forecast integration and the inverter's export-limit entity.
 
-        A live answer counts only from a read taken while Home Assistant is
-        running — before that an integration may simply load after SEM.
-        When there is no live answer, the last running-time verdict stored
+        A live hit counts at any time; a live miss only from a read taken
+        while Home Assistant was running — before that an integration may
+        simply load after SEM. When there is no live answer, the last running-time verdict stored
         for this entry stands in, so a restart does not rebuild rows an
         earlier running read had removed (or drop rows it had kept). No
         live answer and nothing stored is None — UNKNOWN keeps every row."""
@@ -1855,10 +1855,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
     def _live_runtime_facts(self) -> Dict[str, Optional[bool]]:
         """(#996) What the readers say right now; None for "not asked"."""
+        # A HIT is definitive at any time — Solcast found before HA says it is
+        # running is Solcast. A MISS counts only from a read taken while HA
+        # was running; the readers answer None for an earlier one, and the
+        # caller then falls back to the stored running-time verdict.
         facts: Dict[str, Optional[bool]] = {"solar_forecast": None, "export_limit": None}
-        from .forecast_reader import ha_is_running
-        if not ha_is_running(getattr(self, "hass", None)):
-            return facts
         reader = getattr(self, "_forecast_reader", None)
         if reader is not None:
             try:
@@ -1876,28 +1877,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 pass
         return facts
 
-    def recheck_capabilities(self) -> None:
-        """(#996) Ask the runtime capability questions again — at startup
-        once HA is running, and when the registry gains a forecast or an
-        export-limit entity — then run the growth check, so a capability
-        that appears brings its rows back by itself."""
-        from .forecast_reader import ha_is_running
-        if not ha_is_running(getattr(self, "hass", None)):
-            return
-        sensors = getattr(self, "_sensor_reader", None)
-        if sensors is not None and getattr(sensors, "_export_limit_cache", None) is None:
-            try:
-                sensors.invalidate_export_limit_cache()
-            except Exception:  # noqa: BLE001
-                pass
-        reader = getattr(self, "_forecast_reader", None)
-        if reader is not None and not getattr(reader, "_source", None):
-            try:
-                reader.detect_source()
-            except Exception:  # noqa: BLE001 — no answer is UNKNOWN
-                _LOGGER.debug("#996 forecast re-detection failed", exc_info=True)
-        self._check_module_growth()
-
     def _check_module_growth(self) -> None:
         """(#923) Hardware SEM only DISCOVERS — a battery added to HA's Energy
         Dashboard — changes no SEM option, so no options reload creates its
@@ -1906,7 +1885,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         at_setup = self.setup_presence
         if not isinstance(at_setup, dict) or self.config_entry is None:
             return  # still setting up: the platforms read the fresh verdict
-        key = f"{DOMAIN}_module_reload_at"
+        # (#996) per entry: one entry's reload must not hold back another's.
+        key = f"{DOMAIN}_module_reload_at_{self.config_entry.entry_id}"
         now_ts = dt_util.utcnow().timestamp()
         grown = module_reload_due(
             at_setup, self.install_presence(), now_ts, self.hass.data.get(key))
@@ -4563,6 +4543,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 await self._storage.async_save_daily_throttled()
 
             self._initial_update_done = True
+            # (#996) The live runtime answers are read every cycle; a
+            # capability present now that the platforms were built without
+            # (enabled entity, renamed entity, new integration) reloads once,
+            # rate-limited per entry. One mechanism for every such change.
+            try:
+                self._check_module_growth()
+            except Exception:  # noqa: BLE001 — a growth check never costs a cycle
+                _LOGGER.debug("#996 module growth check failed", exc_info=True)
             result = sem_data.to_dict()
             # (#699) the cards' atomic balance set — built HERE, where the
             # home-hold state lives, so a known-incoherent cycle ships the

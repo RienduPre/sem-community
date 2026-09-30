@@ -6,9 +6,9 @@ refresh. On a restart where Solcast has not loaded yet, a "none found"
 read would make the forecast rows ABSENT and the stale sweep would delete
 their registry rows — and the user's names and settings with them.
 
-Required: nothing read before HA is running is ABSENT; SEM asks again once
-HA is running and when the registry gains a forecast entity; a read while
-running that finds nothing is still ABSENT."""
+Required: a miss read before HA is running is never ABSENT; the coordinator
+asks again every cycle and reloads once when a capability turns up; a read
+while running that finds nothing is still ABSENT."""
 from __future__ import annotations
 
 import importlib.util
@@ -78,6 +78,8 @@ async def test_a_restart_before_solcast_loaded_keeps_every_row(
     hass.set_state(CoreState.running)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
     await hass.async_block_till_done()
+    await coordinator.async_refresh()          # the next cycle asks again
+    await hass.async_block_till_done()
 
     assert coordinator.install_presence()[Module.SOLAR_FORECAST] is Presence.PRESENT
     assert _row(hass) == "sensor.sem_forecast_today_kwh"
@@ -98,8 +100,10 @@ async def test_nothing_while_running_is_absent_and_a_late_install_brings_it_back
     assert entry.runtime_data.setup_presence[Module.SOLAR_FORECAST] is Presence.ABSENT
     assert _row(hass) is None
 
-    # The user installs Solcast; no reload by hand.
+    # The user installs Solcast; no reload by hand — the next cycle sees it.
     _install_solcast(hass)
+    await hass.async_block_till_done()
+    await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
 
     assert entry.runtime_data.setup_presence[Module.SOLAR_FORECAST] is Presence.PRESENT

@@ -88,11 +88,19 @@ class TestTheVerdict:
         assert p[Module.SOLAR_FORECAST] is Presence.ABSENT
         assert p[Module.EXPORT_LIMIT] is Presence.ABSENT
 
-    def test_while_ha_is_starting_nothing_is_absent(self):
+    def test_a_miss_while_ha_is_starting_is_not_absent(self):
+        # The readers answer None for a miss read before HA was running.
         p = SEMCoordinator.install_presence(
-            _stub(forecast_path="none_available", export_cache=None, hass=STARTING))
+            _stub(forecast_path="none_available", read_running=False, hass=STARTING))
         assert p[Module.SOLAR_FORECAST] is Presence.UNKNOWN
         assert p[Module.EXPORT_LIMIT] is Presence.UNKNOWN
+
+    def test_a_hit_while_ha_is_starting_is_present(self):
+        p = SEMCoordinator.install_presence(
+            _stub(forecast_path="solcast", forecast_source="solcast",
+                  export_cache="number.inverter_export_limit", hass=STARTING))
+        assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
+        assert p[Module.EXPORT_LIMIT] is Presence.PRESENT
 
     def test_a_miss_read_while_starting_stays_unknown_after_start(self):
         # Running now, but the reader's last miss was taken during start-up.
@@ -173,9 +181,19 @@ class TestTheStoredRunningVerdict:
         SEMCoordinator.install_presence(stub)          # unchanged: no second write
         assert stub.hass.async_create_task.call_count == 1
 
-    def test_a_read_while_starting_is_never_stored(self):
+    def test_a_miss_while_starting_is_never_stored(self):
         store = _Store()
         stub = self._with_store(
-            _stub(forecast_path="none_available", export_cache=None, hass=STARTING), store)
+            _stub(forecast_path="none_available", read_running=False, hass=STARTING), store)
         SEMCoordinator.install_presence(stub)
         assert store.verdicts == {}
+
+    def test_a_live_hit_before_running_outranks_a_stored_absent(self):
+        # Installed while HA was down: the stored "no" must not win over
+        # a scan that already finds Solcast.
+        store = _Store({"solar_forecast": False})
+        stub = self._with_store(
+            _stub(forecast_path="solcast", forecast_source="solcast", hass=STARTING), store)
+        p = SEMCoordinator.install_presence(stub)
+        assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
+        assert store.verdicts["solar_forecast"] is True
