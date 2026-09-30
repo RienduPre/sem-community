@@ -42,6 +42,20 @@ forecast — plus **modules** for the hardware you own:
 | Heat pump | an SG-Ready relay, climate entity, SG-Ready service or heat-pump power/energy sensor is set | heat-pump status and energy entities |
 | Hot water | a hot-water entity is set | the tank's temperature and legionella settings |
 
+Controls follow the same rule (#996). A setting your house cannot use is
+not created, so nothing shows a live number that changes nothing:
+
+| Control | Appears when |
+|---|---|
+| Cheap / expensive price thresholds, next cheap window | the tariff mode is dynamic |
+| Export guard (switches, holds, state) | you name an export-limit entity, or SEM finds one on the inverter's device |
+| Forecast rows, forecast spending, charge pacing | a forecast entity is set, or SEM finds Solcast, Forecast.Solar or Open-Meteo |
+| kWh per kWp and the degradation trend | a plant size (kWp) is set |
+| ROI rows | an investment figure is set |
+
+Set the thing up and the control appears with one automatic reload. When
+SEM has not looked yet, it keeps the control rather than guess.
+
 A small install therefore has fewer entities, by design — a solar-only SEM
 has no `sensor.sem_battery_soc`. Add the hardware and its entities appear:
 through SEM's Configure screen at once, and for a battery you add to HA's

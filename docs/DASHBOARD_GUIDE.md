@@ -39,6 +39,13 @@ The dashboard is generated automatically on first install. If you need to regene
 > configured, and cards on the other tabs drop the parts that belong to
 > hardware you do not have (the sankey's battery and EV nodes, for example).
 > See [Modules](USER_GUIDE.md#modules--sem-shows-what-you-have).
+>
+> **Controls follow your house too (#996).** A setting you cannot use is
+> not shown: the price thresholds appear only on a dynamic tariff, the
+> export guard only when SEM finds an export-limit entity on the inverter
+> (or you name one), the forecast rows only with a forecast, kWh-per-kWp
+> only with a plant size, ROI only with an investment figure. Set the
+> thing up and the control appears.
 
 ### Home
 
