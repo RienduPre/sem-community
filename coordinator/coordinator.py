@@ -1833,9 +1833,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 pass
         sensors = getattr(self, "_sensor_reader", None)
         if sensors is not None:
+            config = self.config or {}
             try:
                 facts["export_limit"] = sensors.export_limit_answer(
-                    (self.config or {}).get("solar_production_sensor"))
+                    config.get("solar_production_sensor")
+                    or config.get("solar_power_sensor"))
             except Exception:  # noqa: BLE001
                 pass
         return facts

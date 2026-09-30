@@ -7,6 +7,14 @@ tab, the cards that reference it, the welcome text — asks THIS module, so
 they cannot disagree. Before #923 "has a battery" was decided in four
 places, each slightly differently (#857).
 
+(#996) The same table answers a second question: can this house USE a
+control? A price threshold needs a dynamic tariff, the export guard needs
+an export-limit entity, the forecast rows need a forecast, kWh-per-kWp
+needs a plant size, ROI needs an investment. Those are the five
+capabilities below the four hardware modules — same states, same
+consumers, so a knob with nothing behind it is not created at all rather
+than shown live with a plausible number.
+
 Two rules make the verdict safe to act on:
 
 * It comes from CONFIGURATION, never from live sensor state. A sensor that
