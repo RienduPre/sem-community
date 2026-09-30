@@ -134,6 +134,17 @@ class TestRecordOnSessionEnd:
         _tick(h, connected=False)
         assert h._storage.add_session_to_history.call_count == 1
 
+    def test_a_replug_without_charging_does_not_record_the_old_session_again(self):
+        """August on .175: every session stored twice. The finished
+        session's data stays for display; a later plug + unplug with no
+        charge must not write it again."""
+        h = _host()
+        _unplug(h)
+        for _ in range(2):
+            _tick(h, connected=True)          # car back, no power drawn
+        _unplug(h)
+        assert h._storage.add_session_to_history.call_count == 1
+
     def test_an_empty_session_leaves_no_record(self):
         h = _host(session_kwh=0.0)
         _unplug(h)

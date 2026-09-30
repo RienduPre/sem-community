@@ -47,7 +47,19 @@ def select_sessions(
     ``YYYY-MM-DD`` floor. A record without a start sorts last; an old
     record without a charger matches every charger filter — it was written
     before SEM knew which charger it was."""
-    rows = [dict(r) for r in history if isinstance(r, dict)]
+    rows = []
+    seen = set()
+    for r in history:
+        if not isinstance(r, dict):
+            continue
+        # Records written before 2.2 hold many sessions twice: the old
+        # writer re-recorded a finished session on a later plug + unplug
+        # with no charge. Show an exact double once; storage stays as is.
+        ident = (r.get("timestamp"), r.get("charger_id"), r.get("energy_kwh"))
+        if r.get("timestamp") is not None and ident in seen:
+            continue
+        seen.add(ident)
+        rows.append(dict(r))
     if charger_id:
         rows = [r for r in rows if r.get("charger_id") in (charger_id, None)]
     if month:

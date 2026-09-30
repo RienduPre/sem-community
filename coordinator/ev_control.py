@@ -1207,7 +1207,12 @@ class EVControlMixin:
             # be written from ``_update_ev_intelligence`` on the fleet-wide
             # disconnect with the primary's data, so a second charger's
             # sessions were never recorded.
-            if self._session_data.energy_kwh > 0 and self._storage:
+            # Only a session that is still ACTIVE ends here. A finished
+            # session's data is kept for display, so gating on energy alone
+            # re-recorded it on every later plug + unplug without a charge —
+            # the old writer's bug, every August session stored twice.
+            if (self._session_data.active and self._session_data.energy_kwh > 0
+                    and self._storage):
                 self._storage.add_session_to_history(
                     _finished_session_record(self))
             self._session_data.active = False

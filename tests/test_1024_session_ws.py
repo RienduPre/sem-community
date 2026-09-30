@@ -59,6 +59,24 @@ def _hass(history):
     return hass
 
 
+class TestLegacyDoubles:
+    def test_an_exact_double_is_shown_once(self):
+        rec = {"timestamp": "2026-08-12T18:00:00+02:00", "energy_kwh": 5.2,
+               "solar_share_pct": 40.0, "duration_min": 90.0, "taper_detected": False}
+        twin = dict(rec, taper_detected=True)
+        rows = select_sessions([rec, twin, HISTORY[1]])
+        assert [r["energy_kwh"] for r in rows] == [2.0, 5.2]
+
+    def test_two_chargers_at_the_same_second_are_two_sessions(self):
+        a = {"timestamp": "2026-09-02T18:00:00+02:00", "charger_id": "keba", "energy_kwh": 2.0}
+        b = dict(a, charger_id="wall2")
+        assert len(select_sessions([a, b])) == 2
+
+    def test_same_start_different_energy_is_kept(self):
+        a = {"timestamp": "2026-09-02T18:00:00+02:00", "energy_kwh": 2.0}
+        assert len(select_sessions([a, dict(a, energy_kwh=2.5)])) == 2
+
+
 class TestCommand:
     def test_the_command_name(self):
         assert WS_SESSION_HISTORY == f"{DOMAIN}/session_history"
