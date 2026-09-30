@@ -8,6 +8,7 @@ actuator of the scheduler's verdict; the Huawei adapter sells to grid.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -146,8 +147,30 @@ def test_decide_battery_actuates_arbitrage_verdict():
 # ── adapter / actuator ──────────────────────────────────────────────
 
 def _hass():
+    """A hass whose selects REFLECT ``select_option`` (#978): the adapter
+    now believes the entity, not the service call, so a fake that swallowed
+    the flip would model exactly the dropped write the fix refuses."""
     h = MagicMock()
-    h.services.async_call = AsyncMock()
+    _reflect_selects(h)
+    return h
+
+
+def _reflect_selects(h):
+    from types import SimpleNamespace as _NS
+    selects = {}
+    prior_get = h.states.get
+
+    async def _call(domain, service, data=None, **kw):
+        if service == "select_option" and data:
+            selects[data["entity_id"]] = _NS(state=data["option"], attributes={})
+
+    def _get(eid):
+        if eid in selects:
+            return selects[eid]
+        return prior_get(eid) if callable(prior_get) else None
+
+    h.services.async_call = AsyncMock(side_effect=_call)
+    h.states.get = MagicMock(side_effect=_get)
     return h
 
 
@@ -219,10 +242,15 @@ def test_huawei_autodetects_battery_device_zero_config():
     dev = MagicMock()
     dev.id = "batterydev123"
     dev.identifiers = {("huawei_solar", "BT2470369058/connected_energy_storage")}
-    reg = MagicMock()
-    reg.devices.values.return_value = [dev]
+    # (#1026) asked per config entry, not read off `reg.devices`
+    hass.config_entries.async_entries.return_value = [
+        SimpleNamespace(entry_id="huawei-entry")]
+    reg = MagicMock(spec=["async_get"])
     with patch(
         "homeassistant.helpers.device_registry.async_get", return_value=reg,
+    ), patch(
+        "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+        return_value=[dev],
     ):
         a = HuaweiBatteryAdapter(hass, {"battery_max_discharge_power": 4000})
     assert a._inverter_device_id == "batterydev123"
@@ -463,6 +491,7 @@ async def test_normal_sets_self_consume_after_force_charge():
     state = MagicMock()
     state.state = "nom"
     hass.states.get = MagicMock(return_value=state)
+    _reflect_selects(hass)   # (#978) the flip to api is reflected — NORMAL has a real change to make
     gen = _bidir(hass)
     await gen.command_force_charge(target_soc=100.0, charge_power_w=1000, duration_min=60)
     hass.services.async_call.reset_mock()
@@ -602,6 +631,7 @@ def _hass_with_range(entity, lo, hi):
     st = MagicMock()
     st.attributes = {"min": lo, "max": hi}
     h.states.get = MagicMock(return_value=st)
+    _reflect_selects(h)      # (#978) the select still reflects its flip
     return h
 
 
@@ -675,12 +705,17 @@ async def test_force_charge_then_release_restores_then_idle_leaves_alone():
 
 # ── #3: SOC unavailable → never sell blind (reserve safety) ──────────────
 
-def _mode_view(mode, soc, *, sched=None, reserve=None):
+def _mode_view(mode, soc, *, sched=None, reserve=None, available=True):
     cfg = {"battery_mode": mode, "battery_grid_arbitrage_enabled": True}
     if reserve is not None:
         cfg["battery_reserve_soc"] = reserve
+    # (#932) ``last_known_soc`` is a float the pipeline builds as
+    # ``float(... or 0.0)`` — it is never None in production. ``available``
+    # is the flag that says a dark read was HELD; a test that only ever
+    # passes ``soc=None`` proves a branch the product cannot reach.
     return BatteryView(
-        runtime=BatteryRuntime(battery_id="b", last_known_soc=soc),
+        runtime=BatteryRuntime(battery_id="b", last_known_soc=soc,
+                               available=available),
         config=cfg,
         fleet=FleetContext(),
         charging_state="idle",
@@ -695,7 +730,27 @@ def test_force_discharge_holds_when_soc_unavailable():
     # unavailable SOC must HOLD, not drain blind past the backup reserve.
     d = decide_battery(_mode_view("force_discharge", None, reserve=20.0))
     assert d.intent is BatteryIntent.NORMAL
-    assert "unavailable" in d.reason
+    assert "SOC unknown" in d.reason
+
+
+def test_force_discharge_holds_on_a_HELD_soc_the_shape_production_makes():
+    """(#932) The real dropout shape: the reader keeps the last valid 60 %
+    and flags it unavailable. `soc is not None` was the whole guard, and a
+    held 60 passed it — the pack kept discharging blind for as long as the
+    link was down. This is the test the three `soc=None` tests were
+    standing in for."""
+    d = decide_battery(_mode_view("force_discharge", 60.0, reserve=20.0,
+                                  available=False))
+    assert d.intent is BatteryIntent.NORMAL, (
+        "a HELD SOC above the reserve still sold — the sell gate does not "
+        "ask rt.available")
+    assert "last seen" in d.reason
+
+
+def test_force_discharge_sells_on_a_LIVE_soc_above_reserve():
+    d = decide_battery(_mode_view("force_discharge", 60.0, reserve=20.0,
+                                  available=True))
+    assert d.intent is BatteryIntent.FORCE_DISCHARGE
 
 
 def test_force_discharge_sells_when_soc_above_reserve():
@@ -710,6 +765,16 @@ def test_arbitrage_holds_when_soc_unavailable():
     v = _mode_view("auto", None, sched=arb)
     d = decide_battery(v)
     assert d.intent is not BatteryIntent.FORCE_DISCHARGE
+
+
+def test_arbitrage_holds_on_a_HELD_soc(monkeypatch):
+    """(#932) the scheduler path, with the shape production makes."""
+    s = _scheduler()
+    arb = s.evaluate_arbitrage(80.0, 0.45, 0.20)
+    v = _mode_view("auto", 80.0, sched=arb, available=False)
+    d = decide_battery(v)
+    assert d.intent is not BatteryIntent.FORCE_DISCHARGE, (
+        "the arbitrage sell gate took a held SOC as a live one")
 
 
 # ── #5: LIMIT_DISCHARGE splits the home budget across the fleet ──────────

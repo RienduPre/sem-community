@@ -29,13 +29,19 @@ whole intent (the pre-v1.6.3 toggle collection is retired; see the
 [archived legacy reference](archive/EV_CHARGING_LOGIC_LEGACY.md) if you're
 migrating old automations):
 
-| Mode | Grid use | What it does |
-|---|---|---|
-| **Solar only** | Never, unless *you* set a floor | Pure surplus charging; the home battery may assist above the Buffer SoC (Solar Gate permitting). Idles at night. |
-| **Solar + cheapest hours** | Only in cheap tariff windows | Surplus by day; grid only when the dynamic price is cheap. Hidden without a price source. |
-| **Min + Solar** *(default)* | Up to the Min guarantee | Guarantees *At least X kWh* by the *Charge by* deadline (night top-up when needed); solar adds up to Max on top. |
-| **Always (max)** | Whatever it takes | Charge at maximum immediately. Explicit override — ignores solar, tariff and night logic. |
-| **Off** | Never | No charging; SEM keeps the charger idle. |
+| Mode | Grid use | Home battery | What it does |
+|---|---|---|---|
+| **Solar only** | Never, unless *you* set a floor | **Never discharges for the car** | Pure surplus charging. Idles at night. |
+| **Solar + battery** *(2.1, #885/#878)* | Never, unless *you* set a floor | Assists down to **max(Buffer SoC, tonight's computed floor)** — above the Solar Gate always, and below it when tonight's forecast budget is positive | Surplus plus the pack — the charger twin of a load's "Solar + battery" mode, restoring the legacy `pv` / `self_consumption` split. Idles at night. Works from day one; the forecast-led bypass and the dynamic floor wake once the battery learner completes (the card says so while it's still gathering). |
+| **Solar + cheapest hours** | Only in cheap tariff windows | Never | Surplus by day; grid only when the dynamic price is cheap. Always listed — shown disabled with the reason when no dynamic tariff is configured. |
+| **Min + Solar** *(default)* | Up to the Min guarantee | Assists above the Buffer SoC | Guarantees *At least X kWh* by the *Charge by* deadline (night top-up when needed); solar adds up to Max on top. |
+| **Always (max)** | Whatever it takes | — | Charge at maximum immediately. Explicit override — ignores solar, tariff and night logic. |
+| **Off** | Never | — | No charging; SEM keeps the charger idle. |
+
+> Earlier versions of this table said Solar only's battery "may assist" — it
+> never did. `solar_only` only *redirects* power that would have charged the
+> pack; the discharge assist lived in Min + Solar alone, which is exactly the
+> gap **Solar + battery** closes.
 
 The per-mode detail lives in the same card: **Charge target** (Min / Max kWh),
 **Charge by** deadline, **Min / Max current**, and **Set as default**.
@@ -50,6 +56,19 @@ The per-mode detail lives in the same card: **Charge target** (Min / Max kWh),
 > night-capable modes do follow the global, since for them the overnight top-up is the
 > mode's whole purpose.
 
+> **Charge mode Off is hands-off (#898).** SEM sends nothing to a charger in
+> *Off* — no stop, no park-on-disconnect, no failsafe. A session you start
+> elsewhere in Home Assistant runs untouched; switching to Off while SEM's
+> own charge runs ends that charge once. The VPP export pause stops the car
+> with its own explicit stop, not by borrowing Off.
+>
+> **`solar_only` and the battery "redirect" (#899).** Part of the measured
+> battery charge may be credited to the car on the assumption that the
+> inverter yields it. A commanded pack (forced / scheduled charge) is never
+> credited, and the redirect counts only while the meter agrees: three
+> cycles of sustained grid import with a redirect in the budget veto it for
+> the rest of the plug-in.
+>
 > **Turning overnight charging off — set the floor to 0 (#680).** The *At least* floor is
 > the single control for night charging: SEM tops up the gap between surplus and that
 > target, so **a floor of 0 means no overnight charge** (in any mode). There is **no
@@ -83,6 +102,14 @@ a gentle 6 A offer until a fussy car latches) and the full-car backoff
 (#610: after 3 declined ladders, 20 min quiet) → the **reconciler** issues
 the minimum hardware commands to converge and then leaves the charger alone.
 The strategy sensor narrates every step.
+
+Before any of that, the **sensor reader** cleans the charger's power reading:
+a median-of-3 absorbs the one-read UDP blip some boxes produce, and (#910) a
+read that collapses below 5 % of the last accepted value *while the charger's
+own status still says charging* is held at that value for at most two cycles
+and marked `ev_power_held` — a report-timing blink, not a measurement. The
+hold lives on the status: the moment the box says it stopped, the next read
+passes as is, and a charger without a status sensor keeps the median alone.
 
 **Where the ceiling comes from.** Two things, and the lower one wins:
 
@@ -135,21 +162,32 @@ idle while the EV grid-charged.
 |---|---|
 | **Battery buffer SoC** (e.g. 70 %) | Floor of the assist band — the battery only assists the EV above this, and discharge into the car stops here (self-consumption reserve). |
 | **Battery assist min surplus** (Solar Gate, #537) | Real solar surplus (solar − home) required before the battery assists, in every mode. |
-| **Battery assist max power** | Discharge cap when assisting. |
+| **Battery assist max power** | Discharge cap when assisting. **One allowance for the whole house** (#885) — cars and battery-assisted loads spend it between them, in device-list order, not one budget each. |
+| **Battery may assist this charger** (per charger, 2.1 / #885) | Excludes a single charger from the pack. Defaults on, inherits the install-wide battery permission, and can only *restrict* — it never overrides a battery you have declared off-limits to cars. Lets a two-charger install say "the garage may, the guest charger may not". |
 
 > The separate *Battery assist floor SoC* knob was removed (folded into the
 > Buffer SoC) — see CHANGELOG v1.7.3-beta.59.
 
-Active in **Solar only** and **Min + Solar** (gated by the Solar Gate + Buffer SoC in both). Not in **Always (max)** — that mode takes everything from anywhere by definition. Pure amps — SEM issues no battery command; the inverter's own self-consumption does the discharge.
+> **Who spends it first (#885).** The pack is one resource, so the one device
+> list decides the order: a load you dragged above a charger has its share set
+> aside before that charger is offered anything, and the charger runs on solar
+> and grid from there. Loads set to *Finish overnight from → Battery* are the
+> exception — they draw *below* the Buffer SoC, a band the car's assist floor
+> forbids it from entering, so they reserve nothing against a car and a car
+> never eats their overnight window. See
+> [LOAD_PRIORITY.md](LOAD_PRIORITY.md#spending-the-battery--and-the-sun--follows-the-same-list-too-21-885).
+
+Active in **Solar + battery** and **Min + Solar** (gated by the Solar Gate + Buffer SoC in both — *not* Solar only, which never discharges the pack for the car). Not in **Always (max)** — that mode takes everything from anywhere by definition. Pure amps — SEM issues no battery command; the inverter's own self-consumption does the discharge.
 
 ### Cheapest hours (tariff-aware charging)
 
-The cheapest-hours behaviour (built into the **Solar + cheapest hours** mode, and available to *Min + Solar* via the per-charger *Cheapest hours* option) changes behaviour in **three** places — not just at night:
+The cheapest-hours behaviour (built into the **Solar + cheapest hours** mode, and available to *Min + Solar* via the per-charger *Cheapest hours* option) changes behaviour in **four** places — not just at night:
 
 | Time | Charging Mode | What the cheapest-hours behaviour does |
 |---|---|---|
 | Night | tariff-aware modes | Waits for the [energy plan's](ENERGY_PLANNER.md) charge block — the cheapest hours that also fit under your peak limit and priority order (subject to Min reachability) |
 | Daytime | Min + Solar | **Drops the Min grid guarantee on EXPENSIVE / VERY_EXPENSIVE hours.** Falls back to surplus-only; resumes on price drop or sufficient solar |
+| Daytime | Solar + cheapest hours | **Tops the Min floor up from grid on CHEAP / VERY_CHEAP / NEGATIVE hours** (#856) — the same shared top-up seam as the night window (plan gate, deadline floor, peak-managed rate). Solar surplus wins when it offers more. A static tariff (no live price level) never triggers it. |
 | Daytime | Solar only | No effect (never uses grid anyway) |
 | Anytime | Always (max) / Off | No effect (explicit override) |
 
@@ -182,7 +220,13 @@ Every 10 s during the night window, for each charger:
                                           so a missing plan never costs you the car.
                                           The card says "reactive — no plan yet".
 
-6. Apply current = max(deadline_amps, gentle_ramp_amps).
+6. Apply current = max(deadline_amps, gentle_ramp_amps). When tonight's plan
+   places the charge in a block, the block's watts become amps by the
+   charger's **learned W/A ladder** (#904) — the largest setpoint whose
+   predicted draw fits the block — never by dividing by a single bucket's
+   W/A, which on a car that tapers at high setpoints asked 14 A for a 5.3 kW
+   block. A limit lowering the current (slot guard, shed) is written in the
+   same cycle (#905); a night verdict is honoured through a blind cycle (#907).
    If shared peak budget exceeded (multi-charger), throttle proportionally (#274/H1).
 ```
 
@@ -268,7 +312,7 @@ Each charger has its own daily energy bucket (`daily_ev` for that charger). The 
 | Daily target counter shows yesterday's number into the morning | Working as intended — bucket only resets at *Charge by* time | `sensor.sem_charger_*_daily_energy`. Pre-#280 reset at sunrise; now at deadline to prevent double-charge race. Note: the FLEET total (`sensor.sem_daily_ev_energy`) behaves this way only while all chargers share one deadline — with differing deadlines it resets at midnight (#724) |
 | EV plugged in, SEM says *"Charging active"*, but real draw is ~0 W with `commanded_current > 0` | **Fixed in #446 (v1.7.1-beta.16+).** Pre-#446 if you had `ev_target_type="soc"` saved without a vehicle SOC sensor, SEM substituted an estimated SOC into the kWh budget which could go to 0 and idle the charger. The v10 → v11 migration auto-resets these to `"kwh"` on first restart after upgrade. If you're seeing this on an OLDER version, manually set `ev_target_type` back to `"kwh"` in the Configuration tab, or upgrade. | Configuration tab → EV chargers → Target type (the SOC option is now disabled when no vehicle SOC sensor is configured) |
 | Heat pump section in dashboard says "No heat pump configured" even though `heat_pump_relay1_entity` / `heat_pump_relay2_entity` are filled | **v1.7.1-beta.17+ exposes the diagnostic surface.** Check `sensor.sem_heat_pump_registration_status` — its state + attributes tell you which of the six possible failure modes applies (`partial_sg_ready_only_relay1`, `entity_missing`, `unavailable`, etc.). When a configured relay entity stays `unavailable` for 5+ minutes a Repair issue files at **Settings → System → Repairs** naming the specific entity. For users wiring SG-Ready via Nibe Modbus rather than physical relays, see "Heat pump — two valid wiring paths" below. | Configuration tab → Heat pump section → status sensor; Settings → System → Repairs |
-| Strategy sensor says *"full-car backoff — car declined N start ladders; next offer in X min"* | **Working as intended (#610).** The car is plugged in with surplus available, but its BMS declined several complete start-offer ladders (gentle 6 A start, auto-raised to ~10 A, held 90 s) without drawing — typically a full battery. Instead of re-offering every few minutes all afternoon, SEM waits ~20 min between offers. The backoff ends instantly when the car draws (e.g. after cabin preconditioning frees headroom), when you unplug/re-plug, or when you change the charge mode. | `sensor.sem_charging_strategy` reason text; nothing to configure |
+| Strategy sensor says *"start backoff — car declined N start ladders; next offer in X min"* | **Working as intended (#610).** The car is plugged in with an offer available, but it declined several complete start-offer ladders (gentle 6 A start, auto-raised to ~10 A, held 90 s) without drawing. Instead of re-offering every few minutes all afternoon, SEM waits ~20 min between offers, and says how much it is withholding meanwhile. SEM cannot make a car accept — check the car's own charge limit and departure timer, and the charger app (a Wallbox in Eco-Smart/Scheduled mode holds its own contactor). The backoff ends instantly when the car draws (e.g. after cabin preconditioning frees headroom), when you unplug/re-plug, or when you change the charge mode. Before 2.1.0-beta.30 this line read *"full-car backoff"* and said "typically a full battery" — SEM has no instrument for that and no longer claims it (#983). | `sensor.sem_charging_strategy` reason text; nothing to configure |
 
 ---
 
@@ -313,6 +357,8 @@ Some HEMS tools bundle vendor-specific Modbus templates that write directly to i
 ---
 
 ## Phase switching — 1↔3‑phase, observed, manual and automatic (#804)
+
+> **2.1: off by default.** Real-world testing found the shipped model harmful on two brands (a Wattpilot latched paused after every switch; a Zaptec has no phase command — it switches on a current threshold). Phase switching is dormant until you turn on **Phase switching** for the charger (Configuration → EV chargers). The rework — a per-brand start signal, the threshold model, a per-phase current guard — is the 2.1 arc; everything below describes the behaviour once enabled.
 
 Some wallboxes can switch between 1‑ and 3‑phase charging (go‑e's `psm`
 select, KEBA X‑series via Modbus, openWB's flag). SEM supports them in

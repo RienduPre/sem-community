@@ -77,16 +77,18 @@ def _make_coord(cid: str, draw_w: float, *, observer: bool = False):
 
 
 class TestTheGateStillPolices:
-    def test_a_drawing_off_charger_is_stopped(self):
-        """Mode `off`, box auto-started at 3 kW during another charger's
-        night window: the police pass must open the contactor."""
+    def test_a_drawing_off_charger_is_left_alone(self):
+        """(#898) Mode `off`, box drawing 3 kW during another charger's
+        night window: Off is hands-off — the draw is not SEM's to stop.
+        (Pre-#898 the police pass opened the contactor here, which is how a
+        session the user started elsewhere got killed within a cycle.)"""
         coord, ev_dev, adapter, power = _make_coord("b", 3000.0)
 
         asyncio.run(coord._police_opted_out_charger(
             "b", ev_dev, {"id": "b", "charge_mode": "off"}, power,
         ))
 
-        assert adapter.disables == 1
+        assert adapter.disables == 0
 
     def test_a_rogue_start_on_solar_only_is_stopped(self):
         """`solar_only` at night has no surplus to wait for — a fresh
@@ -129,13 +131,15 @@ class TestTheGateStillPolices:
 
     def test_a_charger_without_its_own_reading_uses_the_fleet_fallback(self):
         """Single-charger setups have no per-charger dict — the fleet
-        sum IS this charger's draw (build_view's own resolution)."""
+        sum IS this charger's draw (build_view's own resolution). Proven on
+        the solar_only row, whose rogue-start DISABLE still fires; an off
+        charger is hands-off since #898 and would show nothing."""
         coord, ev_dev, adapter, power = _make_coord("b", 0.0)
         power.ev_power_per_charger = {}
-        power.ev_power = 3000.0
+        power.ev_power = 4100.0
 
         asyncio.run(coord._police_opted_out_charger(
-            "b", ev_dev, {"id": "b", "charge_mode": "off"}, power,
+            "b", ev_dev, {"id": "b", "charge_mode": "solar_only"}, power,
         ))
 
         assert adapter.disables == 1
@@ -146,7 +150,28 @@ class TestThePoliceObserveToo:
     the same seam. Observing a rogue draw must report it, never open the
     contactor — on the shared rig a real KEBA is on the other end."""
 
-    def test_a_rogue_draw_is_not_stopped_while_observing(self):
+    def test_a_rogue_draw_arms_the_seam_instead_of_opening_the_contactor(self):
+        """The guarantee moved DOWN a layer (#855, 30.08.2026); it did not
+        weaken.
+
+        This used to assert ``adapter.disables == 0`` — the police pass must
+        not reach the adapter at all. That measured the old cut, which sat
+        above the adapter and was therefore blind to what the adapter would
+        actually have sent: #854's "stop" was a current write + an energy
+        target + an ENABLE, and only the word "IDLE" ever reached the
+        surface.
+
+        Since #855 the single hardware seam is ``ControllableDevice.send``,
+        below the adapter. So the brand path runs — that is how
+        ``withheld_commands`` can name the exact service and payload — and
+        the safety property is that the device is ARMED before it is
+        commanded. A real device with ``observer_mode`` set refuses the send
+        and records it; nothing reaches the box.
+
+        Measured here rather than assumed: the rigs are wired to a real
+        KEBA, and this is the assertion that stands between a rogue-draw
+        police pass and somebody's car.
+        """
         coord, ev_dev, adapter, power = _make_coord(
             "b", 3000.0, observer=True,
         )
@@ -155,10 +180,11 @@ class TestThePoliceObserveToo:
             "b", ev_dev, {"id": "b", "charge_mode": "off"}, power,
         ))
 
-        assert adapter.disables == 0, (
-            "the police pass wrote to hardware while observing"
+        assert getattr(ev_dev, "observer_mode", False) is True, (
+            "the police pass reached the adapter with the seam unarmed — "
+            "on a rig that believes it is only watching, that is a real "
+            "command to a real charger"
         )
-        assert adapter.currents == []
 
     def test_the_would_stop_still_reaches_the_surface(self):
         coord, ev_dev, adapter, power = _make_coord(
@@ -180,7 +206,9 @@ class TestThePoliceObserveToo:
 
         would = controller.observer_decisions["ev:b"]
         assert would["kind"] == "charger"
-        assert would["action"] in ("disable", "idle")
+        # (#898) an off charger is RELEASED — the surface says so, and
+        # says it would send nothing (0 W), never a stop.
+        assert would["action"] == "release"
         assert would["power_w"] == 0.0
 
 

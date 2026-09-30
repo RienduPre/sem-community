@@ -75,6 +75,12 @@ class SchedulerDecision:
     STOP_FORCE_DISCHARGE, whereas the night scheduler's same-named states stop
     a force-CHARGE. Without this the stop relied on a Huawei-only coincidence
     (its stop-charge service also clears a forcible discharge)."""
+    from_forecast_spend: bool = False
+    """(#778) True on verdicts from ``evaluate_forecast_sell`` — the
+    forecast-led spend trigger. decide_battery then checks the SPEND plan
+    gate (``view.forecast_sell``) and the SPEND master switch
+    (``forecast_spending_enabled``) instead of arbitrage's; everything
+    else (floors, budget cap, permissions, fleet split) is shared."""
     price_forced: bool = False
     """(#638 one-gate C4) True only on the negative-price override —
     being PAID to consume is a reactive price gate, so decide_battery
@@ -87,6 +93,23 @@ class SchedulerDecision:
     def should_charge(self) -> bool:
         """Whether the scheduler decided to charge."""
         return self.state in (SchedulerState.SCHEDULED, SchedulerState.WAITING_FOR_SLOT, SchedulerState.CHARGING)
+
+
+def _num(value, default: float) -> float:
+    """A config number, or its documented default when the key holds null.
+
+    ``None`` is an absence, not a zero: ``dict.get(key, default)`` hands the
+    default back only when the key is MISSING, and an options file that
+    carries ``"battery_arbitrage_reserve_soc": null`` is how one install
+    reached the scheduler with ``None`` (#932). An explicit 0 is a choice
+    and is honoured.
+    """
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 @dataclass
@@ -211,12 +234,19 @@ class SchedulerConfig:
             peak_limit_w=0.0 if config.get(
                 "peak_limit_unlimited", False
             ) else float(config.get("target_peak_limit", 0.0) or 0.0) * 1000.0,
-            max_grid_import_w=config.get("battery_max_grid_import_w", 0.0),
+            # (#932 audit / the spendable_budget lesson) ``config.get(key,
+            # default)`` returns None when the key EXISTS holding null — how
+            # a hand-edited or migrated options file looks — and None then
+            # reached ``current_soc <= cfg.arbitrage_reserve_soc`` as a
+            # TypeError, swallowed by the cycle's blanket except: arbitrage
+            # silently off, no Repair. An explicit 0 stays a choice; None is
+            # an absence and takes the documented default.
+            max_grid_import_w=_num(config.get("battery_max_grid_import_w"), 0.0),
             force_charge_on_negative_price=config.get("battery_force_charge_negative_price", True),
             arbitrage_enabled=config.get("battery_grid_arbitrage_enabled", False),
-            arbitrage_min_export_price=config.get("battery_arbitrage_min_export_price", 0.20),
-            arbitrage_reserve_soc=config.get("battery_arbitrage_reserve_soc", 50.0),
-            max_discharge_power_w=config.get("battery_max_discharge_power", 5000.0),
+            arbitrage_min_export_price=_num(config.get("battery_arbitrage_min_export_price"), 0.20),
+            arbitrage_reserve_soc=_num(config.get("battery_arbitrage_reserve_soc"), 50.0),
+            max_discharge_power_w=_num(config.get("battery_max_discharge_power"), 5000.0),
             # #533: cap the arbitrage sell power. Explicit key wins; else fall
             # back to the grid export limit (max_export_power); 0 = uncapped.
             arbitrage_max_export_w=float(
@@ -466,7 +496,12 @@ class BatteryChargeScheduler:
                 state=SchedulerState.NOT_NEEDED,
                 target_soc=target_soc,
                 deficit_kwh=deficit_kwh,
-                reason=f"Already at target SOC ({current_soc:.0f}% >= {target_soc:.0f}%)",
+                # (#983) The gate carries a 1 % tolerance the sentence did
+                # not: at 79 % against an 80 % target it printed "79% >= 80%",
+                # false in its own operands. State the reading and the target,
+                # and the slack that made them equal.
+                reason=(f"Already at target SOC ({current_soc:.0f}% of "
+                        f"{target_soc:.0f}%, within the 1% tolerance)"),
                 evaluated_at=now,
             )
             return self._decision

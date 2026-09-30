@@ -195,23 +195,26 @@ class TestHelpers:
 
 
 class TestOffMode:
-    """`off` always → DISABLE. Mirrors #315 fix at the strategy level."""
+    """`off` always → RELEASE (#898): hands-off, SEM sends nothing. The
+    reconciler ends SEM's OWN running session once on the way in; a session
+    the user started elsewhere is never touched (it used to be DISABLE,
+    re-asserted on every rogue start — #315 applied to the user's session)."""
 
     def test_off_disconnected(self):
         d = decide(_view(mode="off", connected=False))
-        assert d.intent is ChargerIntent.DISABLE
+        assert d.intent is ChargerIntent.RELEASE
 
     def test_off_connected_no_solar(self):
         d = decide(_view(mode="off", solar_w=0))
-        assert d.intent is ChargerIntent.DISABLE
+        assert d.intent is ChargerIntent.RELEASE
 
     def test_off_connected_high_solar(self):
         d = decide(_view(mode="off", solar_w=10000))
-        assert d.intent is ChargerIntent.DISABLE
+        assert d.intent is ChargerIntent.RELEASE
 
     def test_off_at_night(self):
         d = decide(_view(mode="off", is_night=True))
-        assert d.intent is ChargerIntent.DISABLE
+        assert d.intent is ChargerIntent.RELEASE
 
 
 class TestAlwaysMaxMode:
@@ -573,11 +576,14 @@ class TestSolarPlusCheapMode:
 
 
 class TestUnknownMode:
-    """Unknown mode → fail safe to OFF (loud)."""
+    """Unknown mode → fail safe to OFF (loud). Since #898 OFF is hands-off:
+    a misconfigured charger is one SEM does not command, rather than one it
+    stops."""
 
     def test_unknown_mode_falls_back_to_off(self):
         d = decide(_view(mode="some_typo_mode"))
-        assert d.intent is ChargerIntent.DISABLE
+        assert d.intent is ChargerIntent.RELEASE
+        assert d.mode == "off"
 
 
 class TestPurity:
@@ -621,12 +627,20 @@ class TestIdleBridgeable:
     def test_sun_gone_is_structural(self):
         ok, why = _idle_bridgeable(_view(solar_w=500))  # < 1000 min_solar
         assert ok is False
-        assert "sun gone" in why
+        assert "below the solar minimum" in why
 
-    def test_not_cheap_tariff_is_structural(self):
+    def test_not_cheap_tariff_is_structural_only_for_tariff_modes(self):
+        """(#893) supersedes the blanket clause this test used to pin. A
+        not-cheap window is structural ONLY for the modes that price their
+        grid use — for a solar mode, a cloud dip's hold is funded by the
+        user's own surplus and pack, and the old blanket rule hard-stopped
+        the session with every cloud whenever electricity wasn't cheap
+        (DigitalOptics, most tariffs = most of the day)."""
+        ok, why = _idle_bridgeable(_view(
+            "solar_plus_cheap", solar_w=5000, tariff_level="normal"))
+        assert ok is False and "not-cheap tariff" in why
         ok, why = _idle_bridgeable(_view(solar_w=5000, tariff_level="normal"))
-        assert ok is False
-        assert "not-cheap tariff" in why
+        assert ok is True, f"a solar-mode cloud dip went structural: {why}"
 
     def test_no_assist_no_surplus_is_structural(self):
         # solar 3000, home 2500 → real surplus 500 < 4140 min charge; battery
@@ -674,3 +688,70 @@ class TestIdleBridgeable:
                          solar_w=8000, home_w=500))
         assert d.intent is ChargerIntent.IDLE
         assert d.bridgeable is False
+
+
+class TestSolarPlusCheapDaytimeCheapHours:
+    """#856 (hoyte): "Solar + cheapest hours" honoured cheap hours at NIGHT
+    only. By day it fell back to solar-only regardless of price, so a
+    near-zero or negative daytime hour was ignored and the car charged only
+    in `always_max`. The mode's name is a promise about PRICE, not about the
+    clock. Daytime cheap hours now top up the Min floor from grid exactly as
+    the night window does — same plan gate, same peak-managed rate, same
+    "At least" guarantee — and solar surplus still wins when it offers more.
+    """
+
+    def _cheap_day(self, **kw):
+        base = dict(mode="solar_plus_cheap", is_night=False,
+                    tariff_level="very_cheap", target_kwh=6.0,
+                    solar_w=0.0, home_w=500, battery_soc=95)
+        base.update(kw)
+        return _view(**base)
+
+    def test_cheap_daytime_hour_tops_up_from_grid(self):
+        d = decide(self._cheap_day())
+        assert d.intent is ChargerIntent.CHARGE_AT_AMPS
+        assert d.commanded_amps >= 6, "no solar at all, yet it charges — grid"
+        assert "cheap" in d.reason.lower()
+        assert "night" not in d.reason.lower(), "it is day, and the reason must say so"
+
+    def test_negative_price_counts_as_cheap(self):
+        d = decide(self._cheap_day(tariff_level="negative"))
+        assert d.intent is ChargerIntent.CHARGE_AT_AMPS
+
+    def test_static_or_unknown_tariff_never_grid_charges_by_day(self):
+        """`tariff_level None` means no dynamic signal — the mode is hidden
+        without a dynamic tariff, but a stale None must not read as cheap."""
+        d = decide(self._cheap_day(tariff_level=None))
+        assert d.intent is ChargerIntent.IDLE, "no solar, no price signal → nothing"
+
+    def test_normal_daytime_stays_solar_only(self):
+        d = decide(self._cheap_day(tariff_level="normal"))
+        assert d.intent is ChargerIntent.IDLE
+
+    def test_solar_surplus_wins_when_it_offers_more(self):
+        """A cheap hour must never DOWNGRADE a strong solar offer to the
+        grid floor rate."""
+        d = decide(self._cheap_day(solar_w=9000, home_w=500))
+        assert d.intent is ChargerIntent.CHARGE_AT_AMPS
+        assert d.commanded_amps > 6
+
+    def test_no_min_target_means_nothing_to_fill_and_says_so(self):
+        """hoyte's likely state: 'At least 0 kWh'. The cheap window has no
+        floor to fill; the reason must tell the user which knob does."""
+        d = decide(self._cheap_day(target_kwh=0.0))
+        assert d.intent is ChargerIntent.IDLE
+        assert "min" in d.reason.lower() or "at least" in d.reason.lower()
+
+    def test_the_plan_gate_holds_by_day_too(self):
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            PlanVerdict,
+        )
+        d = decide(self._cheap_day(
+            plan=PlanVerdict(hold=True, reason="planned for 13:00", until=None)))
+        assert d.intent is ChargerIntent.IDLE
+        assert "waiting for the planned window" in d.reason
+
+    def test_expensive_daytime_still_pauses(self):
+        d = decide(self._cheap_day(tariff_level="expensive"))
+        assert d.intent is ChargerIntent.IDLE
+        assert "pausing grid imports" in d.reason

@@ -6,7 +6,12 @@ DOMAIN: Final = "solar_energy_management"
 # ============================================
 # UPDATE & DELTA THRESHOLDS
 # ============================================
-DEFAULT_OBSERVER_MODE: Final = False  # When True, skip all hardware control (read-only monitoring)
+DEFAULT_OBSERVER_MODE: Final = True  # A new install OBSERVES first — it
+# shows what it WOULD do and waits for one deliberate switch before it
+# commands anything. Was False until 29.08.2026, when a fresh install on
+# a rig wired to a real KEBA became a second controller nobody chose and
+# fed a car ~5 kWh in Off mode. An install default should never be the
+# thing that starts touching someone's hardware.
 DEFAULT_UPDATE_INTERVAL: Final = 10  # seconds - 10 seconds for highly accurate energy integration
 # Missing legacy config must not silently require an inverter/load sensor lane.
 # Grid-only remains fail-closed for the installation's upstream phase limit and
@@ -58,7 +63,47 @@ DEFAULT_DEVICE_RATED_POWER: Final = 1000
 DEFAULT_BATTERY_DISCHARGE_PROTECTION_ENABLED: Final = True  # Enable discharge protection during night charging
 DEFAULT_BATTERY_MAX_DISCHARGE_POWER: Final = 5000  # Watts - Maximum allowed discharge (caps 1:1 home consumption matching)
 DEFAULT_DISCHARGE_LIMIT_UPDATE_INTERVAL: Final = 60  # Seconds - How often to update discharge limits
-DEFAULT_BATTERY_DISCHARGE_CONTROL_ENTITY: Final = ""  # Entity ID for battery discharge control (e.g., number.batteries_maximale_entladeleistung)
+DEFAULT_BATTERY_DISCHARGE_CONTROL_ENTITY: Final = ""
+# (#902) Plausibility gates on battery INGESTION. A modbus source coming back
+# from a dropout can publish one garbage sample (HA-PROD 02.09.2026: SOC 0 %
+# and 22 806 824 W out of a 93 %, 5 kW LUNA, for one cycle). A value no
+# battery can produce is treated exactly like a sensor that did not answer —
+# the existing dark-read path — instead of steering a cycle.
+BATTERY_SOC_MAX_STEP_PCT: Final = 25.0   # pp between two reads; a LUNA moves single digits per MINUTE
+BATTERY_SOC_STEP_CONFIRM_READS: Final = 3  # a rejected level that persists this many reads IS the truth
+BATTERY_POWER_PLAUSIBLE_MAX_W: Final = 100_000.0  # no home battery; 22.8 MW was 2 000x the hardware
+
+# (#988) How much energy must be leaving the house with no source other than
+# the sun before a solar reading of 0 W is refused as a measurement. The
+# Huawei feed on the reference install drops ~273 times a day and only some
+# of those arrive as `unavailable`; 102 arrive as a hard 0 W, which is also
+# what night looks like. Physics tells the two apart — a battery charging
+# 1 267 W with no import and no discharge (PROD, 19.09 08:24) cannot be
+# happening in the dark — and this is the margin that keeps ordinary
+# rounding and meter skew out of it.
+SOLAR_ZERO_REFUTED_W: Final = 200.0
+# A SEM measurement entity keeps its last good value this long while its
+# source is dark, marked ``stale_s``, before it goes unavailable. PROD's
+# Huawei modbus blinks ~137x/day (p50 29 s, p99 114 s; 238 s the longest
+# seen 03.09) — since #818/#875 every blink blanked the dashboard. The
+# coordinator's own honesty (inputs_degraded, *_unavailable) is untouched;
+# this is the SURFACE holding, and saying so. (Guido, 03.09: "it was very
+# stable before.")
+SENSOR_DARK_READ_GRACE_S: Final = 180
+
+# (#910) A one-report charger power blink (KEBA: 0.13 kW at 10 A while the
+# box's own status still said charging) is a dark read, not a measurement —
+# copied into ev_power it becomes a phantom 5 kW house spike for every
+# consumer of the balance. The reader holds the last accepted value while the
+# charger's status says charging and the read drops below RATIO of it, for at
+# most HOLD_CYCLES cycles: two, because the median-of-3 lags one cycle behind
+# a two-read blink. A real stop flips the status and ends the hold at once;
+# the hold lives on the status, never on the clock. MIN_W keeps the start
+# ladder (a car negotiating at 6 A) out of it.
+EV_POWER_BLINK_RATIO: Final = 0.05
+EV_POWER_BLINK_MIN_W: Final = 1000.0
+EV_POWER_BLINK_HOLD_CYCLES: Final = 2
+  # Entity ID for battery discharge control (e.g., number.batteries_maximale_entladeleistung)
 
 # EV Charger Control Configuration
 DEFAULT_EV_CHARGER_SERVICE: Final = ""  # Service for EV charger current control (e.g., "keba.set_current" for KEBA chargers without number entity)
@@ -132,6 +177,11 @@ DEFAULT_MIN_SOLAR_POWER: Final = 1000  # Watts
 DEFAULT_MIN_EXCESS_POWER: Final = 500  # Watts
 DEFAULT_BATTERY_ASSIST_MAX_POWER: Final = 4500  # Watts — max battery discharge for EV assist
 DEFAULT_BATTERY_ASSIST_MIN_SURPLUS: Final = 1200  # Watts — solar surplus required before battery assists the EV (below this, battery is off-limits to the car)
+# (arc #921) the export guard's two holds, the morning EV window and its drain floor
+DEFAULT_EXPORT_GUARD_ENGAGE_S: Final = 120      # seconds a NEGATIVE level must hold before the cut
+DEFAULT_EXPORT_GUARD_RELEASE_S: Final = 300     # seconds an OPEN meter must hold before the release
+DEFAULT_EV_MORNING_WINDOW_HOURS: Final = 2.0    # hours before departure the pack may feed the car
+DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC: Final = 50  # % the morning window may drain the pack to
 DEFAULT_BATTERY_CAPACITY_KWH: Final = 15  # kWh — total usable battery capacity
 
 # ============================================
@@ -252,8 +302,11 @@ PEAK_LIMIT_STEP_KW: Final = 0.1
 DEFAULT_PEAK_LIMIT_UNLIMITED: Final = False
 
 # Load management settings
-DEFAULT_LOAD_MANAGEMENT_ENABLED: Final = True
-DEFAULT_CRITICAL_DEVICE_PROTECTION: Final = True
+# (#897) OFF on a fresh install. The shedder switches off house circuits; a
+# first run must not arm it unasked (forum #30 — a Span panel shed circuit
+# by circuit at a 5 kW ceiling nobody chose). Existing installs carry their
+# own value: the install flow has seeded the key since v1.0.0.
+DEFAULT_LOAD_MANAGEMENT_ENABLED: Final = False
 DEFAULT_LOAD_SHEDDING_DELAY: Final = 5  # seconds - Delay before shedding
 DEFAULT_LOAD_RESTORE_DELAY: Final = 30  # seconds - Delay before restoring
 DEFAULT_MIN_ON_DURATION: Final = 300  # seconds - Minimum time device stays on (anti-flicker)
@@ -313,3 +366,22 @@ ENTITY_SOLAR_POWER: Final = "sensor.sem_solar_power"
 # HA state constants (avoid magic strings)
 STATE_UNKNOWN: Final = "unknown"
 STATE_UNAVAILABLE: Final = "unavailable"
+
+# (#979) Home Assistant's recorder refuses an entity whose attributes exceed
+# this — ``homeassistant.components.recorder.db_schema.MAX_STATE_ATTRS_BYTES``.
+# It is all-or-nothing: ONE oversize attribute means the entity's whole
+# attribute set is never stored, so its history is empty forever and the log
+# carries "State attributes for X exceed maximum size of 16384 bytes" every
+# cycle. RienduPre (#979, 2.1.0-beta.29) hit it on ``diag_charger_control``,
+# which hung the full #814 detection report — a payload that grows with the
+# install — on a channel with a hard cap nothing in SEM ever checked.
+RECORDER_MAX_STATE_ATTRS_BYTES: Final = 16384
+# HA lays its own attributes over ``extra_state_attributes`` before the
+# recorder measures the set — ``friendly_name``, ``unit_of_measurement``,
+# ``device_class``, ``state_class``, ``icon`` — and excludes only
+# ``attribution``/``restored``/``supported_features``. The budget SEM
+# measures against is the cap minus room for those: 15 000 bytes, the
+# figure the energy-plan sensor has used since #581 (the challenge record
+# refuted a 90 % rule that had moved it by 255 bytes).
+RECORDER_ATTR_HEADROOM_BYTES: Final = 1384
+RECORDER_ATTR_BUDGET_BYTES: Final = RECORDER_MAX_STATE_ATTRS_BYTES - RECORDER_ATTR_HEADROOM_BYTES

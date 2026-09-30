@@ -107,6 +107,17 @@ def _fake_self(devices=()):
         # (#638 finding #3) when the fleet first came up short, or None.
         _shadow_partial_since=None,
     )
+    # (#924) the ONE feed-in reader every day-slot builder prices with.
+    # Bound to the REAL method so the fake cannot drift from what the
+    # coordinator does — #755's rate reached one call site of four
+    # precisely because a fake could disagree with production silently.
+    fake._configured_export_rate = (
+        lambda: SEMCoordinator._configured_export_rate(fake))
+    # (#846) per-setpoint sizing — the fake keeps modelling the no-memo
+    # case: amps × the nameplate W/A above, same as a coordinator whose
+    # learner has never been fed.
+    fake._ev_watts_for_amps = (
+        lambda cid, cfg, amps: float(amps) * fake._ev_watts_per_amp(cid, cfg))
     # The ONE planning-peak accessor (one-gate C1): the fake keeps stubbing
     # the execution authority (_get_peak_limit_w) and the REAL hysteresis
     # math runs on top — the same numbers the old inline ledger block made.
@@ -114,6 +125,13 @@ def _fake_self(devices=()):
         EVControlMixin,
     )
     fake._planning_peak_w = lambda: EVControlMixin._planning_peak_w(fake)
+    # (#820) The day ledger's house profile, bound the same way: the REAL
+    # accessor runs, so the double cannot price an evening differently from
+    # production. No ``_predictor`` on the fake → the flat night estimate,
+    # which is what an untrained install has.
+    fake._day_home_w_at = (
+        lambda now, energy=None: SEMCoordinator._day_home_w_at(
+            fake, now, energy))
     # (15.08) The plan's connection authority, bound the same way: the REAL
     # accessor runs, so the double cannot answer "is this car connected?"
     # differently from production (#660 lens). It reads the debounced map

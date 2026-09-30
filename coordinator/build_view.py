@@ -25,6 +25,42 @@ if TYPE_CHECKING:  # pragma: no cover — type-only
     pass
 
 
+
+def _battery_may_assist_ev(config, charger_cfg=None) -> bool:
+    """(#778/#885) Resolve the EV-assist permission for ONE charger.
+
+    Two levels, ANDed, because they answer different questions:
+
+    * **install** (#778) — may the battery be spent on cars at all?
+      ``battery_mode: off`` means SEM is hands-off that battery entirely.
+      UNSET resolves to True: the battery already assists the car when the
+      #537 surplus gate passes, and defaulting it off would silently remove
+      a working feature.
+    * **per charger** (#885) — may it be spent on *this* one? Guido, 31.08:
+      *"on every individual device there is a setting whether it will charge
+      with battery or not, and the same on the charger — therefore not every
+      charger has to be activated."* Loads have had a per-device opt-in since
+      #620 (``battery_assist_enabled`` / ``battery_eligible_overnight``);
+      chargers had a single fleet-wide switch, so a two-charger install could
+      not say "the garage may, the guest charger may not".
+
+    The per-charger key can only RESTRICT — it never overrides an install
+    that said no. Fail-closed, and it keeps one rule ("both must agree")
+    instead of a precedence table nobody can predict. UNSET inherits the
+    install answer, so nothing changes for anyone who has not asked.
+    """
+    from ..consts.battery_permissions import effective_permissions, may_assist_ev
+
+    mode = (config.get("battery_mode") or "auto")
+    stored = config.get("battery_permissions") or {}
+    if not may_assist_ev(mode, effective_permissions(mode, stored)):
+        return False
+    if isinstance(charger_cfg, Mapping):
+        per_charger = charger_cfg.get("ev_battery_may_assist")
+        if per_charger is not None:
+            return bool(per_charger)
+    return True
+
 def build_charger_view(
     fleet_state: FleetCycleState,
     *,
@@ -38,10 +74,14 @@ def build_charger_view(
     top_up_amps: int = 0,
     plan: PlanVerdict = NO_OPINION,
     solar_committed_w: float = 0.0,
+    assist_committed_w: float = 0.0,
+    peak_committed_w: float = 0.0,
     night_deliverable_kwh: float = float("inf"),
     soc_ceiling_reached: bool = False,
     ev_priority: int = 999,
     hardware_max_a: Optional[float] = None,
+    wpa_table: Optional[Mapping[int, float]] = None,
+    redirect_allowed: bool = True,
 ) -> ChargerView:
     """Construct a ChargerView from a per-cycle FleetCycleState +
     per-charger overrides.
@@ -79,6 +119,12 @@ def build_charger_view(
             the #247 tariff planner, which speaks through the same
             type). Defaults to no opinion, meaning "behave as though no
             planner exists".
+        peak_committed_w: Watts higher-priority chargers have already
+            claimed against this 15-minute peak slot (#864).
+        assist_committed_w: Battery assist already committed this cycle —
+            higher-priority chargers' draws plus any pack watts
+            reserved for Tier-1 loads that outrank this charger
+            in the one device list (#885).
         solar_committed_w: Solar already committed to higher-priority
             chargers in this cycle.
 
@@ -144,21 +190,50 @@ def build_charger_view(
         # 0.0 fallback this cycle? Consumed by ChargeStability, which
         # holds the committed command rather than steering blind.
         inputs_degraded=bool(getattr(power_reading, "inputs_degraded", False)),
+        dark_inputs=tuple(getattr(power_reading, "dark_inputs", ()) or ()),
         # #743 — the curtailment probe's grant rides the same one-place
         # thread as every other fleet input.
         curtailment_grant_w=float(
             getattr(fleet_state, "curtailment_grant_w", 0.0) or 0.0,
         ),
+        # (arc #921) the sink verdicts ride the same one-place thread.
+        sink_verdicts=dict(getattr(fleet_state, "sink_verdicts", None) or {}),
+        # (#955) the house's meter limit rides the same one-place thread
+        export_command=getattr(fleet_state, "export_command", None),
+        export_guard_enabled=bool(getattr(fleet_state, "export_guard_enabled", False)),
+        ev_morning_window_open=bool(getattr(fleet_state, "morning_window_open", False)),
         home_w=float(getattr(power_reading, "home_consumption_power", 0.0) or 0.0),
         battery_charge_w=float(getattr(power_reading, "battery_charge_power", 0.0) or 0.0),
         battery_discharge_w=float(getattr(power_reading, "battery_discharge_power", 0.0) or 0.0),
         battery_soc=float(getattr(power_reading, "battery_soc", 0.0) or 0.0),
+        # (#875) a never-read SOC is not a 0 % pack.
+        battery_soc_known=bool(getattr(power_reading, "battery_soc_known", True)),
         grid_import_w=float(getattr(power_reading, "grid_import_power", 0.0) or 0.0),
         grid_export_w=float(getattr(power_reading, "grid_export_power", 0.0) or 0.0),
+        # (#660/#1003) a balance that did not close is not a house reading.
+        home_residual_clamped_w=float(
+            getattr(power_reading, "home_residual_clamped_w", 0.0) or 0.0),
+        # (#906) unread is not zero — the guard needs to know.
+        grid_import_known=not bool(
+            getattr(power_reading, "grid_power_unavailable", False)),
         is_night=fleet_state.is_night,
         tariff_level=fleet_state.tariff_level,
         # (#747) the peak posture rides the one-place thread.
         peak_state=getattr(fleet_state, "peak_state", "normal"),
+        # (#864) so does the slot-budget allowance.
+        peak_slot_allowed_w=getattr(fleet_state, "peak_slot_allowed_w", None),
+        # (#864/#885) what higher-priority chargers already claimed this
+        # cycle — PER-CHARGER, like its two siblings above. It rode the
+        # frozen ``fleet_state`` until #885: that object is built once,
+        # BEFORE the loop resets the accumulator and runs, so every charger
+        # read the same stale total and the cascade the peak guard depends
+        # on never happened. Two chargers connecting in the same cycle each
+        # saw 0 committed and both claimed the whole slot; a SOLO charger
+        # read its own previous commitment as a rival's and either floored
+        # itself or oscillated. ``test_874_peak_guard_is_fleet_wide``
+        # hand-injects this value into the view, so it proved the clamp
+        # correct and could not see that nothing produced its input.
+        peak_committed_w=float(peak_committed_w),
         auto_start_soc=float(config.get("battery_auto_start_soc", 90)),
         buffer_soc=float(config.get("battery_buffer_soc", 70)),
         priority_soc=float(config.get("battery_priority_soc", 30)),
@@ -170,6 +245,25 @@ def build_charger_view(
         battery_assist_min_surplus_w=float(config.get(
             "battery_assist_min_surplus", 1200,
         )),
+        battery_may_assist_ev=_battery_may_assist_ev(config, charger_cfg),
+        battery_spendable_kwh=float(
+            getattr(fleet_state, "battery_spendable_kwh", 0.0) or 0.0),
+        # (#878) NOT coerced to a float with a 0.0 fallback like its
+        # neighbour: None here means "no budget computed", and 0.0 would be
+        # read as a floor of zero — the one reading that licenses draining
+        # the pack to empty. It stays None all the way to the formula.
+        dynamic_floor_pct=getattr(fleet_state, "dynamic_floor_pct", None),
+        # (#878) what higher-priority chargers already took from the pack
+        # (#885) PER-CHARGER, like ``solar_committed_w`` beside it — not
+        # read off ``fleet_state``. That state is built ONCE per cycle
+        # (frozen, before the loop), so every charger saw the same number
+        # and the running total could never cascade from one charger to
+        # the next: the netting was there but inert. The loop threads the
+        # live accumulator (plus what higher-ranked Tier-1 loads have
+        # reserved) through here instead.
+        assist_committed_w=float(assist_committed_w),
+        forecast_spending_enabled=bool(
+            config.get("forecast_spending_enabled", False)),
         solar_committed_w=float(solar_committed_w),
         forecast_remaining_kwh=fleet_state.forecast_remaining_kwh,
         # The user's "Minimum Solar Power" slider (number entity key
@@ -264,4 +358,6 @@ def build_charger_view(
         night_deliverable_kwh=night_deliverable_kwh,
         soc_ceiling_reached=soc_ceiling_reached,
         ev_priority=ev_priority,
+        wpa_table=dict(wpa_table or {}),
+        redirect_allowed=bool(redirect_allowed),
     )

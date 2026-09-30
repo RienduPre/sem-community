@@ -14,6 +14,9 @@
  */
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
+import { antiCyclePlaceholder, antiCycleBounds } from '../util/load-sections.js';
+import { shedReasonKey } from '../util/shed-reason.js';
+import { importKw, slotStatus } from '../util/peak-slot.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { moveToIndex, regroupChildren, computeDropIndex } from '../util/drag-reorder.js';
 import { semTheme, semDefineCard, semFormatPower } from '../base/sem-shared.js';
@@ -43,7 +46,10 @@ class SEMLoadPriorityCard extends SEMLitBase {
         this.devices = [];
         this.targetPeakLimit = 5.0;
         this.peakLimitUnlimited = false;  // (#716) explicit opt-out, never inferred
-        this.currentPeak = 0;
+        this.currentPeak = 0;            // the BILLED metric: 15-min rolling average
+        this.gridImportKw = null;        // (#909) instantaneous, for contrast
+        this.slotAllowedW = null;        // (#864/#909) what the rest of this slot may average
+        this.slotUsedKwh = null;         // (#864/#909) energy spent in this billing slot
         this.loadManagementStatus = 'normal';
         this._sortable = null;
         this._interacting = false;
@@ -131,6 +137,10 @@ class SEMLoadPriorityCard extends SEMLitBase {
     // ── Static CSS ──
     static get styles() {
         return css`
+            /* (#913 follow-up) a refused service call, in the modal's error voice */
+            .svc-error { margin: 6px 0 8px; padding: 6px 10px; border-radius: 6px;
+                         background: rgba(244, 67, 54, .12); color: #f44336;
+                         font-size: 0.85em; }
             :host { display: block; }
             ha-card {
                 overflow: visible;
@@ -371,6 +381,15 @@ class SEMLoadPriorityCard extends SEMLitBase {
         if (targetPeakEntity)  this.targetPeakLimit      = parseFloat(targetPeakEntity.state)  || 5.0;
         if (targetPeakEntity)  this.peakLimitUnlimited   = targetPeakEntity.attributes?.peak_limit_unlimited || false;
         if (currentPeakEntity) this.currentPeak          = parseFloat(currentPeakEntity.state) || 0;
+        // (#909) The two other quantities the peak block needs to stop reading
+        // as a contradiction: what the meter shows RIGHT NOW, and the slot
+        // budget the #864 guard actually steers by.
+        if (targetPeakEntity) {
+            this.slotAllowedW = targetPeakEntity.attributes?.peak_slot_allowed_w ?? null;
+            this.slotUsedKwh  = targetPeakEntity.attributes?.peak_slot_used_kwh ?? null;
+        }
+        const gridEntity = this._hass.states[`${this.entityPrefix}grid_power`];
+        this.gridImportKw = gridEntity ? importKw(gridEntity.state) : null;
         if (statusEntity)      this.loadManagementStatus = statusEntity.state || 'normal';
 
         if (devicesEntity?.attributes?.devices) {
@@ -382,7 +401,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
                     // no longer carries current_power (it made the count sensor
                     // write a row every cycle); older backends still fall back.
                     power: ((info.power_entity && this._hass?.states?.[info.power_entity])
-                        ? (parseFloat(this._hass.states[info.power_entity].state) || 0)
+                        ? (parseFloat(this._hass.states[info.power_entity]?.state) || 0)
                         : (info.current_power || 0)) / 1000,
                     // (#577) self-calibrated rated power (W) — shown dimmed when
                     // the load is off so the row keeps a meaningful number
@@ -431,6 +450,13 @@ class SEMLoadPriorityCard extends SEMLitBase {
         const peakColor  = this._getPeakColor();
         const peakMargin = this.targetPeakLimit - this.currentPeak;
         const peakPct    = unlimited ? 0 : (this.targetPeakLimit > 0 ? Math.min((this.currentPeak / this.targetPeakLimit) * 100, 100) : 0);
+        // (#909) The billing slot the guard defends — null when the install is
+        // uncapped or the guard has published nothing yet.
+        const slot = unlimited ? null : slotStatus({
+            targetKw: this.targetPeakLimit,
+            usedKwh: this.slotUsedKwh,
+            allowedW: this.slotAllowedW,
+        });
 
         return html`
             <ha-card>
@@ -439,7 +465,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
                         <div class="peak-dot" style="background:${peakColor};box-shadow:0 0 8px ${peakColor}"></div>
                         <span id="lm-status" class="status-text">${this._t(this.loadManagementStatus || 'normal').toUpperCase()}</span>
                         <div class="spacer"></div>
-                        <span class="dim">${this._t('peak')}</span>
+                        <span class="dim">${this._t('peak_15min_avg')}</span>
                         <span id="peak-current" class="mono">${this.currentPeak.toFixed(2)} kW</span>
                         <span class="dim">/ ${unlimited ? this._t('uncapped') : this.targetPeakLimit.toFixed(1)}</span>
                         <button class="help-btn ${this._showHelp ? 'active' : ''}" data-action="toggle-help"
@@ -448,9 +474,14 @@ class SEMLoadPriorityCard extends SEMLitBase {
 
                     <div class="peak-box">
                         <div class="peak-row">
-                            <span class="dim">${this._t('current_peak')}</span>
+                            <span class="dim">${this._t('peak_15min_avg')}</span>
                             <span id="peak-current2" class="mono">${this.currentPeak.toFixed(2)} kW</span>
                         </div>
+                        ${this.gridImportKw === null ? nothing : html`
+                        <div class="peak-row">
+                            <span class="dim">${this._t('peak_right_now')}</span>
+                            <span id="peak-now" class="mono dim">${this.gridImportKw.toFixed(2)} kW</span>
+                        </div>`}
                         <div class="peak-row">
                             <span class="dim">${this._t('target_limit')}</span>
                             <span id="peak-target" class="mono">${unlimited ? this._t('uncapped') : this.targetPeakLimit.toFixed(2) + ' kW'}</span>
@@ -463,6 +494,20 @@ class SEMLoadPriorityCard extends SEMLitBase {
                         <div class="bar">
                             <div id="peak-bar" class="bar-fill" style="width:${peakPct}%;background:${peakColor}"></div>
                         </div>
+                        ${slot === null ? nothing : html`
+                        <div class="peak-row" style="margin-top:10px">
+                            <span class="dim">${this._t('peak_slot')} ${slot.label}</span>
+                            <span id="peak-slot-used" class="mono">${slot.usedKwh.toFixed(2)} / ${slot.budgetKwh.toFixed(2)} kWh</span>
+                        </div>
+                        <div class="bar">
+                            <div id="peak-slot-bar" class="bar-fill"
+                                 style="width:${slot.fraction * 100}%;background:${slot.overBudget ? '#f44336' : peakColor}"></div>
+                        </div>
+                        ${slot.allowedKw === null ? nothing : html`
+                        <div class="peak-row">
+                            <span class="dim">${this._t('peak_slot_allows')}</span>
+                            <span id="peak-slot-allows" class="mono dim">${slot.allowedKw.toFixed(2)} kW</span>
+                        </div>`}` }
                     </div>
 
                     <div class="peak-box" style="margin-bottom:16px">
@@ -479,6 +524,8 @@ class SEMLoadPriorityCard extends SEMLitBase {
                         <div class="help-item"><b>${this._t('priority')}</b> — ${this._t('help_device_priority')}</div>
                         <div class="help-item"><b>${this._t('requires')}</b> — ${this._t('help_device_requires')}</div>
                         <div class="help-item"><b>${this._t('configure')}</b> — ${this._t('help_device_configure')}</div>
+                        <div class="help-item"><b>${this._t('peak_15min_avg')}</b> — ${this._t('help_peak_15min_avg')}</div>
+                        <div class="help-item"><b>${this._t('peak_slot')}</b> — ${this._t('help_peak_slot')}</div>
                         <div class="help-item"><b>${this._t('target_limit')}</b> — ${this._t('help_device_peak')}</div>
                         <div class="help-item"><b>${this._t('daily_target')}</b> — ${this._t('help_device_target')}</div>
                     </div>` : nothing}
@@ -557,7 +604,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
                 </div>
                 ${device.blockedBy ? html`<div style="font-size:13px;color:#ff9800;padding:2px 0 0 28px">&#9203; Waiting for: ${device.blockedBy}</div>` : nothing}
                 ${device.dependsOn.length ? html`<div style="font-size:13px;opacity:0.55;padding:0 0 0 28px">&#8618; ${this._t('requires')}: ${device.dependsOn.join(', ')}</div>` : nothing}
-                ${device.isShed && device.shedReason ? html`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${device.shedReason === 'emergency' ? this._t('shed_emergency') : this._t('shed_peak')}</div>` : nothing}
+                ${device.isShed && device.shedReason ? html`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${this._t(shedReasonKey(device.shedReason))}</div>` : nothing}
                 <div class="device-bottom">
                     <div class="status-dot ${onOff ? 'on' : (device.isShed ? 'shed' : '')}" data-field="status-${device.id}"></div>
                     <span class="dim" data-field="onoff-${device.id}">${onOff ? this._t('on') : (device.isShed ? this._t('shed_label') : this._t('off'))}</span>
@@ -684,6 +731,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
         const stacked = (maxH - minH) < STEP_H - 1e-6;
         return html`
             <div class="range-wrap">
+                ${this._serviceError ? html`<div class="svc-error" role="alert">${this._serviceError}</div>` : nothing}
                 <div class="range-labels">
                     <span>${this._t('at_least')} <b style="color:#8DC892">${minH <= 0 ? this._t('no_target') : fmt(minH) + ' h'}</b></span>
                     <span>${this._t('up_to')} <b style="color:#ff9800">${atFull ? this._t('uncapped') : fmt(maxH) + ' h'}</b></span>
@@ -1106,6 +1154,14 @@ class SEMLoadPriorityCard extends SEMLitBase {
             <div class="ge-hint">${this._t('comfort_hint')}</div>`;
     }
 
+    /** (#914) The anti-cycle range the backend publishes off consts/bounds.py
+     *  on the devices sensor, or null when it is not there. Null means the
+     *  input carries no min/max — never a range this card made up. */
+    _antiCycleBounds() {
+        const ent = this._hass?.states?.[`${this._prefix}controllable_devices_count`];
+        return antiCycleBounds(ent?.attributes);
+    }
+
     _renderAntiCycle(device) {
         // (#688) per-load anti-cycling — minutes, next to Min/Max/Mode (the
         // "well-placed" home the cycling report asked for). Blank ⇒ the solid
@@ -1121,24 +1177,37 @@ class SEMLoadPriorityCard extends SEMLitBase {
             device.goals = { ...(device.goals || {}), [key]: v };
             this._sendDeviceUpdate(device.id, key, String(v));
         };
-        const box = (key, ph) => html`
-            <input type="number" min="1" max="120" step="1" style="width:56px"
+        // (#914) ONE bounds table. The range used to be re-declared here as
+        // min="1" max="120" — a second copy of a number that lives nowhere
+        // else, which is how a card and a backend come to disagree. It is now
+        // read from the attribute the backend publishes off consts/bounds.py;
+        // an ABSENT attribute renders no min/max at all rather than a range
+        // this card invented (absent is not a default).
+        const bounds = this._antiCycleBounds();
+        // (#914) The placeholder is the window the LIVE device is actually
+        // holding — never a hard-coded "5" that was true for neither the
+        // resistive default nor the heat-pump one. Absent live object ⇒ "—".
+        const eff = (k) => antiCyclePlaceholder(g, k);
+        const box = (key, effKey) => html`
+            <input type="number" step="1" style="width:56px"
+                   min=${bounds ? bounds.min : nothing}
+                   max=${bounds ? bounds.max : nothing}
                    .value="${g[key] != null && g[key] !== '' ? String(g[key]) : ''}"
-                   placeholder="${ph}"
+                   placeholder="${eff(effKey)}"
                    @change=${onChange(key)}
                    @click=${(e) => e.stopPropagation()}>`;
         return html`
             <div class="ge-row">
                 <span class="ge-label">${this._t('anti_cycle_min_run')}</span>
                 <span class="ge-ctl">
-                    ${box('min_on_time_min', '5')}
+                    ${box('min_on_time_min', 'min_on_effective_min')}
                     <span class="ge-unit">${this._t('minutes_short')}</span>
                 </span>
             </div>
             <div class="ge-row">
                 <span class="ge-label">${this._t('anti_cycle_min_pause')}</span>
                 <span class="ge-ctl">
-                    ${box('min_off_time_min', '5')}
+                    ${box('min_off_time_min', 'min_off_effective_min')}
                     <span class="ge-unit">${this._t('minutes_short')}</span>
                 </span>
             </div>
@@ -1328,11 +1397,28 @@ class SEMLoadPriorityCard extends SEMLitBase {
     }
 
     // ── Service calls ──
+    /** (#913 follow-up) A refused service call used to vanish: the three
+     *  fire-and-forget calls below had no .catch, so the slider snapped back
+     *  or the value did not stick and the card said nothing. HA rejects a
+     *  ServiceValidationError with its TRANSLATED message — the honest #913
+     *  sentence ("switched off, turn it on under…") — so showing err.message
+     *  is the whole fix. Same pattern the Configure modal already uses. */
+    _showServiceError(err) {
+        const msg = (err && err.message) ? String(err.message) : String(err || '');
+        this._serviceError = msg;
+        this.requestUpdate();
+        clearTimeout(this._serviceErrorTimer);
+        this._serviceErrorTimer = setTimeout(() => {
+            this._serviceError = '';
+            this.requestUpdate();
+        }, 12000);
+    }
+
     _sendPriorityUpdate() {
         if (!this._hass) return;
         this._hass.callService('solar_energy_management', 'update_device_priorities', {
             priorities: this.devices.map(d => ({ device_id: d.id, priority: d.priority })),
-        });
+        }).catch((err) => this._showServiceError(err));
         // Hold the just-dragged order until the backend re-emits the sensor
         // (~1 coordinator cycle). Without this the next hass push re-renders
         // the STALE sensor order and the drag snaps back — the "not taking it"
@@ -1345,7 +1431,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
         if (!this._hass) return;
         this._hass.callService('solar_energy_management', 'update_device_config', {
             device_id: deviceId, property, value,
-        });
+        }).catch((err) => this._showServiceError(err));
     }
 
     _sendTargetPeakUpdate(val, unlimited = false) {
@@ -1353,7 +1439,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
         this._hass.callService('solar_energy_management', 'update_target_peak', {
             target_peak_limit: val,
             peak_limit_unlimited: unlimited,
-        });
+        }).catch((err) => this._showServiceError(err));
     }
 
     // ── Configure modal ──

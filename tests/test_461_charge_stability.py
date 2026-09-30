@@ -533,18 +533,29 @@ class TestWiring:
         assert "number.sem_ev_enable_delay_seconds" in body
         assert "number.sem_ev_disable_delay_seconds" in body
 
-    def test_fleet_tariff_level_uses_get_price_level(self) -> None:
-        # #524 — the fleet cycle state must read the tariff level via the
-        # provider's ``get_price_level()`` API. The old
-        # ``getattr(provider, "current_level", None)`` referenced a
-        # non-existent attribute and silently left tariff_level None,
-        # killing every tariff-aware EV decision.
+    def test_fleet_tariff_level_comes_from_the_one_vocabulary(self) -> None:
+        """#524, re-anchored for #994.
+
+        #524's defect was a fleet ``tariff_level`` read off a
+        ``current_level`` attribute no provider has — silently None, killing
+        every tariff-aware EV decision. The anchor held it to
+        ``provider.get_price_level()``; since #994 the level must come from
+        ``price_signal.comparative_level``, which asks that accessor AND
+        checks a comparison stands behind the answer. Asserted over the AST
+        rather than by searching the file's text — the #925 form. (It never
+        counted in that arc's ledger, which matches ``in src``/``in source``
+        only; this one read a variable called ``body``, which is the same
+        defect wearing a different name.)
+        """
+        from .ast_contracts import call_sites
+
+        sites = call_sites("comparative_level")
+        assert any(f == "coordinator/coordinator.py" for f, _, _ in sites), (
+            "#524/#994 anchor — the fleet tariff_level must come from "
+            f"price_signal.comparative_level. Call sites: {sites}")
+
         body = (Path(__file__).parent.parent / "coordinator"
                 / "coordinator.py").read_text()
-        assert "provider.get_price_level()" in body, (
-            "#524 anchor — fleet tariff_level must come from "
-            "provider.get_price_level()."
-        )
         assert 'getattr(provider, "current_level"' not in body, (
             "#524 — the dead current_level read must not return."
         )
@@ -640,3 +651,141 @@ class TestEvccAlignedDefaults:
         from custom_components.solar_energy_management.consts import core as C
         assert C.DEFAULT_EV_ENABLE_DELAY_SEC == 60
         assert C.DEFAULT_EV_DISABLE_DELAY_SEC == 180    # was 300
+
+
+@pytest.mark.unit
+class TestCarLatchFloor:
+    """(#893) A fussy car's demonstrated latch floor ends the settle/un-latch
+    churn.
+
+    Live on .175, 01.09: the car latched and drew 3.1 kW at 8 A, but at the
+    settled-back 6 A drew 0.13 kW — the un-latch re-armed the start ladder,
+    cycling the contactor every ~3 min all night. The fix: a settle to LOWER
+    amps that the car answers by dropping teaches a per-session floor; a
+    budget below that floor holds off (quiet IDLE) instead of re-laddering,
+    and the next start begins AT the floor rather than re-poking the min.
+
+    Harness contract (the 2026-07-19 lesson, see test_610): after the filter
+    emits a CHARGE command the test must set
+    ``adapter.last_intent = CHARGE_AT_AMPS`` — the fake never self-updates,
+    and without it every cycle re-enters the fresh-start branch vacuously.
+    """
+
+    def _teach_floor(self, st, adapter):
+        """Walk the live churn once: night start at 6 A -> ladder to 8 A ->
+        car latches at 8 -> settle back to 6 -> car drops. Returns the
+        decision of the drop cycle (t=80)."""
+        night_idle = _view(is_night=True, power_w=120.0)     # plugged, no draw
+        night_draw = _view(is_night=True, power_w=3130.0)    # drawing hard
+
+        d0 = st.filter(_charge(amps=6), night_idle, adapter, now_ts=0.0)
+        assert d0.intent is ChargerIntent.CHARGE_AT_AMPS     # night starts at once
+        assert d0.commanded_amps == 6
+        adapter.last_intent = ChargerIntent.CHARGE_AT_AMPS   # actuation applied
+
+        d1 = st.filter(_charge(amps=6), night_idle, adapter, now_ts=25.0)
+        assert d1.commanded_amps == 8, d1.reason             # ladder kick
+
+        d2 = st.filter(_charge(amps=6), night_draw, adapter, now_ts=35.0)
+        assert d2.commanded_amps == 8, d2.reason             # latched, debounce holds 8
+
+        d3 = st.filter(_charge(amps=6), night_draw, adapter, now_ts=70.0)
+        assert d3.commanded_amps == 6, d3.reason             # settle back to budget
+
+        return st.filter(_charge(amps=6), night_idle, adapter, now_ts=80.0)
+
+    def test_settle_below_floor_holds_off_instead_of_cycling(self):
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        d = self._teach_floor(st, adapter)
+        # The drop at 6 A teaches floor=8 and the sub-floor budget goes
+        # quiet — no re-ladder, no contactor click.
+        assert d.intent is ChargerIntent.IDLE, d.reason
+        assert "latch floor" in d.reason and "8" in d.reason
+        assert st._car_floor_a.get("wb") == 8
+        # And it STAYS quiet while the budget stays below the floor —
+        # this is the all-night churn that must not come back.
+        night_idle = _view(is_night=True, power_w=120.0)
+        for t in (100.0, 200.0, 400.0, 1000.0):
+            dn = st.filter(_charge(amps=6), night_idle, adapter, now_ts=t)
+            assert dn.intent is ChargerIntent.IDLE, (t, dn.reason)
+
+    def test_budget_at_floor_starts_at_floor(self):
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        self._teach_floor(st, adapter)
+        # Budget rises to the demonstrated floor: charging resumes, and the
+        # offer begins AT 8 A — not another 6 A poke the car refuses.
+        night_idle = _view(is_night=True, power_w=120.0)
+        d = st.filter(_charge(amps=8), night_idle, adapter, now_ts=100.0)
+        assert d.intent is ChargerIntent.CHARGE_AT_AMPS, d.reason
+        assert d.commanded_amps == 8, d.reason
+
+    def test_floor_decays_when_car_draws_lower(self):
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        self._teach_floor(st, adapter)
+        night_idle = _view(is_night=True, power_w=120.0)
+        night_draw = _view(is_night=True, power_w=3130.0)
+        # Restart at the floor, car latches at 8 again...
+        st.filter(_charge(amps=8), night_idle, adapter, now_ts=100.0)
+        st.filter(_charge(amps=8), night_draw, adapter, now_ts=110.0)
+        # ...then the budget settles to 6 and this time the car KEEPS
+        # drawing (appetite changed): the draw at 6 decays the floor.
+        for t in (115.0, 125.0, 135.0, 145.0, 155.0):
+            st.filter(_charge(amps=6), night_draw, adapter, now_ts=t)
+        assert st._car_floor_a.get("wb") == 6
+
+    def test_disconnect_clears_floor(self):
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        self._teach_floor(st, adapter)
+        assert st._car_floor_a.get("wb") == 8
+        st.filter(_charge(amps=6), _view(connected=False), adapter, now_ts=90.0)
+        assert "wb" not in st._car_floor_a
+        assert "wb" not in st._draw_amps
+
+    def test_stale_draw_record_floors_next_round_immediately(self):
+        # The live 31.08 pattern round 2..N: after a give-up the ladder
+        # used to re-poke 6 A every backoff round — one contactor click
+        # each. The previous round's draw record re-floors the very first
+        # sub-floor cycle instead: zero clicks, quiet hold.
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        st._draw_amps["wb"] = 8  # previous same-plug round drew at 8 A
+        night_idle = _view(is_night=True, power_w=120.0)
+        d0 = st.filter(_charge(amps=6), night_idle, adapter, now_ts=0.0)
+        assert d0.intent is ChargerIntent.IDLE, d0.reason
+        assert "latch floor" in d0.reason
+        assert st._car_floor_a.get("wb") == 8
+
+    def test_guard_never_interrupts_an_active_draw(self):
+        # While the car IS drawing, a sub-floor budget must ease via
+        # _adjust (the decay probe), never hard-IDLE a live session.
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        self._teach_floor(st, adapter)
+        night_idle = _view(is_night=True, power_w=120.0)
+        night_draw = _view(is_night=True, power_w=3130.0)
+        st.filter(_charge(amps=8), night_idle, adapter, now_ts=100.0)
+        st.filter(_charge(amps=8), night_draw, adapter, now_ts=110.0)
+        # Budget dips below the floor mid-draw: no IDLE while drawing.
+        for t in (115.0, 125.0, 135.0, 145.0):
+            d = st.filter(_charge(amps=6), night_draw, adapter, now_ts=t)
+            assert d.intent is ChargerIntent.CHARGE_AT_AMPS, (t, d.reason)
+
+    def test_no_floor_without_a_draw(self):
+        # A car that never draws (genuinely full) walks the ladder to
+        # give-up and teaches NOTHING — no floor, no draw record.
+        st = ChargeStability()
+        adapter = FakeAdapter()
+        night_idle = _view(is_night=True, power_w=120.0)
+        st.filter(_charge(amps=6), night_idle, adapter, now_ts=0.0)
+        adapter.last_intent = ChargerIntent.CHARGE_AT_AMPS
+        st.filter(_charge(amps=6), night_idle, adapter, now_ts=21.0)   # -> 8
+        st.filter(_charge(amps=6), night_idle, adapter, now_ts=42.0)   # -> 10
+        d = st.filter(_charge(amps=6), night_idle, adapter, now_ts=140.0)
+        assert d.intent is ChargerIntent.IDLE
+        assert "did not accept the start" in d.reason  # (#983)
+        assert "wb" not in st._car_floor_a
+        assert "wb" not in st._draw_amps

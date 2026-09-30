@@ -52,6 +52,38 @@ class PerChargerState:
     reenable_attempts: int = 0
     charge_refused: bool = False
     last_set_amps_ts: Optional[float] = None
+    # (#899) the solar_only battery redirect, checked against the meter:
+    # consecutive cycles the grid funded a credited redirect, and the veto
+    # that lands after REDIRECT_VETO_STRIKES of them. Per plug-in.
+    redirect_strikes: int = 0
+    redirect_vetoed: bool = False
+
+    def reset_session(self) -> None:
+        """(#899) A new plug-in is a new session: the veto and its strikes
+        end with the session that earned them."""
+        self.redirect_strikes = 0
+        self.redirect_vetoed = False
+
+
+def note_redirect_outcome(state: "PerChargerState", *, redirect_w: float,
+                          grid_import_w: float, charging: bool,
+                          grid_import_known: bool = True) -> None:
+    """(#899) Fold one cycle's meter verdict into the charger's durable state.
+    Pure bookkeeping; ``energy_reclaim.redirect_strikes`` is the rule.
+
+    ``grid_import_known`` (#925 audit) has to travel with the watts. The
+    flag was computed correctly in ``build_view`` and declared on
+    ``FleetContext`` in the same commit batch that added this call, and
+    then simply never passed — so the verdict was taken on a number that
+    might be a fallback."""
+    from .energy_reclaim import REDIRECT_VETO_STRIKES, redirect_strikes
+    state.redirect_strikes = redirect_strikes(
+        state.redirect_strikes, redirect_w=redirect_w,
+        grid_import_w=grid_import_w, charging=charging,
+        grid_import_known=grid_import_known,
+    )
+    if state.redirect_strikes >= REDIRECT_VETO_STRIKES:
+        state.redirect_vetoed = True
 
 
 @dataclass

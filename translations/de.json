@@ -80,17 +80,38 @@
           "ev_battery_capacity_kwh": "Gesamte nutzbare Kapazität der EV-Batterie in kWh. Wird zur Schätzung von SOC und Ladedauer verwendet.",
           "ev_target_soc": "Ab hier gilt das Auto für SEM als geladen. Das ist eine Definition von \"voll\", keine Ladegrenze."
         }
+      },
+      "sources": {
+        "title": "Benenne deine Energie-Sensoren",
+        "description": "Dein Home-Assistant-Energie-Dashboard ist nicht eingerichtet (oder es fehlt Solar bzw. Netz), also hat SEM dein System direkt gefragt.\n\nWas SEM erkannt hat:\n{summary}\n\nBestätige oder ändere unten jeden Eintrag. SEM braucht Solar und Netz, um den Überschuss zu berechnen; lass Batterie leer, wenn du keine hast. Du kannst das Energie-Dashboard später unter {url} einrichten — SEM benutzt weiterhin, was du hier wählst.",
+        "data": {
+          "solar_power_sensor": "Solarleistung",
+          "grid_import_power_sensor": "Netzleistung",
+          "battery_power_sensor": "Batterieleistung (optional)",
+          "observer_mode": "Beobachtermodus (nur zusehen, nichts senden)",
+          "battery_soc_sensor": "Batterieladestand (optional)",
+          "grid_import_power_entity": "Netzbezug-Leistung (optional)",
+          "grid_export_power_entity": "Netzeinspeisung-Leistung (optional)"
+        },
+        "data_description": {
+          "solar_power_sensor": "Aktuelle Erzeugung in Watt — kein Tagesgesamtwert.",
+          "grid_import_power_sensor": "Aktueller Bezug/Einspeisung in Watt. Ein vorzeichenbehafteter Sensor genügt; SEM erkennt die Richtung selbst.",
+          "battery_power_sensor": "Aktuelles Laden/Entladen in Watt. Leer lassen, wenn keine Hausbatterie vorhanden ist.",
+          "observer_mode": "Für die ersten Tage empfohlen: SEM zeigt jede Entscheidung, die es treffen würde, und sendet nichts an deine Hardware.",
+          "battery_soc_sensor": "Ladestand in Prozent. SEM's vier Batteriezonen lesen ihn.",
+          "grid_import_power_entity": "Nur wenn dein Zähler keinen einzelnen vorzeichenbehafteten Sensor hat: die Bezugsseite, immer positiv. Beide ausfüllen oder keinen.",
+          "grid_export_power_entity": "Die Einspeiseseite, immer positiv. SEM rechnet Einspeisung minus Bezug — es muss keine Richtung geraten werden."
+        }
       }
     },
     "error": {
       "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
       "entity_not_found": "Entität nicht gefunden. Bitte überprüfen Sie die Entity-ID.",
-      "service_not_found": "Benachrichtigungsdienst nicht gefunden. Bitte überprüfen Sie den Dienstnamen (z. B. notify.mobile_app_your_phone)."
+      "service_not_found": "Benachrichtigungsdienst nicht gefunden. Bitte überprüfen Sie den Dienstnamen (z. B. notify.mobile_app_your_phone).",
+      "required": "SEM needs this sensor to read your system."
     },
     "abort": {
-      "already_configured": "Solar Energy Management ist bereits konfiguriert. Nur eine Instanz erlaubt.",
-      "energy_dashboard_not_configured": "SEM liest Ihre Solar-, Netz- und Batteriesensoren aus dem Energie-Dashboard von Home Assistant, und dieses ist noch nicht eingerichtet.\n\nRichten Sie es zuerst unter Einstellungen → Dashboards → Energie ({url}) ein — fügen Sie mindestens Ihre Solarproduktion und Ihren Netzbezug hinzu — und starten Sie diese Installation dann erneut.",
-      "energy_dashboard_incomplete": "Ihr Energie-Dashboard ist eingerichtet, aber es fehlt: {missing}.\n\nSEM benötigt diese Quellen, um Ihre Anlage auszulesen. Fügen Sie sie unter Einstellungen → Dashboards → Energie ({url}) hinzu und starten Sie diese Installation dann erneut."
+      "already_configured": "Solar Energy Management ist bereits konfiguriert. Nur eine Instanz erlaubt."
     }
   },
   "options": {
@@ -160,7 +181,8 @@
           "legionella_target_temp": "Legionellen-Desinfektionsziel (°C)",
           "legionella_interval_hours": "Max. Stunden zwischen Desinfektionszyklen",
           "diagram_style": "Systemdiagramm-Stil",
-          "grid_sign_invert": "Vorzeichen der Netzleistung umkehren"
+          "grid_sign_invert": "Vorzeichen der Netzleistung umkehren",
+          "battery_operating_mode_entity": "Battery operating-mode entity (watched)"
         },
         "data_description": {
           "update_interval": "Wie oft der Koordinator Sensoren ausliest und die Hardware nachregelt. 10 s ergibt die genaueste Energieintegration; Werte über 30 s zählen zu wenig Energie. Bereich 10–60 s.",
@@ -185,7 +207,8 @@
           "hot_water_solar_target": "Zieltemperatur (°C) für die solarunterstützte Warmwasserbereitung. SEM heizt den Boiler auf, wenn Überschuss verfügbar ist.",
           "legionella_target_temp": "Temperatur (°C), die das Warmwassersystem während eines Legionellen-Desinfektionszyklus erreichen muss.",
           "legionella_interval_hours": "Maximale Anzahl Stunden zwischen Legionellen-Desinfektionszyklen, bevor SEM eine Aufheizung erzwingt.",
-          "grid_sign_invert": "Nur aktivieren, wenn Netzbezug als positiver Wert angezeigt wird (z. B. Enphase). SEMs Konvention ist negativ = Bezug; dies kehrt den Rohwert um und umgeht die automatische Vorzeichenerkennung."
+          "grid_sign_invert": "Nur aktivieren, wenn Netzbezug als positiver Wert angezeigt wird (z. B. Enphase). SEMs Konvention ist negativ = Bezug; dies kehrt den Rohwert um und umgeht die automatische Vorzeichenerkennung.",
+          "battery_operating_mode_entity": "The inverter's operating-policy selector (e.g. Huawei's 'Working mode'). SEM only READS it: the mode is shown beside the battery evidence, and a one-time repair warns when it is not the self-consumption mode SEM's planning assumes. SEM never changes it. Leave empty to disable the watch."
         }
       },
       "settings_ev": {
@@ -304,12 +327,16 @@
           "battery_force_charge_negative_price": "Zwangsladung bei negativem Preis",
           "battery_charge_platform": "Batterie-Ladeplattform",
           "battery_replan_interval_min": "Neuplanungsintervall (min)",
-          "battery_prefer_consecutive_window": "Zusammenhängendes Ladefenster bevorzugen"
+          "battery_prefer_consecutive_window": "Zusammenhängendes Ladefenster bevorzugen",
+          "battery_charge_power_limit_entity": "Entität für Batterie-Ladeleistungs-Limit (für Ladetempo)",
+          "inverter_ac_limit_w": "AC-Ausgangsgrenze des Wechselrichters"
         },
         "data_description": {
           "battery_charge_platform": "Welchen Wechselrichter SEM für die geplante Netzladung ansteuert. Wähle Deye, um den Deye-Verdrahtungsschritt einzublenden.",
           "battery_replan_interval_min": "Wie oft der Ladeplan anhand der neuesten Prognose und Preise neu berechnet wird.",
-          "battery_prefer_consecutive_window": "Ein: günstige Stunden in einem Block (weniger Start/Stopp-Zyklen); Aus: einzelne günstigste Stunden, auch wenn verstreut."
+          "battery_prefer_consecutive_window": "Ein: günstige Stunden in einem Block (weniger Start/Stopp-Zyklen); Aus: einzelne günstigste Stunden, auch wenn verstreut.",
+          "battery_charge_power_limit_entity": "Die Max-Ladeleistungs-Number des Wechselrichters, in die das Ladetempo schreibt (z. B. Huaweis 'Maximale Ladeleistung'). Leer lassen = Ladetempo bleibt rein informativ.",
+          "inverter_ac_limit_w": "Maximale AC-Ausgangsleistung des Wechselrichters in Watt. Das Ladetempo öffnet seine Grenze, wo Solar dies überschreiten würde — so wird abgeregelte Sonne genutzt. 0 = nicht gesetzt."
         }
       },
       "ev_charger_edit": {
@@ -328,6 +355,7 @@
           "ev_charge_mode_start": "Charge Mode — Start Value (optional)",
           "ev_charge_mode_stop": "Charge Mode — Stop Value (optional)",
           "ev_surplus_priority": "Überschuss-Priorität (1=höchste)",
+          "ev_battery_may_assist": "Batterie darf diese Wallbox unterstützen",
           "ev_current_control_entity": "Entität zur Stromsteuerung (Number — Wallbox, go-eCharger)",
           "daily_ev_target_max": "Nie mehr laden als (kWh)",
           "ev_target_soc_max": "Nie über (%) laden",
@@ -342,7 +370,8 @@
           "vehicle_min_current": "Fahrzeug-Mindeststrom (A)",
           "ev_phase_switch_entity": "Phasenumschaltungs-Entität (optional)",
           "ev_phase_switch_value_1p": "Phasenumschaltung: Wert für 1-phasig (optional)",
-          "ev_phase_switch_value_3p": "Phasenumschaltung: Wert für 3-phasig (optional)"
+          "ev_phase_switch_value_3p": "Phasenumschaltung: Wert für 3-phasig (optional)",
+          "ev_phase_switching_enabled": "Phasenumschaltung"
         },
         "data_description": {
           "charger_name": "Anzeigename für diesen Lader im Dashboard.",
@@ -357,6 +386,7 @@
           "ev_charge_mode_start": "The option SEM selects to START charging (e.g. \"Instant Charging\", \"2\"). Must match the select's option exactly.",
           "ev_charge_mode_stop": "The option SEM selects to STOP charging. Leave blank if stopping is done by the start/stop entity or by setting 0 A.",
           "ev_surplus_priority": "Reihenfolge der Überschussverteilung auf mehrere Lader. Niedrigere Zahl = höhere Priorität.",
+          "ev_battery_may_assist": "Lässt den Hausspeicher beim Laden dieses Fahrzeugs mithelfen. Aus = diese Wallbox nutzt nur Solar und Netz. Die anlagenweite Batterie-Berechtigung gilt weiterhin.",
           "ev_current_control_entity": "Number-Entität zum Setzen des Ladestroms (A). Für Wallbox, go-eCharger und ähnliche Lader verwenden.",
           "daily_ev_target_max": "Solarüberschuss hört hier auf zu laden. Das ist eine Obergrenze, kein Ziel — auf Maximum lassen, um frei aus der Sonne zu laden.",
           "ev_target_soc_max": "Solarüberschuss hört hier auf zu laden. Das ist eine Obergrenze, kein Ziel — auf 100% lassen, um frei aus der Sonne zu laden.",
@@ -371,7 +401,8 @@
           "vehicle_min_current": "Fahrzeugspezifische Stromuntergrenze. Der effektive Mindestwert ist der höhere aus diesem und dem Lader-Mindeststrom.",
           "ev_phase_switch_entity": "Select/Number/Switch, das die Wallbox zwischen 1- und 3-phasigem Laden umschaltet (go-e 'psm', KEBA X-Serie, openWB). SEM beobachtet und validiert vorerst nur — automatisches Umschalten folgt in einem späteren Release.",
           "ev_phase_switch_value_1p": "Was für 1-phasiges Laden in die Umschalt-Entität geschrieben wird — Optionsname eines Select, Zahlenwert oder on/off. Bei Select-Entitäten erforderlich; Number-Standard ist 1, Switch-Standard off.",
-          "ev_phase_switch_value_3p": "Was für 3-phasiges Laden in die Umschalt-Entität geschrieben wird — Optionsname eines Select, Zahlenwert oder on/off. Bei Select-Entitäten erforderlich; Number-Standard ist 3, Switch-Standard on."
+          "ev_phase_switch_value_3p": "Was für 3-phasiges Laden in die Umschalt-Entität geschrieben wird — Optionsname eines Select, Zahlenwert oder on/off. Bei Select-Entitäten erforderlich; Number-Standard ist 3, Switch-Standard on.",
+          "ev_phase_switching_enabled": "Standardmäßig aus, solange das 1/3-Phasen-Modell überarbeitet wird (auf manchen Marken pausierten Wallboxen und liefen nicht wieder an). Zum Testen einschalten."
         }
       },
       "ev_charger_add": {
@@ -390,6 +421,7 @@
           "ev_charge_mode_start": "Charge Mode — Start Value (optional)",
           "ev_charge_mode_stop": "Charge Mode — Stop Value (optional)",
           "ev_surplus_priority": "Überschuss-Priorität (1=höchste)",
+          "ev_battery_may_assist": "Batterie darf diese Wallbox unterstützen",
           "ev_current_control_entity": "Entität zur Stromsteuerung (Number — Wallbox, go-eCharger)",
           "daily_ev_target_max": "Nie mehr laden als (kWh)",
           "ev_target_soc_max": "Nie über (%) laden",
@@ -403,7 +435,8 @@
           "ev_min_current": "Minimaler Ladestrom (A)",
           "ev_phase_switch_entity": "Phasenumschaltungs-Entität (optional)",
           "ev_phase_switch_value_1p": "Phasenumschaltung: Wert für 1-phasig (optional)",
-          "ev_phase_switch_value_3p": "Phasenumschaltung: Wert für 3-phasig (optional)"
+          "ev_phase_switch_value_3p": "Phasenumschaltung: Wert für 3-phasig (optional)",
+          "ev_phase_switching_enabled": "Phasenumschaltung"
         },
         "data_description": {
           "charger_name": "Anzeigename für diesen Lader im Dashboard.",
@@ -418,6 +451,7 @@
           "ev_charge_mode_start": "The option SEM selects to START charging (e.g. \"Instant Charging\", \"2\"). Must match the select's option exactly.",
           "ev_charge_mode_stop": "The option SEM selects to STOP charging. Leave blank if stopping is done by the start/stop entity or by setting 0 A.",
           "ev_surplus_priority": "Reihenfolge der Überschussverteilung auf mehrere Lader. Niedrigere Zahl = höhere Priorität.",
+          "ev_battery_may_assist": "Lässt den Hausspeicher beim Laden dieses Fahrzeugs mithelfen. Aus = diese Wallbox nutzt nur Solar und Netz. Die anlagenweite Batterie-Berechtigung gilt weiterhin.",
           "ev_current_control_entity": "Number-Entität zum Setzen des Ladestroms (A). Für Wallbox, go-eCharger und ähnliche Lader verwenden.",
           "daily_ev_target_max": "Solarüberschuss hört hier auf zu laden. Das ist eine Obergrenze, kein Ziel — auf Maximum lassen, um frei aus der Sonne zu laden.",
           "ev_target_soc_max": "Solarüberschuss hört hier auf zu laden. Das ist eine Obergrenze, kein Ziel — auf 100% lassen, um frei aus der Sonne zu laden.",
@@ -431,7 +465,8 @@
           "ev_min_current": "Darunter pausiert SEM das Laden, statt den Strom weiter zu senken.",
           "ev_phase_switch_entity": "Select/Number/Switch, das die Wallbox zwischen 1- und 3-phasigem Laden umschaltet (go-e 'psm', KEBA X-Serie, openWB). SEM beobachtet und validiert vorerst nur — automatisches Umschalten folgt in einem späteren Release.",
           "ev_phase_switch_value_1p": "Was für 1-phasiges Laden in die Umschalt-Entität geschrieben wird — Optionsname eines Select, Zahlenwert oder on/off. Bei Select-Entitäten erforderlich; Number-Standard ist 1, Switch-Standard off.",
-          "ev_phase_switch_value_3p": "Was für 3-phasiges Laden in die Umschalt-Entität geschrieben wird — Optionsname eines Select, Zahlenwert oder on/off. Bei Select-Entitäten erforderlich; Number-Standard ist 3, Switch-Standard on."
+          "ev_phase_switch_value_3p": "Was für 3-phasiges Laden in die Umschalt-Entität geschrieben wird — Optionsname eines Select, Zahlenwert oder on/off. Bei Select-Entitäten erforderlich; Number-Standard ist 3, Switch-Standard on.",
+          "ev_phase_switching_enabled": "Standardmäßig aus, solange das 1/3-Phasen-Modell überarbeitet wird (auf manchen Marken pausierten Wallboxen und liefen nicht wieder an). Zum Testen einschalten."
         }
       },
       "pv_naming": {
@@ -457,7 +492,14 @@
           "heat_pump_power_sensor": "Leistungssensor (optional)",
           "heat_pump_boost_offset": "Temperatur-Boost-Offset (°C)",
           "heat_pump_max_setpoint": "Maximaler Temperatur-Setpoint (°C)",
-          "heat_pump_priority": "Überschuss-Priorität (1=höchste)"
+          "heat_pump_priority": "Überschuss-Priorität (1=höchste)",
+          "heat_pump_sg_ready_service": "SG-Ready service (domain.service)",
+          "heat_pump_sg_ready_service_data": "SG-Ready service data (JSON; placeholders state, relay1, relay2)",
+          "heat_pump_sg_ready_state_entity": "SG-Ready state read-back entity",
+          "heat_pump_relay1_on_value": "SG-Ready contact 1 — ON value",
+          "heat_pump_relay1_off_value": "SG-Ready contact 1 — OFF value",
+          "heat_pump_relay2_on_value": "SG-Ready contact 2 — ON value",
+          "heat_pump_relay2_off_value": "SG-Ready contact 2 — OFF value"
         },
         "data_description": {
           "heat_pump_relay1_entity": "Switch-Entität für SG-Ready-Relais 1 (Signal für Normalbetrieb). Zusammen mit Relais 2 setzen, um das SG-Ready-Protokoll zu nutzen.",
@@ -467,7 +509,11 @@
           "heat_pump_power_sensor": "Optionaler Sensor (W), der den aktuellen Stromverbrauch der Wärmepumpe meldet.",
           "heat_pump_boost_offset": "Grad Celsius, die während eines Solarüberschuss-Boosts auf den normalen Setpoint addiert werden.",
           "heat_pump_max_setpoint": "Obere Temperaturgrenze (°C), die SEM während eines Boost-Zyklus setzt.",
-          "heat_pump_priority": "Priorität bei der Überschussverteilung gegenüber anderen Geräten. Niedrigere Zahlen werden zuerst bedient."
+          "heat_pump_priority": "Priorität bei der Überschussverteilung gegenüber anderen Geräten. Niedrigere Zahlen werden zuerst bedient.",
+          "heat_pump_relay1_on_value": "Only for a text/number/select contact: the value SEM writes to close contact 1. Leave empty for a switch.",
+          "heat_pump_relay1_off_value": "Only for a text/number/select contact: the value SEM writes to open contact 1. Leave empty for a switch.",
+          "heat_pump_relay2_on_value": "Only for a text/number/select contact: the value SEM writes to close contact 2. Leave empty for a switch.",
+          "heat_pump_relay2_off_value": "Only for a text/number/select contact: the value SEM writes to open contact 2. Leave empty for a switch."
         }
       },
       "ev_charger_menu": {
@@ -583,13 +629,51 @@
           "deye_program_5_charge": "Programm 5 — Netzladen-Auswahl (Entität)",
           "deye_program_6_time": "Programm 6 — Zeitfenster-Entität (time.*)",
           "deye_program_6_soc": "Programm 6 — Ziel-SOC-Zahlenentität",
-          "deye_program_6_charge": "Programm 6 — Netzladen-Auswahl (Entität)"
+          "deye_program_6_charge": "Programm 6 — Netzladen-Auswahl (Entität)",
+          "deye_system_work_mode_control": "Control Deye System Work Mode (export policy)",
+          "deye_system_work_mode_entity": "Deye System Work Mode entity",
+          "deye_system_work_mode_selling_option": "Label of the 'Selling First' option",
+          "deye_system_work_mode_zero_load_option": "Label of the 'Zero Export To Load' option",
+          "deye_system_work_mode_zero_ct_option": "Label of the 'Zero Export To CT' option"
         },
         "data_description": {
           "deye_bms_max_charge_current_a": "Optionale vom BMS vorgegebene Obergrenze. 0 = keine BMS-Grenze; es gilt das Wechselrichter-Maximum.",
           "deye_observer_mode": "Wenn EIN, berechnet und protokolliert SEM seine Deye-Aktionen, schreibt aber nie auf den Wechselrichter.",
           "deye_actuation_enabled": "Wenn AUS, schreibt SEM nie auf den Wechselrichter, selbst wenn der Beobachtermodus ebenfalls aus ist. Beide Freigaben müssen erlauben, bevor ein Befehl gesendet wird.",
           "deye_max_charge_current_a": "Sichere Obergrenze, die SEM auf der Ladestrom-Entität befiehlt."
+        }
+      },
+      "heat_pump_menu": {
+        "title": "Heat pumps",
+        "description": "Your primary heat pump is configured. Add more units, each driven independently by priority.",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "heat_pump_unit": {
+        "title": "Additional heat pump",
+        "description": "Configure this unit the same way as the primary: SG-Ready relays, a climate entity, or a service call (for command-driven pumps like Buderus over EMS-ESP).",
+        "data": {
+          "name": "Name",
+          "heat_pump_relay1_entity": "SG-Ready relay 1",
+          "heat_pump_relay2_entity": "SG-Ready relay 2",
+          "heat_pump_invert_sg_ready": "Invert SG-Ready relays (NC wiring)",
+          "heat_pump_climate_entity": "Climate entity",
+          "heat_pump_power_sensor": "Power sensor",
+          "heat_pump_energy_sensor": "Energy sensor",
+          "heat_pump_temperature_sensor": "Temperature sensor",
+          "heat_pump_rated_power": "Rated power",
+          "heat_pump_boost_offset": "Boost offset",
+          "heat_pump_max_setpoint": "Maximum setpoint",
+          "heat_pump_force_on_threshold": "Force-on threshold",
+          "heat_pump_priority": "Priority",
+          "heat_pump_sg_ready_service": "SG-Ready service (domain.service)",
+          "heat_pump_sg_ready_service_data": "SG-Ready service data (JSON; placeholders state, relay1, relay2)",
+          "heat_pump_sg_ready_state_entity": "SG-Ready state read-back entity",
+          "heat_pump_relay1_on_value": "SG-Ready contact 1 — ON value",
+          "heat_pump_relay1_off_value": "SG-Ready contact 1 — OFF value",
+          "heat_pump_relay2_on_value": "SG-Ready contact 2 — ON value",
+          "heat_pump_relay2_off_value": "SG-Ready contact 2 — OFF value"
         }
       }
     },
@@ -600,493 +684,54 @@
       "heat_pump_partial_relays": "SG-Ready benötigt BEIDE Relais-Entitäten. Setze beide Relais — oder lasse beide leer und konfiguriere nur die climate-Entität für den climate-only Setpoint-Boost.",
       "deye_program_groups_incomplete": "All six Deye program groups must define time, SOC, and grid-charge entities.",
       "deye_work_mode_mapping_not_distinct": "Die Work-Mode-Steuerung braucht zwei verschiedene Optionen – eine für Load First und eine für Battery First. Wählen Sie beide, und nicht zweimal dieselbe.",
-      "deye_force_charge_work_mode_invalid": "Wählen Sie, mit welchem Work Mode SEM die Batterie zwangsladen soll: Load First oder Battery First."
+      "deye_force_charge_work_mode_invalid": "Wählen Sie, mit welchem Work Mode SEM die Batterie zwangsladen soll: Load First oder Battery First.",
+      "deye_system_work_mode_mapping_not_distinct": "The three System Work Mode labels must be filled in and distinct.",
+      "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
+      "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
+      "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
     }
   },
   "entity": {
     "sensor": {
-      "solar_power": {
-        "name": "Solarleistung"
-      },
-      "home_consumption_power": {
-        "name": "Hausverbrauch"
-      },
-      "grid_power": {
-        "name": "Netzleistung"
-      },
-      "grid_active_power": {
-        "name": "Netz-Wirkleistung"
-      },
-      "grid_import_power": {
-        "name": "Netzimport"
-      },
-      "grid_export_power": {
-        "name": "Netzexport"
-      },
-      "battery_power": {
-        "name": "Batterieleistung"
-      },
-      "battery_charge_power": {
-        "name": "Batterie-Ladeleistung"
-      },
-      "battery_discharge_power": {
-        "name": "Batterie-Entladeleistung"
-      },
-      "ev_power": {
-        "name": "EV-Leistung"
-      },
-      "available_power": {
-        "name": "Verfügbare Leistung"
-      },
-      "battery_soc": {
-        "name": "Batterie-SOC"
-      },
-      "battery_status": {
-        "name": "Batteriestatus"
-      },
-      "battery_temperature": {
-        "name": "Batterietemperatur"
-      },
-      "inverter_temperature": {
-        "name": "Wechselrichter-Temperatur"
-      },
-      "battery_cycles_estimated": {
-        "name": "Batteriezyklen (geschätzt)"
-      },
-      "battery_health_score": {
-        "name": "Batterie-Gesundheitswert"
-      },
-      "calculated_current": {
-        "name": "Berechneter Strom"
-      },
-      "charging_state": {
-        "name": "Ladezustand"
-      },
-      "grid_status": {
-        "name": "Netzstatus"
-      },
-      "solar_charging_status": {
-        "name": "Solarladen"
-      },
-      "night_charging_status": {
-        "name": "Nachtladen"
-      },
-      "energy_plan": {
-        "name": "Energieplan"
-      },
-      "battery_priority_status": {
-        "name": "Batteriepriorität"
-      },
-      "charging_strategy": {
-        "name": "Ladestrategie"
-      },
-      "daily_solar_energy": {
-        "name": "Heute Solar"
-      },
-      "daily_home_energy": {
-        "name": "Heute Haus"
-      },
-      "daily_grid_import_energy": {
-        "name": "Heute Import"
-      },
-      "daily_grid_export_energy": {
-        "name": "Heute Export"
-      },
-      "daily_battery_charge_energy": {
-        "name": "Heute Ladung"
-      },
-      "daily_battery_discharge_energy": {
-        "name": "Heute Entladung"
-      },
-      "daily_ev_energy": {
-        "name": "Heute EV"
-      },
-      "monthly_solar_yield_energy": {
-        "name": "Monatlich Solar"
-      },
-      "monthly_grid_import_energy": {
-        "name": "Monatlich Import"
-      },
-      "monthly_grid_export_energy": {
-        "name": "Monatlich Export"
-      },
-      "monthly_battery_charge_energy": {
-        "name": "Monatlich Ladung"
-      },
-      "monthly_battery_discharge_energy": {
-        "name": "Monatlich Entladung"
-      },
-      "monthly_home_consumption_energy": {
-        "name": "Monatlich Haus"
-      },
-      "monthly_ev_consumption_energy": {
-        "name": "Monatlich EV"
-      },
-      "flow_solar_to_home_power": {
-        "name": "Solar zu Haus"
-      },
-      "flow_solar_to_battery_power": {
-        "name": "Solar zu Batterie"
-      },
-      "flow_solar_to_grid_power": {
-        "name": "Solar zu Netz"
-      },
-      "flow_solar_to_ev_power": {
-        "name": "Solar zu EV"
-      },
-      "flow_battery_to_home_power": {
-        "name": "Batterie zu Haus"
-      },
-      "flow_battery_to_grid_power": {
-        "name": "Batterie zu Netz"
-      },
-      "flow_battery_to_ev_power": {
-        "name": "Batterie zu EV"
-      },
-      "flow_grid_to_home_power": {
-        "name": "Netz zu Haus"
-      },
-      "flow_grid_to_ev_power": {
-        "name": "Netz zu EV"
-      },
-      "flow_grid_to_battery_power": {
-        "name": "Netz zu Batterie"
-      },
-      "flow_solar_to_home_energy": {
-        "name": "Solar zu Haus Energie"
-      },
-      "flow_solar_to_ev_energy": {
-        "name": "Solar zu EV Energie"
-      },
-      "flow_solar_to_battery_energy": {
-        "name": "Solar zu Batterie Energie"
-      },
-      "flow_solar_to_grid_energy": {
-        "name": "Solar zu Netz Energie"
-      },
-      "flow_grid_to_home_energy": {
-        "name": "Netz zu Haus Energie"
-      },
-      "flow_grid_to_ev_energy": {
-        "name": "Netz zu EV Energie"
-      },
-      "flow_grid_to_battery_energy": {
-        "name": "Netz zu Batterie Energie"
-      },
-      "flow_battery_to_home_energy": {
-        "name": "Batterie zu Haus Energie"
-      },
-      "flow_battery_to_grid_energy": {
-        "name": "Batterie zu Netz Energie"
-      },
-      "flow_battery_to_ev_energy": {
-        "name": "Batterie zu EV Energie"
-      },
-      "self_consumption_rate": {
-        "name": "Eigenverbrauch"
-      },
       "autarky_rate": {
         "name": "Autarkiequote"
-      },
-      "daily_savings": {
-        "name": "Heute Ersparnis"
-      },
-      "daily_battery_savings": {
-        "name": "Batterie-Ersparnis Heute"
-      },
-      "daily_costs": {
-        "name": "Kosten Heute"
-      },
-      "daily_export_revenue": {
-        "name": "Einspeisung Heute"
-      },
-      "daily_net_cost": {
-        "name": "Nettokosten Heute"
-      },
-      "monthly_savings": {
-        "name": "Monatliche Ersparnis"
-      },
-      "monthly_battery_savings": {
-        "name": "Batterie-Ersparnis Monat"
-      },
-      "monthly_costs": {
-        "name": "Kosten Monat"
-      },
-      "monthly_export_revenue": {
-        "name": "Einspeisung Monat"
-      },
-      "monthly_net_cost": {
-        "name": "Nettokosten Monat"
-      },
-      "yearly_solar_yield_energy": {
-        "name": "Jährlich Solar"
-      },
-      "lifetime_solar_yield_energy": {
-        "name": "Solarproduktion gesamt"
-      },
-      "yearly_grid_import_energy": {
-        "name": "Jährlich Netzimport"
-      },
-      "yearly_grid_export_energy": {
-        "name": "Jährlich Netzexport"
-      },
-      "yearly_battery_charge_energy": {
-        "name": "Jährlich Batterie-Ladung"
-      },
-      "yearly_battery_discharge_energy": {
-        "name": "Jährlich Batterie-Entladung"
-      },
-      "yearly_home_consumption_energy": {
-        "name": "Jährlich Hausverbrauch"
-      },
-      "yearly_ev_energy": {
-        "name": "Jährlich EV-Energie"
-      },
-      "yearly_costs": {
-        "name": "Jährliche Kosten"
-      },
-      "yearly_savings": {
-        "name": "Jährliche Ersparnis"
-      },
-      "yearly_battery_savings": {
-        "name": "Jährliche Batterie-Ersparnis"
-      },
-      "yearly_export_revenue": {
-        "name": "Jährliche Einspeisung"
-      },
-      "yearly_net_cost": {
-        "name": "Jährliche Nettokosten"
-      },
-      "lifetime_total_savings": {
-        "name": "Gesamt Ersparnis"
-      },
-      "lifetime_grid_cost": {
-        "name": "Gesamt Netzkosten"
-      },
-      "roi_percentage": {
-        "name": "ROI Prozent"
-      },
-      "roi_payback_years": {
-        "name": "ROI Amortisation Jahre"
-      },
-      "roi_annual_savings": {
-        "name": "ROI Jährliche Ersparnis"
-      },
-      "forecast_correction_factor": {
-        "name": "Prognose-Korrekturfaktor"
-      },
-      "forecast_corrected_today": {
-        "name": "Korrigierte Prognose Heute"
-      },
-      "forecast_history_days": {
-        "name": "Prognose-Historientage"
-      },
-      "daily_co2_avoided": {
-        "name": "CO2 vermieden Heute"
-      },
-      "yearly_co2_avoided": {
-        "name": "CO2 vermieden Dieses Jahr"
-      },
-      "yearly_trees_equivalent": {
-        "name": "Bäume-Äquivalent Dieses Jahr"
-      },
-      "lifetime_co2_avoided": {
-        "name": "Gesamt CO2 vermieden"
-      },
-      "lifetime_trees_equivalent": {
-        "name": "Gesamt Bäume-Äquivalent"
-      },
-      "power_charge_cost": {
-        "name": "Leistungspreis"
-      },
-      "consecutive_peak_15min": {
-        "name": "15min Spitzenlast"
-      },
-      "monthly_consecutive_peak": {
-        "name": "Monatliche Spitzenlast"
-      },
-      "current_vs_peak_percentage": {
-        "name": "Spitzenlast-Prozent"
-      },
-      "target_peak_limit": {
-        "name": "Spitzenlast-Grenze"
-      },
-      "peak_margin": {
-        "name": "Spitzenlast-Reserve"
-      },
-      "load_management_status": {
-        "name": "Lastmanagement"
-      },
-      "load_management_recommendation": {
-        "name": "Lastempfehlung"
-      },
-      "loads_currently_shed": {
-        "name": "Abgeschaltete Lasten"
       },
       "available_load_reduction": {
         "name": "Verfügbare Reduktion"
       },
-      "controllable_devices_count": {
-        "name": "Geräteanzahl"
+      "available_power": {
+        "name": "Verfügbare Leistung"
       },
-      "surplus_total_w": {
-        "name": "Überschuss Gesamt"
+      "battery_capacity_drift_pct": {
+        "name": "Kapazitätsabweichung"
       },
-      "surplus_distributable_w": {
-        "name": "Überschuss Verteilbar"
+      "battery_charge_pacing": {
+        "name": "Batterie-Ladetempo"
       },
-      "surplus_allocated_w": {
-        "name": "Überschuss Zugewiesen"
+      "battery_charge_power": {
+        "name": "Batterie-Ladeleistung"
       },
-      "surplus_unallocated_w": {
-        "name": "Überschuss Nicht zugewiesen"
+      "battery_cycles_estimated": {
+        "name": "Batteriezyklen (geschätzt)"
       },
-      "surplus_active_devices": {
-        "name": "Überschuss Aktive Geräte"
+      "battery_discharge_power": {
+        "name": "Batterie-Entladeleistung"
       },
-      "surplus_total_devices": {
-        "name": "Überschuss Geräte Gesamt"
+      "battery_dynamic_floor_pct": {
+        "name": "Dynamische Untergrenze"
       },
-      "forecast_today_kwh": {
-        "name": "Prognose Heute"
+      "battery_health_score": {
+        "name": "Batterie-Gesundheitswert"
       },
-      "forecast_tomorrow_kwh": {
-        "name": "Prognose Morgen"
+      "battery_measured_capacity_kwh": {
+        "name": "Gemessene Batteriekapazität"
       },
-      "forecast_remaining_today_kwh": {
-        "name": "Prognose Rest Heute"
+      "battery_power": {
+        "name": "Batterieleistung"
       },
-      "forecast_power_now_w": {
-        "name": "Prognoseleistung Jetzt"
-      },
-      "forecast_source": {
-        "name": "Prognosequelle"
-      },
-      "charging_recommendation": {
-        "name": "Ladeempfehlung"
-      },
-      "tariff_current_import_rate": {
-        "name": "Strompreis"
-      },
-      "tariff_current_export_rate": {
-        "name": "Einspeisevergütung"
-      },
-      "tariff_price_level": {
-        "name": "Preisniveau"
-      },
-      "tariff_provider": {
-        "name": "Tarifanbieter"
-      },
-      "tariff_next_cheap_start": {
-        "name": "Nächstes Günstig-Fenster"
-      },
-      "heat_pump_mode": {
-        "name": "Wärmepumpe Modus"
-      },
-      "heat_pump_sg_ready_state": {
-        "name": "Wärmepumpe SG-Ready"
-      },
-      "pv_daily_specific_yield": {
-        "name": "PV Spezifischer Ertrag"
-      },
-      "pv_performance_vs_forecast": {
-        "name": "PV vs Prognose"
-      },
-      "pv_estimated_annual_degradation": {
-        "name": "PV Jährliche Degradation"
-      },
-      "pv_degradation_trend": {
-        "name": "PV Degradationstrend"
-      },
-      "energy_optimization_score": {
-        "name": "Optimierungswert"
-      },
-      "energy_tip": {
-        "name": "Energietipp"
-      },
-      "energy_tip_category": {
-        "name": "Energietipp Kategorie"
-      },
-      "energy_ev_solar_percentage": {
-        "name": "EV Solarladen %"
-      },
-      "predictor_training_status": {
-        "name": "Prädiktor Trainingsstatus"
-      },
-      "predictor_model_accuracy": {
-        "name": "Prädiktor Genauigkeit"
-      },
-      "predicted_surplus_window": {
-        "name": "Progn. Überschuss-Fenster"
-      },
-      "session_energy": {
-        "name": "Sitzungsenergie"
-      },
-      "session_solar_share": {
-        "name": "Sitzung Solaranteil"
-      },
-      "session_cost": {
-        "name": "Sitzungskosten"
-      },
-      "session_duration": {
-        "name": "Sitzungsdauer"
-      },
-      "lifetime_ev_energy": {
-        "name": "Gesamt EV-Energie"
-      },
-      "lifetime_ev_solar": {
-        "name": "Gesamt EV-Solarenergie"
-      },
-      "lifetime_ev_cost": {
-        "name": "Gesamt EV-Kosten"
-      },
-      "lifetime_ev_sessions": {
-        "name": "Gesamt EV-Sitzungen"
-      },
-      "lifetime_ev_solar_share": {
-        "name": "Gesamt EV-Solaranteil"
-      },
-      "lifetime_ev_battery_share": {
-        "name": "Gesamt EV-Batterieanteil"
-      },
-      "lifetime_ev_grid_share": {
-        "name": "Gesamt EV-Netzanteil"
-      },
-      "vehicle_soc": {
-        "name": "Fahrzeug-SOC"
-      },
-      "ev_remaining_range": {
-        "name": "EV-Reichweite"
-      },
-      "best_surplus_window": {
-        "name": "Bestes Überschuss-Fenster"
-      },
-      "night_start_time": {
-        "name": "Nacht Startzeit"
-      },
-      "night_end_time": {
-        "name": "Nacht Endzeit"
-      },
-      "night_window_hours": {
-        "name": "Nachtfenster Stunden"
-      },
-      "forecast_peak_power_today_w": {
-        "name": "Prognose Spitzenleistung Heute"
-      },
-      "forecast_peak_time_today": {
-        "name": "Prognose Spitzenzeit Heute"
-      },
-      "forecast_surplus_kwh": {
-        "name": "Prognose Überschuss"
-      },
-      "forecast_dampening_factor": {
-        "name": "Prognose-Dämpfungsfaktor"
-      },
-      "battery_scheduler_state": {
-        "name": "Batterie-Ladeplaner Status"
-      },
-      "battery_scheduler_target_soc": {
-        "name": "Batterie-Ladeplaner Ziel-SOC"
+      "battery_priority_status": {
+        "name": "Batteriepriorität"
       },
       "battery_scheduler_deficit_kwh": {
         "name": "Batterie-Ladeplaner Defizit"
@@ -1094,20 +739,137 @@
       "battery_scheduler_reason": {
         "name": "Batterie-Ladeplaner Grund"
       },
-      "ev_charger_count": {
-        "name": "Anzahl EV-Lader"
+      "battery_scheduler_state": {
+        "name": "Batterie-Ladeplaner Status"
       },
-      "ev_taper_trend": {
-        "name": "EV Taper-Trend"
+      "battery_scheduler_target_soc": {
+        "name": "Batterie-Ladeplaner Ziel-SOC"
       },
-      "diag_version": {
-        "name": "SEM-Version"
+      "battery_session_avg_power": {
+        "name": "Batterie-Sitzung Ø-Leistung"
       },
-      "diag_grid_mode": {
-        "name": "Netzsensor-Modus"
+      "battery_session_cost": {
+        "name": "Batterie-Sitzungskosten"
       },
-      "diag_grid_sign": {
-        "name": "Netzvorzeichen"
+      "battery_session_duration": {
+        "name": "Batterie-Sitzungsdauer"
+      },
+      "battery_session_energy": {
+        "name": "Batterie-Sitzungsenergie"
+      },
+      "battery_session_savings": {
+        "name": "Batterie-Sitzung Ersparnis"
+      },
+      "battery_session_solar_share": {
+        "name": "Batterie-Sitzung Solaranteil"
+      },
+      "battery_session_type": {
+        "name": "Batterie-Sitzungstyp"
+      },
+      "battery_soc": {
+        "name": "Batterie-SOC"
+      },
+      "battery_spendable_kwh": {
+        "name": "Heute Nacht verfügbar"
+      },
+      "battery_status": {
+        "name": "Batteriestatus"
+      },
+      "battery_stored_grid_share": {
+        "name": "Gespeicherte Energie aus Netz"
+      },
+      "battery_temperature": {
+        "name": "Batterietemperatur"
+      },
+      "best_surplus_window": {
+        "name": "Bestes Überschuss-Fenster"
+      },
+      "calculated_current": {
+        "name": "Berechneter Strom"
+      },
+      "charging_recommendation": {
+        "name": "Ladeempfehlung"
+      },
+      "charging_state": {
+        "name": "Ladezustand"
+      },
+      "charging_strategy": {
+        "name": "Ladestrategie"
+      },
+      "consecutive_peak_15min": {
+        "name": "15min Spitzenlast"
+      },
+      "controllable_devices_count": {
+        "name": "Geräteanzahl"
+      },
+      "current_vs_peak_percentage": {
+        "name": "Spitzenlast-Prozent"
+      },
+      "daily_battery_charge_energy": {
+        "name": "Heute Ladung"
+      },
+      "daily_battery_charge_grid": {
+        "name": "Heute Ladung aus Netz"
+      },
+      "daily_battery_charge_solar": {
+        "name": "Heute Ladung aus Solar"
+      },
+      "daily_battery_discharge_energy": {
+        "name": "Heute Entladung"
+      },
+      "daily_battery_grid_cost": {
+        "name": "Heute Kosten Netzladung"
+      },
+      "daily_battery_savings": {
+        "name": "Batterie-Ersparnis Heute"
+      },
+      "daily_co2_avoided": {
+        "name": "CO2 vermieden Heute"
+      },
+      "daily_costs": {
+        "name": "Kosten Heute"
+      },
+      "daily_ev_energy": {
+        "name": "Heute EV"
+      },
+      "daily_export_revenue": {
+        "name": "Einspeisung Heute"
+      },
+      "daily_grid_export_energy": {
+        "name": "Heute Export"
+      },
+      "daily_grid_export_negative_kwh": {
+        "name": "Eingespeist bei negativem Preis"
+      },
+      "daily_grid_export_negative_cost": {
+        "name": "Kosten der Einspeisung bei negativem Preis"
+      },
+      "export_guard_state": {
+        "name": "Einspeise-Wächter"
+      },
+      "daily_grid_import_energy": {
+        "name": "Heute Import"
+      },
+      "daily_home_energy": {
+        "name": "Heute Haus"
+      },
+      "daily_net_cost": {
+        "name": "Nettokosten Heute"
+      },
+      "daily_savings": {
+        "name": "Heute Ersparnis"
+      },
+      "daily_solar_energy": {
+        "name": "Heute Solar"
+      },
+      "daily_total_consumption": {
+        "name": "Heute Gesamtverbrauch"
+      },
+      "daily_true_baseload_energy": {
+        "name": "Echte Grundlast heute"
+      },
+      "diag_battery_capacity": {
+        "name": "Batteriekapazität (Konfig.)"
       },
       "diag_battery_sign": {
         "name": "Batterievorzeichen"
@@ -1115,14 +877,11 @@
       "diag_charger_control": {
         "name": "Lader-Steuerungsmethode"
       },
-      "diag_battery_capacity": {
-        "name": "Batteriekapazität (Konfig.)"
+      "diag_charger_count": {
+        "name": "Konfigurierte Ladestationen"
       },
-      "diag_update_interval": {
-        "name": "Aktualisierungsintervall"
-      },
-      "diag_observer_mode": {
-        "name": "Beobachtermodus"
+      "diag_ed_config": {
+        "name": "Energie-Dashboard-Konfiguration"
       },
       "diag_grid_l1_current_a": {
         "name": "Grid L1 Current"
@@ -1142,6 +901,15 @@
       "diag_grid_l3_margin_a": {
         "name": "Grid L3 Current Margin"
       },
+      "diag_grid_mode": {
+        "name": "Netzsensor-Modus"
+      },
+      "diag_grid_sign": {
+        "name": "Netzvorzeichen"
+      },
+      "diag_inputs_degraded": {
+        "name": "Eingänge gestört"
+      },
       "diag_inverter_l1_current_a": {
         "name": "Inverter Load/EPS L1 Current"
       },
@@ -1160,14 +928,17 @@
       "diag_inverter_l3_margin_a": {
         "name": "Inverter Load/EPS L3 Current Margin"
       },
+      "diag_observer_mode": {
+        "name": "Beobachtermodus"
+      },
+      "diag_phase_guard_data_fresh": {
+        "name": "Phase Guard Data Fresh"
+      },
       "diag_phase_guard_mode": {
         "name": "Phase Guard Mode"
       },
       "diag_phase_guard_safe": {
         "name": "Phase Guard Safe"
-      },
-      "diag_phase_guard_data_fresh": {
-        "name": "Phase Guard Data Fresh"
       },
       "diag_phase_guard_stop_reason": {
         "name": "Phase Guard Stop Reason"
@@ -1175,74 +946,431 @@
       "diag_sensors_unavailable": {
         "name": "Sensoren nicht verfügbar"
       },
-      "battery_session_type": {
-        "name": "Batterie-Sitzungstyp"
+      "diag_update_interval": {
+        "name": "Aktualisierungsintervall"
       },
-      "battery_session_energy": {
-        "name": "Batterie-Sitzungsenergie"
+      "diag_version": {
+        "name": "SEM-Version"
       },
-      "battery_session_solar_share": {
-        "name": "Batterie-Sitzung Solaranteil"
+      "energy_ev_solar_percentage": {
+        "name": "EV Solarladen %"
       },
-      "battery_session_cost": {
-        "name": "Batterie-Sitzungskosten"
+      "energy_optimization_score": {
+        "name": "Optimierungswert"
       },
-      "battery_session_savings": {
-        "name": "Batterie-Sitzung Ersparnis"
+      "energy_plan": {
+        "name": "Energieplan"
       },
-      "battery_session_duration": {
-        "name": "Batterie-Sitzungsdauer"
+      "energy_tip": {
+        "name": "Energietipp"
       },
-      "battery_session_avg_power": {
-        "name": "Batterie-Sitzung Ø-Leistung"
+      "energy_tip_category": {
+        "name": "Energietipp Kategorie"
       },
-      "diag_charger_count": {
-        "name": "Konfigurierte Ladestationen"
+      "ev_charger_count": {
+        "name": "Anzahl EV-Lader"
       },
-      "diag_ed_config": {
-        "name": "Energie-Dashboard-Konfiguration"
+      "ev_power": {
+        "name": "EV-Leistung"
       },
-      "heat_pump_registration_status": {
-        "name": "Wärmepumpe Registrierungs-Status"
+      "ev_remaining_range": {
+        "name": "EV-Reichweite"
       },
-      "vpp_event": {
-        "name": "VPP-Ereignis"
+      "ev_taper_trend": {
+        "name": "EV Taper-Trend"
       },
-      "heat_pump_energy_today": {
-        "name": "Wärmepumpe heute"
+      "flow_battery_to_ev_energy": {
+        "name": "Batterie zu EV Energie"
+      },
+      "flow_battery_to_ev_power": {
+        "name": "Batterie zu EV"
+      },
+      "flow_battery_to_grid_energy": {
+        "name": "Batterie zu Netz Energie"
+      },
+      "flow_battery_to_grid_power": {
+        "name": "Batterie zu Netz"
+      },
+      "flow_battery_to_home_energy": {
+        "name": "Batterie zu Haus Energie"
+      },
+      "flow_battery_to_home_power": {
+        "name": "Batterie zu Haus"
+      },
+      "flow_grid_to_battery_energy": {
+        "name": "Netz zu Batterie Energie"
+      },
+      "flow_grid_to_battery_power": {
+        "name": "Netz zu Batterie"
+      },
+      "flow_grid_to_ev_energy": {
+        "name": "Netz zu EV Energie"
+      },
+      "flow_grid_to_ev_power": {
+        "name": "Netz zu EV"
+      },
+      "flow_grid_to_home_energy": {
+        "name": "Netz zu Haus Energie"
+      },
+      "flow_grid_to_home_power": {
+        "name": "Netz zu Haus"
+      },
+      "flow_solar_to_battery_energy": {
+        "name": "Solar zu Batterie Energie"
+      },
+      "flow_solar_to_battery_power": {
+        "name": "Solar zu Batterie"
+      },
+      "flow_solar_to_ev_energy": {
+        "name": "Solar zu EV Energie"
+      },
+      "flow_solar_to_ev_power": {
+        "name": "Solar zu EV"
+      },
+      "flow_solar_to_grid_energy": {
+        "name": "Solar zu Netz Energie"
+      },
+      "flow_solar_to_grid_power": {
+        "name": "Solar zu Netz"
+      },
+      "flow_solar_to_home_energy": {
+        "name": "Solar zu Haus Energie"
+      },
+      "flow_solar_to_home_power": {
+        "name": "Solar zu Haus"
+      },
+      "forecast_corrected_today": {
+        "name": "Korrigierte Prognose Heute"
+      },
+      "forecast_correction_factor": {
+        "name": "Prognose-Korrekturfaktor"
+      },
+      "forecast_dampening_factor": {
+        "name": "Prognose-Dämpfungsfaktor"
+      },
+      "forecast_history_days": {
+        "name": "Prognose-Historientage"
+      },
+      "forecast_peak_power_today_w": {
+        "name": "Prognose Spitzenleistung Heute"
+      },
+      "forecast_peak_time_today": {
+        "name": "Prognose Spitzenzeit Heute"
+      },
+      "forecast_power_now_w": {
+        "name": "Prognoseleistung Jetzt"
+      },
+      "forecast_remaining_today_kwh": {
+        "name": "Prognose Rest Heute"
+      },
+      "forecast_source": {
+        "name": "Prognosequelle"
+      },
+      "forecast_surplus_kwh": {
+        "name": "Prognose Überschuss"
+      },
+      "forecast_today_kwh": {
+        "name": "Prognose Heute"
+      },
+      "forecast_tomorrow_kwh": {
+        "name": "Prognose Morgen"
+      },
+      "forecast_trust_d1": {
+        "name": "Prognose-Vertrauen (morgen)"
+      },
+      "forecast_trust_d2": {
+        "name": "Prognose-Vertrauen (übermorgen)"
+      },
+      "grid_active_power": {
+        "name": "Netz-Wirkleistung"
+      },
+      "grid_export_power": {
+        "name": "Netzexport"
+      },
+      "grid_import_power": {
+        "name": "Netzimport"
+      },
+      "grid_power": {
+        "name": "Netzleistung"
+      },
+      "grid_status": {
+        "name": "Netzstatus"
       },
       "heat_pump_energy_month": {
         "name": "Wärmepumpe diesen Monat"
       },
-      "heat_pump_energy_year": {
-        "name": "Wärmepumpe dieses Jahr"
+      "heat_pump_energy_shifted_today": {
+        "name": "Wärmepumpe verschoben heute"
+      },
+      "heat_pump_energy_today": {
+        "name": "Wärmepumpe heute"
       },
       "heat_pump_energy_total": {
         "name": "Wärmepumpe gesamt"
       },
-      "heat_pump_energy_shifted_today": {
-        "name": "Wärmepumpe verschoben heute"
+      "heat_pump_energy_year": {
+        "name": "Wärmepumpe dieses Jahr"
       },
-      "daily_battery_charge_solar": {
-        "name": "Heute Ladung aus Solar"
+      "heat_pump_mode": {
+        "name": "Wärmepumpe Modus"
       },
-      "daily_battery_charge_grid": {
-        "name": "Heute Ladung aus Netz"
+      "heat_pump_registration_status": {
+        "name": "Wärmepumpe Registrierungs-Status"
       },
-      "daily_battery_grid_cost": {
-        "name": "Heute Kosten Netzladung"
+      "heat_pump_sg_ready_state": {
+        "name": "Wärmepumpe SG-Ready"
       },
-      "battery_stored_grid_share": {
-        "name": "Gespeicherte Energie aus Netz"
+      "home_consumption_power": {
+        "name": "Hausverbrauch"
+      },
+      "inverter_temperature": {
+        "name": "Wechselrichter-Temperatur"
+      },
+      "lifetime_co2_avoided": {
+        "name": "Gesamt CO2 vermieden"
+      },
+      "lifetime_ev_battery_share": {
+        "name": "Gesamt EV-Batterieanteil"
+      },
+      "lifetime_ev_cost": {
+        "name": "Gesamt EV-Kosten"
+      },
+      "lifetime_ev_energy": {
+        "name": "Gesamt EV-Energie"
+      },
+      "lifetime_ev_grid_share": {
+        "name": "Gesamt EV-Netzanteil"
+      },
+      "lifetime_ev_sessions": {
+        "name": "Gesamt EV-Sitzungen"
+      },
+      "lifetime_ev_solar": {
+        "name": "Gesamt EV-Solarenergie"
+      },
+      "lifetime_ev_solar_share": {
+        "name": "Gesamt EV-Solaranteil"
+      },
+      "lifetime_grid_cost": {
+        "name": "Gesamt Netzkosten"
+      },
+      "lifetime_solar_yield_energy": {
+        "name": "Solarproduktion gesamt"
+      },
+      "lifetime_total_savings": {
+        "name": "Gesamt Ersparnis"
+      },
+      "lifetime_trees_equivalent": {
+        "name": "Gesamt Bäume-Äquivalent"
+      },
+      "load_management_recommendation": {
+        "name": "Lastempfehlung"
+      },
+      "load_management_status": {
+        "name": "Lastmanagement"
+      },
+      "loads_currently_shed": {
+        "name": "Abgeschaltete Lasten"
+      },
+      "monthly_battery_charge_energy": {
+        "name": "Monatlich Ladung"
+      },
+      "monthly_battery_discharge_energy": {
+        "name": "Monatlich Entladung"
+      },
+      "monthly_battery_savings": {
+        "name": "Batterie-Ersparnis Monat"
+      },
+      "monthly_consecutive_peak": {
+        "name": "Monatliche Spitzenlast"
+      },
+      "monthly_costs": {
+        "name": "Kosten Monat"
+      },
+      "monthly_ev_consumption_energy": {
+        "name": "Monatlich EV"
+      },
+      "monthly_export_revenue": {
+        "name": "Einspeisung Monat"
+      },
+      "monthly_grid_export_energy": {
+        "name": "Monatlich Export"
+      },
+      "monthly_grid_import_energy": {
+        "name": "Monatlich Import"
+      },
+      "monthly_home_consumption_energy": {
+        "name": "Monatlich Haus"
+      },
+      "monthly_net_cost": {
+        "name": "Nettokosten Monat"
+      },
+      "monthly_savings": {
+        "name": "Monatliche Ersparnis"
+      },
+      "monthly_solar_yield_energy": {
+        "name": "Monatlich Solar"
+      },
+      "night_charging_status": {
+        "name": "Nachtladen"
+      },
+      "night_end_time": {
+        "name": "Nacht Endzeit"
+      },
+      "night_start_time": {
+        "name": "Nacht Startzeit"
+      },
+      "night_window_hours": {
+        "name": "Nachtfenster Stunden"
+      },
+      "peak_margin": {
+        "name": "Spitzenlast-Reserve"
+      },
+      "power_charge_cost": {
+        "name": "Leistungspreis"
+      },
+      "predicted_surplus_window": {
+        "name": "Progn. Überschuss-Fenster"
+      },
+      "predictor_model_accuracy": {
+        "name": "Prädiktor Genauigkeit"
+      },
+      "predictor_training_status": {
+        "name": "Prädiktor Trainingsstatus"
+      },
+      "pv_daily_specific_yield": {
+        "name": "PV Spezifischer Ertrag"
+      },
+      "pv_degradation_trend": {
+        "name": "PV Degradationstrend"
+      },
+      "pv_estimated_annual_degradation": {
+        "name": "PV Jährliche Degradation"
+      },
+      "pv_performance_vs_forecast": {
+        "name": "PV vs Prognose"
+      },
+      "roi_annual_savings": {
+        "name": "ROI Jährliche Ersparnis"
+      },
+      "roi_payback_years": {
+        "name": "ROI Amortisation Jahre"
+      },
+      "roi_percentage": {
+        "name": "ROI Prozent"
+      },
+      "self_consumption_rate": {
+        "name": "Eigenverbrauch"
+      },
+      "session_cost": {
+        "name": "Sitzungskosten"
+      },
+      "session_duration": {
+        "name": "Sitzungsdauer"
+      },
+      "session_energy": {
+        "name": "Sitzungsenergie"
+      },
+      "session_solar_share": {
+        "name": "Sitzung Solaranteil"
+      },
+      "solar_charging_status": {
+        "name": "Solarladen"
+      },
+      "solar_power": {
+        "name": "Solarleistung"
+      },
+      "surplus_active_devices": {
+        "name": "Überschuss Aktive Geräte"
+      },
+      "surplus_allocated_w": {
+        "name": "Überschuss Zugewiesen"
+      },
+      "surplus_distributable_w": {
+        "name": "Überschuss Verteilbar"
+      },
+      "surplus_total_devices": {
+        "name": "Überschuss Geräte Gesamt"
+      },
+      "surplus_total_w": {
+        "name": "Überschuss Gesamt"
+      },
+      "surplus_unallocated_w": {
+        "name": "Überschuss Nicht zugewiesen"
+      },
+      "target_peak_limit": {
+        "name": "Spitzenlast-Grenze"
+      },
+      "tariff_current_export_rate": {
+        "name": "Einspeisevergütung"
+      },
+      "tariff_current_import_rate": {
+        "name": "Strompreis"
+      },
+      "tariff_next_cheap_start": {
+        "name": "Nächstes Günstig-Fenster"
+      },
+      "tariff_price_level": {
+        "name": "Preisniveau"
+      },
+      "tariff_provider": {
+        "name": "Tarifanbieter"
       },
       "true_baseload_power": {
         "name": "Echte Grundlast"
       },
-      "daily_true_baseload_energy": {
-        "name": "Echte Grundlast heute"
+      "vehicle_soc": {
+        "name": "Fahrzeug-SOC"
       },
-      "daily_total_consumption": {
-        "name": "Heute Gesamtverbrauch"
+      "vpp_event": {
+        "name": "VPP-Ereignis"
+      },
+      "yearly_battery_charge_energy": {
+        "name": "Jährlich Batterie-Ladung"
+      },
+      "yearly_battery_discharge_energy": {
+        "name": "Jährlich Batterie-Entladung"
+      },
+      "yearly_battery_savings": {
+        "name": "Jährliche Batterie-Ersparnis"
+      },
+      "yearly_co2_avoided": {
+        "name": "CO2 vermieden Dieses Jahr"
+      },
+      "yearly_costs": {
+        "name": "Jährliche Kosten"
+      },
+      "yearly_ev_energy": {
+        "name": "Jährlich EV-Energie"
+      },
+      "yearly_export_revenue": {
+        "name": "Jährliche Einspeisung"
+      },
+      "yearly_grid_export_energy": {
+        "name": "Jährlich Netzexport"
+      },
+      "yearly_grid_import_energy": {
+        "name": "Jährlich Netzimport"
+      },
+      "yearly_home_consumption_energy": {
+        "name": "Jährlich Hausverbrauch"
+      },
+      "yearly_net_cost": {
+        "name": "Jährliche Nettokosten"
+      },
+      "yearly_savings": {
+        "name": "Jährliche Ersparnis"
+      },
+      "yearly_solar_yield_energy": {
+        "name": "Jährlich Solar"
+      },
+      "yearly_trees_equivalent": {
+        "name": "Bäume-Äquivalent Dieses Jahr"
+      },
+      "house_meter_power": {
+        "name": "Hauszähler"
+      },
+      "house_meter_gap": {
+        "name": "Abweichung Hauszähler"
       }
     },
     "binary_sensor": {
@@ -1292,6 +1420,30 @@
       },
       "energy_plan_actuation": {
         "name": "Ausführung des Energieplans"
+      },
+      "battery_may_export": {
+        "name": "Batterie darf ins Netz verkaufen"
+      },
+      "battery_may_assist_ev": {
+        "name": "Batterie darf das Auto laden"
+      },
+      "forecast_spending_enabled": {
+        "name": "Prognosebasiertes Ausgeben"
+      },
+      "battery_charge_pacing_enabled": {
+        "name": "Batterie-Ladetempo"
+      },
+      "export_guard_enabled": {
+        "name": "Einspeise-Wächter"
+      },
+      "export_guard_override_external": {
+        "name": "Einspeise-Wächter: externe Steuerung übergehen"
+      },
+      "battery_house_sink_enabled": {
+        "name": "Haus als Batterie-Senke"
+      },
+      "ev_morning_window_enabled": {
+        "name": "Morgen-Fenster für das E-Auto"
       }
     },
     "number": {
@@ -1309,6 +1461,18 @@
       },
       "battery_assist_min_surplus": {
         "name": "Batterie-Unterstützung Min. Solarüberschuss"
+      },
+      "export_guard_engage_s": {
+        "name": "Einspeise-Wächter Einschaltverzögerung (s)"
+      },
+      "export_guard_release_s": {
+        "name": "Einspeise-Wächter Freigabeverzögerung (s)"
+      },
+      "ev_morning_window_hours": {
+        "name": "Morgen-Fenster E-Auto (h)"
+      },
+      "battery_morning_drain_floor_soc": {
+        "name": "Morgen-Entladeuntergrenze (%)"
       },
       "regulation_offset": {
         "name": "Regelungsoffset"
@@ -1419,6 +1583,7 @@
         "name": "{charger} Lademodus",
         "state": {
           "solar_only": "Nur Solar",
+          "solar_plus_battery": "Solar + Batterie",
           "solar_plus_cheap": "Solar + günstigste Stunden",
           "min_plus_solar": "Min. + Solar",
           "always_max": "Immer (max)",
@@ -1432,6 +1597,25 @@
           "1": "1-phasig",
           "3": "3-phasig"
         }
+      },
+      "pause_duration": {
+        "name": "Laden pausieren für",
+        "state": {
+          "30_minutes": "30 Minuten",
+          "1_hour": "1 Stunde",
+          "2_hours": "2 Stunden",
+          "4_hours": "4 Stunden",
+          "8_hours": "8 Stunden",
+          "12_hours": "12 Stunden"
+        }
+      }
+    },
+    "button": {
+      "backfill_battery_nights": {
+        "name": "Batterie-Nachthistorie neu aufbauen"
+      },
+      "pause_charging": {
+        "name": "{charger} Laden pausieren"
       }
     }
   },
@@ -1439,11 +1623,8 @@
     "dashboard_generation_failed": {
       "message": "Das SEM-Dashboard konnte nicht erstellt werden. Details finden Sie in den Home-Assistant-Protokollen."
     },
-    "load_management_not_initialized": {
-      "message": "Das Lastmanagement ist noch nicht bereit. Bitte warten Sie, bis die Integration vollständig gestartet ist, und versuchen Sie es erneut."
-    },
     "device_registry_not_initialized": {
-      "message": "Die Geräteregistrierung ist noch nicht bereit. Bitte warten Sie, bis die Integration vollständig gestartet ist, und versuchen Sie es erneut."
+      "message": "Die SEM-Geräteregistrierung konnte nicht aufgebaut werden, daher kann dieses Gerät nicht geändert werden. Prüfe das Home-Assistant-Protokoll auf \"Unified device registry init failed\" und lade die Integration neu."
     },
     "mapping_service_required": {
       "message": "Beim Steuerungstyp „Dienst“ ist ein Dienst erforderlich. Bitte geben Sie einen aufzurufenden Dienst an."
@@ -1460,9 +1641,6 @@
     "invalid_deadline_format": {
       "message": "Ungültiges Fristformat: „{deadline}“. Verwenden Sie das ISO-8601-Format, zum Beispiel 2026-05-27T07:00:00."
     },
-    "energy_dashboard_configuration_failed": {
-      "message": "Konfiguration des Energie-Dashboards fehlgeschlagen. Prüfe, ob alle erforderlichen Sensoren verfügbar sind."
-    },
     "set_option_invalid_payload": {
       "message": "set_option benötigt ein 'options'-Dict, das Konfigurationsschlüssel auf neue Werte abbildet."
     },
@@ -1471,6 +1649,12 @@
     },
     "unknown_appliance_schedule": {
       "message": "Kein Geräteplan für {device_id} gefunden. Prüfen Sie die Geräte-ID, die Sie mit dem Dienst schedule_appliance verwendet haben."
+    },
+    "load_management_disabled": {
+      "message": "Das Lastmanagement ist ausgeschaltet, daher gibt es keine Abwurfliste zu aktualisieren. Schalte es auf dem SEM-Dashboard unter Konfiguration → Lastmanagement ein und versuche es erneut."
+    },
+    "load_management_failed_to_start": {
+      "message": "Das Lastmanagement ist eingeschaltet, konnte aber nicht starten, daher kann SEM seine Geräteliste nicht verwenden. Prüfe das Home-Assistant-Protokoll auf \"Failed to initialize load management\" und lade die Integration neu."
     }
   },
   "issues": {
@@ -1484,11 +1668,25 @@
     },
     "charger_actuation_failed": {
       "title": "E-Auto-Ladegerät nimmt keine Befehle an: {name}",
-      "description": "Die letzten 3+ Strombefehle von SEM an **{name}** wurden abgelehnt: `{error}`. Das Ladegerät steht derzeit NICHT unter SEM-Kontrolle — es macht weiter, was zuletzt befohlen wurde (einschließlich Laden mit voller Leistung im Aus-Modus). Häufigste Ursachen: Die Steuer-Entität wurde durch ein Update der Upstream-Integration umbenannt, oder `ev_charger_service` zeigt auf einen Dienst mit anderem Parameterschema. Prüfe die Steuer-Entität/den Dienst des Ladegeräts in der SEM-Konfiguration. Dieser Hinweis verschwindet automatisch nach dem nächsten erfolgreichen Befehl."
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "An SEM melden",
+            "description": "Die letzten 3+ Strombefehle von SEM an **{name}** wurden abgelehnt: `{error}`. Das Ladegerät steht derzeit NICHT unter SEM-Kontrolle — es macht weiter, was zuletzt befohlen wurde (einschließlich Laden mit voller Leistung im Aus-Modus). Häufigste Ursachen: Die Steuer-Entität wurde durch ein Update der Upstream-Integration umbenannt, oder `ev_charger_service` zeigt auf einen Dienst mit anderem Parameterschema. Prüfe die Steuer-Entität/den Dienst des Ladegeräts in der SEM-Konfiguration. Dieser Hinweis verschwindet automatisch nach dem nächsten erfolgreichen Befehl.\n\nSEM hält dies für einen eigenen Fehler. Öffnen Sie nach Möglichkeit über den Hinweis einen Bug-Report — das Formular ist bereits ausgefüllt. Alternativ kopieren Sie den untenstehenden Kontext. Dieser Dialog sendet nichts.\n\n```\n{context}\n```\n\nBestätigen schließt den Hinweis."
+          }
+        }
+      }
     },
     "charger_stop_unenforceable": {
       "title": "E-Auto-Ladegerät lässt sich nicht stoppen: {name}",
-      "description": "SEM hat **{name}** den Stopp-Befehl gegeben, aber kein konfigurierter Mechanismus kann den Schütz tatsächlich öffnen — das Auto zieht weiterhin {power} W. Die einzige Steuerung, die SEM für dieses Ladegerät hat, ist `{entity}`, und deren Minimum liegt über 0 A, sodass das Schreiben von 0 A nichts bewirkt (SEM schreibt nie einen Wert, den die Entität ablehnen würde). Wenn du einen Hausspeicher hast, kommt diese Leistung aus dem Speicher — zu jeder Tages- und Nachtzeit. Lösung: Konfiguriere für dieses Ladegerät in den SEM-Optionen eine Start/Stopp-Entität (`ev_start_stop_entity`), eine Lademodus-Entität oder einen Stopp-Dienst. Dieser Hinweis verschwindet, sobald das Ladegerät keine Leistung mehr zieht."
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "An SEM melden",
+            "description": "SEM hat **{name}** den Stopp-Befehl gegeben, aber kein konfigurierter Mechanismus kann den Schütz tatsächlich öffnen — das Auto zieht weiterhin {power} W. Die einzige Steuerung, die SEM für dieses Ladegerät hat, ist `{entity}`, und deren Minimum liegt über 0 A, sodass das Schreiben von 0 A nichts bewirkt (SEM schreibt nie einen Wert, den die Entität ablehnen würde). Wenn du einen Hausspeicher hast, kommt diese Leistung aus dem Speicher — zu jeder Tages- und Nachtzeit. Lösung: Konfiguriere für dieses Ladegerät in den SEM-Optionen eine Start/Stopp-Entität (`ev_start_stop_entity`), eine Lademodus-Entität oder einen Stopp-Dienst. Dieser Hinweis verschwindet, sobald das Ladegerät keine Leistung mehr zieht.\n\nSEM hält dies für einen eigenen Fehler. Öffnen Sie nach Möglichkeit über den Hinweis einen Bug-Report — das Formular ist bereits ausgefüllt. Alternativ kopieren Sie den untenstehenden Kontext. Dieser Dialog sendet nichts.\n\n```\n{context}\n```\n\nBestätigen schließt den Hinweis."
+          }
+        }
+      }
     },
     "no_forecast_integration": {
       "title": "Keine Solar-Prognose-Integration erkannt",
@@ -1520,7 +1718,14 @@
     },
     "soc_cap_unenforceable": {
       "title": "Ladelimit von {target}% kann nicht durchgesetzt werden: {name}",
-      "description": "**{name}** ist auf ein prozentuales Ladeziel eingestellt, aber Ihr Fahrzeug meldet derzeit keinen Ladestand — SEM kann deshalb nicht *genau* bei **{target}%** stoppen.\n\nBlind lädt SEM aber nicht: Ab dem letzten echten Messwert dieser Sitzung zählt es die tatsächlich gelieferte Energie mit und stoppt, sobald diese gemessene Summe Ihr Ziel erreicht — überschritten wird nur, was das Auto seit diesem Messwert aufgenommen hat. Kam in dieser Sitzung überhaupt kein echter Messwert an (oder wurde SEM mitten im Ladevorgang neu gestartet), fehlt der Bezugspunkt, und es wird geladen, bis das Auto selbst kurz vor Voll abregelt.\n\nDamit die Grenze exakt trifft, hinterlegen Sie einen **echten Fahrzeug-SOC-Sensor** für diese Ladestation (Konfiguration → EV → Fahrzeug-SOC-Entität). Die Batterie-% im Dashboard sind SEMs *geschätzter* Ladestand, den es für die harte Grenze bewusst ignoriert (er kann driften). Diese Reparatur verschwindet automatisch, sobald wieder ein echter SOC-Wert verfügbar ist."
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "An SEM melden",
+            "description": "**{name}** ist auf ein prozentuales Ladeziel eingestellt, aber Ihr Fahrzeug meldet derzeit keinen Ladestand — SEM kann deshalb nicht *genau* bei **{target}%** stoppen.\n\nBlind lädt SEM aber nicht: Ab dem letzten echten Messwert dieser Sitzung zählt es die tatsächlich gelieferte Energie mit und stoppt, sobald diese gemessene Summe Ihr Ziel erreicht — überschritten wird nur, was das Auto seit diesem Messwert aufgenommen hat. Kam in dieser Sitzung überhaupt kein echter Messwert an (oder wurde SEM mitten im Ladevorgang neu gestartet), fehlt der Bezugspunkt, und es wird geladen, bis das Auto selbst kurz vor Voll abregelt.\n\nDamit die Grenze exakt trifft, hinterlegen Sie einen **echten Fahrzeug-SOC-Sensor** für diese Ladestation (Konfiguration → EV → Fahrzeug-SOC-Entität). Die Batterie-% im Dashboard sind SEMs *geschätzter* Ladestand, den es für die harte Grenze bewusst ignoriert (er kann driften). Diese Reparatur verschwindet automatisch, sobald wieder ein echter SOC-Wert verfügbar ist.\n\nSEM hält dies für einen eigenen Fehler. Öffnen Sie nach Möglichkeit über den Hinweis einen Bug-Report — das Formular ist bereits ausgefüllt. Alternativ kopieren Sie den untenstehenden Kontext. Dieser Dialog sendet nichts.\n\n```\n{context}\n```\n\nBestätigen schließt den Hinweis."
+          }
+        }
+      }
     },
     "unmanaged_charger_found": {
       "title": "SEM hat eine Wallbox gefunden, die es nicht steuert",
@@ -1535,8 +1740,76 @@
       "description": "SEM soll **`{entity_id}`** verwenden, um {capability} bei **{name}**, aber diese Entität ist `{reason}` — jeder Befehl von SEM läuft ins Leere. SEM zeigt weiterhin einen Sollstrom an; die Wallbox folgt ihm nicht.\n\nHäufige Ursachen: Die Entität wurde umbenannt oder entfernt, oder eine Template-Entität konnte nicht geladen werden (ein Template-`number` mit einer ungültigen Option lädt nur als `restored` und schluckt Schreibvorgänge stillschweigend).\n\nPrüfe die Entität unter **Entwicklerwerkzeuge → Zustände**. Fehlt sie dort oder ist sie nicht verfügbar, behebe es an der Quelle; ist sie dauerhaft weg, stelle SEM neu ein unter **Einstellungen → Geräte & Dienste → SEM → Konfigurieren → Wallbox → Bearbeiten**."
     },
     "battery_force_discharge_unsupported": {
-      "title": "Batterie-Leistungssollwert lässt sich nicht schreiben: {entity_id}",
-      "description": "SEM hat versucht, **{entity_id}** zu schreiben, und das Gerät hat jedes Mal abgelehnt: `{error}`.\n\nDie Entität existiert und SEM spricht sie korrekt an — die Firmware des Wechselrichters setzt den Schreibzugriff auf dieses Register schlicht nicht um. Meist heißt das: die in SEMs Batterie-Einstellungen für *Zwangsentladung* gewählte Entität ist lesbar, aber nicht schreibbar.\n\nSEM versucht es nicht mehr, das Log bleibt also sauber. Zwei Folgen: der routinemäßige Sicherheits-Schreibvorgang beim Zurückschalten in den Normalbetrieb entfällt (unkritisch — es war nichts gesetzt), und die **Batterie-Einspeisung ins Netz ist nicht möglich**. Laden, Entladegrenzen und Normalbetrieb bleiben unberührt.\n\n**Wenn Sie keine Netzeinspeisung aus der Batterie nutzen**, entfernen Sie die Zwangsentlade-Entität in den Batterie-Einstellungen — der Hinweis verschwindet dann. **Wenn Sie sie erwartet haben**, ist vermutlich die falsche Entität hinterlegt, oder Ihr Wechselrichter kann keine kommandierte Einspeisung. Ein Neustart lässt SEM erneut versuchen."
+      "title": "Batterie-Leistungssollwert kann nicht geschrieben werden: {entity_id}",
+      "description": "SEM hat versucht, **{entity_id}** zu schreiben, und das Gerät hat jedes Mal abgelehnt: `{error}`. Laden und Entladegrenzen funktionieren weiter; Batterie-Einspeisung ins Netz nicht, und SEM versucht es nicht mehr. **Wenn du keine Batterie-Einspeisung nutzt**, leere die Entität für erzwungene Entladung in SEMs Batterie-Einstellungen. **Wenn sie funktionieren sollte**, ist die Entität vermutlich die falsche, oder der Wechselrichter sperrt dieses Register — lies `{error}`. Nach einem Neustart versucht SEM es erneut."
+    },
+    "charger_failsafe_suspected": {
+      "title": "Deine Wallbox hebt SEMs Stopp per Timer auf: {name}",
+      "description": "**{name}** hat sich **{interval_s} Sekunden** nach SEMs Stopp selbst wieder eingeschaltet, mindestens zweimal, jedes Mal mit derselben Verzögerung. Das ist der Fallback-Timer der Wallbox — oder eine andere Steuerung nach Zeitplan. SEM kämpft nicht dagegen an; die Wallbox kann also nach jedem Stopp mit ihrem Fallback-Strom laden. **Lösung an der Wallbox:** Fallback-Strom auf 0 setzen. Details unter „Mehr erfahren“."
+    },
+    "charger_stop_war_stand_down": {
+      "title": "SEM stoppt {name} vorerst nicht mehr — das Auto lädt weiter",
+      "description": "**{name}** hat nach jedem Stopp durch SEM selbst wieder gestartet. Damit das Auto nicht in einen Ladefehler gerät, stoppt SEM es bis zu **{minutes} Minuten** nicht mehr; solange zieht es **{power} W** aus dem Netz oder deiner Batterie. Zwei Ursachen sehen gleich aus: der Autostart der Wallbox oder eine andere Steuerung an derselben Wallbox. **Lösung:** Autostart ausschalten oder die andere Steuerung stilllegen. Verschwindet, sobald das Auto stoppt oder SEM wieder die Kontrolle hat."
+    },
+    "charger_phase_count_mismatch": {
+      "title": "{name}: die gemessene Leistung passt nicht zu {believed} Phasen",
+      "description": "SEM rechnet Ampere mit **Phasen × Volt** in Watt um. Für **{name}** sind das **{believed}**, ein Ampere sollte also **{nominal} W** ergeben — über **{cycles}** stabile Zyklen zog die Wallbox aber **{watts_per_amp} W pro Ampere**, was zu **{measured}** passt. Diese Zahl bestimmt den angebotenen Strom und was der Nachtplan für das Auto annimmt. **Lösung:** die *Phasen*-Zahl der Wallbox öffnen und auf **{measured}** setzen. Verschwindet von selbst, sobald es passt."
+    },
+    "deye_system_work_mode_invalid": {
+      "title": "Deye-Exportsteuerung nicht nutzbar: {entity_id}",
+      "description": "SEM kann {entity_id} nicht für die Exportsteuerung nutzen: {reason}. Prüfen Sie die Auswahl-Entität und die drei Optionsnamen unter Konfiguration → Batterie-Intelligenz."
+    },
+    "battery_operating_mode_unexpected": {
+      "title": "Battery is in “{mode}” — SEM plans as if it were “{expected}”",
+      "description": "The operating-mode selector {entity_id} reads “{mode}”. SEM's overnight model and the spendable budget assume “{expected}”; in other modes the inverter follows its own schedule underneath SEM and the plans may not hold. If this mode is deliberate, dismiss this — SEM will not fight your choice. Otherwise set the inverter back to “{expected}”."
+    },
+    "battery_force_discharge_entity_unstable": {
+      "title": "Batterie-Sollwert ist immer wieder nicht verfügbar: {entity_id}",
+      "description": "SEM hat das Schreiben von **{entity_id}** nach wiederholten Ablehnungen eingestellt: `{error}`.\n\nHier fehlt dem Gerät nicht das Register. In manchen Zyklen bestand die Entität SEMs eigene Lesbarkeitsprüfung nicht, in anderen beantwortete sie einen echten Schreibvorgang mit einem Fehler — dieses Muster bedeutet, dass die Entität **zeitweise nicht verfügbar** ist und nicht, dass sie nicht beschreibbar wäre. Übliche Ursachen sind eine Batterie oder Integration, die die Netzwerkverbindung verliert, oder eine Entität, die nur veröffentlicht wird, solange die Batterie wach ist.\n\nSolange das so bleibt, **kann die Batterie nicht ins Netz einspeisen**. Laden, Entladegrenzen und der normale Betrieb sind nicht betroffen.\n\nPrüfen Sie, ob die Batterie online bleibt und ob **{entity_id}** eine W- oder kW-Einheit und einen numerischen Zustand behält. Ein Neustart von SEM startet einen neuen Versuch."
+    },
+    "battery_night_backfill_blocked": {
+      "title": "Batterie-Nachtverlauf kann nicht aufgebaut werden",
+      "description": "SEM konnte den Batterie-Nachtverlauf nicht aufbauen, weil diese Installation keinen **{missing}**-Sensor hat.\n\nSEM lernt, wie viel der Batterie sicher ausgegeben werden kann, indem es beobachtet, was das Haus ihr über Nacht entnimmt, und möchte fünf gute Nächte, bevor es eine Zahl nennt. Der Aufbau liest den *eigenen* aufgezeichneten Verlauf des Zählers, damit Sie nicht warten müssen — aber dieser Zähler muss vorhanden sein.\n\n**Zu tun:** Fügen Sie einen kumulativen Energiesensor (kWh, nicht Watt) für **{missing}** zum Energie-Dashboard von Home Assistant hinzu und drücken Sie auf der Batterie-Seite erneut **Aus Verlauf aufbauen**. Durch Warten geht nichts verloren — SEM liest den Verlauf des Zählers, es funktioniert später genauso gut. Die Aufzeichnung läuft unterdessen weiter, eine Nacht pro Tag."
+    },
+    "battery_night_backfill_incomplete": {
+      "title": "Aufgebaute Nächte kennen den Netzanteil nicht",
+      "description": "SEM hat den Batterie-Nachtverlauf aufgebaut, aber **{unbalanced}** der **{recovered}** wiederhergestellten Nächte konnten nur messen, was die *Batterie* geliefert hat — nicht, was das *Netz* beigesteuert hat — weil diese Installation keinen **{missing}**-Sensor hat.\n\nIn einer Nacht, in der die Batterie leer wird und das Netz übernimmt, ist der Batteriewert nur ein Teil der Geschichte. Ohne den fehlenden Zähler geben diese Nächte zu wenig an, was Ihr Haus tatsächlich verbraucht hat, sodass der verfügbare Batteriewert **niedriger ausfällt als er sollte**.\n\n**Zu tun:** Fügen Sie kumulative Energiesensoren (kWh, nicht Watt) für **{missing}** zum Energie-Dashboard hinzu und drücken Sie erneut **Aus Verlauf aufbauen** — dieser Hinweis verschwindet, sobald jede Nacht vollständig erfasst werden kann. Live gemessene Nächte sind nicht betroffen und haben immer Vorrang."
+    },
+    "load_current_control_wrong_unit": {
+      "title": "Eine Last ist auf Stromsteuerung gestellt, ihre Entität erwartet aber Watt",
+      "description": "**{name}** ist auf *Strom*-Steuerung gestellt, aber **{entity_id}** erwartet **{unit}**. Stromsteuerung bedeutet Ampere und ist für Wallboxen gedacht, darum steuert SEM dieses Gerät nicht. **Wenn es wirklich stromgesteuert ist**, wähle seine Ampere-Entität. **Wenn es eine regelbare Leistungslast ist** (AC-THOR, Heizstab), nutze sie vorerst als Ein/Aus-Überschusslast mit einer Schalter-Entität; ein Gerätetyp mit Watt-Sollwert ist in Arbeit."
+    },
+    "load_shed_futile": {
+      "title": "Die Netzspitze kommt von einer Last, die SEM nicht steuert",
+      "description": "Der Zähler zeigt **{grid_import_kw} kW** bei einem Ziel von **{target_kw} kW**. Selbst wenn alles, was SEM abschalten darf, schon aus ist, blieben **{uncontrolled_kw} kW** — davon sind **{managed_charger_kw} kW** eine Wallbox, die SEM bereits steuert; ihre Spitze bestimmt das Ladelimit, nicht das Abschalten. Darum schaltet SEM jetzt nichts ab. **Lösung:** Ladelimit dieser Wallbox senken, SEM die andere Last geben oder das Ziel anheben. Verschwindet von selbst, sobald die Spitze erreichbar ist."
+    },
+    "battery_platform_pinned_generic": {
+      "title": "Battery platform pinned to Generic on a {brand} install",
+      "description": "SEM's battery platform is set to **Generic / other**, but the {brand} integration is loaded. Earlier versions of the options wizard offered only Generic and Deye and defaulted to Generic, so walking through that page once demoted a {brand} install to the generic adapter — no forcible charge, no idempotent register writes. Open **Settings → Integrations → SEM → Configure → Battery scheduler** and set **Battery charge platform** to **Auto-detect**. If Generic is a deliberate choice (a battery with its own control entities), set that entity and this notice goes away."
+    },
+    "split_grid_guessed": {
+      "title": "SEM prüft zwei geratene Netzzähler",
+      "description": "Es ist kein Netzleistungs-Sensor konfiguriert und das Energie-Dashboard liefert keinen, daher hat SEM anhand von Entitätsnamen **{import_entity}** als möglichen Netzbezugs-Zähler und **{export_entity}** als möglichen Einspeise-Zähler gefunden — eine Namensübereinstimmung ohne jeden Gerätebeleg. SEM steuert NICHT danach, solange sie nicht mit deinen Netz-Energiezählern übereinstimmen; die Netzleistung steht so lange auf 0. Um das Warten zu überspringen: **Einstellungen → Integrationen → SEM → Konfigurieren → Sensoren** öffnen und **Netzbezugsleistung** und **Netzeinspeiseleistung** ausdrücklich setzen."
+    },
+    "battery_control_write_not_taken": {
+      "title": "Ein Batterie-Steuerwert wird nicht übernommen: {entity_id}",
+      "description": "SEM hat **`{entity_id}`** auf **{wanted}** gesetzt; in den folgenden Zyklen stand dort weiter **{seen}**, {strikes} Mal in Folge. Der Aufruf schlug nicht fehl — das Register hat den Wert nur nicht behalten. **Lösung:** setze die Entität von Hand unter Entwicklerwerkzeuge → Zustände. Hält der Wert nicht, ist es die falsche Entität für diese Rolle: wähle in der Konfigurationskarte eine andere. Hält er von Hand, aber nicht für SEM, nenne uns Marke und Entität. Verschwindet, sobald ein Schreibvorgang übernommen wird."
+    },
+    "soc_zones_out_of_order": {
+      "title": "Battery SOC zones are out of order",
+      "description": "Your battery zones read **Priority {priority}% · Buffer {buffer}% · Auto-start {auto_start}%**, but SEM expects them to rise in that order: Priority is the reserve you never spend, Buffer is where battery assist stops, and Auto-start is where the pack is full enough to give freely.\n\nSEM is using **{used}** as the boundaries — the same three numbers, sorted — so no zone is skipped and nothing behaves unpredictably. It is telling you because the layout you typed is almost certainly not the one you meant.\n\nFix it in **Settings → Devices & Services → SEM → Configure → Battery** or on the dashboard's Configuration tab. Any values are allowed as long as they ascend; wide zones are fine — 20 / 30 / 50 is a perfectly good layout on a large pack."
+    },
+    "previous_install_leftovers": {
+      "title": "Files from a previous SEM install were found",
+      "description": "SEM removed {removed} leftover file(s) of its own from an earlier install — those were SEM's and are gone.\n\nWhat is left is yours, and SEM will not take it without being asked: the long-term statistics of the old install's sensors, and the dashboard it generated. If you want those cleared too, run the **Remove leftovers** action (Developer tools → Actions → *SEM: Remove leftovers*). If you would rather keep your history, ignore this — nothing else will be deleted."
+    },
+    "heat_pump_contact_values_missing": {
+      "title": "SG-Ready contact {contact} cannot be driven",
+      "description": "**{entity_id}** is set as SG-Ready {contact}, but it is a text/number/select entity and its **{missing}** value is not configured — so SEM has nothing to write and every SG-Ready command for this heat pump fails. Open **Settings → Integrations → SEM → Configure → Heat Pump** (or the dashboard's Configuration tab) and fill both the ON and the OFF value for this contact, or point it at a switch entity instead."
+    },
+    "split_grid_rejected": {
+      "title": "SEM konnte deine Netzleistungs-Zähler nicht finden",
+      "description": "Es ist kein Netzleistungs-Sensor konfiguriert und das Energie-Dashboard liefert keinen. SEM hat **{import_entity}** und **{export_entity}** anhand der Entitätsnamen gefunden und dann mit deinen Netz-Energiezählern verglichen — sie folgen ihnen nicht, also sind es nicht deine Zähler. SEM meldet **keine Netzleistung** statt einer falschen. Öffne **Einstellungen → Integrationen → SEM → Konfigurieren → Sensoren** und setze **Netzbezugsleistung** und **Netzeinspeiseleistung** ausdrücklich."
     }
   },
   "selector": {

@@ -106,6 +106,57 @@ and the battery:
   you drag one above the battery; the `Battery priority SOC` reserve floor stays an
   absolute override (below it, the battery charges first regardless of position).
 
+### Spending the battery — and the sun — follows the same list too (2.1, #885)
+
+Everything above is about who yields while the battery **charges**. The mirror
+questions — who gets to **spend** the pack when it discharges, and who gets the
+**sun** — used to ignore the list entirely.
+
+Two subsystems each held a private copy of `Battery assist max power` and each
+treated it as its own full budget: the EV path and the load path. Nothing
+reconciled them, so a 5 kW pack could be offered 5 kW to the cars *and* 5 kW to
+the loads in the same cycle. And because every charger is decided before the
+load pass runs, a **prio-9 charger took battery power ahead of a prio-1 hot
+water tank** — dragging that tank to the top changed nothing.
+
+Now there is **one allowance, spent in list order**:
+
+- Devices that outrank a charger have their share set aside *before* the
+  charger is offered the pack. What is left goes to the charger; the next
+  device down runs on solar and grid.
+- Only devices that **opted in** take part. A load reserves nothing unless its
+  Mode includes battery ("Solar + battery"), and — new in 2.1 — a charger can
+  be excluded on its own with **Battery may assist this charger**, so a
+  two-charger install can say "the garage may, the guest charger may not". The
+  install-wide battery permission still applies on top: a per-charger toggle
+  can only restrict, never override a battery you have declared off-limits.
+- **"Finish overnight from → Battery" loads reserve nothing against a car.**
+  They run *below* the buffer, down to the hard reserve — a band the car's
+  assist floor forbids it from entering. The two are not competing for the same
+  energy, so an overnight tank never starves the car and the car never eats the
+  tank's overnight window.
+
+> The reservation is an estimate — a device's learned rating, or the threshold
+> it needs to switch on. A device that then draws less simply leaves the
+> remainder in the pool on the next cycle.
+
+**The same now applies to solar.** Chargers are decided earlier in the cycle
+than loads, so before 2.1 a charger at the *bottom* of your list could spend
+the sun before a load at the top was ever asked — and that load then ran on
+grid. Loads ranked above a charger now have their share of the surplus set
+aside first.
+
+If you have loads dragged above a charger, **that charger will now be offered
+less solar than it used to be**. That is the intended change: it is what the
+order was always supposed to mean.
+
+One asymmetry worth knowing, because it looks like an inconsistency: a load
+that is *already running* reserves nothing further from the sun (its draw is
+already inside the house-consumption figure every charger subtracts), but it
+does keep reserving from the battery (the battery ceiling is a state-of-charge
+number and has no such term). Without that, a battery-backed load would switch
+itself off and on repeatedly.
+
 ### How position interacts with battery mode
 
 | Battery mode | Effect |
@@ -197,10 +248,50 @@ to nudge them apart so each is grabbable again.
 The counter resets **after sunrise**, not at midnight — so a battery-eligible
 load isn't reset mid-night and re-drained before the new day's surplus arrives.
 
+## Minimum run / minimum pause — anti-cycling
+
+Two small inputs sit under the Min/Max slider: **Minimum run** and **Minimum
+pause**, in minutes (#688). They stop a load flapping on a passing cloud: once
+SEM switches a load on it stays on for at least the minimum run, and once it
+switches it off it stays off for at least the minimum pause. Together they cap
+cycling at roughly one period per run-plus-pause.
+
+They only apply where SEM is the one switching — the two **solar modes**. In
+*Peak only* the load is user-managed and the peak shedder does not read these
+windows; the row still shows them, but nothing consults them there.
+
+**Defaults** if you leave the boxes blank:
+
+| device | minimum run | minimum pause |
+|---|---|---|
+| a switch load (pump, heater, plug) | 5 min | 5 min |
+| the hot-water controller | 10 min | 5 min |
+| the heat-pump controller | 10 min | 5 min |
+
+The hot-water and heat-pump numbers are the ones SEM uses for its own
+compressor logic (#508): a heat pump restarted after a one-minute pause is
+pure wear while the circuit water is still coming up, which is what the old
+60-second hot-water default did (#914).
+
+A value you type is saved, shown back to you, and **re-applied to the device
+after every restart** (2.1, #914 — before that it silently reverted to the
+default). The greyed placeholder in an empty box is the window the device is
+actually holding right now, or a dash if the device has not come up yet;
+never a made-up number. The range (0–120 min) comes from SEM's one bounds
+table, and the service keeps accepting any non-negative value, so an older
+install holding a larger number is untouched.
+
 ## Finish overnight from — the overnight source (axis 2)
 
-These sources are **night-only** (#633): they engage after night mode starts and a
-load still running at daybreak is stopped — daytime supply is always the Mode above.
+These are **finish** sources: they engage once the free window can no longer
+deliver the target, and a load still running when it can again is stopped —
+daytime supply is always the Mode above. **Battery** is night-only (#633): it
+engages after night mode starts and stops at daybreak. **Grid** (2.1, #953)
+engages whenever today's remaining daylight is shorter than the runtime still
+owed — the whole night, and the tail of a short winter day — but never in a
+morning the sun still has time to cover. Before #953 the Grid half had no
+window at all: the first cheap slot after the meter day rolls at sunrise
+bought the whole day's target from the meter with the sun still to come.
 
 When the sun is gone and the daily target isn't met, a single **"Finish overnight
 from"** picker (shown for *both* solar modes) decides what — if anything — finishes

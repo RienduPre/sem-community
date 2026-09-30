@@ -57,9 +57,16 @@ def build_diagnostics(coord) -> Dict[str, Any]:
             getattr(reader, "_manual_grid_mismatch", False)
         )
     elif _disc.get("import"):
-        out["diag_grid_mode"] = (
-            "split" if _disc.get("confidence") == "same-device" else "split-lowconf"
-        )
+        # (#947) Four tiers, not two. A DECLARED pick is the strongest — the
+        # integration's own vocabulary plus device affinity — and reporting it
+        # as "lowconf" beside an unproven name guess is exactly the collapse
+        # of three states into two this issue is about.
+        _conf = _disc.get("confidence")
+        out["diag_grid_mode"] = {
+            "declared": "split-declared",
+            "same-device": "split",
+            "declared-elsewhere": "split-declared-unverified",
+        }.get(_conf, "split-lowconf")
     else:
         out["diag_grid_mode"] = "combined"
     out["diag_grid_sign"] = "negated" if reader._grid_sign_inverted else "normal"
@@ -141,6 +148,22 @@ def build_diagnostics(coord) -> Dict[str, Any]:
     out["diag_sensors_unavailable"] = sum(
         1 for _ in reader._sensor_unavailable
     )
+
+    # (#818, published 30.08) Whether THIS cycle could be steered on, and
+    # which inputs went dark. The flag already gated every write — a degraded
+    # cycle holds the committed command instead of steering on the reader's
+    # 0.0 fallback — but it was computed, threaded and consumed without ever
+    # being published, so an owner of a flaky feed could only discover SEM was
+    # protecting them by catching a reason string inside a 60-second window.
+    # On the install that prompted this, solar went unavailable 28 times in
+    # half an hour and the charge held through every one.
+    try:
+        _dark = getattr(reader, "_input_dark", {}) or {}
+        out["diag_inputs_dark"] = sorted(k for k, v in _dark.items() if v)
+        out["diag_inputs_degraded"] = bool(out["diag_inputs_dark"])
+    except Exception:  # noqa: BLE001 — diagnostics never break a cycle
+        out["diag_inputs_dark"] = []
+        out["diag_inputs_degraded"] = False
     out["diag_health_violations"] = coord._health_check.total_violations
 
     # (#653) Appliance schedules. Absent on installs that never called the

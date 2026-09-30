@@ -26,7 +26,7 @@
 # energy-path module we read history on.
 
 line-length = 100
-target-version = "py312"
+target-version = "py313"
 
 exclude = [
     "dashboard/card/node_modules",

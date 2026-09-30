@@ -26,7 +26,9 @@ from homeassistant.const import (
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import DEFAULT_MAX_CHARGING_CURRENT
+from .consts.bounds import BOUNDS      # (#870) one range per field
 from .coordinator import SEMCoordinator
+from .coordinator.install_modules import kept_descriptions, presence_of
 
 type SEMConfigEntry = ConfigEntry[SEMCoordinator]
 
@@ -69,26 +71,26 @@ NUMBER_TYPES = [
         # the 4-zone semantics documented in docs/ARCHITECTURE.md.
         key="battery_priority_soc",
         native_unit_of_measurement=PERCENTAGE,
-        native_min_value=5,
-        native_max_value=60,
-        native_step=5,
+        native_min_value=BOUNDS["battery_priority_soc"].min,   # (#870)
+        native_max_value=BOUNDS["battery_priority_soc"].max,
+        native_step=BOUNDS["battery_priority_soc"].step,
         mode=NumberMode.SLIDER,
     ),
     # SOC Zone Thresholds
     NumberEntityDescription(
         key="battery_buffer_soc",
         native_unit_of_measurement=PERCENTAGE,
-        native_min_value=50,
-        native_max_value=95,
-        native_step=5,
+        native_min_value=BOUNDS["battery_buffer_soc"].min,     # (#870)
+        native_max_value=BOUNDS["battery_buffer_soc"].max,
+        native_step=BOUNDS["battery_buffer_soc"].step,
         mode=NumberMode.SLIDER,
     ),
     NumberEntityDescription(
         key="battery_auto_start_soc",
         native_unit_of_measurement=PERCENTAGE,
-        native_min_value=70,
-        native_max_value=100,
-        native_step=5,
+        native_min_value=BOUNDS["battery_auto_start_soc"].min, # (#870)
+        native_max_value=BOUNDS["battery_auto_start_soc"].max,
+        native_step=BOUNDS["battery_auto_start_soc"].step,
         mode=NumberMode.SLIDER,
     ),
     NumberEntityDescription(
@@ -145,6 +147,27 @@ NUMBER_TYPES = [
         native_max_value=5000,
         native_step=100,
         mode=NumberMode.SLIDER,
+    ),
+    # (arc #921) the export guard's holds, the morning EV window and its floor
+    NumberEntityDescription(
+        key="export_guard_engage_s", native_unit_of_measurement="s",
+        native_min_value=30, native_max_value=900, native_step=10,
+        mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG,
+    ),
+    NumberEntityDescription(
+        key="export_guard_release_s", native_unit_of_measurement="s",
+        native_min_value=60, native_max_value=1800, native_step=10,
+        mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG,
+    ),
+    NumberEntityDescription(
+        key="ev_morning_window_hours", native_unit_of_measurement="h",
+        native_min_value=0.5, native_max_value=6, native_step=0.5,
+        mode=NumberMode.SLIDER, entity_category=EntityCategory.CONFIG,
+    ),
+    NumberEntityDescription(
+        key="battery_morning_drain_floor_soc", native_unit_of_measurement="%",
+        native_min_value=10, native_max_value=90, native_step=5,
+        mode=NumberMode.SLIDER, entity_category=EntityCategory.CONFIG,
     ),
     # (#559 Phase 0) threshold for the surplus-availability signal
     # (binary_sensor.sem_surplus_available + the surplus event) that user
@@ -327,9 +350,12 @@ async def async_setup_entry(
     """Set up EMS Solar Optimizer number entities."""
     coordinator: SEMCoordinator = entry.runtime_data
 
+    # (#923) Only the numbers of modules this install has — UNKNOWN keeps.
+    static_descriptions = kept_descriptions(
+        "number", NUMBER_TYPES, presence_of(coordinator))
     entities = [
         SEMNumberEntity(coordinator, description, entry)
-        for description in NUMBER_TYPES
+        for description in static_descriptions
     ]
 
     # Per-charger number entities (#193)
@@ -547,7 +573,7 @@ async def async_setup_entry(
     # Fix entity_ids from pre-translation installs and clean up stale entities.
     # per_battery_descriptions MUST be included so the stale-key sweep doesn't
     # immediately remove the reserve-SOC numbers it just created (#523).
-    all_descriptions = list(NUMBER_TYPES) + per_charger_descriptions + per_battery_descriptions
+    all_descriptions = list(static_descriptions) + per_charger_descriptions + per_battery_descriptions
     _fix_entity_ids(hass, entry, all_descriptions, "number")
     _cleanup_stale_entities(hass, entry, all_descriptions, "number")
 
@@ -588,7 +614,10 @@ def _cleanup_stale_entities(hass, entry, descriptions, platform):
         # Valid keys: both description keys AND legacy UID mapped keys
         valid_keys = {d.key for d in descriptions}
         _LEGACY_UID_MAP = {"battery_capacity": "battery_capacity_kwh"}
-        valid_keys.update(_LEGACY_UID_MAP.values())
+        # (#923) A legacy unique_id is valid only while its entity is — the
+        # unconditional add kept number.sem_battery_capacity alive on an
+        # install whose battery module is ABSENT.
+        valid_keys.update(v for k, v in _LEGACY_UID_MAP.items() if k in valid_keys)
 
         for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
             if entity_entry.domain != platform:
@@ -673,6 +702,10 @@ class SEMNumberEntity(CoordinatorEntity, NumberEntity):
             DEFAULT_DAILY_EV_TARGET,
             DEFAULT_BATTERY_ASSIST_MAX_POWER,
             DEFAULT_BATTERY_ASSIST_MIN_SURPLUS,
+            DEFAULT_EXPORT_GUARD_ENGAGE_S,
+            DEFAULT_EXPORT_GUARD_RELEASE_S,
+            DEFAULT_EV_MORNING_WINDOW_HOURS,
+            DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC,
             DEFAULT_REGULATION_OFFSET,
             DEFAULT_DEMAND_CHARGE_RATE,
             DEFAULT_CHEAP_PRICE_THRESHOLD,
@@ -694,6 +727,10 @@ class SEMNumberEntity(CoordinatorEntity, NumberEntity):
             "ev_target_soc_max": 100,
             "battery_assist_max_power": DEFAULT_BATTERY_ASSIST_MAX_POWER,
             "battery_assist_min_surplus": DEFAULT_BATTERY_ASSIST_MIN_SURPLUS,
+            "export_guard_engage_s": DEFAULT_EXPORT_GUARD_ENGAGE_S,
+            "export_guard_release_s": DEFAULT_EXPORT_GUARD_RELEASE_S,
+            "ev_morning_window_hours": DEFAULT_EV_MORNING_WINDOW_HOURS,
+            "battery_morning_drain_floor_soc": DEFAULT_BATTERY_MORNING_DRAIN_FLOOR_SOC,
             "surplus_event_threshold": 1500,
             "regulation_offset": DEFAULT_REGULATION_OFFSET,
             "demand_charge_rate": DEFAULT_DEMAND_CHARGE_RATE,

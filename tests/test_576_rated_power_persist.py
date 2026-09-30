@@ -42,6 +42,9 @@ def _reg(devices=None):
     reg.hass = MagicMock()
     reg.hass.states.get = MagicMock(return_value=None)   # sensor unavailable → 0 W
     reg._save_storage = AsyncMock()
+    # (#967) the recorder pass is off until Home Assistant has started;
+    # these tests are about the seeding itself, so turn it on.
+    reg._history_seeds_enabled = True
     return reg
 
 

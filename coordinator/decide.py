@@ -38,12 +38,18 @@ from dataclasses import replace
 from typing import Dict, Optional
 
 from ..consts.core import DEFAULT_MAX_CHARGING_CURRENT
+from .watts_per_amp import amps_that_fit, predict_watts
 from .charger_types import (
     ChargerDecision,
     ChargerIntent,
     ChargerView,
+    FleetContext,
 )
 from .energy_reclaim import ev_reclaims_battery_charge
+from .price_signal import (
+    CHEAP_LEVELS, EXPENSIVE_LEVELS as _EXPENSIVE_LEVELS, is_cheap_name,
+)
+from ..tariff.tariff_provider import PriceLevel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,8 +73,26 @@ def _cw(watts) -> int:
 
 def _ev_reclaims(view: ChargerView) -> bool:
     """#576 P2.2 — does this charger reclaim battery-charge power? (Above the
-    battery in the one list, SOC ≥ reserve floor, battery not commanded.)"""
+    battery in the one list, SOC ≥ reserve floor, battery not commanded.)
+    (#875) Never from a pack whose SOC has not been read.
+
+    (#899 round 2) And never once the METER has disproved it. The car can be
+    handed the pack's charging watts by two routes: this position rule, and
+    the forecast redirect below. #899 gave the redirect a meter check — three
+    cycles of grid import with pack watts in the budget and they stop being
+    counted for the rest of the plug-in — and wrote that check into the
+    redirect branch only. The position rule is the OTHER branch of the same
+    split, and it is the one almost every install takes: a charger seeds at
+    priority 3, the pack at 100, so any pack above the reserve floor outranks
+    nothing and the car simply gets its watts. On koen71's Huawei the pack
+    does not yield them, the meter buys them, and with the credit recorded as
+    zero the check could not strike once. The gate belongs here, above the
+    split, so no route to the budget can skip it (bug class 29)."""
     f = view.fleet
+    if not getattr(f, "battery_soc_known", True):
+        return False
+    if not getattr(view, "redirect_allowed", True):
+        return False
     return ev_reclaims_battery_charge(
         soc=f.battery_soc,
         priority_soc=f.priority_soc,
@@ -122,17 +146,54 @@ def soc_zone(soc: float, auto_start: float, buffer: float, priority: float) -> i
     view, or wraps ``decide()`` in a debounce shim).
 
     Returns 1..4. Higher = more battery available.
+
+    (#870) THE THRESHOLDS ARE SORTED FIRST, and that is load-bearing now
+    that the user may place all three anywhere in 5..100. The cascade below
+    assumes priority <= buffer <= auto_start, and the old ranges enforced
+    that by accident — buffer floored at 50, auto-start at 70 — which is
+    also what made coppe218's perfectly reasonable 20/30/50 layout
+    impossible to configure.
+
+    Unsorted, the cascade does not merely mis-order the zones, it SKIPS
+    one: with auto_start 50 and buffer 80, a 60 % pack answers `60 >= 50`
+    and returns Zone 4 — "plenty available" — never reaching the buffer
+    test the user set at 80. Sorting makes the boundaries mean what the
+    three numbers say regardless of which field holds which, so a mistyped
+    zone shifts a boundary instead of deleting one.
+
+    Silently sorting is not the whole answer: a user whose zones are out of
+    order has made a mistake and should be told. That is a Repair, raised
+    from the coordinator where the config is read — not this function's
+    job. This one's job is never to answer nonsense.
     """
-    if soc >= auto_start:
+    lo, mid, hi = sorted((float(priority), float(buffer), float(auto_start)))
+    if soc >= hi:
         return 4
-    if soc >= buffer:
+    if soc >= mid:
         return 3
-    if soc >= priority:
+    if soc >= lo:
         return 2
     return 1
 
 
-def self_consumption_surplus_w(view: ChargerView) -> float:
+def fleet_soc_zone(f: FleetContext) -> int:
+    """The fleet's zone this cycle — ``soc_zone`` over the view's SOC.
+
+    (#875) A SOC that has never been read is not 0 %: the reader holds
+    0.0 in the field because nothing was measured, and the old code
+    read that as Zone 1 for every cycle between a restart and the
+    sensor's first report — the car paused on a "battery priority" the
+    battery never asked for. An UNKNOWN pack is neither a source nor a
+    blocker, so it answers Zone 2: charge the car on surplus, offer no
+    battery assist.
+    """
+    if not getattr(f, "battery_soc_known", True):
+        return 2
+    return soc_zone(f.battery_soc, f.auto_start_soc, f.buffer_soc, f.priority_soc)
+
+
+def self_consumption_surplus_w(view: ChargerView, *,
+                               allow_reclaim: bool = True) -> float:
     """Pure surplus = solar - home (- battery_charge unless Zone 4)
     (- solar_committed_w by higher-priority chargers).
 
@@ -144,6 +205,13 @@ def self_consumption_surplus_w(view: ChargerView) -> float:
     subtracted so the second charger in the per-charger loop sees
     only the surplus NOT already claimed by charger A. Prevents
     over-allocation of solar in multi-charger fleets.
+
+    (#899 round 2) ``allow_reclaim=False`` asks the same question with the
+    #576 position reclaim switched off — the surplus the car would have if
+    the pack kept every watt it is charging with. The difference between the
+    two answers is what this cycle credited the car FROM the pack, which is
+    the number the meter check has to judge (``SolarOnlyMode``). Callers that
+    just want the surplus leave it alone.
     """
     f = view.fleet
     # #743 — granted curtailment watts count exactly like measured
@@ -158,17 +226,39 @@ def self_consumption_surplus_w(view: ChargerView) -> float:
     # ≥ the reserve floor AND the battery isn't under a command. Otherwise the
     # battery keeps its charge (subtract it). Replaces the old fixed
     # ``auto_start_soc`` (90 %) gate with the position rule the loads use.
-    if not _ev_reclaims(view):
+    if not (allow_reclaim and _ev_reclaims(view)):
         available -= f.battery_charge_w
     return max(0.0, available)
 
 
-def battery_assist_budget_w(view: ChargerView) -> float:
-    """Budget for Zone 3/4 battery-assist charging.
+def reclaimed_pack_w(view: ChargerView) -> float:
+    """(#899 round 2) Watts of the pack's own charge this cycle's bare
+    surplus handed to the car — the #576 position reclaim, measured rather
+    than assumed. Exactly what the surplus gained by not subtracting the
+    pack's charge power, so it is right whatever else is in the sum.
 
-    Called exclusively from ``MinPlusSolarMode._decide_day()`` (the
-    Zone 3/4 path) — ``solar_plus_cheap`` delegates its day path to
-    ``solar_only`` and ``always_max`` ignores any budget. When the
+    The decision carries it beside the forecast redirect, because both are
+    the same watts on the same bet: the pack will take less because the car
+    is taking more. The meter is what settles that bet, and it can only
+    settle a number it is given."""
+    return max(0.0, self_consumption_surplus_w(view)
+               - self_consumption_surplus_w(view, allow_reclaim=False))
+
+
+def _battery_assist_split(view: ChargerView) -> tuple[float, float]:
+    """(#885) The Zone 3/4 budget, kept SPLIT into its two parts:
+    ``(surplus, assist)`` — what the sun is giving and what the pack is.
+
+    ``battery_assist_budget_w`` below sums them and is what callers that
+    only want the total keep using. The split exists so the battery share
+    can be STAMPED on the decision (``assist_w``) rather than re-derived
+    downstream from the commitment — one computation, two readers, no
+    drift (#282).
+
+    Reached from ``MinPlusSolarMode._decide_day()`` (the Zone 3/4 path),
+    directly for the split and via ``battery_assist_budget_w`` for the
+    total — ``solar_plus_cheap`` delegates its day path to ``solar_only``
+    and ``always_max`` ignores any budget. When the
     home battery is high enough (Zone 3 or 4), it can discharge to
     bridge the gap between solar surplus and EV demand.
 
@@ -199,22 +289,71 @@ def battery_assist_budget_w(view: ChargerView) -> float:
 
     f = view.fleet
     surplus = self_consumption_surplus_w(view)
-    zone = soc_zone(f.battery_soc, f.auto_start_soc, f.buffer_soc, f.priority_soc)
+
+    # (#778) The permission gate. Previously the ONLY way to say "the house may
+    # use my battery, the car may not" was to set the surplus threshold below
+    # absurdly high — a tuning knob doing a permission's job. Unset resolves to
+    # ON, so nothing changes for anyone who has not asked.
+    if not getattr(f, "battery_may_assist_ev", True):
+        return surplus, 0.0
+
+    zone = fleet_soc_zone(f)
     if zone < 3:
-        return surplus
+        return surplus, 0.0
     # Solar gate: assist only SUPPLEMENTS real solar. Below the
     # configured surplus threshold (default 1200 W) the battery is
     # off-limits to the EV — a sunless evening/overnight session must
     # never drain the home battery into the car. Falls back to surplus
     # only (the day path then behaves like solar_only → idle).
+    #
+    # (#778 phase 5) …unless the forecast says tonight's spend comes back.
+    # This is the case the maintainer's own PROD night exposed: the pack rode
+    # 53% into a morning whose forecast refilled it anyway, because the ONLY
+    # question anyone asked was "is the sun shining right now". The budget
+    # answers a different one — "will tomorrow put this back" — and it is
+    # measured, floored and permissioned before it gets here. Master switch
+    # OFF by default: this is the first non-inert behaviour in the arc.
+    #
+    # (03.09, Guido: "why do I have to switch it on since I chose the option
+    # on the EV charger") The CONSENT is the charger's mode: *Solar + battery*
+    # already says the pack may feed this car. The master switch was the
+    # release train's inertness device for the arc, not a user concept; it
+    # keeps one job — selling forecast surplus to the grid, where no device
+    # mode carries the consent. The budget (spendable > 0, tonight's floor)
+    # stays the SAFETY either way.
     if surplus < f.battery_assist_min_surplus_w:
-        return surplus
+        # (#892) a morning window the user opened is consent AND budget: the
+        # pack is spent into the car on purpose, bounded by the drain floor
+        # decide_battery enforces — so the solar gate does not apply.
+        _window = bool(getattr(f, "ev_morning_window_open", False))
+        _consent = (getattr(view, "mode", None) == "solar_plus_battery"
+                    or bool(getattr(f, "forecast_spending_enabled", False))
+                    or _window)
+        _budget_ok = (float(getattr(f, "battery_spendable_kwh", 0.0) or 0.0) > 0.0
+                      or _window)
+        if not (_consent and _budget_ok):
+            return surplus, 0.0
     potential = battery_assist_potential_w(
         f.battery_soc,
         f.buffer_soc,
         f.auto_start_soc,
         f.battery_assist_max_power_w,
+        # (#878) The budget was the KEY — "may the car have any of the pack?"
+        # This is the CEILING: how deep it may go before the house stops
+        # being covered overnight. The sell sink has taken the same floor
+        # since #778; this one was still stopping at the static buffer, so
+        # the two sinks disagreed about the same pack.
+        dynamic_floor_soc=getattr(f, "dynamic_floor_pct", None),
     )
+    # (#878) ONE battery, one allowance. The potential above is derived from
+    # fleet-wide values — SOC, buffer, floor, cap — so every charger computes
+    # the SAME number. Without subtracting what seniors already claimed, each
+    # one added it again: two chargers asked a 5000 W pack for 7727 W, and a
+    # floor meant to keep the house covered was drained through at twice the
+    # rate its taper assumes. Same cascade as solar_committed_w (#665) and
+    # peak_committed_w (#874).
+    potential = max(0.0, potential - max(
+        0.0, float(getattr(f, "assist_committed_w", 0.0) or 0.0)))
     # #545 / "max out till self-consumption" (user 2026-06-26): once past
     # the solar gate and in the assist band (Zone 3/4, SOC >= buffer),
     # OFFER THE FULL assist potential — let the inverter discharge the
@@ -232,7 +371,24 @@ def battery_assist_budget_w(view: ChargerView) -> float:
     # charger max. Supersedes the #501 "top up to EV minimum only" cap.
     # Confirmed live 2026-06-26 that the car follows a higher offer
     # (Zoe: 8A→3.4kW vs 10A→5.3kW).
-    return surplus + potential
+    return surplus, potential
+
+
+def battery_assist_budget_w(view: ChargerView) -> float:
+    """Total Zone 3/4 budget — solar surplus plus the battery assist.
+
+    Thin sum over :func:`_battery_assist_split`; see that function for
+    the gates, the #545 full-potential rationale and the #878 floor.
+
+    Production reads the SPLIT (it needs the battery share separately, to
+    stamp ``ChargerDecision.assist_w``); this total-only form is what the
+    test suite and the docs refer to. It carries no logic of its own, so it
+    cannot drift from the split — and
+    ``test_the_split_sums_to_the_public_budget`` pins that identity so a
+    future edit cannot make it.
+    """
+    surplus, assist = _battery_assist_split(view)
+    return surplus + assist
 
 
 def _relabel(decision: ChargerDecision, mode: str, prefix: str) -> ChargerDecision:
@@ -250,11 +406,23 @@ def _relabel(decision: ChargerDecision, mode: str, prefix: str) -> ChargerDecisi
     )
 
 
-def amps_from_watts(watts: float, phases: int, voltage: int) -> int:
+#: The ladder walk's ceiling before the actuator's own clamp — no charger
+#: SEM supports offers more.
+_LADDER_TOP = 80
+
+
+def amps_from_watts(watts: float, phases: int, voltage: int, table=None) -> int:
     """Watts → whole amps (round down). The actuator (Step 4)
-    clamps to ``[min_current_a, max_current_a]``."""
+    clamps to ``[min_current_a, max_current_a]``.
+
+    (#846) With a measured ``{amps: W/A}`` table the answer is the largest
+    setpoint whose MEASURED draw fits — on the PROD Zoe 5.5 kW buys 10 A,
+    not the 7 the nameplate arithmetic hands out. Without one this is the
+    nameplate ``watts // (phases × voltage)`` it always was."""
     denom = max(1, phases * voltage)
-    return int(watts // denom)
+    if not table:
+        return int(watts // denom)
+    return amps_that_fit(table, watts, float(denom), max_amps=_LADDER_TOP)
 
 
 def effective_min_amps(cfg: dict, fallback: int = 6) -> int:
@@ -316,7 +484,10 @@ def effective_min_amps(cfg: dict, fallback: int = 6) -> int:
 # exist to avoid (#524). ``cheap`` / ``very_cheap`` and unknown/static
 # (tariff_level None) are bridgeable. Canonical here (decide owns tariff
 # classification); charge_stability reads the resulting ``bridgeable`` flag.
-_NOT_CHEAP_LEVELS = frozenset({"normal", "expensive", "very_expensive"})
+#: (#994) everything that is NOT one of the cheap words — derived from the
+#: one vocabulary, so a seventh level cannot appear on one side only.
+_NOT_CHEAP_LEVELS = frozenset(
+    lv.value for lv in PriceLevel if lv not in CHEAP_LEVELS)
 
 
 def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
@@ -338,34 +509,89 @@ def _idle_bridgeable(view: ChargerView) -> tuple[bool, str]:
       * the sun is effectively gone (``solar_w < min_solar_w``) — deep
         darkness, nothing to bridge to (#461 part 2);
       * a not-cheap tariff window (#524) — holding imports expensive grid;
-      * the battery can't assist (``battery_soc < buffer_soc``) AND the real
-        EV surplus (solar − home − reserved battery) can't sustain even the
-        minimum charge — solar is high but fully consumed by the house /
-        reserved for a below-buffer battery, so the hold imports grid
-        (PROD 2026-06-27).
+      * the battery can't assist — below buffer, never read (#875), or not
+        permitted to (#778/#885); ``_assist_blocked_why`` owns which — AND
+        the real EV surplus (solar − home − reserved battery) can't sustain
+        even the minimum charge, so the hold imports grid (PROD 2026-06-27).
     Otherwise TRANSIENT (real surplus or battery assist, cheap/unknown
     tariff) → the full bridge is worth it.
     """
     f = view.fleet
     if float(f.solar_w) < float(f.min_solar_w):
+        # (#992, class 99) "sun gone" was a claim about the sky, and the
+        # reader's own dashboard refuted it: @alexmc1510 saw this at 828 W
+        # of production while the house EXPORTED 316 W (#967). The gate is
+        # a configured minimum, not darkness — and it is the same knob
+        # SolarOnlyMode quotes correctly a few hundred lines below.
         return False, (
-            f"sun gone (solar {_cw(f.solar_w)}W < {_cw(f.min_solar_w)}W)"
+            f"below the solar minimum (solar {_cw(f.solar_w)}W < "
+            f"{_cw(f.min_solar_w)}W)"
         )
-    if f.tariff_level in _NOT_CHEAP_LEVELS:
+    # (#893) The tariff clause is scoped to the modes that PRICE their
+    # grid use. It used to apply to EVERY mode, which made each daytime
+    # solar dip STRUCTURAL whenever electricity was not cheap — i.e. for
+    # most tariffs, most of the day: a passing cloud hard-stopped a
+    # solar_only session instead of bridging, and the charger cycled with
+    # the weather ("switches rapidly because of clouds", DigitalOptics,
+    # Fronius + number-entity charger). A bridge in a solar mode is funded
+    # by remaining surplus and the battery above its buffer — the user's
+    # own stored energy, priced by nobody. The case #524 actually meant —
+    # a hold that would knowingly import grid — is exactly what the
+    # funding clause below already catches, now also when the battery is
+    # forbidden from assisting rather than merely below its buffer.
+    from ..consts.ev_charge_modes import MODE_USES_TARIFF
+    if (view.mode in MODE_USES_TARIFF
+            and f.tariff_level in _NOT_CHEAP_LEVELS):
         return False, f"not-cheap tariff ({f.tariff_level})"
     cfg = view.config if isinstance(view.config, dict) else {}
     min_amps = effective_min_amps(cfg, 6)
     phases = int(cfg.get("ev_phases", 3))
     voltage = int(cfg.get("ev_voltage", 230))
-    min_charge_w = min_amps * max(1, phases) * max(1, voltage)
+    min_charge_w = int(predict_watts(view.wpa_table, min_amps,
+                                     max(1, phases) * max(1, voltage)))
     real_surplus_w = self_consumption_surplus_w(view)
-    if float(f.battery_soc) < float(f.buffer_soc) and real_surplus_w < min_charge_w:
+    # (#983) WHICH of the three reasons the pack is off the table — named,
+    # not assumed. This gate grew a disjunct in #875 (never read) and another
+    # in #893 (the owner's own permission), but the sentence kept quoting the
+    # SOC comparison it was written for. RienduPre's install (#983) then read
+    # "no battery assist (SoC 98% < buffer 70%)" off a pack sitting at 98 %
+    # against a 70 % buffer: a line its own state refutes, naming a cause
+    # nobody checked, and hiding the switch the reader actually has to flip.
+    # Order = usefulness: an unread SOC makes the comparison meaningless, and
+    # a permission holds whatever the SOC says.
+    battery_assist_blocked = _assist_blocked_why(f)
+    if battery_assist_blocked and real_surplus_w < min_charge_w:
         return False, (
-            f"no battery assist (SoC {f.battery_soc:.0f}% < buffer "
-            f"{f.buffer_soc:.0f}%) + EV surplus {_cw(real_surplus_w)}W "
-            f"< min charge {_cw(min_charge_w)}W"
+            f"no battery assist ({battery_assist_blocked}) + EV surplus "
+            f"{_cw(real_surplus_w)}W < min charge {_cw(min_charge_w)}W"
         )
     return True, ""
+
+
+def _assist_blocked_why(f) -> str:
+    """(#983) Why the home battery may not assist the EV this cycle — the
+    disjunct that actually fired, or ``""`` when it may.
+
+    One resolver, so the boolean and the sentence can never disagree: the
+    caller's gate IS this function being non-empty. A further reason adds a
+    branch here and reaches every reader at once.
+
+    KNOWN GAP, deliberately not closed here (#983 review, for Guido): #878 gave
+    ``battery_assist_potential_w`` an effective floor of
+    ``max(buffer_soc, dynamic_floor_pct)``, so a pack at 75 % with a 70 %
+    buffer and an 80 % overnight floor delivers ZERO assist while this resolver
+    — like the ``or``-chain it replaced — still answers "it may assist", and
+    ``_idle_bridgeable`` holds the contactor on grid watts. Adding that arm
+    changes CONTROL (transient idles become structural), which is a different
+    change from #983's; it is pre-existing on both sides of this fix.
+    """
+    if not getattr(f, "battery_soc_known", True):        # (#875) never read
+        return "battery SoC never read"
+    if not getattr(f, "battery_may_assist_ev", True):    # (#778/#885) consent
+        return "battery is not allowed to assist the EV (your setting)"
+    if float(f.battery_soc) < float(f.buffer_soc):
+        return f"SoC {f.soc_label} < buffer {f.buffer_soc:.0f}%"
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -390,17 +616,21 @@ class ModeStrategy(ABC):
 # ─────────────────────────────────────────────────────────────────
 
 class OffMode(ModeStrategy):
-    """No charging, ever. Adapter calls ``command_disable()`` so
-    KEBA-class firmware actually opens the contactor (#315)."""
+    """(#898) Hands-off. The User Guide has said since 1.7 that Off means
+    *SEM continues monitoring but does not send any commands to the
+    charger* — the code produced DISABLE and the reconciler re-asserted it
+    on every rogue start, stopping a session the user began elsewhere.
+    RELEASE issues nothing; the reconciler ends SEM's own running session
+    once on the way in (see ``DesiredState.RELEASED``)."""
 
     def decide(self, view: ChargerView) -> ChargerDecision:
         return ChargerDecision(
             charger_id=view.power.charger_id,
             mode="off",
-            intent=ChargerIntent.DISABLE,
+            intent=ChargerIntent.RELEASE,
             commanded_amps=0,
             budget_w=0.0,
-            reason="off mode — user-explicit disable",
+            reason="off mode — hands-off, SEM sends nothing to this charger (#898)",
         )
 
 
@@ -483,6 +713,11 @@ class SolarOnlyMode(ModeStrategy):
         # battery_charge_w when SOC < auto_start_soc — the battery
         # has priority on solar in that band.
         bare_surplus_w = self_consumption_surplus_w(view)
+        # (#899 round 2) …and when it does NOT subtract it, these are the
+        # pack's watts, sitting inside "bare" where the meter check could
+        # not see them. Measured here, added to the redirect below, and
+        # carried on the decision as one number the meter can judge.
+        pack_reclaim_w = reclaimed_pack_w(view)
 
         # Forecast-aware battery_charge redirect. The v1.6.x
         # ``calculate_canonical_ev_budget(SOLAR_ONLY)`` branch added
@@ -499,10 +734,27 @@ class SolarOnlyMode(ModeStrategy):
         # forecast redirect must NOT add it a second time. The redirect stays
         # only as the fallback for when the EV does NOT reclaim by position
         # (below the battery, or below the reserve floor) — its original role.
+        # (#899) Two more reasons to credit nothing: a COMMANDED pack keeps
+        # its watts (parity with ``reclaimable_battery_w`` — a forced or
+        # scheduled charge is honoured, not sold to the car), and a session
+        # whose redirect the METER already contradicted (sustained import
+        # with a redirect in the budget: the pack did not yield) is vetoed
+        # until the next plug-in — ``view.redirect_allowed``.
+        # (#899 round 2) …and a THIRD: a pack whose SOC has not been read.
+        # #875 put that rule in ``_ev_reclaims``, and an unread SOC there
+        # returns False — which sent the cycle down this branch instead,
+        # where ``battery_redirect_w`` was handed the reader's 0.0 fallback
+        # and credited 1350 W of an unread pack. The guard that denies one
+        # door has to deny the other, or it just moves the traffic.
         from .flow_calculator import battery_redirect_w as _redirect
-        redirect_w = 0.0 if _ev_reclaims(view) else _redirect(
+        redirect_w = 0.0 if (
+            _ev_reclaims(view)
+            or not getattr(view, "redirect_allowed", True)
+            or not getattr(f, "battery_soc_known", True)
+        ) else _redirect(
             f.battery_charge_w, f.battery_soc,
             f.battery_capacity_kwh, f.forecast_remaining_kwh,
+            battery_commanded=bool(getattr(f, "battery_commanded", False)),
         )
         surplus_w = bare_surplus_w + redirect_w
 
@@ -516,7 +768,21 @@ class SolarOnlyMode(ModeStrategy):
             if isinstance(cfg, dict) else self.PHASES_FALLBACK
         voltage = int(cfg.get("ev_voltage", self.VOLTAGE_FALLBACK)) \
             if isinstance(cfg, dict) else self.VOLTAGE_FALLBACK
-        min_w = min_amps * phases * voltage
+        min_w = int(predict_watts(view.wpa_table, min_amps, phases * voltage))
+
+        # (#899 round 2) Say it, wherever the answer lands — both returns
+        # below. A budget that just lost the pack's watts needs a sentence,
+        # or the reader sees a 3800 W sun and a car that stopped, or dropped
+        # 10 A, for no stated reason.
+        _vetoed = "" if getattr(view, "redirect_allowed", True) else (
+            " [battery kept its charge — the grid paid, so SEM stopped "
+            "counting it]"
+        )
+        # …and name the pack watts that ARE in the budget. Round 1 printed
+        # "redirect=0W" over a budget carrying 2700 W of the pack, which is
+        # the line that made this look closed for ten months. Silent when
+        # there are none, so the common case reads exactly as before.
+        _pack_term = f" + battery={_cw(pack_reclaim_w)}W" if pack_reclaim_w else ""
 
         if surplus_w < min_w:
             return ChargerDecision(
@@ -525,23 +791,28 @@ class SolarOnlyMode(ModeStrategy):
                 budget_w=surplus_w,
                 reason=(
                     f"solar_only: surplus={_cw(surplus_w)}W "
-                    f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W) "
-                    f"< min={min_w}W (={min_amps}A) — idle"
+                    f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W"
+                    f"{_pack_term}) "
+                    f"< min={min_w}W (={min_amps}A) — idle{_vetoed}"
                 ),
             )
 
         max_amps = int(cfg.get("ev_max_current", DEFAULT_MAX_CHARGING_CURRENT)) \
             if isinstance(cfg, dict) else DEFAULT_MAX_CHARGING_CURRENT
-        amps = max(min_amps, min(max_amps, amps_from_watts(surplus_w, phases, voltage)))
+        amps = max(min_amps, min(max_amps, amps_from_watts(surplus_w, phases, voltage, view.wpa_table)))
         return ChargerDecision(
             charger_id=cid, mode="solar_only",
             intent=ChargerIntent.CHARGE_AT_AMPS,
             commanded_amps=amps, budget_w=surplus_w,
+            # (#899) checked against the meter — BOTH doors, or the check
+            # is blind on the one nearly every install uses.
+            redirect_w=float(redirect_w + pack_reclaim_w),
             reason=(
                 f"solar_only: surplus={_cw(surplus_w)}W "
-                f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W) "
+                f"(bare={_cw(bare_surplus_w)}W + redirect={_cw(redirect_w)}W"
+                f"{_pack_term}) "
                 f"→ {amps}A (solar={_cw(f.solar_w)}W, home={_cw(f.home_w)}W, "
-                f"batt_chg={_cw(f.battery_charge_w)}W)"
+                f"batt_chg={_cw(f.battery_charge_w)}W){_vetoed}"
             ),
         )
 
@@ -550,14 +821,20 @@ class SolarOnlyMode(ModeStrategy):
 # min_plus_solar — solar surplus + Min floor at night
 # ─────────────────────────────────────────────────────────────────
 
-def night_top_up_decision(view: "ChargerView", mode_name: str) -> "ChargerDecision":
+def night_top_up_decision(view: "ChargerView", mode_name: str,
+                          phase: str = "night") -> "ChargerDecision":
     """(#634) The shared overnight floor top-up decision — the "At least"
     guarantee. The MODE is the daytime axis; ANY night-capable mode delegates
     here (min_plus_solar always; solar_only when its floor > 0). Overnight
     source is GRID by design — never the home battery (#634 standing rule);
     internally this is the #620 three-source axis with the source
     auto-derived (floor>0 ⇒ grid, floor=0 ⇒ off), no GUI surface.
-    Inherits the #630 peak-managed top-up rate and the deadline sizing."""
+    Inherits the #630 peak-managed top-up rate and the deadline sizing.
+
+    ``phase`` only labels the reason. (#856) The cheapest-hours mode calls
+    this by DAY too — a cheap daytime hour tops the Min floor up exactly as
+    the night window does — so "night:" in a daytime reason would be a lie
+    on the strategy sensor."""
     cid = view.power.charger_id
 
     # Already at Min — idle.
@@ -566,7 +843,7 @@ def night_top_up_decision(view: "ChargerView", mode_name: str) -> "ChargerDecisi
             charger_id=cid, mode=mode_name,
             intent=ChargerIntent.IDLE,
             reason=(
-                f"{mode_name} night: target reached "
+                f"{mode_name} {phase}: target reached "
                 f"(remaining={view.target_kwh:.2f} kWh)"
             ),
         )
@@ -594,7 +871,7 @@ def night_top_up_decision(view: "ChargerView", mode_name: str) -> "ChargerDecisi
         return ChargerDecision(
             charger_id=cid, mode=mode_name,
             intent=ChargerIntent.IDLE,
-            reason=f"{mode_name} night: waiting for the planned window{detail}",
+            reason=f"{mode_name} {phase}: waiting for the planned window{detail}",
         )
 
     cfg = view.config if isinstance(view.config, dict) else {}
@@ -619,7 +896,7 @@ def night_top_up_decision(view: "ChargerView", mode_name: str) -> "ChargerDecisi
             intent=ChargerIntent.CHARGE_AT_AMPS,
             commanded_amps=amps,
             reason=(
-                f"{mode_name} night: deadline floor {amps}A{tag}, "
+                f"{mode_name} {phase}: deadline floor {amps}A{tag}, "
                 f"remaining {view.target_kwh:.1f} kWh"
             ),
         )
@@ -637,7 +914,7 @@ def night_top_up_decision(view: "ChargerView", mode_name: str) -> "ChargerDecisi
         intent=ChargerIntent.CHARGE_AT_AMPS,
         commanded_amps=amps,
         reason=(
-            f"{mode_name} night: top-up at {amps}A"
+            f"{mode_name} {phase}: top-up at {amps}A"
             + (" (peak-managed)" if amps != min_amps else "")
             + f", remaining {remaining_str} kWh"
         ),
@@ -670,49 +947,84 @@ class MinPlusSolarMode(ModeStrategy):
     def _decide_night(self, view: ChargerView) -> ChargerDecision:
         return night_top_up_decision(view, "min_plus_solar")
 
-    def _decide_day(self, view: ChargerView) -> ChargerDecision:
-        """Daytime min_plus_solar: Zone-aware battery assist on top
-        of solar surplus. Zone 4 (SOC≥90) drains battery to EV;
-        Zone 3 (SOC≥70) discharges battery if it's already; Zone 2
-        is pure solar (same as solar_only); Zone 1 idles."""
+    def _decide_day(self, view: ChargerView,
+                    mode_name: str = "min_plus_solar",
+                    allow_min_floor: bool = True) -> ChargerDecision:
+        """Daytime Zone-aware battery assist on top of solar surplus.
+        Zone 4 (SOC≥90) drains battery to EV; Zone 3 (SOC≥70)
+        discharges battery if it's already; Zone 2 is pure solar
+        (same as solar_only); Zone 1 idles.
+
+        (#885 matrix) Parameterized so ``solar_plus_battery`` — the
+        restored legacy ``pv`` mode: PV + pack, no grid — runs the SAME
+        Zone 3/4 body with ``allow_min_floor=False`` instead of carrying
+        a hand-copied twin. One implementation, two modes; the #282
+        drift class is exactly two copies of this arithmetic."""
         f = view.fleet
         cid = view.power.charger_id
         if not view.power.connected:
             return ChargerDecision(
-                charger_id=cid, mode="min_plus_solar",
+                charger_id=cid, mode=mode_name,
                 intent=ChargerIntent.IDLE,
-                reason="min_plus_solar day: EV disconnected",
+                reason=f"{mode_name} day: EV disconnected",
             )
-        zone = soc_zone(f.battery_soc, f.auto_start_soc, f.buffer_soc, f.priority_soc)
+        zone = fleet_soc_zone(f)
         # Zone 1: battery priority — never charge EV from anywhere
         # when battery is below priority_soc.
         if zone == 1:
+            # (#983) Name the boundary ``soc_zone`` ACTUALLY used. Since #870
+            # the three thresholds are sorted first, so with priority 40 and
+            # buffer 30 the Zone-1 edge is 30 — and a reader told to lower
+            # "priority=40" would change nothing. The relation stays true
+            # either way, which is why only naming the right operand fixes it.
+            _edge = min(float(f.priority_soc), float(f.buffer_soc),
+                        float(f.auto_start_soc))
+            _knob = ("priority" if _edge == float(f.priority_soc)
+                     else "lowest zone threshold")
             return ChargerDecision(
-                charger_id=cid, mode="min_plus_solar",
+                charger_id=cid, mode=mode_name,
                 intent=ChargerIntent.IDLE,
                 reason=(
-                    f"min_plus_solar day: Zone 1 "
-                    f"(SOC={f.battery_soc:.0f}% < priority="
-                    f"{f.priority_soc:.0f}%) — battery priority"
+                    f"{mode_name} day: Zone 1 "
+                    f"(SOC={f.battery_soc:.0f}% < {_knob}="
+                    f"{_edge:.0f}%) — battery priority"
                 ),
             )
         # Zone 2: pure solar (same as solar_only).
         if zone == 2:
             return _relabel(
-                _SOLAR_ONLY.decide(view), "min_plus_solar",
-                f"min_plus_solar day Zone 2 (SOC={f.battery_soc:.0f}%)",
+                _SOLAR_ONLY.decide(view), mode_name,
+                f"{mode_name} day Zone 2 (SOC={f.soc_label})",
             )
         # Zone 3 / 4: surplus + capped SOC-based battery assist (#501).
         # The budget uses the battery's POTENTIAL (never gated on
         # currently-flowing discharge — that was the #439
         # chicken-and-egg) capped at ``battery_assist_max_power``.
-        budget_w = battery_assist_budget_w(view)
+        # (#885) Keep the two funders APART. ``budget_w`` is still their
+        # sum (every downstream reader is unchanged), but knowing which
+        # part the pack is funding lets the decision report its own
+        # battery draw instead of the coordinator reconstructing it from
+        # fleet totals afterwards.
+        surplus_w, assist_avail_w = _battery_assist_split(view)
+        budget_w = surplus_w + assist_avail_w
         cfg = view.config if isinstance(view.config, dict) else {}
         min_amps = effective_min_amps(cfg, 6)
         max_amps = int(cfg.get("ev_max_current", DEFAULT_MAX_CHARGING_CURRENT))
         phases = int(cfg.get("ev_phases", 3))
         voltage = int(cfg.get("ev_voltage", 230))
-        surplus_amps = amps_from_watts(budget_w, phases, voltage)
+        surplus_amps = amps_from_watts(budget_w, phases, voltage, view.wpa_table)
+
+        def _assist_share(commanded_amps: int) -> float:
+            """(#885) Watts of the PACK this commitment actually spends.
+
+            Solar funds first, the battery covers the gap, grid takes the
+            rest — so a charger commanded 6 A under a fat budget draws far
+            less battery than it was offered. Mirrors
+            :func:`solar_commitment_w`'s plain amps x phases x voltage so
+            the two fleet accumulators measure commitments the same way.
+            """
+            commanded_w = float(commanded_amps) * float(phases) * float(voltage)
+            return max(0.0, min(assist_avail_w, commanded_w - surplus_w))
 
         # Need-gated min floor (#501, amends ADR 0010 pattern 1).
         # The mode's Min guarantee lives in the night top-up; the
@@ -725,18 +1037,26 @@ class MinPlusSolarMode(ModeStrategy):
         # the floor even applied after Min was already met.
         remaining = view.target_kwh
         floor_needed = (
-            remaining is not None
+            allow_min_floor
+            and remaining is not None
             and remaining > 0.1
             and remaining > view.night_deliverable_kwh
         )
         if floor_needed:
             amps = max(min_amps, min(max_amps, surplus_amps))
             return ChargerDecision(
-                charger_id=cid, mode="min_plus_solar",
+                charger_id=cid, mode=mode_name,
                 intent=ChargerIntent.CHARGE_AT_AMPS,
                 commanded_amps=amps, budget_w=budget_w,
+                assist_w=_assist_share(amps),
+                # (#899 round 2) Deliberately 0, and this is the one branch
+                # where that is the truth. The floor BUYS grid on purpose —
+                # the Min guarantee outranks the sun here — so import proves
+                # nothing about whether the pack yielded, and declaring pack
+                # watts would strike on the mode doing its job.
+                redirect_w=0.0,
                 reason=(
-                    f"min_plus_solar day Zone {zone}: Min floor engaged "
+                    f"{mode_name} day Zone {zone}: Min floor engaged "
                     f"({remaining:.1f} kWh remaining > "
                     f"{view.night_deliverable_kwh:.1f} kWh night-deliverable) "
                     f"→ {amps}A (budget={_cw(budget_w)}W, floor={min_amps}A)"
@@ -745,22 +1065,38 @@ class MinPlusSolarMode(ModeStrategy):
         if surplus_amps >= min_amps:
             amps = min(max_amps, surplus_amps)
             return ChargerDecision(
-                charger_id=cid, mode="min_plus_solar",
+                charger_id=cid, mode=mode_name,
                 intent=ChargerIntent.CHARGE_AT_AMPS,
                 commanded_amps=amps, budget_w=budget_w,
+                assist_w=_assist_share(amps),
+                # (#899 round 2) Zone 3/4 reaches the same position reclaim
+                # through ``_battery_assist_split``, so it spends the pack's
+                # charging watts exactly as ``solar_only`` does and owes the
+                # meter the same number. ``assist_w`` stays out of it: a
+                # DISCHARGE the user asked for is a different bet, and the
+                # meter has nothing to say about it.
+                redirect_w=reclaimed_pack_w(view),
                 reason=(
-                    f"min_plus_solar day Zone {zone}: budget={_cw(budget_w)}W "
+                    f"{mode_name} day Zone {zone}: budget={_cw(budget_w)}W "
                     f"→ {amps}A (solar surplus + capped battery assist)"
                 ),
             )
         remaining_str = f"{remaining:.1f}" if remaining is not None else "?"
+        # The idle tail differs per mode: min_plus_solar reassures about the
+        # Min guarantee; solar_plus_battery HAS no Min concept, so promising
+        # a night window would be a lie about what the mode does.
+        tail = (
+            f"— Min ({remaining_str} kWh) is covered by the night window, "
+            f"staying self-consumption-only"
+            if allow_min_floor else
+            "— staying idle (this mode spends solar and the pack only)"
+        )
         return ChargerDecision(
-            charger_id=cid, mode="min_plus_solar",
+            charger_id=cid, mode=mode_name,
             intent=ChargerIntent.IDLE,
             reason=(
-                f"min_plus_solar day Zone {zone}: budget={_cw(budget_w)}W "
-                f"below {min_amps}A min — Min ({remaining_str} kWh) is "
-                f"covered by the night window, staying self-consumption-only"
+                f"{mode_name} day Zone {zone}: budget={_cw(budget_w)}W "
+                f"below {min_amps}A min {tail}"
             ),
         )
 
@@ -769,13 +1105,62 @@ class MinPlusSolarMode(ModeStrategy):
 # solar_plus_cheap — solar + cheap-tariff windows at night
 # ─────────────────────────────────────────────────────────────────
 
+class SolarPlusBatteryMode(ModeStrategy):
+    """PV surplus plus the home battery — and nothing else. (#885 matrix)
+
+    The restored half of the legacy ``pv`` / ``self_consumption`` split
+    that the #277 consolidation collapsed: since then the ONLY way to let
+    the pack help the car was ``min_plus_solar``, which also commits the
+    user to a Min floor and grid backfill. Loads kept the distinction
+    (#620: "Solar only" vs "Solar + battery"); this gives chargers the
+    same choice back.
+
+    Day: the exact ``min_plus_solar`` Zone 3/4 body with the Min-floor
+    branch off — one implementation, see ``_decide_day``.
+    Night: ``solar_only``'s contract, verbatim — never grid-charges
+    (#346), and the #634 "At least" floor remains the mode-independent
+    overnight guarantee (per-charger-explicit, per #679, which gates this
+    mode exactly like ``solar_only`` in ``mode_allows_night_charging``).
+    """
+
+    def decide(self, view: ChargerView) -> ChargerDecision:
+        f = view.fleet
+        cid = view.power.charger_id
+
+        if not view.power.connected:
+            return ChargerDecision(
+                charger_id=cid, mode="solar_plus_battery",
+                intent=ChargerIntent.IDLE,
+                reason="solar_plus_battery but EV disconnected",
+            )
+
+        if f.is_night:
+            # Same shape as SolarOnlyMode: an explicit "At least" floor is
+            # the only thing that may grid at night; without one, idle.
+            if view.target_kwh is not None and view.target_kwh > 0.1:
+                return night_top_up_decision(view, "solar_plus_battery")
+            return ChargerDecision(
+                charger_id=cid, mode="solar_plus_battery",
+                intent=ChargerIntent.IDLE,
+                reason=(
+                    "solar_plus_battery night: no At-least floor set — "
+                    "this mode never grid-charges (#346 contract, same "
+                    "as solar_only)"
+                ),
+            )
+
+        return _MIN_PLUS_SOLAR._decide_day(
+            view, mode_name="solar_plus_battery", allow_min_floor=False,
+        )
+
+
 class SolarPlusCheapMode(ModeStrategy):
     """During day: solar_only behaviour, but pauses during
     expensive tariff windows. At night: charge during the
     cheapest hours only (#247).
     """
 
-    EXPENSIVE_LEVELS = frozenset({"expensive", "very_expensive"})
+    EXPENSIVE_LEVELS = frozenset(lv.value for lv in _EXPENSIVE_LEVELS)
 
     def decide(self, view: ChargerView) -> ChargerDecision:
         f = view.fleet
@@ -797,8 +1182,52 @@ class SolarPlusCheapMode(ModeStrategy):
                 f"→ pausing grid imports",
             )
 
-        # Day, normal/cheap tariff: solar surplus only (same as
-        # min_plus_solar day path).
+        # (#856, hoyte) Day, CHEAP tariff: the mode's name is a promise
+        # about PRICE, not about the clock. Until now a cheap or negative
+        # daytime hour was ignored — the day path was solar-only regardless
+        # of price, so the car charged only in always_max — and the docs
+        # said "Daytime: charges from solar surplus" without a word about
+        # why. A cheap daytime hour now tops the Min floor up from grid
+        # exactly as the night window does: the same shared seam (plan
+        # gate, deadline floor, peak-managed rate), so there is still ONE
+        # copy of that logic. Solar surplus wins whenever it offers more —
+        # a cheap hour must never downgrade a strong sun.
+        #
+        # Only a CHEAP hour may start a grid charge by day. This asked the
+        # question backwards — "is it not one of the dear words, and not
+        # None" — which was right only while "no comparative signal" WAS
+        # Python None. (#994) gave that state two names of its own, `flat`
+        # and `no_prices`, and a truthy string sailed through both halves:
+        # on a flat tariff SEM would have topped the car up from the grid
+        # believing it a cheap hour, which is this issue's own disease. Ask
+        # the vocabulary the question it exists to answer.
+        if not f.is_night and is_cheap_name(f.tariff_level):
+            solar = _relabel(
+                _SOLAR_ONLY.decide(view), "solar_plus_cheap",
+                f"solar_plus_cheap day: tariff={f.tariff_level}",
+            )
+            if view.target_kwh is None or view.target_kwh <= 0.1:
+                # Nothing to fill: the cheap hour has no floor to top up.
+                # Say which knob would change that — hoyte's install had
+                # "At least 0 kWh" and saw a plan that looked wrong.
+                if solar.intent is ChargerIntent.IDLE:
+                    return replace(
+                        solar,
+                        reason=(f"{solar.reason} — cheap hour unused: no Min "
+                                f"target to fill (set 'At least' on the EV card)"),
+                    )
+                return solar
+            grid = night_top_up_decision(
+                view, "solar_plus_cheap", phase="day (cheap tariff)")
+            if (solar.intent is ChargerIntent.CHARGE_AT_AMPS
+                    and grid.intent is ChargerIntent.CHARGE_AT_AMPS
+                    and solar.commanded_amps >= grid.commanded_amps):
+                return replace(
+                    solar, reason=f"{solar.reason} (cheap hour: solar offer wins)")
+            return grid
+
+        # Day, normal tariff: solar surplus only (same as min_plus_solar
+        # day path).
         if not f.is_night:
             return _relabel(
                 _SOLAR_ONLY.decide(view), "solar_plus_cheap",
@@ -822,15 +1251,85 @@ _OFF = OffMode()
 _ALWAYS_MAX = AlwaysMaxMode()
 _SOLAR_ONLY = SolarOnlyMode()
 _MIN_PLUS_SOLAR = MinPlusSolarMode()
+_SOLAR_PLUS_BATTERY = SolarPlusBatteryMode()
 _SOLAR_PLUS_CHEAP = SolarPlusCheapMode()
 
 MODE_STRATEGIES: Dict[str, ModeStrategy] = {
     "off": _OFF,
     "always_max": _ALWAYS_MAX,
     "solar_only": _SOLAR_ONLY,
+    "solar_plus_battery": _SOLAR_PLUS_BATTERY,
     "min_plus_solar": _MIN_PLUS_SOLAR,
     "solar_plus_cheap": _SOLAR_PLUS_CHEAP,
 }
+
+
+
+def clamp_to_peak_slot(result, view):
+    """(#864) Tighten a charging offer so the 15-minute slot lands on target.
+
+    FLEET-WIDE. The allowance is one budget for the whole house, so a second
+    charger must see what the first already claimed this cycle — otherwise
+    each computes the full headroom and takes it. Reproduced on review: two
+    idle 3-phase chargers, a 6000 W target and a 500 W baseline, each landing
+    7 A for a combined 10160 W — 69 % over the target the guard defends.
+
+    ``peak_committed_w`` is the running total the per-charger loop
+    accumulates, exactly as ``solar_committed_w`` already does for the solar
+    cascade ("lower-priority chargers see only the surplus this one didn't
+    take"). One budget, one accumulator, same shape.
+
+    Never a proactive idle: the clamp floors at the effective minimum, because
+    stopping cars on a transient is the flap this project spent months
+    killing. The hard stop stays with #747's EMERGENCY, which runs after and
+    wins.
+    """
+    _allowed = getattr(view.fleet, "peak_slot_allowed_w", None)
+    if _allowed is None or result.intent not in (
+            ChargerIntent.CHARGE_AT_AMPS, ChargerIntent.CHARGE_MAX):
+        return result
+    # grid_import includes THIS charger's current draw — credit it back, or
+    # the guard ratchets its own offer to zero cycle over cycle. Only the
+    # grid-fed share can be credited (solar-covered draw never touched the
+    # meter).
+    _this_w = float(getattr(view.power, "power_w", 0.0) or 0.0)
+    if getattr(view.fleet, "grid_import_known", True):
+        _others_w = max(0.0, float(view.fleet.grid_import_w)
+                        - min(_this_w, float(view.fleet.grid_import_w)))
+    else:
+        # (#906) The meter is blind this cycle: ``grid_import_w`` is the
+        # reader's 0.0, so "grid minus this charger" would read the whole
+        # house as absent and hand the EV the entire allowance (PROD 02.09:
+        # headroom GREW inside a slot averaging 8 kW). The house's own held
+        # draw is the honest estimate of what else the slot is carrying.
+        _others_w = max(0.0, float(getattr(view.fleet, "home_w", 0.0) or 0.0))
+    # …and what higher-priority chargers have ALREADY been offered this
+    # cycle but have not yet drawn, so it cannot appear in grid_import.
+    _committed_w = max(0.0, float(
+        getattr(view.fleet, "peak_committed_w", 0.0) or 0.0))
+    _ev_allow_w = max(0.0, float(_allowed) - _others_w - _committed_w)
+    _min_a = effective_min_amps(dict(view.config), 6)
+    _wpa = (float(view.config.get("ev_phases") or 3)
+            * float(view.config.get("ev_voltage") or 230))
+    _max_a = int(view.config.get("ev_max_current")
+                 or DEFAULT_MAX_CHARGING_CURRENT)
+    _cap_a = max(_min_a, amps_that_fit(
+        view.wpa_table, _ev_allow_w, _wpa, _max_a))
+    # Speak only when it BITES: an allowance at or above the hardware
+    # maximum is not a clamp, and a reason claiming one would mislead the
+    # person reading the observer surface (seen live on .175).
+    if _cap_a < _max_a and (
+            result.intent is ChargerIntent.CHARGE_MAX
+            or result.commanded_amps > _cap_a):
+        return replace(
+            result, intent=ChargerIntent.CHARGE_AT_AMPS,
+            commanded_amps=_cap_a,
+            budget_w=predict_watts(view.wpa_table, _cap_a, _wpa),
+            capped_by_limit=True,   # (#905) lands in one cycle
+            reason=(f"{result.reason} [peak slot guard: "
+                    f"{_ev_allow_w:.0f}W headroom → {_cap_a}A]"),
+        )
+    return result
 
 
 def decide(view: ChargerView) -> ChargerDecision:
@@ -850,6 +1349,11 @@ def decide(view: ChargerView) -> ChargerDecision:
     # mode dispatch so solar_only / min_plus_solar / always_max /
     # solar_plus_cheap all honour it. Skip while disconnected so a stale
     # ceiling can't suppress the "idle — disconnected" reason.
+    # (#898) Off is hands-off before any guard: a ceiling, a disconnect or
+    # a night gate has nothing to police on a charger SEM does not command.
+    if view.mode == "off":
+        return _OFF.decide(view)
+
     if view.soc_ceiling_reached and view.power.connected:
         # Max SOC/target is a STRUCTURAL stop — never bridge it.
         return ChargerDecision(
@@ -885,6 +1389,19 @@ def decide(view: ChargerView) -> ChargerDecision:
                 reason=f"{result.reason} [structural: {why}]",
             )
 
+    # (#864) The PREVENTIVE peak bound — the slot budget, applied to the
+    # OFFER before the wire. The reactive machine below (#747) triggers
+    # when the rolling average crosses the target, but by then the billed
+    # slot average IS the peak: the trigger condition equals the damage
+    # condition (live on PROD 29.08: 9.9 kW under a 6.0 kW target, state
+    # 'normal' throughout). This bound follows the bill's own arithmetic —
+    # what may the rest of the CURRENT 15-min slot import so the slot
+    # lands on target — and only ever tightens a charging offer. Floors at
+    # the effective minimum, never a proactive idle: stopping cars on a
+    # transient is the flap this project spent months killing, and the
+    # hard stop stays with #747's EMERGENCY, which runs after and wins.
+    result = clamp_to_peak_slot(result, view)
+
     # (#747) PEAK SHED is a guarantee, senior to every mode — always_max
     # included: its "grid backfill expected" promise ends where the house's
     # peak defense begins. The load manager's actuation exclusion stays
@@ -900,6 +1417,9 @@ def decide(view: ChargerView) -> ChargerDecision:
             return replace(
                 result, intent=ChargerIntent.IDLE, commanded_amps=0,
                 budget_w=0.0, bridgeable=False,
+                # (#940) senior to the contactor's minimum ON: the peak
+                # defence is a guarantee, and it opens the relay this cycle.
+                safety_stop=True,
                 reason=f"{result.reason} [peak EMERGENCY — EV sheds first]",
             )
         min_a = effective_min_amps(dict(view.config), 6)
@@ -909,7 +1429,9 @@ def decide(view: ChargerView) -> ChargerDecision:
                    * float(view.config.get("ev_voltage") or 230))
             return replace(
                 result, intent=ChargerIntent.CHARGE_AT_AMPS,
-                commanded_amps=min_a, budget_w=min_a * wpa,
+                commanded_amps=min_a,
+                budget_w=predict_watts(view.wpa_table, min_a, wpa),
+                capped_by_limit=True,   # (#905) a shed order is not a preference
                 reason=f"{result.reason} [peak SHEDDING — clamped to {min_a}A]",
             )
     return result

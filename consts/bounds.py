@@ -66,6 +66,9 @@ BOUNDS: dict[str, Range] = {
     "daily_ev_target": Range(0, 200, step=0.5, unit="kWh"),
     "daily_ev_target_max": Range(0, 200, step=0.5, unit="kWh"),
     "ev_battery_capacity_kwh": Range(10, 120, step=5, unit="kWh"),
+    # ── charge pacing (#820, 2.1 audit item 6) ──────────────────────
+    # The inverter's AC output limit; 0 = not set (clipping guard off).
+    "inverter_ac_limit_w": Range(0, 100000, step=100, unit="W"),
     "ev_kwh_per_100km": Range(8, 50, step=0.5, unit="kWh/100km"),
 
     # ── Home battery ─────────────────────────────────────────────────
@@ -75,6 +78,32 @@ BOUNDS: dict[str, Range] = {
     # never reported. One row, one answer.
     "battery_capacity_kwh": Range(1, 100, step=0.5, unit="kWh"),
 
+    # ── Battery SOC zones (#870) ─────────────────────────────────────
+    # coppe218: "Battery size, chemistry, inverter behaviour and the user's
+    # energy strategy differ significantly between installations... a
+    # configuration such as Priority 20 / Buffer 30 / Auto-start 50 can be
+    # completely intentional." It could not be configured: buffer floored
+    # at 50 and auto-start at 70, so his two lower zones were unreachable.
+    #
+    # The old minimums were doing two jobs — bounding the value AND implying
+    # the ordering priority < buffer < auto_start. That is why widening one
+    # felt unsafe. The ordering is a RUNTIME relationship between three
+    # numbers, not a property of any one field's range, so it does not
+    # belong here; ``decide.soc_zone`` now enforces it where it is actually
+    # used, and a Repair tells the user when their zones are out of order
+    # rather than a slider silently forbidding a legitimate layout.
+    #
+    # These were declared TWICE (number.py entities and the config-flow
+    # selectors) with the numbers duplicated by hand. Same numbers today,
+    # which is exactly how #828's pair started.
+    "battery_priority_soc": Range(5, 100, step=5, unit="%"),
+    "battery_buffer_soc": Range(5, 100, step=5, unit="%"),
+    "battery_auto_start_soc": Range(5, 100, step=5, unit="%"),
+
+    # ── heat pumps (#685) ────────────────────────────────────────────
+    "heat_pump_rated_power": Range(100, 30000, step=100, unit="W"),
+    "heat_pump_force_on_threshold": Range(0, 30000, step=100, unit="W"),
+
     # ── Deye forced grid charging (#826) ─────────────────────────────
     # The pair that started this: SEM's write ceiling is bounded BY the BMS
     # ceiling (the adapter takes min(entity, this, BMS)), so it can never
@@ -83,6 +112,16 @@ BOUNDS: dict[str, Range] = {
     "deye_max_charge_current_a": Range(
         1, 200, step=1, unit="A", at_most="deye_bms_max_charge_current_a"),
     "deye_bms_max_charge_current_a": Range(0, 200, step=1, unit="A"),
+    # (#914) the per-load anti-cycle window, minutes — ONE row for both the
+    # minimum-run and minimum-pause inputs, which share it. Published on the
+    # devices sensor as ``anti_cycle_bounds`` and read by the Load Priority
+    # card, which used to re-declare 1..120 inline: a second copy of a
+    # number that then lived nowhere else. A UI hint only — the service
+    # keeps its existing non-negative check and refuses nothing new, so an
+    # install that stored a larger value years ago keeps working unchanged.
+    # (The first draft declared a second, identical row for the pause input;
+    # test_828's orphan check caught it — a row nobody reads is a claim.)
+    "anti_cycle_window_min": Range(0, 120, step=1, unit="min"),
 }
 
 

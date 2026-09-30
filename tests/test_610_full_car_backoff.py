@@ -3,7 +3,7 @@
 PROD 2026-07-18, car at 100 % (kWh-target mode, no vehicle SOC sensor):
 SEM correctly showed "System ready", but the start-kick ladder re-offered
 ~10 A every time the surplus persisted — the bounded give-up ("car not
-latching — full/refusing") re-armed immediately, producing continuous
+latching") re-armed immediately, producing continuous
 ``keba.set_current`` UDP chatter against a BMS that kept declining.
 
 The fix tunes the RETRY CADENCE only (per the #440 truth model the
@@ -104,7 +104,7 @@ def _run_ladder_to_giveup(st, adapter, t0, *, view=None, first=False):
     for _i in range(1, 5):                                 # climb to ceiling
         t = t + (START_KICK_GRACE_S + 1)
         d = _filter(st, view, adapter, now=t)
-        if "full-car backoff" in d.reason:
+        if "start backoff" in d.reason:
             return d, t
     t = t + START_KICK_GIVEUP_S + 5
     d = _filter(st, view, adapter, now=t)                 # give-up
@@ -121,7 +121,10 @@ class TestFullCarBackoff:
         adapter = FakeAdapter()
         d, _ = _run_ladder_to_giveup(st, adapter, 0.0, first=True)
         assert d.intent is ChargerIntent.IDLE
-        assert "not latching" in d.reason
+        # (#983) the give-up reports the OFFER and the DRAW, never a
+        # diagnosis of the car it cannot see.
+        assert "did not accept the start" in d.reason
+        assert "full" not in d.reason.lower()
         assert "backing off" not in d.reason
         assert "wb" not in st._giveup_backoff_until
 
@@ -141,7 +144,7 @@ class TestFullCarBackoff:
         for dt in (30.0, 300.0, FULL_CAR_BACKOFF_S - 60.0):
             d2 = _filter(st, _view(power_w=120.0), adapter, now=t + dt)
             assert d2.intent is ChargerIntent.IDLE
-            assert "full-car backoff" in d2.reason
+            assert "start backoff" in d2.reason
 
     def test_backoff_gates_ladder_block_with_stale_charge_intent(self):
         """THE PROD 2026-07-19 11:10 signature: backoff arms, and the very
@@ -161,7 +164,7 @@ class TestFullCarBackoff:
         assert adapter.last_intent is ChargerIntent.CHARGE_AT_AMPS
         d2 = _filter(st, _view(power_w=120.0), adapter, now=t + 30.0)
         assert d2.intent is ChargerIntent.IDLE
-        assert "full-car backoff" in d2.reason
+        assert "start backoff" in d2.reason
         assert "trying" not in d2.reason  # NO ladder restart
 
     def test_backoff_expires_then_one_giveup_rearms(self):
@@ -237,7 +240,7 @@ class TestFullCarBackoff:
         adapter2 = FakeAdapter()
         d = _filter(st2, _view(power_w=120.0), adapter2, now=10.0)
         assert d.intent is ChargerIntent.IDLE
-        assert "full-car backoff" in d.reason
+        assert "start backoff" in d.reason
 
     def test_mode_switch_clears_streak_and_backoff(self):
         """Switching to a non-surplus mode (always_max/off) is user intent —
@@ -272,7 +275,7 @@ class TestFullCarBackoff:
         adapter.last_intent = None
         d = _filter(st, _view(power_w=120.0, is_night=True), adapter, now=t + 60.0)
         assert d.intent is ChargerIntent.IDLE
-        assert "full-car backoff" in d.reason
+        assert "start backoff" in d.reason
 
     def test_median_lag_cannot_smuggle_a_charge_past_the_backoff(self):
         """THE PROD 2026-07-26 signature: an armed backoff, and a raw CHARGE
@@ -310,7 +313,7 @@ class TestFullCarBackoff:
             f"{d.commanded_amps}A — {d.reason}"
         )
         assert d.commanded_amps == 0
-        assert "full-car backoff" in d.reason
+        assert "start backoff" in d.reason
 
     def test_a_real_draw_during_the_backoff_still_clears_it(self):
         """The clear-on-draw moved out of the charge_wanted branch with the

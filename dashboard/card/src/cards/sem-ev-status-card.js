@@ -13,6 +13,8 @@
 import { SEMLitBase, html, css, svg, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
 import { resolveChargerSoc } from '../util/charger-soc.js';
+import { chargerStatusKey } from '../util/charger-status.js';
+import { evStripSegments, evStripWindow } from '../util/ev-strip.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 const CHARGER_COLORS = ['#8DC892', '#64B5F6'];
@@ -44,6 +46,8 @@ class SEMEVStatusCard extends SEMLitBase {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        // (#980 follow-up) the pause countdown's minute tick
+        if (this._pauseTimer) { clearInterval(this._pauseTimer); this._pauseTimer = null; }
         document.removeEventListener('visibilitychange', this._boundVisibility);
     }
 
@@ -124,6 +128,11 @@ class SEMEVStatusCard extends SEMLitBase {
             const _cs = hass.states[`${prefix}charging_state`]?.attributes || {};
             key += '|' + [_cs.ev_tariff_waiting, _cs.ev_deadline_reachable,
                 _cs.ev_next_cheap_window].join(':');
+            // (#944) a stop-war stand-down relabels that charger's status
+            key += '|' + this._chargers.map(id =>
+                (((_cs.per_charger_stop_war || {})[id] || {}).standing_down === true)
+                    ? '1' : '0'
+            ).join(':');
 
             key += '|' + this._chargers.map(id =>
                 hass.states[`number.sem_charger_${id}_daily_ev_target`]?.state || ''
@@ -235,6 +244,21 @@ class SEMEVStatusCard extends SEMLitBase {
      * only the fleet-level (primary charger) plan existed. Fleet plan kept
      * as the fallback for coordinators that predate the attribute.
      */
+    // (#980 follow-up) re-render once a minute while a pause runs, so the
+    // countdown moves between state changes; nothing runs otherwise.
+    updated(changed) {
+        super.updated?.(changed);
+        const paused = Object.keys(this._hass?.states || {}).some((eid) =>
+            eid.startsWith('select.sem_charger_') && eid.endsWith('_charge_mode')
+            && this._hass.states[eid]?.state === 'off'
+            && this._hass.states[eid]?.attributes?.paused_until);
+        if (paused && !this._pauseTimer) {
+            this._pauseTimer = setInterval(() => this.requestUpdate(), 60000);
+        } else if (!paused && this._pauseTimer) {
+            clearInterval(this._pauseTimer); this._pauseTimer = null;
+        }
+    }
+
     _renderPlanStrip(chargerId) {
         const cs = this._hass?.states['sensor.sem_charging_state'];
         const perPlan = chargerId
@@ -248,11 +272,6 @@ class SEMEVStatusCard extends SEMLitBase {
         if (!plan.some(r => evKinds.has(r.kind))) return nothing;
 
         const now = Date.now();
-        const horizon = 12 * 3600 * 1000;  // 12h window
-        const end = now + horizon;
-        const w = 100;  // viewBox units (percent-like)
-        const xOf = (ts) => Math.max(0, Math.min(w, ((ts - now) / horizon) * w));
-
         // Build EV state segments by walking the plan. State machine:
         //   start         → idle
         //   night_open    → wait (if tariff_waiting) else charging
@@ -262,36 +281,24 @@ class SEMEVStatusCard extends SEMLitBase {
         const evRows = plan.filter(r => ['now','night_open','ev_charge_start',
             'ev_min_reached','ev_deadline'].includes(r.kind));
         evRows.sort((a,b) => new Date(a.when) - new Date(b.when));
-        // Waiting-for-cheap is a per-charger fact: a per-charger plan
-        // marks it on the ev_charge_start row itself (the composer sets
-        // detail=plan_ev_charge_tariff only on the wait path). The fleet
-        // attribute is primary-charger-scoped — only trust it when we're
-        // rendering the fleet fallback plan.
-        const tariffWait = usingPerPlan
-            ? plan.some(r => r.kind === 'ev_charge_start'
-                          && r.detail === 'plan_ev_charge_tariff')
-            : !!cs?.attributes?.ev_tariff_waiting;
-        const segments = [];
-        let cursor = now;
-        let state = 'idle';
-        for (const r of evRows) {
-            const t = new Date(r.when).getTime();
-            // Clamp each transition to the 12h horizon. Without the clamp a
-            // plan whose first EV event is beyond the window (morning view,
-            // night charge scheduled for e.g. 21:35 when now+12h is 19:56)
-            // advanced cursor PAST end, so the idle-fill below was skipped
-            // and the strip rendered EMPTY instead of a full "nothing
-            // scheduled in the next 12h" idle bar. Clamping keeps cursor
-            // inside the window so the fill always covers the visible time.
-            const segEnd = Math.min(t, end);
-            if (segEnd > cursor) segments.push({s: cursor, e: segEnd, state});
-            cursor = Math.max(cursor, segEnd);
-            if (r.kind === 'night_open') state = tariffWait ? 'wait' : 'charging';
-            else if (r.kind === 'ev_charge_start') state = 'charging';
-            else if (r.kind === 'ev_min_reached') state = 'done';
-            else if (r.kind === 'ev_deadline') state = 'done';
-        }
-        if (cursor < end) segments.push({s: cursor, e: end, state});
+        // (#967) The window ends where the EV's plan ends, not at a fixed
+        // 12 h — read at 09:37, a fixed window showed @alexmc1510 a wait
+        // band running off the right edge and never the 00:00 charge it
+        // was waiting for. Still 12 h whenever the plan fits inside it.
+        const { end, hours } = evStripWindow(evRows, now);
+        const horizon = end - now;
+        const w = 100;  // viewBox units (percent-like)
+        const xOf = (ts) => Math.max(0, Math.min(w, ((ts - now) / horizon) * w));
+        // (#967) The state walk is a pure function with its own unit test —
+        // it used to paint `night_open` as CHARGING unless a start row carried
+        // the private-selector detail, so a joint-plan start at 00:00 (or any
+        // held-back start) still turned the window open into a charging bar
+        // inside the punta band. The fleet attribute is primary-charger-scoped
+        // and only trusted on the fleet fallback plan.
+        const segments = evStripSegments(evRows, {
+            now, end, usingPerPlan,
+            fleetTariffWait: !!cs?.attributes?.ev_tariff_waiting,
+        });
 
         // Tinting overlay: expensive blocks darken the strip + cheap blocks lighten
         const overlays = [];
@@ -322,6 +329,10 @@ class SEMEVStatusCard extends SEMLitBase {
         const stateColor = (s) => ({
             idle:     '#566072',
             wait:     '#8353d1',
+            // (#967) the daytime preview before the plan has covered the
+            // car — a paler wait, never the charging green: an estimate is
+            // a promise the strip has no right to make yet.
+            estimate: '#b8a6e8',
             charging: '#8DC892',
             done:     '#4db6ac',
         })[s] || '#566072';
@@ -329,22 +340,26 @@ class SEMEVStatusCard extends SEMLitBase {
         // palette — cheap is a deeper leaf-green so it can't be mistaken for
         // the 'charging' sea-green it used to share (#464 legend feedback).
         const overlayColor = (k) => k === 'cheap' ? '#43a047' : '#f06292';
+        // the window's length is part of the sentence, not a fixed word
+        const _hrs = (key) => (this._t(key) || '').split('{hours}').join(hours);
 
-        // Hourly ticks for time labels (every 3h)
+        // Five evenly spaced time labels — quarters of whatever the window
+        // turned out to be, so the last one always names its END (a 12 h
+        // window still reads 3-hourly, exactly as before).
         const _tz = this._hass?.config?.time_zone || undefined;
         const ticks = [];
-        for (let h = 0; h <= 12; h += 3) {
-            const t = now + h * 3600 * 1000;
+        for (let i = 0; i <= 4; i++) {
+            const t = now + (horizon * i) / 4;
             const label = new Date(t).toLocaleTimeString([],
                 { hour: '2-digit', minute: '2-digit', timeZone: _tz });
             ticks.push({x: xOf(t), label});
         }
 
         return html`
-            <div class="plan-strip" title="${this._t('today_plan_title')} (12h)">
+            <div class="plan-strip" title="${this._t('today_plan_title')} (${hours}h)">
                 <div class="strip-title">
                     <ha-icon icon="mdi:chart-timeline" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
-                    <span>${this._t('plan_strip_title')}</span>
+                    <span>${_hrs('plan_strip_title')}</span>
                 </div>
                 <svg viewBox="0 0 ${w} 16" preserveAspectRatio="none" class="strip-svg">
                     ${segments.map(s => svg`
@@ -365,13 +380,14 @@ class SEMEVStatusCard extends SEMLitBase {
                 <div class="strip-legend">
                     <span><i style="background:${stateColor('idle')}"></i>${this._t('plan_strip_idle')}</span>
                     <span><i style="background:${stateColor('wait')}"></i>${this._t('plan_strip_wait')}</span>
+                    <span><i style="background:${stateColor('estimate')}"></i>${this._t('plan_strip_estimate')}</span>
                     <span><i style="background:${stateColor('charging')}"></i>${this._t('plan_strip_charging')}</span>
                     <span><i style="background:${stateColor('done')}"></i>${this._t('plan_strip_done')}</span>
                     <span><i class="line" style="background:${overlayColor('cheap')}"></i>${this._t('plan_strip_cheap')}</span>
                     <span><i class="line" style="background:${overlayColor('expensive')}"></i>${this._t('plan_strip_expensive')}</span>
                 </div>
                 ${this._showHelp ? html`
-                    <div class="setting-help strip-help">${this._t('plan_strip_help')}</div>
+                    <div class="setting-help strip-help">${_hrs('plan_strip_help')}</div>
                 ` : nothing}
             </div>
         `;
@@ -577,7 +593,11 @@ class SEMEVStatusCard extends SEMLitBase {
         const perChargerConnected = this._hass?.states[`binary_sensor.sem_charger_${id}_connected`];
         const isConnected = perChargerConnected?.state === 'on';
         const isCharging = power > 50;
-        const statusText = isCharging ? this._t('charging') : isConnected ? this._t('connected') : this._t('idle');
+        // (#944) SEM standing down from a stop war reads as its own status,
+        // not as an ordinary charge.
+        const standDown = (this._stateAttrs(`${this._prefix}charging_state`)
+            .per_charger_stop_war || {})[id];
+        const statusText = this._t(chargerStatusKey({ isCharging, isConnected, standDown }));
         // What SEM actually commanded to the charger (the set current), shown
         // next to the status so you can see SEM's transmitted A vs the car's
         // real draw — e.g. "CHARGING (8 A)".
@@ -597,14 +617,60 @@ class SEMEVStatusCard extends SEMLitBase {
         // select entity itself — solar_plus_cheap is conditionally
         // hidden by the entity's ``options`` property when no dynamic
         // tariff is configured (Q1 resolution).
+        // (#980) Pause: the shared duration dropdown + THIS charger's button.
+        // It lives beside the mode because that is what it sets — Off for a
+        // while, then back — and because setting the mode back is how a
+        // pause is cancelled, so the two belong in one place.
+        const pauseDurationId = 'select.sem_pause_duration';
+        const pauseDurationAttrs = this._stateAttrs(pauseDurationId);
+        const pauseDuration = this._stateStr(pauseDurationId) || '1_hour';
+        const pauseOptions = pauseDurationAttrs.options || [];
+        const pauseButtonId = `button.sem_charger_${id}_pause_charging`;
+        const pauseAvailable = !!this._hass?.states?.[pauseButtonId];
+
         const chargeModeEntityId = `select.sem_charger_${id}_charge_mode`;
         const chargeModeAttrs = this._stateAttrs(chargeModeEntityId);
         const chargeMode = this._stateStr(chargeModeEntityId) || 'min_plus_solar';
+        // (#980 follow-up) The running pause, visible. The deadline rides on
+        // the mode select's attributes while the mode reads Off; picking a
+        // mode is the cancel, so the line exists only under Off and goes the
+        // moment the select changes — before the record is even swept.
+        const pausedUntilRaw = chargeMode === 'off' ? chargeModeAttrs.paused_until : null;
+        const pausedUntil = pausedUntilRaw ? new Date(pausedUntilRaw) : null;
+        const pauseRunning = !!(pausedUntil && !isNaN(pausedUntil));
+        const pauseRemainingMin = pauseRunning
+            ? Math.max(0, Math.round((pausedUntil - Date.now()) / 60000)) : 0;
+        const pauseResumeMode = chargeModeAttrs.pause_resume_mode || '';
+        const pauseUntilLabel = pauseRunning ? pausedUntil.toLocaleTimeString([],
+            { hour: '2-digit', minute: '2-digit', timeZone: this._hass?.config?.time_zone || undefined }) : '';
+        const pauseLeftLabel = pauseRemainingMin >= 60
+            ? `${Math.floor(pauseRemainingMin / 60)} h ${pauseRemainingMin % 60} min`
+            : `${pauseRemainingMin} min`;
         const chargeModeOptions = chargeModeAttrs.options || [
-            'solar_only', 'min_plus_solar', 'always_max', 'off',
+            'solar_only', 'solar_plus_battery', 'solar_plus_cheap',
+            'min_plus_solar', 'always_max', 'off',
         ];
+        // (#885 matrix, decision 3) One rule, two severities. A mode that
+        // CANNOT function without its prerequisite is DISABLED with the
+        // reason (solar_plus_cheap without a dynamic tariff has no cheap
+        // windows to use — the #277 Q1 ghost-option protection, kept, but
+        // visible instead of hidden). A mode that functions PARTIALLY gets
+        // an INFO below instead (solar_plus_battery works on live surplus
+        // from day one; the forecast bypass and dynamic floor wake when
+        // the #800 learner graduates).
+        const tariffAvailable = chargeModeAttrs.tariff_available !== false;
+        const modesNeedingTariff = chargeModeAttrs.modes_needing_tariff || [];
+        const modeDisabled = (o) =>
+            !tariffAvailable && modesNeedingTariff.includes(o);
+        const spendableAttrs =
+            this._stateAttrs('sensor.sem_battery_spendable_kwh');
+        const learnerLearning = spendableAttrs.phase === 'learning';
+        const learnerInfo = (this._t('charge_mode_battery_learning_info') || '')
+            .replace(/\{n\}/g, spendableAttrs.nights_sealed ?? '?')
+            .replace(/\{total\}/g, spendableAttrs.nights_required ?? '?');
         const chargeModeLabels = {
             solar_only:       this._t('charge_mode_solar_only'),
+            solar_plus_battery: this._t('charge_mode_solar_plus_battery'),
             solar_plus_cheap: this._t('charge_mode_solar_plus_cheap'),
             min_plus_solar:   this._t('charge_mode_min_plus_solar'),
             always_max:       this._t('charge_mode_always_max'),
@@ -784,12 +850,57 @@ class SEMEVStatusCard extends SEMLitBase {
                                     @click=${(e) => e.stopPropagation()}
                                     @change=${(e) => this._selectOption(chargeModeEntityId, e.target.value)}>
                                 ${chargeModeOptions.map(o => html`
-                                    <option value=${o} ?selected=${o === chargeMode}>
-                                        ${chargeModeLabels[o] || o}
+                                    <option value=${o} ?selected=${o === chargeMode}
+                                            ?disabled=${modeDisabled(o)}>
+                                        ${chargeModeLabels[o] || o}${modeDisabled(o) ? ` — ${this._t('charge_mode_needs_tariff')}` : ''}
                                     </option>`)}
                             </select>
                         </span>
                     </div>
+                    ${pauseAvailable ? html`
+                    <div class="ct-row">
+                        <span class="ct-label">${this._t('pause_charging_for')}</span>
+                        <span class="ct-ctl ct-pause">
+                            <select class="ct-mode-select ct-pause-select"
+                                    .value=${pauseDuration}
+                                    @click=${(e) => e.stopPropagation()}
+                                    @change=${(e) => this._selectOption(pauseDurationId, e.target.value)}>
+                                ${pauseOptions.map(o => html`
+                                    <option value=${o} ?selected=${o === pauseDuration}>
+                                        ${this._t(`pause_duration_${o}`) || o}
+                                    </option>`)}
+                            </select>
+                            <button class="ct-pause-btn"
+                                    @click=${(e) => { e.stopPropagation(); this._pressButton(pauseButtonId); }}
+                                    title=${this._t('pause_charging_hint')}>
+                                <ha-icon icon="mdi:pause-octagon-outline" style="--mdc-icon-size:15px"></ha-icon>
+                                ${pauseRunning ? this._t('pause_charging_again') : this._t('pause_charging')}
+                            </button>
+                        </span>
+                    </div>
+                    ${pauseRunning ? html`
+                    <div class="ct-subhint">
+                        <div class="ct-hint-row">
+                            <ha-icon icon="mdi:pause-circle-outline" style="--mdc-icon-size:13px;color:#8DC892"></ha-icon>
+                            <span class="ct-hint-text">${pauseRemainingMin > 0
+                                ? html`${(this._t('pause_status_line') || '')
+                                        .replace('{left}', pauseLeftLabel)
+                                        .replace('{mode}', chargeModeLabels[pauseResumeMode] || pauseResumeMode)
+                                        .replace('{time}', pauseUntilLabel)}
+                                    <span style="opacity:.75"> ${this._t('pause_resume_hint')}</span>`
+                                : this._t('pause_resuming')}</span>
+                        </div>
+                    </div>
+                    ` : nothing}
+                    ` : nothing}
+                    ${chargeMode === 'solar_plus_battery' && learnerLearning ? html`
+                    <div class="ct-subhint">
+                        <div class="ct-hint-row">
+                            <ha-icon icon="mdi:school-outline" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
+                            <span class="ct-hint-text">${learnerInfo}</span>
+                        </div>
+                    </div>
+                    ` : nothing}
                     ${this._showHelp ? html`
                     <div class="ct-subhint">
                         <div class="ct-hint-row">

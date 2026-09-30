@@ -33,18 +33,31 @@ from ..ha_energy_reader import (
     _find_load_power_sensor,
 )
 from .load_device_discovery import LoadDeviceDiscovery, resolve_load_is_on
+# (#780/#888) the two axes, asked of the module that owns them. Imported
+# unaliased so a structural test can see the call.
+from .device_axes import user_hands_off
 from ..devices.base import (
-    SwitchDevice,
     CurrentControlDevice,
     surplus_device_from_spec,
+)
+from ..devices.power_setpoint import (   # (#880) ONE producer, over there
+    PowerSetpointDevice, device_class_for_control,
 )
 from ..hardware_detection import discover_ev_charger_from_registry
 from ..const import LOAD_PRIORITY_BASE as _LOAD_PRIORITY_BASE
 
+#: (#880) Domains whose control is a watt SETPOINT rather than a contact.
+#: The reporter configured "Control type: Number entity" and got a
+#: SwitchDevice, so SEM turned the AC-THOR fully on and wrote no value.
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "sem_device_mappings"
+
+
+#: (#880) The top of every EVSE SEM supports. A "current" control that
+#: ranges past it is not amperes — see ``_register_current_control``.
+MAX_PLAUSIBLE_CHARGER_AMPS: int = 32
 
 
 def _goal_bool(value: Any) -> bool:
@@ -247,6 +260,12 @@ class UnifiedDeviceRegistry:
         # device_ids we've already tried to seed from history this session — so
         # a device with no history yet isn't re-queried on every 35 s refresh.
         self._rating_seed_attempted: set = set()
+        # (#967) The history seed reads the recorder, and the recorder is slow
+        # on a long window. Setup does not wait for it: Home Assistant cancels
+        # a setup that overruns its start-up budget, and the whole integration
+        # then fails to load. Turned on by
+        # ``async_seed_ratings_from_history`` once HA has started.
+        self._history_seeds_enabled: bool = False
         # (#576) Only surface the home-battery priority row when the install
         # actually has a battery. Set by the coordinator each cycle from
         # ``power.battery_soc is not None``; batteryless systems never see it.
@@ -290,11 +309,14 @@ class UnifiedDeviceRegistry:
         """Return current device list."""
         return self._devices
 
-    async def async_initialize(self) -> None:
-        """Load manual mappings from storage, then refresh devices.
+    async def _load_storage(self) -> None:
+        """Load the registry's own store and run its one-shot upgrades.
 
-        Also schedules a delayed re-discovery after 35s because at startup
-        many entities aren't available yet (HA loads integrations in stages).
+        Split out of ``async_initialize`` (#888) so the store migration is
+        a unit that can be exercised without discovery, HA, or a running
+        load manager — the two-store round-trip that put the fabricated
+        hands-off flag back on .175 was only reproducible once this had
+        its own seam.
         """
         try:
             data = await self._store.async_load()
@@ -310,6 +332,70 @@ class UnifiedDeviceRegistry:
                 self._controllable_overrides = {
                     k: bool(v) for k, v in data.get("controllable_overrides", {}).items()
                 }
+                # (#888) ONE-SHOT: drop hands-off flags SEM fabricated about
+                # itself. Adoption used to read the DERIVED ``is_controllable``
+                # as the user's opt-out, so every Energy-Dashboard device whose
+                # switch was not yet discovered at startup was written down as
+                # "never touch this" — permanently, and unreachable from any
+                # surface, so the Control card answered "SEM won't act"
+                # whatever Mode was picked.
+                #
+                # Clearing them is safe rather than a guess, and the dates say
+                # why: this store was created 25.07.2026 (6fdd1eec), while the
+                # only UI that could ever write the flag died in the LitElement
+                # migration on 14.05.2026 (e36b66fa) — a dead handler survives
+                # in the card, but nothing emits to it. No entry written into
+                # this store can be a surviving user click.
+                #
+                # One-shot by marker, not by heuristic: once the axis has an
+                # honest writer again a real opt-out must never be swept away
+                # by an upgrade.
+                #
+                # THE MARKER IS THE ADOPTION LATCH, PERSISTED — and that is
+                # load-bearing, found live on .175 the first time this ran:
+                # the flags were cleared here, and 35 s later adoption put
+                # them straight back. The LoadManagement store carries its
+                # own copy of ``user_hands_off`` for every row — SEM's derived
+                # output from the PREVIOUS run, persisted in a second place —
+                # and adoption, latched only in memory, re-read that echo as
+                # the user's word on every restart. The fabricated flag
+                # round-tripped through two stores; clearing one of them was
+                # half a fix.
+                #
+                # Adoption exists to seed a pre-#650 install ONCE. A registry
+                # store at all proves that has happened — the store and the
+                # adopter arrived in the same commit — so on any load with
+                # data the latch is set and stays set across restarts.
+                # ABSENT is not FALSE — the three-state rule, in its own
+                # store. A store with NO latch key at all predates #888: its
+                # hands-off flags can only be adoption's fabrication, so
+                # clear them and latch. A store that HAS the key is post-#888
+                # and every flag in it was set through an honest writer —
+                # respect the value, and if adoption simply has not run yet
+                # (False), leave the flags AND the latch alone. The first
+                # version tested ``not data.get(...)`` and so read a fresh
+                # install's honest ``False`` as "needs migration", wiping a
+                # genuine opt-out on its first restart; #650's own
+                # round-trip test caught it in the same minute.
+                if "legacy_flags_adopted" not in data:
+                    if self._controllable_overrides:
+                        _fabricated = sorted(self._controllable_overrides)
+                        self._controllable_overrides = {}
+                        _LOGGER.warning(
+                            "(#888) cleared %d hands-off flag(s) SEM had set "
+                            "about itself, not the user: %s — these loads are "
+                            "SEM's to act on again, subject to the Mode you "
+                            "picked",
+                            len(_fabricated), _fabricated[:6],
+                        )
+                    self._legacy_flags_adopted = True
+                    # Persist NOW, before any refresh can run adoption. The
+                    # first version set a flag here and saved "later" —
+                    # later was after the delayed rediscovery, which is
+                    # exactly when adoption fires.
+                    await self._save_storage()
+                else:
+                    self._legacy_flags_adopted = bool(data["legacy_flags_adopted"])
                 self._rated_power_overrides = {
                     k: float(v) for k, v in
                     data.get("rated_power_overrides", {}).items()
@@ -362,6 +448,14 @@ class UnifiedDeviceRegistry:
                 )
         except Exception as e:
             _LOGGER.warning("Could not load device mappings: %s", e)
+
+    async def async_initialize(self) -> None:
+        """Load manual mappings from storage, then refresh devices.
+
+        Also schedules a delayed re-discovery after 35s because at startup
+        many entities aren't available yet (HA loads integrations in stages).
+        """
+        await self._load_storage()
 
         # (#662) Both dependency stores are loaded now — break any cycle a
         # pre-guard or hand-edited store carried in, before a device can
@@ -495,6 +589,8 @@ class UnifiedDeviceRegistry:
         from ..devices.base import DeviceControlMode
         for device_id, spec in self._service_registrations.items():
             device = surplus_device_from_spec(self.hass, device_id, spec)
+            # (#890) the spec is the SEED; a persisted drag outranks it.
+            device.priority = self._service_device_priority(device_id, spec)
             try:
                 device.control_mode = DeviceControlMode(
                     spec.get("control_mode", "surplus")
@@ -557,7 +653,9 @@ class UnifiedDeviceRegistry:
             "rated_power": spec.get("rated_power") or 0,
             "power_entity_id": spec.get("power_entity_id"),
             "energy_entity_id": spec.get("energy_entity_id"),  # #600
-            "control_mode": spec.get("control_mode", "surplus"),
+            # (#847) creation default "off" - restore path keeps "surplus"
+            # for legacy stores that predate the persisted mode.
+            "control_mode": spec.get("control_mode", "off"),
             "depends_on": list(spec.get("depends_on") or []),
             # (#569) device kind + climate params — persisted so a climate
             # AC rehydrates as a ClimateDevice (not a SwitchDevice) on restart.
@@ -572,11 +670,14 @@ class UnifiedDeviceRegistry:
         # under the same id.
         from ..devices.base import DeviceControlMode
         device = surplus_device_from_spec(self.hass, device_id, stored)
+        # (#890) A re-registration must not undo the user's drag: the spec
+        # priority is the seed, the override store is the slot.
+        device.priority = self._service_device_priority(device_id, stored)
         try:
             device.control_mode = DeviceControlMode(stored["control_mode"])
         except ValueError:
-            device.control_mode = DeviceControlMode.SURPLUS
-            stored["control_mode"] = "surplus"
+            device.control_mode = DeviceControlMode.OFF  # (#847)
+            stored["control_mode"] = "off"
         if stored["depends_on"]:
             device.depends_on = list(stored["depends_on"])
         self._apply_goals(device)
@@ -590,7 +691,8 @@ class UnifiedDeviceRegistry:
             "device_id": device_id,
             "name": stored["name"],
             "entity_id": stored["entity_id"],
-            "priority": stored["priority"],
+            # (#890) the EFFECTIVE slot — what the allocator will use
+            "priority": device.priority,
             "rated_power": stored["rated_power"],
             "control_mode": stored["control_mode"],
             "device_type": stored["device_type"],
@@ -846,6 +948,17 @@ class UnifiedDeviceRegistry:
         # charger twice.
         charger_entities = self._configured_charger_entities()
 
+        # (#882 follow-up) The wrong-unit repair follows the MAPPING, not the
+        # device. Its clear used to live inside the current-control branch
+        # only, so every other way of reconfiguring the device — removing
+        # the mapping (back to its discovered switch), remapping it as a
+        # switch, switching "controllable" off, service-registering the id —
+        # never reached it, and the persistent repair for an entity SEM no
+        # longer pointed at outlived the mapping (02.09 live proof on the
+        # towel heater). Track who actually reached the current path; every
+        # other device in the roster is cleared after the walk, in one place.
+        reached_current_path: set[str] = set()
+
         for device in self._devices:
             if device.is_ev:
                 continue  # EV charger handled by __init__.py
@@ -886,7 +999,7 @@ class UnifiedDeviceRegistry:
                         device.device_id, entity,
                     )
                     continue
-                surplus_device = SwitchDevice(
+                surplus_device = device_class_for_control(entity)(
                     hass=self.hass,
                     device_id=device.device_id,
                     name=device.name,
@@ -909,8 +1022,7 @@ class UnifiedDeviceRegistry:
                 # (#805) No explicit choice → monitor only. See
                 # DEFAULT_DISCOVERED_CONTROL_MODE: SEM does not actuate what
                 # it found by itself until the user opts it in.
-                mode_str = self._control_mode_overrides.get(
-                    device.device_id, DEFAULT_DISCOVERED_CONTROL_MODE)
+                mode_str = self.control_mode_for(device.device_id)
                 try:
                     surplus_device.control_mode = DeviceControlMode(mode_str)
                 except ValueError:
@@ -929,20 +1041,8 @@ class UnifiedDeviceRegistry:
                 self._surplus_controller.register_device(surplus_device)
 
             elif control_type == "current":
-                entity = control.get("entity", "")
-                surplus_device = CurrentControlDevice(
-                    hass=self.hass,
-                    device_id=device.device_id,
-                    name=device.name,
-                    priority=device.priority,
-                    min_current=float(control.get("min_value", 6)),
-                    max_current=float(control.get("max_value", 32)),
-                    phases=1,
-                    voltage=230.0,
-                    current_entity_id=entity,
-                    power_entity_id=device.power_sensor,
-                )
-                self._surplus_controller.register_device(surplus_device)
+                reached_current_path.add(device.device_id)
+                self._register_current_control(device, control)
 
             elif control_type == "service":
                 # Service-based control (e.g., keba.set_current) — create SwitchDevice
@@ -952,6 +1052,180 @@ class UnifiedDeviceRegistry:
                     "Skipping service-based device %s for surplus (EV handled separately)",
                     device.device_id,
                 )
+
+        # (#882 follow-up) see above — the raise/clear on the current path is
+        # _register_current_control's; everything else is by definition no
+        # longer under current control and carries no wrong-unit repair.
+        from ..coordinator.repair_issues import (
+            clear_load_current_control_wrong_unit,
+        )
+        for device in self._devices:
+            if device.is_ev or device.device_id in reached_current_path:
+                continue
+            clear_load_current_control_wrong_unit(self.hass, device.device_id)
+
+    def _register_current_control(self, device, control) -> None:
+        """Register a current-controlled load — unless its entity is watts.
+
+        (#882) ``CurrentControlDevice`` is the EV-charger class: amperes,
+        defaulting to 6–32. A variable LOAD — a my-PV AC-THOR, an immersion
+        element, a heat rod — publishes a setpoint in WATTS, and aiming the
+        charger class at one produces a device that can never be written a
+        meaningful value. It was not merely wrong, it was silent: no write, no
+        error, ``Allocated surplus: 0 W`` indefinitely, and the load counted
+        as a charger in diagnostics ("Chargers: 1 (number)" on the reporter's
+        install, for a water heater).
+
+        The watt-modulating class this actually needs is #880. Until it
+        exists, refuse the pairing and SAY so — #799's rule that a silent
+        no-op is not an answer.
+
+        Deliberately narrow: only a POWER-native entity is refused.
+        ``native_power_scale`` is the same generic check #749 built for the
+        battery setpoint (one rule, two consumers, no laxer second copy), and
+        it returns None for an ampere entity, an unlabelled number, or one
+        that cannot be read — all of which register exactly as before. An
+        entity that is merely unavailable at setup is not evidence of the
+        wrong unit, and must not cost a working device its registration.
+        """
+        entity = control.get("entity", "") or ""
+        scale = None
+        if entity:
+            try:
+                from ..coordinator.power_control import native_power_scale
+                # require_explicit_unit: only an entity that DECLARES a
+                # power unit is refused. A bare number could just as well be
+                # amperes — plenty of charger integrations publish one — and
+                # refusing those would break working installs to fix a
+                # different fault.
+                scale = native_power_scale(
+                    self.hass, entity, require_explicit_unit=True)
+            except Exception:  # noqa: BLE001 — a probe never costs a setup
+                scale = None
+        # (#880) …and when it declares NO unit, its RANGE still answers.
+        # @jonasbkarlsson reproduced #880 on a plain Home Assistant number
+        # helper, which carries a unit only if its owner typed one — so the
+        # unit probe above says nothing about exactly the install the issue
+        # was filed from. A control whose ceiling is past any charger's is
+        # not an ampere knob: 32 A is the top of every EVSE SEM supports,
+        # and the #882 pairing is a 0-9000 entity. This is evidence, not a
+        # guess, and it runs only where the unit gave no answer — an entity
+        # that DECLARES amperes is still a charger, whatever its range.
+        if scale is None:
+            # ONLY where the unit gave no answer. ``native_power_scale``
+            # returns None for two different facts — "declares no unit" and
+            # "declares a unit that is not power" — and an entity that says
+            # AMPERES is a charger whatever its range. Reading the attribute
+            # is the only way to tell those apart.
+            _st = self.hass.states.get(entity)
+            _attrs = getattr(_st, "attributes", None)
+            _readable = isinstance(_attrs, dict) and _st.state not in (
+                "unavailable", "unknown", None, "")
+            _declared = (str(_attrs.get("unit_of_measurement") or "").strip()
+                         if _readable else "")
+            try:
+                _ceiling = float(control.get("max_value") or 0.0)
+            except (TypeError, ValueError):
+                _ceiling = 0.0
+            # (#925) An entity SEM could not read has not "declared no unit" —
+            # it has not answered. Only a live read that came back empty opens
+            # the range question; an unreadable one keeps today's behaviour,
+            # which is what #882's own test asks for (a device that vanishes
+            # for a cycle must not be re-typed under SEM's feet).
+            if _readable and not _declared and _ceiling > MAX_PLAUSIBLE_CHARGER_AMPS:
+                scale = 1.0
+                _LOGGER.info(
+                    "Load %s (%s): %s declares no unit but ranges to %.0f — "
+                    "past any charger's %d A, so it is a watt setpoint (#880).",
+                    device.name, device.device_id, entity, _ceiling,
+                    MAX_PLAUSIBLE_CHARGER_AMPS,
+                )
+
+        if scale is not None:
+            # (#880) A POWER entity under "current" control. #882 could only
+            # refuse this pairing — current control writes amperes and SEM had
+            # no class that writes watts. It has one now, and the entity
+            # itself says which: route, don't refuse. The user keeps the
+            # configuration they already made and the load starts following
+            # the surplus on upgrade.
+            st = self.hass.states.get(entity)
+            unit = ""
+            if st is not None and isinstance(getattr(st, "attributes", None), dict):
+                unit = str(st.attributes.get("unit_of_measurement") or "")
+            _LOGGER.info(
+                "Load %s (%s) is set to CURRENT control but %s is a POWER "
+                "entity (%s) — driving it as a watt setpoint (#880).",
+                device.name, device.device_id, entity, unit or "no unit",
+            )
+            try:
+                from ..coordinator.repair_issues import (
+                    clear_load_current_control_wrong_unit,
+                )
+                clear_load_current_control_wrong_unit(self.hass, device.device_id)
+            except Exception:  # noqa: BLE001
+                pass
+            self._surplus_controller.register_device(PowerSetpointDevice(
+                hass=self.hass,
+                device_id=device.device_id,
+                name=device.name,
+                rated_power=self._initial_rated_power(
+                    device.device_id, device.power_sensor),
+                priority=device.priority,
+                entity_id=entity,
+                power_entity_id=device.power_sensor,
+                energy_entity_id=getattr(device, "energy_sensor", None),
+            ))
+            return
+
+        try:
+            from ..coordinator.repair_issues import (
+                clear_load_current_control_wrong_unit,
+            )
+            clear_load_current_control_wrong_unit(self.hass, device.device_id)
+        except Exception:  # noqa: BLE001
+            pass
+
+        surplus_device = CurrentControlDevice(
+            hass=self.hass,
+            device_id=device.device_id,
+            name=device.name,
+            priority=device.priority,
+            min_current=float(control.get("min_value", 6)),
+            max_current=float(control.get("max_value", 32)),
+            phases=1,
+            voltage=230.0,
+            current_entity_id=entity,
+            power_entity_id=device.power_sensor,
+        )
+        # (#976) what the current entity's platform implies for control —
+        # the same producer every charger builder calls: a load whose
+        # current control is an OCPP maximum-current number would otherwise
+        # be "stopped" with a 0 A profile the charge point keeps.
+        from ..hardware_detection import wire_current_entity
+        wire_current_entity(self.hass, surplus_device, device.device_id, entity)
+        self._surplus_controller.register_device(surplus_device)
+
+    def control_mode_for(self, device_id: str) -> str:
+        """What a device may do: the user's choice, else the discovery default.
+
+        (#895) The ONE answer for every reader — the surplus sync, the load-
+        manager sync and the card payload. #805 lowered the default to
+        monitor-only, but each reader carried its own ``"peak_only"``
+        literal, so the change reached the surplus side and missed the
+        shedder: a first install still fed every discovered device to
+        emergency shedding (forum #30 — a Span panel and a backup battery
+        switched off circuit by circuit, HA's own supply included).
+        """
+        # (#896) A service registration's mode lives in its spec — that is
+        # what the live object is built from at boot and what the card row
+        # shows. The override map mirrors it from the same writers; a legacy
+        # spec that predates the mirror would otherwise read as "off" here
+        # while running as "surplus" there.
+        spec = self._service_registrations.get(device_id)
+        if spec is not None:
+            return spec.get("control_mode", "surplus")
+        return self._control_mode_overrides.get(
+            device_id, DEFAULT_DISCOVERED_CONTROL_MODE)
 
     def _sync_to_load_manager(self) -> bool:
         """Populate LoadManagement._devices dict from registry devices.
@@ -985,23 +1259,30 @@ class UnifiedDeviceRegistry:
         # sync has always healed this by construction — it unregisters every
         # ``energy_dashboard_*`` device before re-adding the ones it knows —
         # so this is the same rule on the other side of the seam.
-        derived = {d.device_id for d in self._devices}
-        old_ids = [
-            did for did in list(self._load_manager._devices.keys())
-            if did not in derived
-            # (#436) per-charger EV rows are registered by __init__.py, not here
-            and not did.startswith("load_device_")
-            # (#559 Phase 0) an explicit registration is a user decision, not a
-            # discovery guess — and it never appears in ``derived``
-            and did not in self._service_registrations
-        ]
-        for did in old_ids:
-            del self._load_manager._devices[did]
-            _LOGGER.debug("Removed old device from load manager: %s", did)
+        # (#896) The roster the shedder sees is the roster the card shows.
+        # An explicit ``register_surplus_device`` registration owns its
+        # switch: the ED twin for the same entity is folded into it (as the
+        # card payload already does), and the registration itself gets a
+        # row — below, after the ED loop, so it wins an id collision too.
+        # Before this the roster was the ED list alone: a service-registered
+        # load set to peak_only was shed by NOBODY (the surplus controller
+        # leaves peak_only to the load manager, and the load manager had
+        # never heard of it) and the plan counted its kilowatts as
+        # uncontrolled.
+        service_entities = {
+            spec.get("entity_id")
+            for spec in self._service_registrations.values()
+            if spec.get("entity_id")
+        }
+        written: set = set()
 
         for device in self._devices:
             device_id = device.device_id
             control = device.control
+            if device_id in self._service_registrations:
+                continue  # the registration's own row is written below
+            if device.control_entity and device.control_entity in service_entities:
+                continue  # one switch, one row — the registration's
 
             # Build device info dict compatible with LoadManagementCoordinator
             device_info = {
@@ -1013,7 +1294,12 @@ class UnifiedDeviceRegistry:
                 "device_type": "ev_charger" if device.is_ev else "individual_device",
                 "description": f"Energy Dashboard: {device.name}",
                 "source": "unified_registry",
-                "power_rating": self._get_power_rating(device.power_sensor),
+                # (#896) WATTS, and the RATING — the same accessor the Control
+                # card reads, so the shedder's estimate of what a switch
+                # would free is the number the user sees. The live sensor
+                # tick that sat here read 0 W for a load that is off and 0 W
+                # forever for an energy-only load.
+                "power_rating": self._rated_power_for(device_id, device.power_sensor),
                 "is_available": True,
                 "priority": device.priority,
                 "is_critical": device.is_critical,
@@ -1024,7 +1310,9 @@ class UnifiedDeviceRegistry:
                 "user_hands_off": device.user_hands_off,
                 "is_controllable": device.is_controllable,
                 "is_ev": device.is_ev,
-                "control_mode": self._control_mode_overrides.get(device.device_id, "peak_only"),
+                # (#895) the same default the surplus side applies — the
+                # shedder used to carry its own "peak_only" literal here.
+                "control_mode": self.control_mode_for(device.device_id),
                 # (#649) Is this device driven by the surplus controller? Only
                 # then may load_management stand down from shedding it — a
                 # surplus-mode device with no live controller object (e.g. a
@@ -1041,6 +1329,25 @@ class UnifiedDeviceRegistry:
                 device_info["switch_entity"] = control.get("entity")
 
             self._load_manager._devices[device_id] = device_info
+            written.add(device_id)
+
+        for did, spec in self._service_registrations.items():
+            self._load_manager._devices[did] = self._service_lm_row(did, spec)
+            written.add(did)
+
+        # Keep exactly two things: what this pass wrote (ED rows and service
+        # registrations) and the per-charger EV rows. Everything else in
+        # LoadManagement's dict is stale — including a row this registry
+        # derived on an EARLIER pass and folded on this one.
+        old_ids = [
+            did for did in list(self._load_manager._devices.keys())
+            if did not in written
+            # (#436) per-charger EV rows are registered by __init__.py, not here
+            and not did.startswith("load_device_")
+        ]
+        for did in old_ids:
+            del self._load_manager._devices[did]
+            _LOGGER.debug("Removed old device from load manager: %s", did)
 
         # (#748) DATA-LAYER charger-duplicate reconcile — the twin of the #700
         # display fold. #700 suppressed the duplicate only in
@@ -1324,6 +1631,36 @@ class UnifiedDeviceRegistry:
             )
         return bool(removed)
 
+    def knows_device(self, device_id: str) -> bool:
+        """(#913 follow-up) Is ``device_id`` a device this install has — live
+        now, or persisted and merely not built yet?
+
+        The goal, mode and flag stores are keyed by whatever id they are
+        handed, which is the right shape for a device that is ABOUT TO
+        register (a service-registered load can arrive after its goal) and
+        the wrong answer for a typo, a renamed entity or a card row that no
+        longer exists: the service returned 200 and stored a value nothing
+        would ever read — the #462 silent-no-op class, seen on .175 when a
+        hot-water goal was accepted on a rig with no hot-water device.
+
+        Known means: live in the surplus controller; a persisted service
+        registration; or any row the Control card would show (Energy
+        Dashboard devices, charger rows, the battery row) — the card's own
+        payload is the authoritative "what exists here".
+        """
+        if not device_id:
+            return False
+        sc = getattr(self, "_surplus_controller", None)
+        if sc is not None and getattr(sc, "get_device", None) is not None:
+            if sc.get_device(device_id) is not None:
+                return True
+        if device_id in (getattr(self, "_service_registrations", None) or {}):
+            return True
+        try:
+            return device_id in self.get_devices_for_sensor()
+        except Exception:  # noqa: BLE001 — an unbuildable payload is "unknown", not a crash
+            return False
+
     def get_devices_for_sensor(self) -> Dict[str, Dict[str, Any]]:
         """Return dict formatted for the controllable_devices_count sensor attributes."""
         result = {}
@@ -1421,7 +1758,7 @@ class UnifiedDeviceRegistry:
                 "device_type": "ev_charger" if device.is_ev else "individual_device",
                 "has_manual_mapping": device.has_manual_mapping,
                 "control": device.control,
-                "control_mode": self._control_mode_overrides.get(did, "peak_only"),
+                "control_mode": self.control_mode_for(did),
                 # (#122/#576) the "Requires" link — read from the persistent
                 # store so it both survives rebuilds AND shows on the card
                 # (pre-fix it was never emitted, so the card couldn't display it).
@@ -1444,7 +1781,8 @@ class UnifiedDeviceRegistry:
             current_power = round(live.get_current_consumption()) if is_on and live else 0.0
             result[did] = {
                 "name": spec.get("name", did),
-                "priority": spec.get("priority", 5),
+                # (#890) the one axis, not the spec — a drag must show here
+                "priority": self._service_device_priority(did, spec),
                 # (#780) an explicit registration IS the control handle.
                 "has_control_handle": True,
                 "user_hands_off": False,
@@ -1644,19 +1982,74 @@ class UnifiedDeviceRegistry:
             **self._goal_payload(did),
         }
 
-    def refresh_direct_device_priorities(self) -> None:
-        """(#576) Make the drag store authoritative for directly-registered
-        surplus devices (heat pump / hot water / climate) too — mirrors the EV
-        charger refresh. ED / service devices already resolve via the registry
-        sync; this covers the ones registered straight into the controller so
-        their list position governs the walk (not just the card row)."""
+    def _service_device_priority(self, device_id: str, spec: Dict[str, Any]) -> int:
+        """(#890) The slot of a service-registered device: the one axis,
+        seeded by the priority the ``register_surplus_device`` call gave.
+
+        Every reader of a service device's priority — the live object at
+        registration and at boot, the card payload — goes through here, so
+        a drag override reaches all of them or none. Before this the spec
+        was read directly in three places and the override in none."""
+        return self.priority_for(
+            device_id, seed=int(spec.get("priority", 5) or 5))
+
+    def _service_lm_row(self, device_id: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """(#896) The load-manager row of a service-registered device — the
+        same axes the ED rows carry, read from the same resolvers (mode,
+        priority, rating), so the shedder's roster matches the card's."""
+        entity = spec.get("entity_id") or None
+        live = (
+            self._surplus_controller.get_device(device_id)
+            if self._surplus_controller is not None else None
+        )
+        return {
+            "power_entity": spec.get("power_entity_id"),
+            "energy_entity": spec.get("energy_entity_id"),
+            "switch_entity": entity,
+            "control": {"type": "switch", "entity": entity} if entity else None,
+            "friendly_name": spec.get("name", device_id),
+            "device_type": "individual_device",
+            "description": f"Registered device: {spec.get('name', device_id)}",
+            "source": "service_registration",
+            "power_rating": self._rated_power_for(device_id, spec.get("power_entity_id")),
+            "is_available": True,
+            "priority": self._service_device_priority(device_id, spec),
+            "is_critical": bool(self._critical_overrides.get(device_id, False)),
+            # (#780) an explicit registration IS the control handle.
+            "has_control_handle": entity is not None,
+            "user_hands_off": False,
+            "is_controllable": entity is not None,
+            "is_ev": False,
+            "control_mode": self.control_mode_for(device_id),
+            # (#649) as the ED rows: a live controller object exists. Whether
+            # it sheds the load is the mode's question (surplus → the surplus
+            # controller's; peak_only → this row is the shedder's).
+            "surplus_managed": live is not None,
+        }
+
+    def refresh_direct_device_overrides(self) -> None:
+        """(#576) Make the override stores authoritative for every surplus
+        device the ED rebuild does not re-create — heat pump / hot water /
+        climate registered straight into the controller AND (#890)
+        service-registered devices, which the sync deliberately leaves alone
+        (ownership by construction, #559) and which therefore had no other
+        path from a store to the live object. ED rows get theirs from the
+        rebuild, chargers from the coordinator's own refresh.
+
+        (#914) Renamed from ``refresh_direct_device_priorities`` because it
+        now carries the GOALS too. The anti-cycle windows a user set on the
+        hot-water row were stored, published back to the card, and never
+        re-applied to the live object after a restart — the drag priority
+        had this seam and the goals did not. ``_apply_goals`` is idempotent
+        (returns early with nothing stored; writes only keys present), so
+        this costs nothing on an install with no goal set.
+        """
         for did, dev in getattr(self._surplus_controller, "_devices", {}).items():
             if did.startswith("energy_dashboard_") or getattr(dev, "is_ev", False):
                 continue
-            if did in self._service_registrations:
-                continue
             dev.priority = self.priority_for(
                 did, seed=int(getattr(dev, "priority", 5) or 5))
+            self._apply_goals(dev)
 
     def set_ev_chargers(self, chargers: List[Dict[str, Any]]) -> None:
         """(#576 P2.1) The coordinator hands its configured chargers here each
@@ -1904,6 +2297,16 @@ class UnifiedDeviceRegistry:
                 # reload (None ⇒ the card shows the default placeholder).
                 "min_on_time_min": goals.get("min_on_time_min"),
                 "min_off_time_min": goals.get("min_off_time_min"),
+                # (#914) what the LIVE object is actually holding, in minutes
+                # — the only way to see that a stored goal reached the
+                # device (it did not, across a restart, until #914). None
+                # when there is no live object yet: absent, not zero.
+                "min_on_effective_min": (
+                    None if live is None or getattr(live, "min_on_seconds", None) is None
+                    else round(float(live.min_on_seconds) / 60.0, 1)),
+                "min_off_effective_min": (
+                    None if live is None or getattr(live, "min_off_seconds", None) is None
+                    else round(float(live.min_off_seconds) / 60.0, 1)),
                 # (#705) the comfort band — pre-fill for the editor.
                 "comfort_entity": goals.get("comfort_entity", ""),
                 "comfort_target": goals.get("comfort_target", 0),
@@ -1989,9 +2392,16 @@ class UnifiedDeviceRegistry:
     async def _adopt_legacy_device_flags(self) -> None:
         """Seed the #650 override stores from LoadManagement — ONCE per session.
 
-        Only non-default values are adopted (critical=True, controllable=False):
+        Only non-default values are adopted (critical=True, hands-off=True):
         those are the ones a user had to click for, and only the OLD code path
         could have put them in the LM dict without a matching override.
+
+        (#888) "A user had to click for it" is the whole justification, so it
+        has to be TRUE of every key read here. It was not: the permission half
+        used to accept the DERIVED ``is_controllable`` flag, which SEM writes
+        itself for every row. ``is_critical`` is derived too (it mirrors the
+        override), but a derived True can only come FROM an override that
+        already exists, so re-adopting it is a no-op rather than a fabrication.
 
         One-shot by design. After the first sync the LM dict holds the
         REGISTRY's values, so a second pass would read our own output back — and
@@ -2006,28 +2416,44 @@ class UnifiedDeviceRegistry:
             return  # LM not up yet — try again on the next refresh
         self._legacy_flags_adopted = True
         crit = ctrl = 0
+        _crit_ids: list = []
+        _ctrl_ids: list = []
         for did, info in lm._devices.items():
             if not did.startswith("energy_dashboard_") or not isinstance(info, dict):
                 continue
             if info.get("is_critical") is True and did not in self._critical_overrides:
                 self._critical_overrides[did] = True
+                _crit_ids.append(did)
                 crit += 1
-            # (#780) either spelling of the user's opt-out: the migrated
-            # permission key, or the pre-split mixed flag whose False could
-            # only have come from this same toggle on an ``energy_dashboard_``
-            # row (the registry always derives those rows WITH a handle).
-            hands_off = (
-                info.get("user_hands_off") is True
-                or info.get("is_controllable") is False  # LEGACY-READ (#780)
-            )
-            if hands_off and did not in self._controllable_overrides:
+            # (#888) THE PERMISSION AXIS, asked of the module that owns it.
+            #
+            # This used to ALSO accept ``is_controllable is False`` as the
+            # user's opt-out, on the stated premise that "the registry always
+            # derives those rows WITH a handle". That premise is false:
+            # ``_sync_to_load_manager`` writes ``is_controllable`` for EVERY
+            # Energy-Dashboard device (see the derived write above), and
+            # ``UnifiedDevice.is_controllable`` is ``has_control_handle and
+            # not user_hands_off`` — so a device whose switch simply had not
+            # been discovered yet wrote False as ARITHMETIC, and this read it
+            # back as a PREFERENCE. SEM told itself to keep its hands off a
+            # load nobody had opted out of, permanently, with no way to undo
+            # it from any surface.
+            #
+            # ``device_axes.user_hands_off`` refuses that legacy fallback on
+            # purpose, in its own words: "reading it here too would count the
+            # same bit twice and, worse, would re-mix the axes this module
+            # exists to separate." #780 migrated every consumer except this
+            # one.
+            if user_hands_off(info) and did not in self._controllable_overrides:
                 self._controllable_overrides[did] = False
+                _ctrl_ids.append(did)
                 ctrl += 1
         if crit or ctrl:
             await self._save_storage()
             _LOGGER.info(
-                "Adopted %d critical / %d controllable flag(s) from LoadManagement (#650)",
-                crit, ctrl,
+                "Adopted %d critical / %d hands-off flag(s) from LoadManagement "
+                "(#650): critical=%s hands_off=%s",
+                crit, ctrl, _crit_ids[:6], _ctrl_ids[:6],
             )
 
     async def async_set_device_flag(
@@ -2094,6 +2520,12 @@ class UnifiedDeviceRegistry:
                 self._priority_overrides[device_id] = int(priority)
 
         await self._save_storage()
+        # (#890) Apply to the live objects the ED rebuild below does not
+        # re-create (direct + service-registered devices) — and apply NOW,
+        # not on the next cycle: the rebuild returns early on an install
+        # without an Energy Dashboard, and the service response is read as
+        # "it took".
+        self.refresh_direct_device_overrides()
         await self.async_refresh_devices()
 
     async def update_device_control_mode(self, device_id: str, mode: str) -> None:
@@ -2150,18 +2582,40 @@ class UnifiedDeviceRegistry:
                 except Exception:  # noqa: BLE001
                     obs = None
                 if obs is True or (obs is None and surplus_device.is_active):
-                    if getattr(surplus_device, "_status", None) is not None:
-                        surplus_device._status.last_activated = None
-                    await surplus_device.deactivate()
+                    if getattr(surplus_device, "_sem_commanded", False):
+                        # SEM issued the ON: opt-out undoes SEM's own action.
+                        # Clear the UNIFIED clock (#644) — the attribute
+                        # ``deactivate()`` actually gates on. This used to
+                        # clear ``_status.last_activated``, a DIFFERENT
+                        # attribute, so the comment above ("a deliberate
+                        # command beats flicker protection") was not true: a
+                        # Mode→Off inside ``min_on_seconds`` returned at the
+                        # anti-flicker guard and left the load ON, with no
+                        # error and no log.
+                        surplus_device._last_activated = None
+                        if getattr(surplus_device, "_status", None) is not None:
+                            surplus_device._status.last_activated = None
+                        await surplus_device.deactivate()
+                        _LOGGER.info(
+                            "Mode off: released %s (turned off once — SEM "
+                            "will not touch it again while mode stays off)",
+                            device_id,
+                        )
+                    else:
+                        # (#847 refinement, 2.1) ADOPTED only — a running
+                        # load claimed under Surplus so goal gates could
+                        # stop it, never started by SEM. Opt-out releases
+                        # the claim with ZERO writes.
+                        _LOGGER.info(
+                            "Mode off: released adopted load %s without "
+                            "actuation (#847)", device_id,
+                        )
                     surplus_device._offpeak_forced = False
                     surplus_device._offpeak_forced_date = None
                     surplus_device._batt_overnight_forced = False
                     surplus_device._batt_overnight_forced_date = None
                     surplus_device._sem_owned = False
-                    _LOGGER.info(
-                        "Mode off: released %s (turned off once — SEM will "
-                        "not touch it again while mode stays off)", device_id,
-                    )
+                    surplus_device._sem_commanded = False
 
         # (#649) Keep the load manager's copy in step NOW. It is only rebuilt by
         # the 35 s rediscovery, so until then a device the user has just handed
@@ -2190,7 +2644,7 @@ class UnifiedDeviceRegistry:
                 self._has_battery = True
             battery_priority = self.battery_surplus_priority()
             self.set_ev_chargers(charger_rows)
-            self.refresh_direct_device_priorities()
+            self.refresh_direct_device_overrides()
             return battery_priority
         except Exception:  # pragma: no cover - never break the cycle
             return None
@@ -2380,6 +2834,11 @@ class UnifiedDeviceRegistry:
             "dependencies": self._dependency_overrides,
             "critical_overrides": self._critical_overrides,          # (#650)
             "controllable_overrides": self._controllable_overrides,  # (#650)
+            # (#888) the persisted adoption latch. Once True, adoption never
+            # runs again on this install — so SEM's own echo in the
+            # LoadManagement store can never be re-read as the user's word,
+            # and a genuine opt-out set afterwards survives every upgrade.
+            "legacy_flags_adopted": bool(self._legacy_flags_adopted),
             "rated_power_overrides": self._rated_power_overrides,
             "service_registrations": self._service_registrations,
             "device_goals": self._device_goals,
@@ -2439,7 +2898,10 @@ class UnifiedDeviceRegistry:
         power sensor, which reads 0 W whenever the load is off. Falls back to the
         live sensor reading when no device is registered (or its rating is 0).
         """
-        live = self._surplus_controller.get_device(device_id)
+        # (#896) the LM sync reads this too, and it already tolerates a
+        # registry with no surplus controller — so must the accessor.
+        sc = self._surplus_controller
+        live = sc.get_device(device_id) if sc is not None else None
         rated = float(getattr(live, "rated_power", 0) or 0) if live else 0.0
         if rated > 0:
             return rated
@@ -2538,7 +3000,15 @@ class UnifiedDeviceRegistry:
             # real history is a measurement — including 8 W. The old
             # ``> _DEFAULT_RATED_POWER`` gate discarded exactly the small loads
             # that needed the correction most (#744).
-            if override <= 0 and did not in self._rating_seed_attempted:
+            # (#967) ``_history_seeds_enabled`` is False until Home Assistant
+            # has started. The device is NOT marked as attempted while it is
+            # off, so the seed still happens — one pass later, off the setup
+            # path.
+            if (
+                self._history_seeds_enabled
+                and override <= 0
+                and did not in self._rating_seed_attempted
+            ):
                 self._rating_seed_attempted.add(did)
                 hist_max = await self._history_max_power(sensor)
                 if hist_max > 0 and (not measured or hist_max > rated_now):
@@ -2558,31 +3028,31 @@ class UnifiedDeviceRegistry:
     async def _history_max_power(self, power_sensor: str, days: int = 7) -> float:
         """(#576) Largest numeric value the power sensor reported in the last
         ``days`` — the load's real running draw. 0.0 if the recorder is
-        unavailable or has no usable history (best-effort, never raises)."""
-        try:
-            from homeassistant.components.recorder import get_instance
-            from homeassistant.components.recorder.history import (
-                state_changes_during_period,
-            )
-            from homeassistant.util import dt as dt_util
-            from datetime import timedelta as _timedelta
+        unavailable or has no usable history."""
+        from ..coordinator.recorder_history import read_states
 
-            end = dt_util.utcnow()
-            start = end - _timedelta(days=days)
-            history = await get_instance(self.hass).async_add_executor_job(
-                state_changes_during_period, self.hass, start, end, str(power_sensor),
-            )
-            mx = 0.0
-            for st in history.get(power_sensor, []):
-                try:
-                    v = float(st.state)
-                except (ValueError, TypeError):
-                    continue
-                if v > mx:
-                    mx = v
-            return mx
-        except Exception as e:  # noqa: BLE001 — best-effort seed, never blocks setup
-            _LOGGER.debug(
-                "rated-power history seed for %s unavailable: %s", power_sensor, e,
-            )
-            return 0.0
+        states = await read_states(self.hass, power_sensor, days)
+        mx = 0.0
+        for st in states or []:
+            try:
+                v = float(st.state)
+            except (ValueError, TypeError):
+                continue
+            if v > mx:
+                mx = v
+        return mx
+
+    async def async_seed_ratings_from_history(self) -> None:
+        """(#967) The recorder pass, once Home Assistant has started.
+
+        Setup runs the same seeding with the history turned off, so a load
+        keeps its persisted rating from the first second. This adds the part
+        that needs the database, at a moment where taking a few seconds
+        costs nobody their integration.
+        """
+        self._history_seeds_enabled = True
+        try:
+            if await self._seed_and_apply_ratings():
+                await self._save_storage()
+        except Exception as e:  # noqa: BLE001 — a rating never costs a restart
+            _LOGGER.debug("rated-power history seed pass failed: %s", e)

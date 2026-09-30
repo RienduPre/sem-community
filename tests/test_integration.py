@@ -46,9 +46,16 @@ class TestPlatformEntityCounts:
         add_entities = MagicMock()
         await switch_setup(mock_hass, config_entry, add_entities)
         switches = add_entities.call_args[0][0]
-        assert len(switches) == 3
+        # 6 since #778: observer, vacation, energy-plan actuation, plus the
+        # forecast-spending master switch and its two permissions.
+        assert len(switches) == 11  # +battery_charge_pacing_enabled (#820) +4 arc #921 (export guard, override, house sink, morning window)
         keys = {s.entity_description.key for s in switches}
-        assert keys == {"observer_mode", "vacation_mode", "energy_plan_actuation"}
+        assert keys == {"observer_mode", "vacation_mode", "energy_plan_actuation",
+                        "battery_charge_pacing_enabled",  # #820
+                        "forecast_spending_enabled",
+                        "battery_may_export", "battery_may_assist_ev",
+                        "export_guard_enabled", "export_guard_override_external",      # arc #921
+                        "battery_house_sink_enabled", "ev_morning_window_enabled"}
 
     @pytest.mark.asyncio
     async def test_number_count(self, mock_hass, config_entry, mock_coordinator):
@@ -136,11 +143,21 @@ class TestSwitchDefaults:
     # ``charge_mode`` default (``min_plus_solar`` permits night;
     # users opting out pick ``solar_only`` / ``off`` in the selector).
 
-    def test_observer_mode_default_off(self, mock_coordinator):
+    def test_observer_mode_defaults_to_the_constant(self, mock_coordinator):
+        """With nothing configured the switch follows DEFAULT_OBSERVER_MODE.
+
+        Asserted against the constant, not a literal: this test pins that
+        the switch READS the product default, and must not freeze whatever
+        that default happened to be when it was written. (It said False
+        until 29.08.2026, when a new install started observing first.)
+        """
+        from custom_components.solar_energy_management.consts.core import (
+            DEFAULT_OBSERVER_MODE,
+        )
         mock_coordinator.config_entry.options = {}
         desc = SWITCH_TYPES[0]  # observer_mode (only remaining global switch)
         switch = SEMSolarSwitch(mock_coordinator, desc, "test")
-        assert switch._is_on is False
+        assert switch._is_on is DEFAULT_OBSERVER_MODE
 
 
 # ============================================================

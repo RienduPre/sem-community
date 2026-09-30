@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from .price_signal import CHEAP_LEVELS, EXPENSIVE_LEVELS
 
 
 # Row kinds — keyed strings the card maps to icons + colors.
@@ -44,6 +45,8 @@ KIND_BATTERY_FULL = "battery_full"   # #298: home battery charging → full ETA
 KIND_BATTERY_EMPTY = "battery_empty"  # #298: home battery discharging → floor ETA
 KIND_DEVICE_RUN = "device_run"       # #576: a surplus device's expected run window
 KIND_DEVICE_DONE = "device_done"     # #576: a surplus device met its daily goal
+KIND_EXPORT_CLOSED = "export_closed"   # arc #921: the meter closes (export price negative)
+KIND_EXPORT_REOPENS = "export_reopens" # arc #921: the meter reopens
 
 
 @dataclass
@@ -141,6 +144,50 @@ def _consecutive_blocks(
     return blocks
 
 
+def _merge_touching(
+    blocks: List[tuple],
+    join_gap: timedelta = timedelta(minutes=1),
+) -> List[tuple]:
+    """(#963) Collapse ``(start, end)`` pairs that touch into single windows.
+
+    The joint plan hands out one block per pricing slot, but a user reads the
+    plan for *transitions*: a run of adjacent slots is ONE charge that starts
+    once. Only genuinely adjacent blocks merge — ``join_gap`` absorbs slot
+    arithmetic (an end at 14:59:59.999 against a start at 15:00), never a real
+    pause. A gap means SEM stops and starts again, and that second start is a
+    transition the user wants to see.
+
+    Assumes ``blocks`` is sorted by start, which is the caller's contract.
+    """
+    windows: List[tuple] = []
+    for start, end in blocks:
+        if windows and start <= windows[-1][1] + join_gap:
+            windows[-1] = (windows[-1][0], max(windows[-1][1], end))
+        else:
+            windows.append((start, end))
+    return windows
+
+
+def ev_preview_inputs(*, night_need_kwh: float, peak_managed_amps: int,
+                      watts_per_amp: float, gate_covered: bool):
+    """(#967) What the strip's EV preview is allowed to be drawn from.
+
+    ``(kwh, rate_kw, detail)`` for the daytime preview — the hours before the
+    per-charger night plan exists. The kWh is the ONE producer's answer
+    (``build_night_target_map`` → ``_calculate_remaining_need``): for a
+    SOC-target charger that is ``target − the car's own reading``, never the
+    per-day ``daily_ev_target`` knob. The rate is the peak-managed current the
+    reactive night charge will actually run at, never a literal. And until the
+    joint plan's gate covers the car the row is an ESTIMATE and says so —
+    @alexmc1510's strip promised a 4.5 kWh / 4.1 kW bar (20:36–21:41) for a
+    19.8 kWh need, drawn as if booked.
+    """
+    kwh = max(0.0, float(night_need_kwh or 0.0))
+    rate_kw = max(0.0, float(peak_managed_amps or 0) * float(watts_per_amp or 0.0) / 1000.0)
+    detail = "plan_ev_charge_night" if gate_covered else "plan_ev_charge_estimate"
+    return kwh, rate_kw, detail
+
+
 def compose_today_plan(
     *,
     now: datetime,
@@ -173,6 +220,11 @@ def compose_today_plan(
     # just formats them so it stays unit-testable.
     device_runs: Optional[List[Dict[str, Any]]] = None,
     currency: str = "",
+    # arc #921 — from the grid verdict's ``until``: an OPEN verdict carries the
+    # next closing, a CLOSED one the reopening. The grid stops being a sink.
+    export_closes_at: Optional[datetime] = None,
+    export_reopens_at: Optional[datetime] = None,
+    ev_row_detail: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build the forward-looking plan as a list of row dicts.
 
@@ -246,8 +298,9 @@ def compose_today_plan(
             except (ValueError, TypeError, KeyError):
                 continue
 
-        cheap_levels = ("cheap", "very_cheap", "negative")
-        expensive_levels = ("expensive", "very_expensive")
+        # (#994) one vocabulary, and a flat tariff draws neither block.
+        cheap_levels = tuple(lv.value for lv in CHEAP_LEVELS)
+        expensive_levels = tuple(lv.value for lv in EXPENSIVE_LEVELS)
 
         for block in _consecutive_blocks(future, cheap_levels, min_block_len=2):
             avg_price = sum(block["prices"]) / len(block["prices"])
@@ -258,15 +311,41 @@ def compose_today_plan(
                 values={"end": block["end"].strftime("%H:%M"),
                         "price": f"{avg_price:.2f}", "currency": currency},
             ))
+        # (#992, class 99) The expensive row used to promise "Min+PV grid
+        # pauses" on every expensive block in the curve — on installs with no
+        # EV at all, on chargers past their Min, on Always-Max and Off. It is
+        # a claim about a charger, so it is made only when there is a charge
+        # still to make: the same gate the EV rows below use. Its cheap-block
+        # sibling never claimed anything of the sort.
+        #
+        # …and only when the charger's MODE pauses for price at all. Gating
+        # on the Min shortfall alone still promised a pause for Always-Max,
+        # which charges through every expensive hour by definition — and an
+        # unmet Min is close to the default state, since every install gets
+        # a daily target whatever its mode. ``ev_tariff_optimized`` is the
+        # resolver for exactly this question (only solar_plus_cheap defers),
+        # and the composer was already being handed it.
+        _pause_claim = bool(ev_tariff_optimized
+                            and ev_min_remaining_kwh
+                            and ev_min_remaining_kwh > 0.1)
         for block in _consecutive_blocks(future, expensive_levels, min_block_len=2):
             avg_price = sum(block["prices"]) / len(block["prices"])
             rows.append(PlanRow(
                 when=block["start"], kind=KIND_EXPENSIVE_START,
                 label="plan_expensive_start",
-                detail="plan_expensive_detail",
+                detail=("plan_expensive_detail" if _pause_claim
+                        else "plan_expensive_detail_plain"),
                 values={"end": block["end"].strftime("%H:%M"),
                         "price": f"{avg_price:.2f}", "currency": currency},
             ))
+
+    # === arc #921: the meter closes / reopens (the grid stops being a sink) ===
+    if export_closes_at and now < export_closes_at < horizon:
+        rows.append(PlanRow(when=export_closes_at, kind=KIND_EXPORT_CLOSED,
+                            label="plan_export_closed"))
+    if export_reopens_at and now < export_reopens_at < horizon:
+        rows.append(PlanRow(when=export_reopens_at, kind=KIND_EXPORT_REOPENS,
+                            label="plan_export_reopens"))
 
     # === Night window ===
     if night_start and now < night_start < horizon:
@@ -290,14 +369,29 @@ def compose_today_plan(
             parsed_blocks.append((bs, be))
         if parsed_blocks:
             parsed_blocks.sort()
-            for bs, _be in parsed_blocks:
+            # (#963, @HorizonKane: "scheduler full of events that won't
+            # happen") The joint plan is expressed in hourly BLOCKS, so a
+            # charge running 14:00–17:00 arrives here as three of them. One
+            # row per block announced "EV charging starts" three times for a
+            # single start — and since the composer caps at 8 rows, six such
+            # rows evicted the solar peak, the night window and the deadline,
+            # leaving a plan made almost entirely of events that never happen.
+            # Merge blocks that TOUCH into windows and announce each window's
+            # start once. A real gap stays a real second start: his 17:00 hole
+            # is SEM stopping and starting again, which is worth a row.
+            windows = _merge_touching(parsed_blocks)
+            for bs, _be in windows:
                 if now < bs < horizon:
                     rows.append(PlanRow(
                         when=bs, kind=KIND_EV_CHARGE_START,
                         label="plan_ev_charge_start",
                         detail="plan_ev_charge_joint",
                     ))
-            last_end = parsed_blocks[-1][1]
+            # The last WINDOW's end, not the last block's: for touching,
+            # non-overlapping allocations (what pack_night emits) these are
+            # the same instant; for a block contained in an earlier one it is
+            # the honest answer where the old value was the inner block's.
+            last_end = windows[-1][1]
             if now < last_end < horizon:
                 # The plan's own promise — not a rate estimate.
                 rows.append(PlanRow(
@@ -319,14 +413,21 @@ def compose_today_plan(
                     when=ev_next_cheap_window,
                     kind=KIND_EV_CHARGE_START,
                     label="plan_ev_charge_start",
-                    detail="plan_ev_charge_tariff",
+                    # (#967) By day this branch is reached by the PREVIEW's
+                    # own affordable start, and a preview is an estimate
+                    # wherever its time came from — the caveat belongs to the
+                    # row, not to the branch that produced the hour.
+                    detail=ev_row_detail or "plan_ev_charge_tariff",
                 ))
         elif night_start and night_start > now:
-            # Will charge from night_start at peak-managed rate
+            # Will charge from night_start at peak-managed rate. (#967) By
+            # day this is a PREVIEW of a night the planner has not seen yet;
+            # the coordinator says so through ``ev_row_detail`` so the card
+            # draws an estimate, not a booking.
             rows.append(PlanRow(
                 when=night_start, kind=KIND_EV_CHARGE_START,
                 label="plan_ev_charge_start",
-                detail="plan_ev_charge_night",
+                detail=ev_row_detail or "plan_ev_charge_night",
             ))
 
         # Min-reached estimate (legacy fallback — with blocks the last

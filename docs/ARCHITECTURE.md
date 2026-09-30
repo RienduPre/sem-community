@@ -153,6 +153,135 @@ build_charger_view(charger_id) ──► ChargerView (frozen, pure input)
   and the self-resume guard (#315/#346/#353) is one `adapter.is_self_charging()`
   check before applying the new intent.
 
+**Two clamps run after the mode strategy, in this order (2.1):**
+
+1. **`clamp_to_peak_slot(result, view)`** (#864) — the *preventive* peak
+   bound. Demand tariffs bill the average import of each fixed 15-minute clock
+   slot, so a defence that waits for the rolling average to cross the target
+   acts after the billed peak is already set. This tightens the offer so the
+   slot still lands on target, floors at `effective_min_amps` (never a
+   proactive idle — stopping on a transient is the flapping the project spent
+   months removing), and speaks in the reason string only when it actually
+   bites.
+
+   It is **fleet-wide**. The slot allowance is one budget for the whole house,
+   so `FleetContext.peak_committed_w` accumulates what higher-priority chargers
+   have already been offered this cycle — exactly as `solar_committed_w`
+   already does for the solar cascade. Without it each charger computed the
+   full headroom and took it: two idle 3-phase chargers under a 6000 W target
+   landed a combined 10160 W.
+
+2. **#747's peak shed** — the reactive EMERGENCY guarantee, senior to every
+   mode including `always_max`. It runs after the clamp and wins.
+
+The same slot allowance bounds the battery's cheap-hours grid charging and
+defers cheap-hours load starts that cannot fit, because the limit lives at the
+**power meter** — this is a layer above the devices, not an EV feature.
+
+**Observer mode cuts at the adapter, not above it** (#855). The observation
+surface used to report the *decision* ("would charge at 13 A") but never the
+service calls, because the cut sat above the brand adapter — so nothing was
+ever built for the seam to withhold. Observer now runs the whole brand path
+and refuses at the single hardware seam, `ControllableDevice.send()`,
+recording exactly what it refused (`keba.set_current {current: 10}`). Every
+commandable device carries the flag, not only chargers.
+
+### One assist formula, two floors (#501, #878)
+
+`battery_assist_potential_w` is the single SOC→power curve for the
+battery→EV assist. It exists so the strategy decision (`decide.py`) and the
+canonical budget (`FlowCalculator._calculate_battery_assist_w`) **cannot
+disagree** — that divergence is the #282 class, so both callers change
+together or not at all, pinned by an oracle test rather than two separate
+assertions.
+
+Since #878 it takes two floors and binds on the deeper:
+
+```
+floor = max(buffer_soc, dynamic_floor_pct)
+
+  SOC <  floor                 → 0        (battery off-limits)
+  SOC == floor and floor > buffer → 0     (the computed floor is a HARD stop)
+  SOC >= auto_start            → full cap
+  floor <= SOC < auto_start    → ramp 0.5 → 1.0 × cap across the band
+```
+
+Three details that are not obvious and each cost a test to find:
+
+* **The floor is evaluated before the Zone-4 branch.** A demanding night can
+  compute a floor *above* `auto_start`; checking `auto_start` first would
+  hand out the entire cap below the level the house needs.
+* **The taper runs from the effective floor**, not the buffer. A curve
+  measured from a level the pack may never reach keeps offering power right
+  down to it.
+* **At the floor exactly, the two floors differ.** The configured buffer
+  keeps its historical half-cap edge — harmless, and changing it would alter
+  behaviour on every existing install. The *computed* floor means "this much
+  must still be in the pack at dawn", so anything offered at that level
+  breaches the promise the number was calculated to keep; it is a hard stop.
+
+**Fail-closed, and this is the dangerous direction.** The change only bites
+when the computed floor sits *above* the buffer — so a sign error or a bad
+default does not under-spend, it permits a **deeper** drain than before, on a
+real battery, silently. Hence: `None` means fall back to the buffer and never
+a floor of zero; a lower computed floor never lowers the buffer; NaN and
+unparseable values are ignored rather than obeyed; and the value is carried
+**un-coerced** from `_planning_evidence` through `FleetCycleState` →
+`build_charger_view` → `FleetContext`. An `or 0.0` anywhere on that path
+would turn "no budget computed" into "drain to empty" — its neighbour
+`battery_spendable_kwh` can safely coerce, because 0 kWh spendable is a real
+answer; here 0 is the catastrophic one.
+
+Measured on a rig publishing `dynamic_floor_pct = 79.0` against a 70 % buffer:
+between 72 % and 79 % SOC the assist previously offered **2475–3262 W** into
+the car out of a pack that needed that energy for the house hours later.
+
+### Fire → check → adjust — SEM measures the result of its own commands (#846)
+
+The amps SEM offers a charger are SEM's **choice**, so nothing outside SEM
+corrects the arithmetic behind them. Nameplate says 16 A on three phases is
+16 × 3 × 230 = 11.04 kW; the car on PROD takes 10.02 kW at 16 A and only
+3.32 kW at 8 A. A model that never checks its own result is wrong by up to
+40 % on the one decision it re-issues every cycle — and the error feeds the
+surplus→amps math, the night packer's block sizing and the peak guard alike.
+
+So SEM keeps a **measured watts-per-amp table** per charger, per phase
+count, per commanded setpoint (`coordinator/watts_per_amp.py`):
+
+- **fire** — the reconciler writes the setpoint;
+- **check** — the per-charger publication loop offers (setpoint, this
+  charger's draw) to the learner every cycle — only while the setpoint has
+  been steady for two cycles, the phase belief is undisputed, no phase
+  switch is in flight and the car is not tapering. Observer mode never
+  learns: SEM is not commanding, so there is nothing to check;
+- **adjust** — `_ev_watts_for_amps` / the adapter conversions answer "what
+  will X A buy" from the table. Between two measured setpoints the draw is
+  bridged linearly in watts (a bridge, replaced by a measurement the first
+  time SEM stands on that setpoint); outside the measured range it is
+  nameplate. A measurement may only ever LOWER what SEM believes it bought —
+  freeing headroom — never license exceeding a configured cap.
+
+Three properties hold the design honest:
+
+1. **The phase belief anchors the learner, never the reverse.** Without
+   phase switching the configured count is the belief; with it, the
+   sequencer's. A sample that fits a different phase count is refused and
+   named `phase_belief` in the diagnostic — the first serious phase bug must
+   stay visible, not be smoothed into a plausible constant.
+2. **No measurement says why.** `sensor.sem_charging_state` →
+   `ev_watts_per_amp` lists the table, the samples still earning
+   confidence, and every refusal with its reason. "SEM has no measurement"
+   and "SEM measured and refused" are different statements.
+3. **Learned state survives a restart, and a cold start replays itself.**
+   The table persists in SEM's storage; a charger the learner has never
+   been fed for is replayed once at boot from SEM's own recorded series —
+   `sensor.sem_charger_<id>_commanded_current` against
+   `sensor.sem_charger_<id>_power` (`coordinator/wpa_replay.py`). The
+   report is published as `ev_watts_per_amp_replay`.
+
+The same principle is the standing rule for every actuator SEM owns: a
+command is a hypothesis about the world, and the next reading is its test.
+
 ### Decide → actuate → adapter (battery side)
 
 Symmetric to the EV side. Batteries have observed-only and commanded
@@ -178,6 +307,94 @@ intents (`NORMAL`, `LIMIT_DISCHARGE`, `FORCE_CHARGE`,
 `STOP_FORCE_CHARGE`). The pure `BatteryChargeScheduler.evaluate()`
 that pre-v1.7.0 lived alongside is preserved verbatim — it
 produces the `SchedulerDecision` that feeds `BatteryView.scheduler_decision`.
+
+### Decide → actuate → adapter (export side, #955)
+
+The house's grid tie is its own control axis, not a battery intent. A
+battery can need `LIMIT_DISCHARGE` *and* an export cut in the same cycle —
+one intent per battery per cycle cannot carry both — so the meter limit gets
+its own decision, its own seam and its own observer key, and the batteries
+carry one axis again.
+
+```
+   PowerReadings + the cycle's grid verdict (arc #921)
+         │
+   ┌─────▼──────────────────────────────────┐
+   │ 0. TRACK   ExportGuard.update()         │  stateful — hysteresis, "last not
+   │    _compute_export_command(power)       │  first", refusal as a state. Leaves
+   │    → FleetCycleState.export_command     │  a VALUE on the cycle, never a write.
+   └─────┬──────────────────────────────────┘
+   ┌─────▼──────────────────────────────────┐
+   │ 1. DECIDE  decide_export(fleet)         │  pure — no hass, no adapter, no clock
+   │    → ExportDecision(LIMIT|RELEASE|NONE) │  Takes the FLEET: the meter is a house
+   └─────┬──────────────────────────────────┘  quantity and no battery owns it.
+   ┌─────▼──────────────────────────────────┐
+   │ 2. SEAM    actuate_export(decision,     │  ONE write. Observer cuts HERE and
+   │            adapter, standing=...)       │  publishes under OBSERVER_KEY =
+   │    → the refusal text, or None          │  "export_guard" — its own key.
+   └─────┬──────────────────────────────────┘
+   ┌─────▼──────────────────────────────────┐
+   │ 3. ADAPTER command_limit_export(w) /    │  brand dialect: Huawei's
+   │            command_release_export()     │  set_zero_power_grid_connection,
+   │    _export_control_adapter() picks it   │  Deye's register, Generic's number.
+   └─────────────────────────────────────────┘
+```
+
+Three things worth knowing:
+
+- **The tick runs after the sink verdicts**, not beside `_compute_peak_slot_allowance`.
+  Symmetry with the peak guard would put it 60 lines before `self._sink_verdicts`
+  is assigned, and the guard would key on the previous cycle's verdict.
+- **One adapter, chosen by capability.** `_export_control_adapter()` prefers the
+  adapter already holding SEM's cut (you release what you cut), then any brand
+  that overrides the base's refusing verb, then the primary — so on a #531 mixed
+  fleet the cut reaches the inverter that owns the grid tie rather than whichever
+  adapter was inserted first.
+- **The observer surface is a ROSTER, so a held cut keeps saying so.**
+  `retire_unpublished_observer_decisions` sweeps every cycle: whoever published
+  stays, everyone else is dropped. The seam therefore publishes the COMMAND on
+  the cycle one fires and the STANDING state (`_publish_standing`) on the quiet
+  cycles in between — exactly one publisher per cycle, both under the seam's own
+  key. Without the second, a cut shows for one cycle and vanishes while SEM is
+  still holding the meter shut (.175, twice).
+- **`holds_export_cut()`, not `export_release_recipe()`.** "How would I undo a cut"
+  and "am I holding one" are different questions. Huawei can always answer the
+  first (the integration owns the reset), so the hand-back paths ask the second —
+  otherwise a teardown resets a feed-in limit the owner set and SEM never touched
+  (#908/#936).
+
+- **The fleet the dispatch reads must carry the axis.** There are TWO
+  `FleetContext` producers — `build_view.build_charger_view` for the chargers
+  and `_run_battery_pipeline`'s own for the batteries — and the export dispatch
+  is handed the second. Until 17.09 that one carried neither `export_command`
+  nor `export_guard_enabled`, so `decide_export` read "guard off" on every
+  cycle and the guard *never wrote*, on any rig, while the tracker said
+  "engaged" and the observer surface showed the standing row (bug classes 93
+  and 94). Both producers now read Step 6's `_cycle_fleet_state`; an AST pin
+  asks the sibling question — every `FleetContext` producer passes the axis —
+  and a cycle-level test runs the real pipeline and asserts the adapter was
+  awaited.
+- **The observer rig can read what would hit the wire.** In observer mode the
+  seam appends the adapter's `export_dry_run(intent, watts)` to the cycle's
+  withheld list under `withheld_commands.export_guard`: the exact service +
+  payload (`huawei_solar.set_zero_power_grid_connection` on the INVERTER
+  device; the captured prior's restore) or the refusal in the verb's own words.
+  Each row says `standing: true|false` — a command this cycle, or the roster's
+  re-publish of a held cut — because the two were indistinguishable and that
+  is how a guard that had never written looked proven for two days.
+- **The Huawei adapter's three measured facts** (17.09, the reference
+  SUN2000): the mode readback is three-state — `unavailable` is *unread*, not
+  "free", and the cut refuses on it; the prior is captured once and KEPT across
+  a release, because the integration's readback lags a write by 8–15 min and a
+  cut → release → cut inside that window would otherwise adopt SEM's own
+  `Zero Power` as the baseline and latch the meter shut; and the last-resort
+  hand-back is `set_maximum_feed_grid_power_percent 100`, never
+  `reset_maximum_feed_grid_power` — mode 0 (`Unlimited`) does not land on this
+  inverter, 100 % of nominal is the same intent and does.
+
+Structurally pinned by `tests/test_921_one_track.py`,
+`tests/test_955_dispatch_reads_the_fleet.py` and `tests/test_955_export_dry_run.py`;
+the shapes they prevent are bug classes 92–96.
 
 ### Compute intent → reconcile (load side)
 
@@ -282,8 +499,14 @@ coordinator/
 ├── battery_adapters/       — Per-brand battery control surface (Huawei, GoodWe, Generic)
 ├── decide.py               — Pure decide(view) → ChargerDecision (5 ModeStrategy classes)
 ├── decide_battery.py       — Pure decide_battery(view) → BatteryDecision
+├── decide_export.py        — Pure decide_export(fleet) → ExportDecision (#955)
 ├── actuate.py              — Thin delegation of ChargerDecision to ChargerReconciler
 ├── actuate_battery.py      — Intent dispatch onto BatteryControlAdapter
+├── actuate_export.py       — The house's meter limit: one write, one observer key
+├── export_guard.py         — ExportGuard tracker: hysteresis both ways, refusal
+│                             as a state, "last, not first" (#955)
+├── sink_verdicts.py        — One OPEN/HELD/CLOSED verdict per sink, per cycle;
+│                             never a price in the balance layer (arc #921)
 ├── power_control.py        — Unit-safe battery power setpoint writes (#702):
 │                             fail-closed validation + W↔kW conversion; rejects
 │                             current/percent/unitless-unknown/out-of-range controls
@@ -393,7 +616,7 @@ SEM tracks the number of hours since the water last reached the Legionella targe
 5. Variable-power devices get proportional current allocation
 6. When surplus drops: LIFO deactivation (lowest priority first)
 
-The surplus controller is always-on and runs every coordinator update (~10s). Price-responsive mode is automatic when `tariff_mode == "dynamic"`.
+The surplus controller is always-on and runs every coordinator update (~10s). Price-responsive mode is automatic when `tariff_mode == "dynamic"`; it may only DAMP the distributable pool (`price_damped_pool`, #953) — it used to add a virtual +3 kW / +10 kW *after* the coordinator had bounded the pool by the sun (#620/#938), which is how a "Solar only" load came to run from the grid. The two remaining terms that still join the pool carry their own physics: the feed-in-limit add-back is derived from the already-bounded surplus, and the #576 battery reclaim is bounded by `solar_bounded_reclaim` before it is handed to `update()`.
 
 ---
 
@@ -1050,9 +1273,9 @@ A household may have the system set to German, but one user's profile set to Eng
 **Translates:** All SEM custom card content (labels, status text, error messages)
 
 **How it works:**
-1. `sem-localize.js` is auto-generated from `translations.json` — contains all 1341 keys × 16 languages as a JS object
-2. Loaded as a Lovelace resource, exposes `window.semLocalize(key, lang)`
-3. Fires `sem-localize-ready` CustomEvent when loaded
+1. `sem-localize.js` is auto-generated from `translations.json`. Since the #738 split it carries English inline as the fallback floor and lazily injects the viewer's own language as a sibling `sem-localize.<lang>.js`
+2. Loaded as a Lovelace resource, exposes `window.semLocalize(key, lang)`. **Only the loader is a resource** — the per-language siblings are assets it fetches over `/local`, and registering them as resources is a bug (#901): the table then arrives from two URLs with different cache keys, and every language loads on every page
+3. Fires `sem-localize-ready` CustomEvent when loaded (and again after a language table is injected, so cards re-render)
 4. SEM cards extend `SEMLitBase` (in `src/base/sem-lit-base.js`) which provides `_t(key)` → calls `semLocalize(key, hass.language)`
 5. Cards re-render when the user's language changes (detected in `_checkLocaleChange()`)
 

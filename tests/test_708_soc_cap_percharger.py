@@ -127,9 +127,27 @@ PER_CHARGER_REPAIRS = {
         "which is instantiated per charger and holds self.charger_id + its "
         "own adapter/power (#627)"
     ),
+    "raise_charger_stop_war_stand_down": (
+        "structural — raised by ChargerReconciler._surface_stand_down, which "
+        "is instantiated per charger: the war, the window and the draw are "
+        "this reconciler's own, from its own adapter/power (#944)"
+    ),
+    "raise_charger_phase_count_mismatch": (
+        "structural — raised from coordinator._surface_phase_verdict, which "
+        "runs INSIDE the per-charger loop and asks the W/A learner for THIS "
+        "(charger_id, phase count) bucket only. The learner is keyed by "
+        "charger id at every entry point, so a second charger's draw cannot "
+        "reach this verdict (#967)"
+    ),
     "raise_charger_actuation_failed": (
         "structural — raised from devices/base.py on the device object "
         "whose write just failed (#392)"
+    ),
+    "raise_charger_failsafe_suspected": (
+        "structural — raised via ChargerAdapter.report_failsafe_suspected "
+        "from the reconciler's apply loop; the reconciler is instantiated "
+        "per charger and measured THIS charger's stop→re-enable interval, "
+        "and the adapter reads only its own device (#823)"
     ),
     "raise_charger_control_entity_broken": (
         "structural — raised from coordinator._check_charger_control_entities, "

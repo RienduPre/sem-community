@@ -36,6 +36,17 @@ SETTLE_S = 60.0
 # UI element and fat fingers happen; the contactor doesn't care whose.
 MIN_SWITCH_GAP_S = 120.0
 
+# (#804) How long the stop before a switch may take. The hold that waits
+# for it suppresses every charge command, so an unbounded wait is a charger
+# SEM never commands again: @HorizonKane's go-e kept drawing through SEM's
+# stop — the one surface that could open it was not configured — and the
+# sequence sat in ``stopping`` for the rest of the session. A Zaptec opens
+# in 3-15 s (measured). A box still drawing after two minutes is not slow,
+# it is not listening, so SEM gives the switch up and says so. Three
+# minutes: a cloud-reported charger's power can lag ~90 s (Wallbox), and a
+# slow stop must not be read as a deaf one.
+STOP_WAIT_S = 180.0
+
 # Phase C hysteresis — up after 5 sustained minutes of headroom, down
 # after 10 sustained minutes of starvation. Asymmetric on purpose: a
 # missed up-switch costs yield, a flappy down-switch costs the contactor.
@@ -61,6 +72,7 @@ class SeqResult:
     hold_charging: bool              # force the charger decision to IDLE
     issue_switch: Optional[int]      # fire the switch command NOW (1|3)
     believed_phases: Optional[int]   # sequencer's post-switch belief
+    gave_up: bool = False            # (#804) the box never stopped — drop it
 
 
 class PhaseSwitchSequencer:
@@ -70,16 +82,28 @@ class PhaseSwitchSequencer:
         self._state = "idle"
         self._pending: Optional[int] = None
         self._switched_at = 0.0
+        self._stopping_since: Optional[float] = None
         self._last_switch_at = float("-inf")
 
-    def _result(self, hold: bool, issue: Optional[int] = None) -> SeqResult:
-        return SeqResult(state=self._state, hold_charging=hold,
-                         issue_switch=issue, believed_phases=None)
+    @property
+    def in_flight(self) -> bool:
+        """(#846) True while a switch is mid-sequence (stopping or settling).
+        Anything measured now describes the ramp, not the car — the W/A
+        learner gates on this. A property rather than a caller poking
+        ``_state``: one name, one truth."""
+        return self._state in ("stopping", "settling")
 
-    def _abort(self) -> SeqResult:
+    def _result(self, hold: bool, issue: Optional[int] = None,
+                gave_up: bool = False) -> SeqResult:
+        return SeqResult(state=self._state, hold_charging=hold,
+                         issue_switch=issue, believed_phases=None,
+                         gave_up=gave_up)
+
+    def _abort(self, gave_up: bool = False) -> SeqResult:
         self._state = "idle"
         self._pending = None
-        return self._result(hold=False)
+        self._stopping_since = None
+        return self._result(hold=False, gave_up=gave_up)
 
     def _fire(self, now: float, target: int) -> SeqResult:
         self._state = "settling"
@@ -117,6 +141,11 @@ class PhaseSwitchSequencer:
                     or desired_phases == believed):
                 return self._abort()
             if charging:
+                if (self._stopping_since is not None
+                        and now - self._stopping_since >= STOP_WAIT_S):
+                    # The box is not taking SEM's stop. Holding costs it
+                    # every charge command; the switch is the thing to drop.
+                    return self._abort(gave_up=True)
                 return self._result(hold=True)   # never switch under load
             return self._fire(now, desired_phases)
 
@@ -129,6 +158,7 @@ class PhaseSwitchSequencer:
         if charging:
             self._state = "stopping"
             self._pending = desired_phases
+            self._stopping_since = now
             return self._result(hold=True)
         return self._fire(now, desired_phases)
 
@@ -160,7 +190,12 @@ class PhaseAutoPlanner:
     def new_session(self) -> None:
         # A new car (or replug) gets a fresh switch budget; the minimum
         # interval survives the replug — it protects the box, not the car.
+        # (#1008) The sustain clocks are the new car's too: a window that
+        # filled up while the last car was still here says nothing about
+        # this one, and left standing it switched on the first cycle.
         self._session_switches = 0
+        self._up_since = None
+        self._down_since = None
 
     def desired(self, now: float, believed: Optional[int],
                 surplus_w: float) -> Optional[int]:

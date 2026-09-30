@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .tariff_provider import TariffProvider, TariffData, PriceLevel
+from .tariff_provider import LEVEL_FLAT, TariffProvider, TariffData, PriceLevel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +55,34 @@ TARIFF_PRESETS = {
 }
 
 
+def _day_numbers(value: object) -> List[int]:
+    """A rule's weekday list as integers 0-6, silently dropping the rest.
+
+    (#994) Storage and YAML both hand back ``["0", "1"]`` readily enough,
+    and ``dow not in ["0"]`` is True for every day of the week — so the
+    whole rule was ignored and the install lost its levels without a word.
+    ``None`` used to raise TypeError out of the update loop.
+    """
+    out: List[int] = []
+    for item in (value or []):
+        try:
+            day = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6:
+            out.append(day)
+    return out
+
+
+def _tariff_word(value: object) -> str:
+    """A rule's tariff word, normalised: ``ht`` or ``nt``.
+
+    (#994) Readers disagreed about case and about which spellings count,
+    so the table now holds one of two words and nothing downstream guesses.
+    """
+    return "ht" if str(value or "").strip().lower() in ("ht", "peak") else "nt"
+
+
 class CalendarTariffProvider(TariffProvider):
     """Tariff provider with user-defined weekly HT/NT schedule.
 
@@ -81,7 +109,7 @@ class CalendarTariffProvider(TariffProvider):
         self.peak_rate = ht_rate if ht_rate is not None else peak_rate
         self.off_peak_rate = nt_rate if nt_rate is not None else off_peak_rate
         self.export_rate = export_rate
-        self.default_tariff = default_tariff
+        self.default_tariff = _tariff_word(default_tariff)
         self.holiday_entity = holiday_entity
         self.schedule_entity = schedule_entity
         self.currency = currency
@@ -89,10 +117,17 @@ class CalendarTariffProvider(TariffProvider):
         # Parse rules into (days, start_time, end_time, tariff) tuples
         self._rules: List[tuple] = []
         for rule in (rules or []):
-            days = rule.get("days", [])
+            # (#994) Normalise HERE, once. `_get_tariff_at` returned the
+            # rule's word verbatim and `_is_high_tariff` compared it with a
+            # case-SENSITIVE ``== "ht"``, so a rule written ``"HT"`` was
+            # never high tariff at the decision site while every other
+            # reader lower-cased and thought it was — a level of CHEAP,
+            # forever, on a day that does have a peak window. And a
+            # ``"days": null`` raised TypeError out of the update loop.
+            days = _day_numbers(rule.get("days"))
             start = self._parse_time(rule.get("start", "00:00"))
             end = self._parse_time(rule.get("end", "00:00"))
-            tariff = rule.get("tariff", "peak")
+            tariff = _tariff_word(rule.get("tariff", "peak"))
             self._rules.append((days, start, end, tariff))
 
         if self._rules:
@@ -110,6 +145,20 @@ class CalendarTariffProvider(TariffProvider):
         """Parse "HH:MM" string to time object."""
         parts = s.split(":")
         return time(int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
+
+    def _holiday_readable(self) -> bool:
+        """(#994) Can the holiday question be ASKED right now?
+
+        Configured-but-unreadable is its own answer (#925). A holiday is
+        off-peak from midnight to midnight, so while SEM cannot tell, it
+        cannot tell whether a peak hour is reachable today either — and
+        ``_is_holiday`` answering a flat False turned "I could not ask"
+        into "it is a normal working day", complete with a level.
+        """
+        if not self.holiday_entity:
+            return True
+        state = self.hass.states.get(self.holiday_entity)
+        return bool(state) and state.state not in ("unknown", "unavailable")
 
     def _is_holiday(self) -> bool:
         """Check if today is a holiday (via binary_sensor)."""
@@ -132,9 +181,12 @@ class CalendarTariffProvider(TariffProvider):
         # HA Schedule helper mode
         if self.schedule_entity:
             state = self.hass.states.get(self.schedule_entity)
-            if state:
+            if state and state.state not in ("unknown", "unavailable"):
                 # Schedule helper: "on" = HT period, "off" = NT period
                 return "ht" if state.state == "on" else "nt"
+            # (#994) A helper that will not read is not a helper saying NT.
+            # It used to answer "off" → NT → CHEAP, all day, on an input
+            # nobody could see.
             return self.default_tariff
 
         # Rule-based evaluation
@@ -143,6 +195,10 @@ class CalendarTariffProvider(TariffProvider):
 
         for days, start, end, tariff in self._rules:
             if dow not in days:
+                continue
+            if start == end:
+                # A zero-width window can never contain a moment. It used
+                # to be counted as a reachable HT period all the same.
                 continue
             # Handle same-day windows (start < end)
             if start <= end:
@@ -158,7 +214,7 @@ class CalendarTariffProvider(TariffProvider):
     def _is_high_tariff(self, when: Optional[datetime] = None) -> bool:
         """Check if given time is in high tariff period."""
         now = when or dt_util.now()
-        return self._get_tariff_at(now) == "ht"
+        return _tariff_word(self._get_tariff_at(now)) == "ht"
 
     def get_current_import_rate(self) -> float:
         return self.peak_rate if self._is_high_tariff() else self.off_peak_rate
@@ -166,14 +222,87 @@ class CalendarTariffProvider(TariffProvider):
     def get_current_export_rate(self) -> float:
         return self.export_rate
 
-    def get_price_level(self) -> PriceLevel:
+    def _rates_differ(self) -> bool:
+        """(#994) Is there anything to compare? Relative, so the answer is
+        the same in CHF, in cents and in rupees (#359/#417/#549)."""
+        hi, lo = float(self.peak_rate), float(self.off_peak_rate)
+        mean = (abs(hi) + abs(lo)) / 2.0
+        if mean <= 0.0:
+            return abs(hi - lo) > 1e-9
+        return (abs(hi - lo) / mean) > 0.005
+
+    def _ht_can_occur(self, when: Optional[datetime] = None) -> bool:
+        """(#994) …and can this calendar be in high tariff ON THAT DAY?
+
+        With no rules — which is every install today, because
+        ``coordinator.py`` never passed a schedule, and also the deliberate
+        "Flat Rate (no HT/NT)" preset — ``_get_tariff_at`` always returns
+        the ``off_peak`` default, so this provider answered CHEAP
+        unconditionally, forever, whatever rates the owner configured. A
+        level with no reachable alternative is not a comparison.
+
+        The DAY matters, and the first version of this check forgot it:
+        asking whether an HT rule exists anywhere in the weekly table is not
+        asking whether one can arrive today. Three of the five shipped
+        presets have days with no HT rule at all — EKZ and ewz cover Mon–Sat
+        morning, CKW only Mon–Fri — so on a Sunday they reproduced exactly
+        the incident this issue is named for, through the calendar instead
+        of the clock. ``StaticTariffProvider._both_rates_occur`` got this
+        right from the start; this is the same question, asked of a rule
+        table instead of a weekday constant.
+        """
+        now = when or dt_util.now()
+        # A holiday is NT from midnight to midnight, whatever the table
+        # says — ``_get_tariff_at`` checks it first and the rule scan never
+        # knew, so a holiday published a peak/off-peak spread it could not
+        # reach.
+        if self.holiday_entity and not self._holiday_readable():
+            return False        # cannot ask → cannot claim a peak hour
+        if self.holiday_entity and self._is_holiday():
+            return False
+        # A Schedule helper decides moment by moment and publishes no
+        # timetable anyone can scan. Its existence IS the claim that high
+        # tariff happens; reading the rule table instead silenced this
+        # entire input mode, because a schedule-helper install has no
+        # rules at all.
+        if self.schedule_entity:
+            st = self.hass.states.get(self.schedule_entity)
+            return bool(st) and st.state not in ("unknown", "unavailable")
+        if not self._rules:
+            return self.default_tariff == "ht"
+        # Otherwise: ask the function that DECIDES, at every boundary the
+        # rules name, instead of re-deriving the answer from the table.
+        # Re-deriving is what produced the defect this method exists to
+        # fix (bug class 104), one level down: a mis-cased word, a
+        # zero-width window and a holiday each made the two disagree.
+        # A half-open window always contains its own start, so probing
+        # every rule's start plus midnight is exact, not a sample.
+        day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        probes = {day}
+        for _days, start, end, _t in self._rules:
+            probes.add(day.replace(hour=start.hour, minute=start.minute))
+            probes.add(day.replace(hour=end.hour, minute=end.minute))
+        return any(_tariff_word(self._get_tariff_at(p)) == "ht"
+                   for p in probes)
+
+    def _comparison_stands(self, when: Optional[datetime] = None) -> bool:
+        return self._rates_differ() and self._ht_can_occur(when)
+
+    def get_price_level(self) -> Optional[PriceLevel]:
+        """(#994) ``None`` when nothing was compared."""
+        if not self._comparison_stands():
+            return None
         return PriceLevel.NORMAL if self._is_high_tariff() else PriceLevel.CHEAP
 
     def get_price_at(self, when: datetime) -> Optional[float]:
         return self.peak_rate if self._is_high_tariff(when) else self.off_peak_rate
 
     def get_price_level_at(self, when: datetime) -> "PriceLevel | None":
-        # Same calendar rule get_price_level applies now: NT = CHEAP (#638).
+        # Same calendar rule get_price_level applies now: NT = CHEAP (#638),
+        # and the same refusal when nothing distinguishes the hours (#994)
+        # — asked of the day BEING classified, not of today.
+        if not self._comparison_stands(when):
+            return None
         return (PriceLevel.NORMAL if self._is_high_tariff(when)
                 else PriceLevel.CHEAP)
 
@@ -184,14 +313,26 @@ class CalendarTariffProvider(TariffProvider):
         data = TariffData(
             current_import_rate=self.peak_rate if is_ht else self.off_peak_rate,
             current_export_rate=self.export_rate,
-            price_level=PriceLevel.NORMAL if is_ht else PriceLevel.CHEAP,
+            price_level=self.get_price_level(),
             currency=self.currency,
             provider="calendar",
             is_dynamic=False,
-            classifier_path="calendar_schedule",
-            today_min_price=self.off_peak_rate,
-            today_max_price=self.peak_rate,
-            today_avg_price=(self.peak_rate + self.off_peak_rate) / 2,
+            classifier_path=("calendar_schedule" if self._comparison_stands()
+                             else "calendar_no_comparison"),
+            # A calendar always HAS its two rates and its rule table; when
+            # it declines, the day simply holds one price.
+            level_absence=LEVEL_FLAT,
+            # (#994) with no HT rule REACHABLE TODAY the day has ONE price;
+            # reporting the rate table's two would tell every consumer —
+            # and ``variation_known``, which reads exactly these two fields
+            # — to wait for an hour this day can never reach.
+            today_min_price=(self.off_peak_rate if self._comparison_stands()
+                             else self.get_current_import_rate()),
+            today_max_price=(self.peak_rate if self._comparison_stands()
+                             else self.get_current_import_rate()),
+            today_avg_price=((self.peak_rate + self.off_peak_rate) / 2
+                             if self._comparison_stands()
+                             else self.get_current_import_rate()),
         )
 
         # Calculate next tariff transition
@@ -228,9 +369,35 @@ class CalendarTariffProvider(TariffProvider):
         Used by the dashboard schedule card for visualization.
         """
         day = date or dt_util.now()
+        # (#994) A day with nothing to compare is ONE block with no level.
+        # This method never asked, so a flat calendar — equal rates, or a
+        # preset with no peak window today — still handed the card a full
+        # day of alternating NT/HT stripes to paint, right beside a sensor
+        # correctly reading `flat`. The strip is the picture users check
+        # first, and it was telling the older story.
+        if not self._comparison_stands(day):
+            return [{
+                "start": "00:00", "end": "24:00", "tariff": None,
+                "level": LEVEL_FLAT,
+                "avg_price": round(self.get_current_import_rate(), 4),
+            }]
+
         blocks = []
         current_tariff = None
         block_start = None
+
+        def _close(end_str: str) -> None:
+            blocks.append({
+                "start": block_start.strftime("%H:%M"),
+                "end": end_str,
+                "tariff": current_tariff,
+                # The card reads `level` first and falls back to the
+                # legacy HT/NT word; give it both so it never has to.
+                "level": "normal" if current_tariff == "ht" else "cheap",
+                "avg_price": round(
+                    self.peak_rate if current_tariff == "ht"
+                    else self.off_peak_rate, 4),
+            })
 
         for hour in range(24):
             for minute in (0, 30):
@@ -238,20 +405,12 @@ class CalendarTariffProvider(TariffProvider):
                 tariff = self._get_tariff_at(check_time)
                 if tariff != current_tariff:
                     if current_tariff is not None:
-                        blocks.append({
-                            "start": block_start.strftime("%H:%M"),
-                            "end": check_time.strftime("%H:%M"),
-                            "tariff": current_tariff,
-                        })
+                        _close(check_time.strftime("%H:%M"))
                     current_tariff = tariff
                     block_start = check_time
 
         # Close last block
         if current_tariff is not None and block_start is not None:
-            blocks.append({
-                "start": block_start.strftime("%H:%M"),
-                "end": "24:00",
-                "tariff": current_tariff,
-            })
+            _close("24:00")
 
         return blocks

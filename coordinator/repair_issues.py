@@ -31,6 +31,8 @@ spamming", 2026-06-06) drove this work.
 from __future__ import annotations
 
 import logging
+import re
+import urllib.parse
 from typing import Optional
 
 from homeassistant.core import HomeAssistant
@@ -51,6 +53,18 @@ _LOGGER = logging.getLogger(__name__)
 # 10-30 s) and stay silent — log channel was already demoted in
 # v1.7.1-beta.9.
 UNAVAILABLE_REPAIR_THRESHOLD_S: int = 300  # 5 minutes
+
+# (#945) The two things that can be wrong with a charger's ENABLE surface,
+# spelled once. They are the ``error`` detail of ``charger_actuation_failed``
+# — the sentence the owner reads — and they name DIFFERENT faults, so the
+# surface may not collapse them. Both are held on the wall clock above
+# (class 86): a restart makes an entity absent for minutes, and five
+# re-asserts that have not landed yet look exactly like a switch that
+# refuses to hold.
+ENABLE_UNREADABLE: str = (
+    "enable switch unavailable/locked — cannot start charging")
+ENABLE_WILL_NOT_HOLD: str = (
+    "enable switch will not stay on — cannot start charging")
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +95,7 @@ def raise_sensor_unavailable(
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="sensor_unavailable",
+            learn_more_url=next_step_url("docs", "sensor_unavailable", **_versions(hass)),
             translation_placeholders={
                 "entity_id": entity_id,
                 "friendly_name": friendly_name or entity_id,
@@ -123,6 +138,7 @@ def raise_sensor_stale(
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="sensor_stale",
+            learn_more_url=next_step_url("docs", "sensor_stale", **_versions(hass)),
             translation_placeholders={
                 "entity_id": entity_id,
                 "friendly_name": friendly_name or entity_id,
@@ -167,10 +183,22 @@ def raise_charger_actuation_failed(
             hass,
             domain=DOMAIN,
             issue_id=_actuation_issue_id(device_id),
-            is_fixable=False,
+            is_fixable=True,
             is_persistent=True,
             severity=ir.IssueSeverity.ERROR,
             translation_key="charger_actuation_failed",
+            data={
+                "copy_context": copy_context(
+                    "charger_actuation_failed", reason=str(error or ""),
+                    brand=str(name or ""), **_versions(hass)),
+                # The flow step renders the diagnosis now, so it needs the
+                # same placeholders the issue carries (#831 follow-up).
+                "placeholders": {"name": name, "error": error},
+            },
+            learn_more_url=next_step_url(
+                "report", "charger_actuation_failed",
+                reason=str(error or ""), brand=str(name or ""),
+                **_versions(hass)),
             translation_placeholders={
                 "name": name,
                 "error": error,
@@ -188,6 +216,397 @@ def clear_charger_actuation_failed(hass: HomeAssistant, device_id: str) -> None:
         _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
 
 
+# ── #831: every repair offers the next step ─────────────────────────────────
+# A repair card is the one moment SEM has the user's attention WITH the
+# context in hand. Two kinds of repair, two kinds of link — mixing them would
+# flood the tracker with user-side misconfigurations:
+#   docs   → "your setup needs attention": a TROUBLESHOOTING.md anchor.
+#   report → "this looks like SEM's fault": a bug-report form with the
+#            context prefilled (GitHub issue forms accept per-field prefill
+#            by id). The user reviews and presses the button — or does not.
+# Privacy is load-bearing: versions, repair key and reason travel; entity ids
+# and diagnostics NEVER do (URLs are proxy-logged and truncate ~8 KB).
+
+_REPO_URL = "https://github.com/traktore-org/sem-community"
+_ENTITY_ID_RE = re.compile(
+    r"\b(?:sensor|binary_sensor|number|switch|select|button|input_\w+|climate|"
+    r"water_heater|light|cover)\.[a-z0-9_]+")
+
+#: docs-side repair key → TROUBLESHOOTING.md anchor. Pinned by
+#: tests/test_831_repair_next_step.py — every anchor must resolve to a real
+#: heading, the #219 lesson shape.
+_DOCS_ANCHORS = {
+    "sensor_unavailable": "a-configured-sensor-is-unavailable",
+    # (#900) the options wizard pinned a brand install to the generic adapter
+    "battery_platform_pinned_generic": "the-battery-platform-is-pinned-to-generic",
+    "soc_zones_out_of_order": "your-battery-soc-zones-are-out-of-order",
+    # (#911) the grid meters were guessed by name — set them explicitly
+    "split_grid_guessed": "sem-guessed-your-grid-power-meters",
+    # (#947) the guess was checked against the counters and failed
+    "split_grid_rejected": "sem-could-not-find-your-grid-power-meters",
+    # (#935) files from an install that came before this one
+    "previous_install_leftovers": "files-from-a-previous-sem-install",
+    "sensor_stale": "a-sensor-stopped-updating-stale",
+    "no_forecast_integration": "no-solar-forecast-integration-found",
+    "no_recorder": "the-recorder-is-not-available",
+    "heat_pump_relay_unavailable": "heat-pump-sg-ready-relay-unavailable",
+    "hot_water_entity_unavailable": "hot-water-switch-unavailable",
+    "hot_water_temperature_sensor_unavailable":
+        "hot-water-temperature-sensor-unavailable",
+    "heat_pump_partial_sg_ready": "heat-pump-only-one-sg-ready-relay",
+    "heat_pump_contact_values_missing": "heat-pump-sg-ready-contact-values",
+    "charger_control_entity_broken": "a-charger-control-entity-is-broken",
+    # (#915) a battery control SEM wrote never reflected the value
+    "battery_control_write_not_taken": "a-battery-control-write-is-not-taken",
+    # KEBA has a dedicated deep-dive doc — richer than a troubleshooting
+    # section, so the builder serves it whole (a full URL passes through).
+    "keba_failsafe_active":
+        "https://github.com/traktore-org/sem-community/blob/develop/docs/KEBA_FAILSAFE.md",
+    "charger_failsafe_suspected": "your-wallbox-undoes-sems-stop-on-a-timer",
+    # (#944) The stop war's stand-down — the fix is on the box or in the
+    # other controller, never in SEM.
+    "charger_stop_war_stand_down": "sem-stood-down-while-the-charger-kept-charging",
+    # (#967) The measured draw does not fit the configured phase count.
+    "charger_phase_count_mismatch":
+        "the-charger-draws-on-a-different-number-of-phases-than-sem-believes",
+    "battery_force_discharge_unsupported":
+        "the-inverter-refuses-forced-discharge",
+    # (#872) Same withdrawal, different culprit — the entity rather than the
+    # device. Its own section, because the fix is a different one.
+    "battery_force_discharge_entity_unstable":
+        "the-battery-power-setpoint-keeps-going-unavailable",
+    "deye_system_work_mode_invalid": "deye-system-work-mode-setup-cannot-be-used",
+    "battery_operating_mode_unexpected":
+        "the-battery-is-in-a-mode-sem-does-not-expect",
+    # (#877) Two ways the rebuild button can come back short, two sections —
+    # the fix for each is a different sensor.
+    "battery_night_backfill_blocked":
+        "sem-cannot-rebuild-your-battery-night-history",
+    "battery_night_backfill_incomplete":
+        "rebuilt-nights-cannot-see-what-the-grid-contributed",
+    # (#882) A load set to current control aimed at a watt entity.
+    "load_current_control_wrong_unit":
+        "a-load-is-set-to-current-control-but-its-entity-is-in-watts",
+    # (#896) The peak is driven by a load SEM does not control.
+    "load_shed_futile": "the-grid-peak-is-driven-by-a-load-sem-does-not-control",
+}
+
+
+def copy_context(key: str, *, reason: str = "", brand: str = "",
+                 sem_version: str = "", ha_version: str = "") -> str:
+    """The selectable text the RepairsFlow shows (#831) — same fields as the
+    report URL, same privacy rule (the caller passes scrubbed reasons)."""
+    lines = [f"Repair: {key}"]
+    if brand:
+        lines.append(f"Hardware: {brand}")
+    if sem_version:
+        lines.append(f"SEM: {sem_version}")
+    if ha_version:
+        lines.append(f"Home Assistant: {ha_version}")
+    if reason:
+        lines.append(f"Detail: {_ENTITY_ID_RE.sub('(entity)', str(reason))}")
+    return "\n".join(lines)
+
+
+def _docs_ref(sem_version: str) -> str:
+    """(2.1 audit, item 7) A beta runs from develop; its docs anchors do not
+    exist on main until the stable merge. Link the branch the running
+    version came from, so a repair's deep link never 404s from a beta."""
+    v = str(sem_version or "")
+    return "develop" if ("beta" in v or "rc" in v or not v) else "main"
+
+
+def next_step_url(kind: str, key: str, *, reason: str = "",
+                  sem_version: str = "", ha_version: str = "",
+                  brand: str = "") -> str:
+    """The one builder — no call site hand-rolls a URL (#831).
+
+    ``kind="docs"`` → a TROUBLESHOOTING anchor. ``kind="report"`` → the
+    bug-report form, prefilled. Only FREE-TEXT fields are prefilled:
+    ``inverter``/``charger`` are dropdowns and a value that does not exactly
+    match an option renders empty — the brand rides the description line
+    instead, where it survives any option-list rename.
+    """
+    if kind == "docs":
+        anchor = _DOCS_ANCHORS.get(key, "")
+        ref = _docs_ref(sem_version)
+        if anchor.startswith("http"):
+            return anchor.replace("/blob/develop/", f"/blob/{ref}/").replace(
+                "/blob/main/", f"/blob/{ref}/")
+        return f"{_REPO_URL}/blob/{ref}/docs/TROUBLESHOOTING.md#{anchor}"
+    # Entity ids never enter a logged URL — scrub even when a reason string
+    # embeds one (they routinely do; that is the card's job, not the URL's).
+    clean_reason = _ENTITY_ID_RE.sub("(entity)", str(reason or ""))
+    desc = f"Repair: {key}"
+    if brand:
+        desc += f" — {brand}"
+    if clean_reason:
+        desc += f" — {clean_reason}"
+    q = urllib.parse.urlencode({
+        "template": "bug_report.yml",
+        "sem-version": sem_version or "",
+        "ha-version": ha_version or "",
+        "description": desc,
+    })
+    return f"{_REPO_URL}/issues/new?{q}"
+
+
+def _versions(hass: HomeAssistant) -> dict:
+    """SEM + HA versions for the report prefill, resolved in one place."""
+    sem = ""
+    try:
+        integ = hass.data.get("integrations", {}).get(DOMAIN)
+        v = getattr(integ, "version", None)
+        sem = v if isinstance(v, str) else ""
+    except Exception:  # noqa: BLE001
+        sem = ""
+    if not sem:
+        try:
+            v = hass.data.get(DOMAIN, {}).get("_manifest_version")
+            sem = v if isinstance(v, str) else ""
+        except Exception:  # noqa: BLE001
+            sem = ""
+    try:
+        from homeassistant.const import __version__ as ha_ver
+    except Exception:  # noqa: BLE001
+        ha_ver = ""
+    return {"sem_version": sem, "ha_version": ha_ver if isinstance(ha_ver, str) else ""}
+
+
+def raise_split_grid_guessed(hass: HomeAssistant, *, import_entity, export_entity) -> None:
+    """(#911) The grid meters were adopted by entity-name pattern with no
+    device evidence. One persistent Repair naming both picks; cleared by a
+    same-device pair, an explicit pair, or a rediscovery.
+
+    (#947) This is now the SOFTER of two: SEM has candidates it is still
+    checking against the energy counters. Raising it retires the harder one,
+    because a pair cannot be both under test and already disproved."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, "split_grid_rejected")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete (split_grid_rejected) failed: %s", e)
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="split_grid_guessed",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="split_grid_guessed",
+            learn_more_url=next_step_url("docs", "split_grid_guessed", **_versions(hass)),
+            translation_placeholders={
+                "import_entity": str(import_entity or "—"),
+                "export_entity": str(export_entity or "—"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create (split_grid_guessed) failed: %s", e)
+
+
+def raise_split_grid_rejected(hass: HomeAssistant, *, import_entity, export_entity) -> None:
+    """(#947) The counters have answered: these name-matched sensors do not
+    track the grid energy counters, so they are not the meters and SEM is
+    reporting NO grid power rather than a wrong one.
+
+    A separate issue id from its softer sibling, which it retires — same
+    entities, a different situation for the user, and one Repair must never
+    quietly change its own story under a reader.
+    """
+    try:
+        ir.async_delete_issue(hass, DOMAIN, "split_grid_guessed")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete (split_grid_guessed) failed: %s", e)
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="split_grid_rejected",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="split_grid_rejected",
+            learn_more_url=next_step_url("docs", "split_grid_rejected", **_versions(hass)),
+            translation_placeholders={
+                "import_entity": str(import_entity or "—"),
+                "export_entity": str(export_entity or "—"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create (split_grid_rejected) failed: %s", e)
+
+
+def clear_split_grid_guessed(hass: HomeAssistant) -> None:
+    """Retire BOTH grid-guess notices — the question is settled."""
+    for issue_id in ("split_grid_guessed", "split_grid_rejected"):
+        try:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("issue_registry.delete (%s) failed: %s", issue_id, e)
+
+
+def raise_soc_zones_out_of_order(hass: HomeAssistant, *, priority, buffer,
+                                  auto_start) -> None:
+    """(#870) The three battery SOC zones are not in ascending order.
+
+    Since #870 all three are settable anywhere in 5..100, because the old
+    minimums were enforcing the ordering by accident and made a perfectly
+    reasonable 20/30/50 layout impossible. ``decide.soc_zone`` sorts them
+    so the boundaries still mean what the numbers say and no zone is ever
+    skipped — but a user who wrote them out of order made a mistake, and
+    silently repairing a mistake teaches nothing. Say so, once, naming
+    what they set and what SEM is therefore using."""
+    lo, mid, hi = sorted((float(priority), float(buffer), float(auto_start)))
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="soc_zones_out_of_order",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="soc_zones_out_of_order",
+            learn_more_url=next_step_url("docs", "soc_zones_out_of_order",
+                                         **_versions(hass)),
+            translation_placeholders={
+                "priority": f"{float(priority):g}",
+                "buffer": f"{float(buffer):g}",
+                "auto_start": f"{float(auto_start):g}",
+                "used": f"{lo:g} / {mid:g} / {hi:g}",
+            },
+        )
+    except Exception as e:  # noqa: BLE001 — never fail the cycle over a repair
+        _LOGGER.debug("issue_registry.create (soc_zones_out_of_order): %s", e)
+
+
+def clear_soc_zones_out_of_order(hass: HomeAssistant) -> None:
+    try:
+        ir.async_delete_issue(hass, DOMAIN, "soc_zones_out_of_order")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete (soc_zones_out_of_order): %s", e)
+
+
+def raise_battery_platform_pinned_generic(hass: HomeAssistant, *, brand: str) -> None:
+    """(#900) The battery platform is explicitly ``generic`` on an install
+    whose ``brand`` integration is loaded — the wizard's old default put it
+    there. One persistent Repair; cleared when the option changes."""
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="battery_platform_pinned_generic",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="battery_platform_pinned_generic",
+            learn_more_url=next_step_url("docs", "battery_platform_pinned_generic", **_versions(hass)),
+            translation_placeholders={"brand": brand},
+        )
+    except Exception as e:  # noqa: BLE001 — never fail the cycle over a repair
+        _LOGGER.debug("issue_registry.create failed for pinned platform: %s", e)
+
+
+def clear_battery_platform_pinned_generic(hass: HomeAssistant) -> None:
+    try:
+        ir.async_delete_issue(hass, DOMAIN, "battery_platform_pinned_generic")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def raise_battery_operating_mode_unexpected(hass: HomeAssistant, entity_id: str,
+                                            *, mode: str, expected: str) -> None:
+    """(#845) The inverter's operating-policy selector is in a mode SEM's
+    model does not expect. Observe-only: not fixable in-app, because a
+    deliberate ``fully_fed_to_grid`` is a legitimate choice SEM must not
+    fight — the Repair names the disagreement and the user decides."""
+    try:
+        ir.async_create_issue(
+            hass, domain=DOMAIN,
+            issue_id=f"battery_operating_mode_unexpected_{entity_id}",
+            is_fixable=False, is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="battery_operating_mode_unexpected",
+            translation_placeholders={
+                "entity_id": entity_id, "mode": str(mode),
+                "expected": str(expected),
+            },
+            learn_more_url=next_step_url(
+                "docs", "battery_operating_mode_unexpected",
+                **_versions(hass)),
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create failed for %s: %s", entity_id, e)
+
+
+def clear_battery_operating_mode_unexpected(hass: HomeAssistant, entity_id: str) -> None:
+    try:
+        ir.async_delete_issue(
+            hass, DOMAIN, f"battery_operating_mode_unexpected_{entity_id}")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", entity_id, e)
+
+
+def raise_deye_system_work_mode_invalid(hass: HomeAssistant, entity_id: str,
+                                        *, reason: str) -> None:
+    """(#827, 2.1 audit) A System Work Mode setup SEM cannot use — the reason
+    used to land in a private attribute nobody reads."""
+    try:
+        ir.async_create_issue(
+            hass, domain=DOMAIN,
+            issue_id=f"deye_system_work_mode_invalid_{entity_id}",
+            is_fixable=False, is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="deye_system_work_mode_invalid",
+            translation_placeholders={"entity_id": entity_id, "reason": reason},
+            learn_more_url=next_step_url("docs", "deye_system_work_mode_invalid",
+                                         **_versions(hass)),
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create failed for %s: %s", entity_id, e)
+
+
+def clear_deye_system_work_mode_invalid(hass: HomeAssistant, entity_id: str) -> None:
+    try:
+        ir.async_delete_issue(hass, DOMAIN, f"deye_system_work_mode_invalid_{entity_id}")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", entity_id, e)
+
+
+def _failsafe_issue_id(device_id: str) -> str:
+    return f"charger_failsafe_suspected_{device_id}"
+
+
+def raise_charger_failsafe_suspected(
+    hass: HomeAssistant, device_id: str, *, name: str, interval_s: float,
+) -> None:
+    """(#823) The box re-enabled itself on a CONSTANT interval after SEM's
+    stop — a charger-side failsafe/controller-timeout fallback. SEM cannot
+    write failsafe registers on a generic charger and must not guess register
+    numbers; the fix is a one-time change on the box, so this is instruction,
+    not war (#763)."""
+    try:
+        ir.async_create_issue(
+            hass, domain=DOMAIN,
+            issue_id=_failsafe_issue_id(device_id),
+            is_fixable=False, is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="charger_failsafe_suspected",
+            learn_more_url=next_step_url("docs", "charger_failsafe_suspected", **_versions(hass)),
+            translation_placeholders={
+                "name": name, "interval_s": str(int(interval_s)),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create failed for %s: %s", device_id, e)
+
+
+def clear_charger_failsafe_suspected(hass: HomeAssistant, device_id: str) -> None:
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _failsafe_issue_id(device_id))
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
+
+
 def _battery_force_discharge_issue_id(entity_id: str) -> str:
     return f"battery_force_discharge_unsupported_{entity_id}"
 
@@ -197,6 +616,7 @@ def raise_battery_force_discharge_unsupported(
     entity_id: str,
     *,
     error: str,
+    unstable: bool = False,
 ) -> None:
     """File a repair when the battery refuses the forcible-discharge write.
 
@@ -208,8 +628,30 @@ def raise_battery_force_discharge_unsupported(
 
     #799's lesson applies — a log line is not a surface. Raised once the
     capability is withdrawn; cleared the moment a write succeeds again.
+
+    (#872) ``unstable`` picks the OTHER story. One repair was covering two
+    faults, and its text asserted the wrong one outright — *"the inverter's
+    firmware simply does not implement writing that register"* — while SEM's
+    own unit check had been refusing the same entity on other cycles. That
+    reads as a verdict, and it sent Rien to his firmware when the actionable
+    fault was an entity going unavailable. Same issue_id either way, so a
+    case that turns out to be the other one REPLACES its repair instead of
+    leaving a contradictory pair on the Repairs page.
     """
     try:
+        # Both keys spelled out: the #831 scanner classifies repairs by
+        # reading the literals in this file, and a computed key is a repair
+        # nobody has decided a next step for.
+        if unstable:
+            _key = "battery_force_discharge_entity_unstable"
+            _url = next_step_url(
+                "docs", "battery_force_discharge_entity_unstable",
+                **_versions(hass))
+        else:
+            _key = "battery_force_discharge_unsupported"
+            _url = next_step_url(
+                "docs", "battery_force_discharge_unsupported",
+                **_versions(hass))
         ir.async_create_issue(
             hass,
             domain=DOMAIN,
@@ -217,7 +659,8 @@ def raise_battery_force_discharge_unsupported(
             is_fixable=False,
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
-            translation_key="battery_force_discharge_unsupported",
+            translation_key=_key,
+            learn_more_url=_url,
             translation_placeholders={
                 "entity_id": entity_id,
                 "error": error,
@@ -236,6 +679,113 @@ def clear_battery_force_discharge_unsupported(
             hass, DOMAIN, _battery_force_discharge_issue_id(entity_id))
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.delete failed for %s: %s", entity_id, e)
+
+
+def _load_unit_issue_id(device_id: str) -> str:
+    return f"load_current_control_wrong_unit_{device_id}"
+
+
+def clear_load_current_control_wrong_unit(
+    hass: HomeAssistant, device_id: str,
+) -> None:
+    """Clear the #882 repair.
+
+    Its RAISE is gone: #882 could only warn that a load set to "current"
+    control pointed at a POWER entity, because SEM had no class that
+    writes watts. #880 built one, so that pairing is now driven instead of
+    refused. The clear stays — an install upgrading from a beta that
+    raised it must not keep a standing repair for something that works.
+    """
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _load_unit_issue_id(device_id))
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
+
+
+_BACKFILL_ISSUE_ID = "battery_night_backfill_needs_sensors"
+
+
+def raise_battery_night_backfill_blocked(
+    hass: HomeAssistant,
+    *,
+    missing: str,
+) -> None:
+    """The user pressed the button and SEM cannot rebuild anything (#877).
+
+    A person who presses "Rebuild from history" is asking a direct question
+    and deserves a direct answer that OUTLIVES the moment. A notification is
+    dismissed and gone; the missing sensor is not. Guido, 31.08: *"if a user
+    presses the button and not all requirements are met it should create a
+    repair"* — so the refusal goes where unfinished setup lives, with a docs
+    anchor that says which sensor and why.
+
+    Cleared the moment a rebuild succeeds with every leg accounted for.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_BACKFILL_ISSUE_ID,
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="battery_night_backfill_blocked",
+            learn_more_url=next_step_url(
+                "docs", "battery_night_backfill_blocked", **_versions(hass)),
+            translation_placeholders={"missing": missing},
+        )
+    except Exception as e:  # noqa: BLE001 — never fail a service over a repair
+        _LOGGER.debug("issue_registry.create failed for backfill: %s", e)
+
+
+def raise_battery_night_backfill_incomplete(
+    hass: HomeAssistant,
+    *,
+    missing: str,
+    unbalanced: int,
+    recovered: int,
+) -> None:
+    """It rebuilt, but the nights under-state the house (#877).
+
+    A DIFFERENT fault from the one above and deliberately a different card:
+    #872 is the lesson that one repair covering two faults ends up asserting
+    the wrong one. Here the rebuild worked — what is missing is the evidence
+    to tell how much of each night the GRID carried, so every reconstructed
+    night reports only what the battery gave. The estimate reads low, which
+    is the unsafe direction, and the user can fix it by adding a sensor.
+
+    Same issue_id as the blocked case: an install that gains its discharge
+    counter and then hits this one REPLACES its card rather than collecting
+    two contradictory ones.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_BACKFILL_ISSUE_ID,
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="battery_night_backfill_incomplete",
+            learn_more_url=next_step_url(
+                "docs", "battery_night_backfill_incomplete",
+                **_versions(hass)),
+            translation_placeholders={
+                "missing": missing,
+                "unbalanced": str(unbalanced),
+                "recovered": str(recovered),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create failed for backfill: %s", e)
+
+
+def clear_battery_night_backfill(hass: HomeAssistant) -> None:
+    """Cleared on a rebuild that accounted for every leg."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _BACKFILL_ISSUE_ID)
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for backfill: %s", e)
 
 
 def _stop_unenforceable_issue_id(device_id: str) -> str:
@@ -268,10 +818,25 @@ def raise_charger_stop_unenforceable(
             hass,
             domain=DOMAIN,
             issue_id=_stop_unenforceable_issue_id(device_id),
-            is_fixable=False,
+            is_fixable=True,
             is_persistent=True,
             severity=ir.IssueSeverity.ERROR,
             translation_key="charger_stop_unenforceable",
+            data={
+                "copy_context": copy_context(
+                    "charger_stop_unenforceable",
+                    reason=f"stop unenforceable at {power_w:.0f} W",
+                    brand=str(name or ""), **_versions(hass)),
+                "placeholders": {
+                    "name": name,
+                    "power": f"{power_w:.0f}",
+                    "entity": entity,
+                },
+            },
+            learn_more_url=next_step_url(
+                "report", "charger_stop_unenforceable",
+                reason=f"stop unenforceable at {power_w:.0f} W", brand=str(name or ""),
+                **_versions(hass)),
             translation_placeholders={
                 "name": name,
                 "power": f"{power_w:.0f}",
@@ -286,6 +851,117 @@ def clear_charger_stop_unenforceable(hass: HomeAssistant, device_id: str) -> Non
     """Clear the #627 repair once the charger is no longer drawing."""
     try:
         ir.async_delete_issue(hass, DOMAIN, _stop_unenforceable_issue_id(device_id))
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
+
+
+def _stop_war_stand_down_issue_id(device_id: str) -> str:
+    return f"charger_stop_war_stand_down_{device_id}"
+
+
+def raise_charger_stop_war_stand_down(
+    hass: HomeAssistant,
+    device_id: str,
+    *,
+    name: str,
+    power_w: float,
+    minutes: float,
+) -> None:
+    """(#944) SEM stood down from a stop war (#763) and the car still draws.
+
+    The #627 repair's sibling with the opposite cause: there no stop
+    mechanism exists; here one exists and WORKS — every stop took — and the
+    box undid it each time, by its own auto-start or on another controller's
+    command. Standing down is right for the car; doing it with only a log
+    line left an owner to find out from a draining house battery, 80 minutes
+    in (PROD 10.09.2026).
+
+    Not persistent: the ceasefire lives in the reconciler's memory and a
+    restart forgets it, so the notice must not outlive it.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_stop_war_stand_down_issue_id(device_id),
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="charger_stop_war_stand_down",
+            learn_more_url=next_step_url(
+                "docs", "charger_stop_war_stand_down", **_versions(hass)),
+            translation_placeholders={
+                "name": name,
+                "power": f"{power_w:.0f}",
+                "minutes": str(max(1, int(round(minutes)))),
+            },
+        )
+    except Exception as e:  # noqa: BLE001 — never fail the cycle over a repair
+        _LOGGER.debug("issue_registry.create failed for %s: %s", device_id, e)
+
+
+def clear_charger_stop_war_stand_down(hass: HomeAssistant, device_id: str) -> None:
+    """(#944) The draw stopped, the war ended, or SEM is stopping again."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _stop_war_stand_down_issue_id(device_id))
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
+
+
+def _phase_mismatch_issue_id(device_id: str) -> str:
+    return f"charger_phase_count_mismatch_{device_id}"
+
+
+def raise_charger_phase_count_mismatch(
+    hass: HomeAssistant,
+    device_id: str,
+    *,
+    name: str,
+    believed: int,
+    measured: int,
+    watts_per_amp: float,
+    nominal_wpa: float,
+    samples: int,
+) -> None:
+    """(#967) The draw SEM measured does not fit the phase count it converts
+    with — and SEM has been converting with it anyway.
+
+    Every amp SEM commands is ``watts ÷ (phases × volts)``, so this one
+    number sets the charge current, the planner's minimum, and the peak
+    guard's headroom. Believing 3 where 1 is true starves the car (@alexmc1510
+    got 6 A of a 5 kW budget); believing 1 where 3 is true commands three
+    times the watts SEM thinks it bought, straight through a peak limit. The
+    learner has always been able to see this — a refused sample named
+    ``phase_belief`` IS the observation — and spent it as a rejection.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_phase_mismatch_issue_id(device_id),
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="charger_phase_count_mismatch",
+            learn_more_url=next_step_url(
+                "docs", "charger_phase_count_mismatch", **_versions(hass)),
+            translation_placeholders={
+                "name": name,
+                "believed": str(int(believed)),
+                "measured": str(int(measured)),
+                "watts_per_amp": f"{float(watts_per_amp):.0f}",
+                "nominal": f"{float(nominal_wpa):.0f}",
+                "cycles": str(int(samples)),
+            },
+        )
+    except Exception as e:  # noqa: BLE001 — never fail the cycle over a repair
+        _LOGGER.debug("issue_registry.create failed for %s: %s", device_id, e)
+
+
+def clear_charger_phase_count_mismatch(hass: HomeAssistant, device_id: str) -> None:
+    """(#967) The count was corrected, or the draw started fitting it."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _phase_mismatch_issue_id(device_id))
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.delete failed for %s: %s", device_id, e)
 
@@ -324,10 +1000,24 @@ def raise_soc_cap_unenforceable(
             hass,
             domain=DOMAIN,
             issue_id=_soc_cap_issue_id(device_id),
-            is_fixable=False,
+            is_fixable=True,
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="soc_cap_unenforceable",
+            data={
+                "copy_context": copy_context(
+                    "soc_cap_unenforceable",
+                    reason=f"SOC cap {target_soc:.0f}% unenforceable",
+                    brand=str(name or ""), **_versions(hass)),
+                "placeholders": {
+                    "name": name,
+                    "target": f"{target_soc:.0f}",
+                },
+            },
+            learn_more_url=next_step_url(
+                "report", "soc_cap_unenforceable",
+                reason=f"SOC cap {target_soc:.0f}% unenforceable", brand=str(name or ""),
+                **_versions(hass)),
             translation_placeholders={
                 "name": name,
                 "target": f"{target_soc:.0f}",
@@ -350,6 +1040,40 @@ def clear_soc_cap_unenforceable(hass: HomeAssistant, device_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def raise_load_shed_futile(hass: HomeAssistant, *, grid_import_kw: float,
+                           target_kw: float, uncontrolled_kw: float,
+                           managed_charger_kw: float = 0.0) -> None:
+    """(#896) Shedding everything SEM may shed would still leave the meter
+    above the target: the peak belongs to a load SEM does not control. Filed
+    once per episode instead of shedding the house (forum #30)."""
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id="load_shed_futile",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="load_shed_futile",
+            learn_more_url=next_step_url("docs", "load_shed_futile", **_versions(hass)),
+            translation_placeholders={
+                "grid_import_kw": f"{grid_import_kw:.1f}",
+                "target_kw": f"{target_kw:.1f}",
+                "uncontrolled_kw": f"{uncontrolled_kw:.1f}",
+                "managed_charger_kw": f"{managed_charger_kw:.1f}",
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create load_shed_futile failed: %s", e)
+
+
+def clear_load_shed_futile(hass: HomeAssistant) -> None:
+    try:
+        ir.async_delete_issue(hass, DOMAIN, "load_shed_futile")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete load_shed_futile failed: %s", e)
+
+
 def raise_no_forecast_integration(hass: HomeAssistant) -> None:
     """File a repair when SEM has been running without a usable
     solar-forecast integration for long enough that the user
@@ -363,6 +1087,7 @@ def raise_no_forecast_integration(hass: HomeAssistant) -> None:
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="no_forecast_integration",
+            learn_more_url=next_step_url("docs", "no_forecast_integration", **_versions(hass)),
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.create no_forecast failed: %s", e)
@@ -387,6 +1112,7 @@ def raise_no_recorder(hass: HomeAssistant) -> None:
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="no_recorder",
+            learn_more_url=next_step_url("docs", "no_recorder", **_versions(hass)),
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.create no_recorder failed: %s", e)
@@ -435,6 +1161,7 @@ def raise_heat_pump_relay_unavailable(
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="heat_pump_relay_unavailable",
+            learn_more_url=next_step_url("docs", "heat_pump_relay_unavailable", **_versions(hass)),
             translation_placeholders={
                 "slot": slot,
                 "entity_id": entity_id,
@@ -501,6 +1228,7 @@ def raise_hot_water_entity_unavailable(
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="hot_water_entity_unavailable",
+            learn_more_url=next_step_url("docs", "hot_water_entity_unavailable", **_versions(hass)),
             translation_placeholders={
                 "entity_id": entity_id,
                 "minutes": str(minutes_unavailable),
@@ -551,6 +1279,7 @@ def raise_hot_water_temperature_sensor_unavailable(
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="hot_water_temperature_sensor_unavailable",
+            learn_more_url=next_step_url("docs", "hot_water_temperature_sensor_unavailable", **_versions(hass)),
             translation_placeholders={
                 "entity_id": entity_id,
                 "minutes": str(minutes_unavailable),
@@ -708,10 +1437,55 @@ def raise_heat_pump_partial_sg_ready(hass: HomeAssistant) -> None:
             is_persistent=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key="heat_pump_partial_sg_ready",
+            learn_more_url=next_step_url("docs", "heat_pump_partial_sg_ready", **_versions(hass)),
         )
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug(
             "issue_registry.create heat_pump_partial_sg_ready failed: %s", e,
+        )
+
+
+def raise_heat_pump_contact_values_missing(hass: HomeAssistant, *, contact,
+                                           entity_id, missing) -> None:
+    """(#801) A SG-Ready contact points at a text/number/select entity but
+    one of the two values SEM must write is not set.
+
+    The config flow refuses this, but the dashboard Config card saves every
+    field through ``set_option`` one at a time — so the pairing rule cannot
+    live only in the form. A contact SEM cannot drive fails EVERY write, and
+    without this the only trace is a log line: the user sees a green "saved"
+    and a heat pump that never boosts again.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=f"heat_pump_contact_values_missing_{contact}",
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="heat_pump_contact_values_missing",
+            learn_more_url=next_step_url(
+                "docs", "heat_pump_contact_values_missing", **_versions(hass)),
+            translation_placeholders={
+                "contact": str(contact),
+                "entity_id": str(entity_id or "—"),
+                "missing": str(missing),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug(
+            "issue_registry.create heat_pump_contact_values_missing failed: %s", e,
+        )
+
+
+def clear_heat_pump_contact_values_missing(hass: HomeAssistant, *, contact) -> None:
+    try:
+        ir.async_delete_issue(
+            hass, DOMAIN, f"heat_pump_contact_values_missing_{contact}")
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug(
+            "issue_registry.delete heat_pump_contact_values_missing failed: %s", e,
         )
 
 
@@ -729,11 +1503,6 @@ def clear_heat_pump_partial_sg_ready(hass: HomeAssistant) -> None:
 # ---------------------------------------------------------------------------
 
 # Where the user is sent to fix it (how + why to disable the KEBA failsafe).
-KEBA_FAILSAFE_DOC_URL = (
-    "https://github.com/traktore-org/sem-community/blob/develop/docs/KEBA_FAILSAFE.md"
-)
-
-
 def raise_keba_failsafe_active(
     hass: HomeAssistant, *, charger_name: str,
 ) -> None:
@@ -758,7 +1527,7 @@ def raise_keba_failsafe_active(
             severity=ir.IssueSeverity.WARNING,
             translation_key="keba_failsafe_active",
             translation_placeholders={"name": charger_name},
-            learn_more_url=KEBA_FAILSAFE_DOC_URL,
+            learn_more_url=next_step_url("docs", "keba_failsafe_active", **_versions(hass)),
         )
     except Exception as e:  # noqa: BLE001 — never fail the cycle over a repair
         _LOGGER.debug("issue_registry.create keba_failsafe_active failed: %s", e)
@@ -839,6 +1608,7 @@ def raise_charger_control_entity_broken(
             is_persistent=True,
             severity=ir.IssueSeverity.ERROR,
             translation_key="charger_control_entity_broken",
+            learn_more_url=next_step_url("docs", "charger_control_entity_broken", **_versions(hass)),
             translation_placeholders={
                 "name": name,
                 "entity_id": entity_id,
@@ -850,6 +1620,48 @@ def raise_charger_control_entity_broken(
         _LOGGER.debug("issue_registry.create failed for %s: %s", entity_id, e)
 
 
+def _battery_write_issue_id(entity_id: str) -> str:
+    return f"battery_control_write_not_taken_{entity_id}"
+
+
+def raise_battery_control_write_not_taken(
+    hass: HomeAssistant, *, entity_id: str, wanted: str, seen: str,
+    strikes: int,
+) -> None:
+    """(#915) SEM wrote a battery control and the entity never reflected it
+    — three cycles running. A declared key cannot say whether a register
+    accepts a write, expires it, or is a global setting the vendor says to
+    leave alone; only the first write answers that, and this is where the
+    answer surfaces instead of staying a log line."""
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_battery_write_issue_id(entity_id),
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="battery_control_write_not_taken",
+            learn_more_url=next_step_url(
+                "docs", "battery_control_write_not_taken", **_versions(hass)),
+            translation_placeholders={
+                "entity_id": entity_id,
+                "wanted": str(wanted),
+                "seen": str(seen),
+                "strikes": str(strikes),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.create failed for %s: %s", entity_id, e)
+
+
+def clear_battery_control_write_not_taken(hass: HomeAssistant, entity_id: str) -> None:
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _battery_write_issue_id(entity_id))
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for %s: %s", entity_id, e)
+
+
 def clear_charger_control_entity_broken(
     hass: HomeAssistant, device_id: str, entity_id: str,
 ) -> None:
@@ -859,3 +1671,50 @@ def clear_charger_control_entity_broken(
             hass, DOMAIN, _control_entity_issue_id(device_id, entity_id))
     except Exception as e:  # noqa: BLE001
         _LOGGER.debug("issue_registry.delete failed for %s: %s", entity_id, e)
+
+
+_PREVIOUS_INSTALL_ISSUE_ID = "previous_install_leftovers"
+
+
+def raise_previous_install_leftovers(hass: HomeAssistant, removed: int) -> None:
+    """(#935) SEM found and removed files a previous install left behind.
+
+    The stores are SEM's own and go without asking. What this card is for is
+    the half SEM must NOT take: the generated dashboard and the long-term
+    statistics of the old install's entities are the user's history, and a
+    year of solar yield is not SEM's to delete because a config entry was
+    re-created. So: say what was cleaned, name what was left, and give the one
+    action that clears the rest — ``solar_energy_management.remove_leftovers``.
+
+    Not fixable in place on purpose: the answer is a choice, not a repair, and
+    it is reversible only in the direction of keeping.
+    """
+    try:
+        ir.async_create_issue(
+            hass,
+            domain=DOMAIN,
+            issue_id=_PREVIOUS_INSTALL_ISSUE_ID,
+            is_fixable=False,
+            # Persistent, though the sweep that raises it runs once: the card
+            # is about state that OUTLIVES it — the user's statistics are
+            # still on disk — and nothing re-raises it, because after the
+            # sweep there are no orphans left to find. Non-persistent, the
+            # message would vanish at the next restart, quite possibly before
+            # anyone read it (seen on the .46 rig, 12.09).
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="previous_install_leftovers",
+            learn_more_url=next_step_url(
+                "docs", "previous_install_leftovers", **_versions(hass)),
+            translation_placeholders={"removed": str(removed)},
+        )
+    except Exception as e:  # noqa: BLE001 — never fail a setup over a repair
+        _LOGGER.debug("issue_registry.create failed for leftovers: %s", e)
+
+
+def clear_previous_install_leftovers(hass: HomeAssistant) -> None:
+    """The user answered — by running the service, or by not caring."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _PREVIOUS_INSTALL_ISSUE_ID)
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.debug("issue_registry.delete failed for leftovers: %s", e)

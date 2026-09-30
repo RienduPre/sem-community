@@ -20,6 +20,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semDefineCard, semCardSurfaceCSS } from '../base/sem-shared.js';
+import { priceLevelKey } from '../util/price-level.js';
 
 // Section index — order = visual order in the rendered tab. Each entry
 // carries a colour-accent that matches the section icon, mirroring the
@@ -42,7 +43,7 @@ const ESSENTIAL_SECTIONS = new Set([
     'overview',        // what is still missing, and the route to each
     'tariff',          // without a price, every saving SEM reports is zero
     'ev_chargers',     // the main sink on most installs
-    'battery_zones',   // the floors that keep the house covered
+    'battery_zones',   // the floors that keep the house covered,
 ]);
 
 const ESSENTIAL_CONTROLS = new Set([
@@ -54,6 +55,13 @@ const ESSENTIAL_CONTROLS = new Set([
     // Battery: the safety floor. Everything else in that section is a
     // sensor override that detection normally supplies.
     'battery_discharge_protection_enabled',
+    // (#897) Load management: the arm switch and the number it defends.
+    // The shedder switches off house circuits; hiding its on/off behind
+    // Advanced is how a first install shed a Span panel circuit by circuit
+    // at a 5 kW ceiling nobody chose (forum #30). Enabling it and setting
+    // the ceiling are one act in one place, so both are reachable here.
+    'load_management_enabled',
+    'target_peak_limit',
 ]);
 
 const ADV_KEY = 'sem_config_advanced_v1';
@@ -140,6 +148,17 @@ const SECTIONS = [
         subtitleFn: () => '',
     },
     {
+        // (2.1 audit, item 2) One home for the four 2.1 switches, the
+        // pacing picker, the AC limit and the Deye export row. An ADVANCED
+        // section: #830's default view stays at four; the Setup overview
+        // routes here.
+        // They were HA entities only, or options-flow pages 11-12.
+        id: 'battery_intelligence',
+        docs: 'https://github.com/traktore-org/sem-community/blob/develop/docs/USER_GUIDE.md#forecast-led-spending-v21',
+        titleKey: 'config_section_battery_intelligence',
+        subtitleFn: (c) => c._batteryIntelligenceSubtitle(),
+    },
+    {
         id: 'load_management',
         docs: 'https://github.com/traktore-org/sem-community/blob/develop/docs/USER_GUIDE.md#load-management-settings',
         icon: 'mdi:flash-alert',
@@ -197,6 +216,11 @@ const WATCHED = [
     'number.sem_battery_priority_soc', 'number.sem_battery_buffer_soc',
     'number.sem_battery_auto_start_soc',
     'number.sem_battery_assist_min_surplus', 'number.sem_battery_assist_max_power',
+    // arc #921
+    'switch.sem_export_guard_enabled', 'switch.sem_export_guard_override_external',
+    'switch.sem_battery_house_sink_enabled', 'switch.sem_ev_morning_window_enabled',
+    'number.sem_export_guard_engage_s', 'number.sem_export_guard_release_s',
+    'number.sem_ev_morning_window_hours', 'number.sem_battery_morning_drain_floor_soc',
     'number.sem_cheap_price_threshold', 'number.sem_expensive_price_threshold',
     'number.sem_minimum_solar_power',
     'number.sem_update_interval',
@@ -214,13 +238,28 @@ const WATCHED = [
 // #528 — entity-wiring keys that trigger an entry RELOAD when changed (mirror
 // of __init__.py:_SET_OPTION_STRUCTURAL_KEYS). Pickers for these stage their
 // edit and commit on one Apply, so the reload fires once for the whole batch.
+// (#801) Mirrors consts/devices.py — the domains a SG-Ready contact may
+// point at, and which of them are VALUE domains needing an ON/OFF value.
+// A switch contact is driven by turn_on/turn_off and needs neither.
+const CONTACT_VALUE_DOMAINS = new Set([
+    'text', 'input_text', 'number', 'input_number', 'select', 'input_select',
+]);
+const SG_READY_CONTACT_DOMAINS = ['switch', 'input_boolean', ...CONTACT_VALUE_DOMAINS];
+
 const STRUCTURAL_KEYS = new Set([
     'battery_soc_sensor',
     // #628/#696 — the three power-SOURCE overrides (Sensor sources section).
     // Read at SensorReader construction (#592/#597) → backend reloads on
     // set_option; staging batches the three into one Apply/reload.
     'grid_power_sensor', 'solar_production_sensor', 'battery_power_sensor',
+    // (#891) the fourth source. Read at SensorReader construction like the
+    // three above, so structural like them.
+    'house_power_sensor',
     'heat_pump_relay1_entity', 'heat_pump_relay2_entity',
+    // (#801) the ON/OFF values of a text/number/select contact — read at
+    // HeatPumpController construction, so structural like the entity itself.
+    'heat_pump_relay1_on_value', 'heat_pump_relay1_off_value',
+    'heat_pump_relay2_on_value', 'heat_pump_relay2_off_value',
     'heat_pump_climate_entity', 'heat_pump_power_sensor',
     'heat_pump_temperature_sensor', 'heat_pump_invert_sg_ready',
     'hot_water_entity', 'hot_water_power_sensor', 'hot_water_temperature_sensor',
@@ -229,6 +268,10 @@ const STRUCTURAL_KEYS = new Set([
     // #550 — structural TOGGLES: reload the entry too, so they stage + commit on
     // Apply like the pickers (a live flip would reload and discard staged edits).
     'battery_discharge_protection_enabled', 'battery_setpoint_bidirectional',
+    // (#809/#869) the setpoint model and its direction select are read at
+    // adapter construction, like the flag above.
+    'battery_setpoint_model', 'battery_power_direction_entity',
+    'battery_direction_discharge_value', 'battery_direction_charge_value',
 ]);
 
 class SEMConfigCard extends SEMLitBase {
@@ -387,6 +430,9 @@ class SEMConfigCard extends SEMLitBase {
     // Cached options dict from the SEM entry — refreshed on entryId
     // lookup and after any save. Reads are synchronous in render().
     _options = {};
+    // (#897) Sections the user routed to from the Setup overview this
+    // session — shown in the default view even while unconfigured.
+    _revealed = new Set();
 
     async _refreshOptions() {
         if (!this._hass) return;
@@ -445,6 +491,13 @@ class SEMConfigCard extends SEMLitBase {
     }
 
     /** Should this control appear in the current view? */
+    // (#801) True when a SG-Ready contact points at a VALUE entity, so the
+    // two value rows belong beside it. An unset or switch contact gets none.
+    _isValueContact(entityId) {
+        const eid = String(entityId || '');
+        return CONTACT_VALUE_DOMAINS.has(eid.split('.')[0]);
+    }
+
     _showsControl(key) {
         if (this._advanced) return true;
         // Entity-backed controls carry their domain; compare on the
@@ -551,7 +604,7 @@ class SEMConfigCard extends SEMLitBase {
     _tariffSubtitle() {
         const provider = this._val('tariff_provider') || '—';
         const level = this._val('tariff_price_level') || '';
-        return level ? `${provider} · ${this._t(level.toLowerCase()) || level}` : provider;
+        return level ? `${provider} · ${this._t(priceLevelKey(level)) || level}` : provider;
     }
     _heatPumpSubtitle() {
         return this._bin('heat_pump_registered')
@@ -736,6 +789,12 @@ class SEMConfigCard extends SEMLitBase {
     }
 
     _openSection(id) {
+        // (#897) A Setup-overview chip routes here. In the default view the
+        // section filter shows essentials and configured subsystems only —
+        // which is exactly what an unconfigured optional one (load
+        // management off, no heat pump yet) is not, so the route led to a
+        // section that was not rendered. What the user asked to see is shown.
+        this._revealed = new Set([...this._revealed, id]);
         this._collapsed = { ...this._collapsed, [id]: false };
         this.requestUpdate();
     }
@@ -863,6 +922,8 @@ class SEMConfigCard extends SEMLitBase {
                        vocabulary. Value fields only show once the entity is
                        set; select entities REQUIRE them, number defaults to
                        1/3 and switch to off/on. */}
+                    ${this._renderToggleNested(idx, cid, 'ev_phase_switching_enabled', 'config_ev_phase_switching',
+                        opts, 'config_help_ev_phase_switching')}
                     ${this._renderPickerNested(idx, cid, 'ev_phase_switch_entity', 'config_ev_phase_switch',
                         ['select', 'number', 'switch', 'input_select', 'input_number', 'input_boolean'],
                         null, opts, 'config_help_ev_phase_switch')}
@@ -871,6 +932,17 @@ class SEMConfigCard extends SEMLitBase {
                             opts, 'config_help_ev_phase_values', '1 / off / einphasig')}
                         ${this._renderTextNested(idx, cid, 'ev_phase_switch_value_3p', 'config_ev_phase_3p',
                             opts, 'config_help_ev_phase_values', '3 / on / dreiphasig')}` : nothing}
+                    ${''/* (2.1 audit) start/stop via a charge-mode select
+                       (go-e / Wattpilot force-state). The option labels are
+                       the integration's own vocabulary — never guessed —
+                       so they are typed here, beside the entity. */}
+                    ${this._renderPickerNested(idx, cid, 'ev_charge_mode_entity', 'config_ev_charge_mode',
+                        ['select', 'input_select'], null, opts, 'config_help_ev_charge_mode')}
+                    ${charger.ev_charge_mode_entity ? html`
+                        ${this._renderTextNested(idx, cid, 'ev_charge_mode_start', 'config_ev_charge_mode_start',
+                            opts, 'config_help_ev_charge_mode', 'On / 2')}
+                        ${this._renderTextNested(idx, cid, 'ev_charge_mode_stop', 'config_ev_charge_mode_stop',
+                            opts, 'config_help_ev_charge_mode', 'Off / 1')}` : nothing}
                     ${this._renderPickerNested(idx, cid, 'vehicle_soc_entity', 'config_ev_vehicle_soc',
                         'sensor', null, opts, 'config_help_ev_vehicle_soc')}
                     ${this._renderTargetTypeSelectNested(idx, cid, charger, opts)}
@@ -1016,8 +1088,12 @@ class SEMConfigCard extends SEMLitBase {
         if (!r) return this._t('config_detect_none');
         const n = (r.chargers || []).length;
         const nm = (r.near_misses || []).length;
-        const base = `${n} ${this._t('config_detect_chargers')}`;
-        return nm ? `${base} · ${nm} ${this._t('config_detect_near_misses')}` : base;
+        const gaps = ((r.census || {}).unknown_energy_domains || []).length
+                   + ((r.census || {}).rows_matched_nothing || []).length;
+        let base = `${n} ${this._t('config_detect_chargers')}`;
+        if (nm) base += ` · ${nm} ${this._t('config_detect_near_misses')}`;
+        if (gaps) base += ` · ${gaps} ${this._t('config_census_gaps')}`;
+        return base;
     }
 
     // (#814 Pillar B) Detected hardware with evidence. Read-only view of the
@@ -1030,6 +1106,88 @@ class SEMConfigCard extends SEMLitBase {
         }
         const chargers = r.chargers || [];
         const misses = r.near_misses || [];
+        // (#915) Controls each INSTALLED integration says it creates, matched
+        // against this box's own entities. Unconfirmed by definition.
+        const rosterProposals = r.roster_proposals || [];
+        // A proposal that says "unconfirmed" and offers no way to confirm is
+        // a chore. When the role maps to a top-level option, accepting it is
+        // one click through the same set_option path the pickers below use;
+        // when it lives inside a charger, say so instead of showing a button
+        // that would write it in the wrong place.
+        // (#915) A reason for every proposal that carries no button. The
+        // registry cannot say whether the entity LOADED, what it MEASURES,
+        // or whether a strategy select lists the options SEM would send —
+        // the backend checks the live state and says which; the card only
+        // renders the verdict. Never a bare missing button.
+        const fill = (key, vars) => Object.entries(vars).reduce(
+            (t, [k, v]) => t.split('{' + k + '}').join(v), this._t(key));
+        const whyNoButton = (p) => {
+            switch (p.action) {
+                case 'observe_only': return this._t('config_proposed_observe_only');
+                case 'not_loaded': return this._t('config_proposed_not_loaded');
+                case 'no_unit': return fill('config_proposed_no_unit', { wanted: p.unit_wanted || '' });
+                case 'unit_mismatch': return fill('config_proposed_unit_mismatch',
+                    { seen: p.unit_seen || '?', wanted: p.unit_wanted || '' });
+                case 'options_unmapped': return fill('config_proposed_options_unmapped',
+                    { missing: (p.values_missing || []).join(', '),
+                      options: (p.options || []).join(', ') });
+                case 'pair_incomplete': return fill('config_proposed_pair_incomplete',
+                    { missing: (p.missing_role || []).join(', ') });
+                case 'per_charger': return this._t('config_proposed_per_charger');
+                // (#956) a service the registry could not be asked about, or
+                // one SEM cannot drive as-is — the reason travels with the row
+                case 'unaskable':
+                case 'needs_hand_wiring': return p.reason || '';
+                default: return p.reason || '';
+            }
+        };
+        const useButton = (p, entity, fieldKey) => {
+            const st = this._saveStatus?.[fieldKey];
+            return html`
+                <button class="sem-btn" ?disabled=${st === 'saving'}
+                    @click=${() => this._saveOption(p.config_key, entity, fieldKey)}>
+                    ${st === 'saving' ? this._t('config_proposed_using')
+                                      : this._t('config_proposed_use')}
+                </button>
+                ${st === 'ok' ? html`<span style="opacity:.7"> ✓</span>` : nothing}
+                ${st && st !== 'ok' && st !== 'saving' ? html`<span style="opacity:.7"> ${st}</span>` : nothing}`;
+        };
+        const proposalRow = (role, p) => {
+            // (#956) a proposal may name a SERVICE instead of an entity
+            // (KEBA's set_current); it renders the same, lands per charger.
+            const what = p.entity || p.service || (p.candidates || []).join(' / ') || '';
+            const already = this._options?.[p.config_key] === p.entity;
+            const reason = whyNoButton(p);
+            // (#915) the runners-up: a brand that declares several keys for
+            // one role gets a deterministic first pick, and the user gets to
+            // see there WAS a choice — each alternative carries its own
+            // button, so a two-pack install can pick the right pack.
+            const alts = (p.alternatives || []).filter((a) => a && a.entity);
+            return html`
+            <div class="row">
+                <span class="lbl">${role}</span>
+                <span style="font-family:monospace;font-size:0.85em">${what}
+                    <span style="opacity:.6"> · ${p.matched_key}</span>
+                </span>
+            </div>
+            <div class="row" style="margin:-6px 0 6px">
+                <span class="lbl"></span>
+                <span>
+                    ${p.action === 'set_option' && !already ? useButton(p, p.entity, 'prop_' + role) : nothing}
+                    ${already ? html`<span style="opacity:.7">${this._t('config_proposed_already')}</span>` : nothing}
+                    ${reason ? html`<span style="opacity:.7">${reason}</span>` : nothing}
+                </span>
+            </div>
+            ${alts.map((a, i) => html`
+                <div class="row" style="margin:-6px 0 6px">
+                    <span class="lbl" style="opacity:.6">${this._t('config_proposed_or')}</span>
+                    <span style="font-family:monospace;font-size:0.85em">${a.entity}
+                        <span style="opacity:.6"> · ${a.matched_key}</span>
+                        ${p.action === 'set_option' && p.config_key && this._options?.[p.config_key] !== a.entity
+                            ? html` ${useButton(p, a.entity, 'prop_' + role + '_alt' + i)}` : nothing}
+                    </span>
+                </div>`)}`;
+        };
         const prober = r.prober_candidates || [];
         const dis = r.disagreements || [];
         const roleRow = (k, v) => html`
@@ -1037,8 +1195,32 @@ class SEMConfigCard extends SEMLitBase {
                 <span style="font-family:monospace;font-size:0.85em">${v.entity || v.value || '—'}
                     ${v.device_class ? html`<span style="opacity:.6"> · ${v.domain}/${v.device_class}</span>` : nothing}
                 </span></div>`;
+        const census = r.census || {};
+        const unknown = census.unknown_energy_domains || [];
+        const nomatch = census.rows_matched_nothing || [];
+        // (#915) The same gap with a name on it. A bare domain tells the user
+        // nothing they can act on; "EG4 Web Monitor · 412 installs" tells them
+        // what to report. Falls back to the bare domain when the roster has
+        // never heard of it — which is itself worth seeing.
+        const named = census.unknown_energy_domains_named || [];
+        const describe = (dom) => {
+            const d = named.find((x) => x && x.domain === dom);
+            if (!d || !d.name) return dom;
+            const n = d.installs ? ` · ${d.installs} ${this._t('config_census_installs')}` : '';
+            return `${d.name}${n}`;
+        };
         return html`
             <div class="setting-help-text" style="margin:0 0 6px">${this._t('config_detect_intro')}</div>
+            ${unknown.length ? html`
+                <div class="row" style="color:var(--warning-color,#ffa726)">
+                    <span class="lbl">${this._t('config_census_unknown')}</span>
+                    <span style="font-family:monospace">${unknown.map(describe).join(', ')}</span>
+                </div>` : nothing}
+            ${nomatch.length ? html`
+                <div class="row" style="color:var(--warning-color,#ffa726)">
+                    <span class="lbl">${this._t('config_census_nomatch')}</span>
+                    <span style="font-family:monospace">${nomatch.join(', ')}</span>
+                </div>` : nothing}
             ${chargers.map((c) => html`
                 <div class="row" style="font-weight:600">
                     <span class="lbl">${this._t('config_detect_charger')}: ${c.platform}</span>
@@ -1052,12 +1234,49 @@ class SEMConfigCard extends SEMLitBase {
             `)}
             ${misses.map((m) => html`
                 <div class="row" style="color:${T.warn || '#ffb74d'}">
-                    <span class="lbl">⚠ ${m.platform}</span>
+                    <span class="lbl">⚠ ${m.roster?.name || m.platform}</span>
                     <span>${this._t('config_detect_near_miss')}</span>
                 </div>
                 <div class="setting-help-text" style="margin:-2px 0 8px">
                     ${(m.entities || []).map((e) => e.entity).join(', ')}
-                </div>`)}
+                </div>
+                ${m.suggested_charger?.id ? html`
+                    <div class="row" style="margin:-2px 0 8px">
+                        <span class="lbl"></span>
+                        <span>
+                            <button class="sem-btn" ?disabled=${this._chargerBusy}
+                                @click=${() => this._addSuggestedCharger(m.suggested_charger)}>
+                                ${this._t('config_near_miss_add')}
+                            </button>
+                        </span>
+                    </div>` : html`
+                    <div class="row" style="margin:-2px 0 8px">
+                        <span class="lbl"></span>
+                        <span><a class="sem-btn" target="_blank" rel="noopener"
+                                 href=${this._reportNearMissUrl(m)}>
+                            ${this._t('config_near_miss_report')}
+                        </a></span>
+                    </div>`}
+                ${Object.keys(m.proposed_roles || {}).length ? html`
+                    <div class="row" style="font-weight:600">
+                        <span class="lbl">${this._t('config_proposed_roles')}</span>
+                        <span style="opacity:.7">${this._t('config_proposed_unconfirmed')}</span>
+                    </div>
+                    ${Object.entries(m.proposed_roles).map(([role, p]) => proposalRow(role, p))}
+                    <div class="setting-help-text" style="margin:2px 0 8px">
+                        ${this._t('config_proposed_help')}
+                    </div>` : nothing}`)}
+            ${rosterProposals.map((rp) => html`
+                <div class="row" style="font-weight:600">
+                    <span class="lbl">🧩 ${rp.roster?.name || rp.domain}</span>
+                    <span style="opacity:.7">${this._t('config_proposed_unconfirmed')}</span>
+                </div>
+                ${Object.entries(rp.proposed_roles || {}).map(([role, p]) => proposalRow(role, p))}
+            `)}
+            ${rosterProposals.length ? html`
+                <div class="setting-help-text" style="margin:2px 0 8px">
+                    ${this._t('config_proposed_help')}
+                </div>` : nothing}
             ${dis.filter((d) => d.kind === 'prober_only').map((d) => html`
                 <div class="row"><span class="lbl">🔎 ${d.platform}</span>
                     <span>${this._t('config_detect_prober_only')}</span></div>`)}
@@ -1080,6 +1299,15 @@ class SEMConfigCard extends SEMLitBase {
             ${this._renderPicker('battery_power_sensor', 'config_battery_power_sensor',
                 'sensor', 'power', opts, 'config_help_battery_power_sensor')}
             ${this._sourceUnavailableWarning('battery_power_sensor', opts, T)}
+            ${/* (#891) The house as the inverter measures it. SEM works its
+                  own figure out from the other four, and on a hybrid that
+                  sum carries the inverter's conversion losses. Naming a
+                  sensor here publishes both and the difference; SEM's own
+                  number is unchanged, which is why there is no question
+                  about the car. */ ''}
+            ${this._renderPicker('house_power_sensor', 'config_house_power_sensor',
+                'sensor', 'power', opts, 'config_help_house_power_sensor')}
+            ${this._sourceUnavailableWarning('house_power_sensor', opts, T)}
         `;
     }
 
@@ -1087,7 +1315,8 @@ class SEMConfigCard extends SEMLitBase {
     _sensorSourcesSubtitle() {
         const opts = this._options || {};
         const n = ['grid_power_sensor', 'solar_production_sensor',
-                   'battery_power_sensor'].filter((k) => opts[k]).length;
+                   'battery_power_sensor', 'house_power_sensor']
+            .filter((k) => opts[k]).length;
         if (!n) return this._t('config_sources_all_auto');
         return `${n} ${this._t('config_sources_overridden')}`;
     }
@@ -1206,6 +1435,8 @@ class SEMConfigCard extends SEMLitBase {
                 { min: 0, max: 10000, step: 0.001, unit: `${currency}/kWh`, default: 0.3387 }, opts, 'config_help_off_peak_rate')}
             ${this._renderOptionNumberInput('electricity_export_rate', 'config_export_rate',
                 { min: 0, max: 10000, step: 0.001, unit: `${currency}/kWh`, default: 0.075 }, opts, 'config_help_export_rate')}
+            ${this._renderOptionNumberInput('grid_import_surcharge', 'config_import_surcharge',
+                { min: 0, max: 10, step: 0.001, unit: `${currency}/kWh`, default: 0 }, opts, 'config_help_import_surcharge')}
             ${this._renderOptionNumberInput('demand_charge_rate', 'config_demand_charge_rate',
                 { min: 0, max: 100000, step: 0.01, unit: `${currency}/kW/Mt`, default: 4.32 }, opts, 'config_help_demand_charge_rate')}
             ${this._renderPicker('grid_import_power_entity', 'config_grid_import_entity',
@@ -1254,6 +1485,24 @@ class SEMConfigCard extends SEMLitBase {
                 ${this._renderOptionToggle('battery_setpoint_bidirectional',
                     'config_battery_bidirectional', opts,
                     'config_help_battery_bidirectional', false)}
+                ${''/* (#809/#869) how SEM's signed watts reach the wire:
+                    signed (default) · inverted (Victron ESS grid setpoint)
+                    · direction_select (Anker: a charge/discharge select and
+                    an unsigned watt number). Setup fields, not knobs. */}
+                ${this._renderTextOption('battery_setpoint_model',
+                    'config_setpoint_model', opts,
+                    'config_help_setpoint_model', 'signed')}
+                ${opts['battery_setpoint_model'] === 'direction_select' ? html`
+                    ${this._renderPicker('battery_power_direction_entity',
+                        'config_direction_entity', 'select', null, opts,
+                        'config_help_direction_entity')}
+                    ${this._renderTextOption('battery_direction_discharge_value',
+                        'config_direction_val_discharge', opts,
+                        'config_help_direction_values', 'discharge')}
+                    ${this._renderTextOption('battery_direction_charge_value',
+                        'config_direction_val_charge', opts,
+                        'config_help_direction_values', 'charge')}
+                ` : nothing}
             ` : nothing}
             ${''/* Battery→grid arbitrage UI is deactivated for the stable
                release (drained a real battery to its reserve floor when a
@@ -1288,10 +1537,29 @@ class SEMConfigCard extends SEMLitBase {
         return html`
             ${statusBlock}
             <div class="hp-form">
-                ${this._renderPicker('heat_pump_relay1_entity', 'config_hp_relay1', ['switch', 'input_boolean'],
+                ${/* (#801) A SG-Ready contact is not always a switch — EMS-ESP
+                      carries them as text entities holding a bit string. The
+                      picker offers every domain SEM can drive; the two value
+                      rows appear only for a non-switch contact. Each field
+                      saves on its own through set_option, so the pairing rule
+                      cannot live here: a contact left with one value raises a
+                      Repair from the coordinator, against the live config
+                      (#801 review — this comment used to claim a refusal the
+                      dashboard path did not have). */ ''}
+                ${this._renderPicker('heat_pump_relay1_entity', 'config_hp_relay1', SG_READY_CONTACT_DOMAINS,
                     null, opts, 'config_help_hp_relay')}
-                ${this._renderPicker('heat_pump_relay2_entity', 'config_hp_relay2', ['switch', 'input_boolean'],
+                ${this._isValueContact(opts.heat_pump_relay1_entity) ? html`
+                    ${this._renderOptionTextInput('heat_pump_relay1_on_value', 'config_hp_relay1_on',
+                        opts, 'config_help_hp_contact_values', '100000000000')}
+                    ${this._renderOptionTextInput('heat_pump_relay1_off_value', 'config_hp_relay1_off',
+                        opts, 'config_help_hp_contact_values', '000000000000')}` : nothing}
+                ${this._renderPicker('heat_pump_relay2_entity', 'config_hp_relay2', SG_READY_CONTACT_DOMAINS,
                     null, opts, 'config_help_hp_relay')}
+                ${this._isValueContact(opts.heat_pump_relay2_entity) ? html`
+                    ${this._renderOptionTextInput('heat_pump_relay2_on_value', 'config_hp_relay2_on',
+                        opts, 'config_help_hp_contact_values', '100000000000')}
+                    ${this._renderOptionTextInput('heat_pump_relay2_off_value', 'config_hp_relay2_off',
+                        opts, 'config_help_hp_contact_values', '000000000000')}` : nothing}
                 ${/* #550: relay contact polarity — read at HeatPumpController
                       construction (structural). Was only on the native flow. */ ''}
                 ${this._renderOptionToggle('heat_pump_invert_sg_ready', 'config_hp_invert_sg_ready',
@@ -1435,6 +1703,56 @@ class SEMConfigCard extends SEMLitBase {
         await this._saveOption('ev_chargers', newChargers, statusKey);
     }
 
+    // (#915) Accept a near miss as a charger. "Entities present, no role
+    // matched — please report" is the right line when SEM has nothing
+    // better; it is the wrong line when SEM has already worked out which
+    // entity is the charging current. Then the answer is not a bug report,
+    // it is *add this charger* — with the pickers pre-filled from what the
+    // integration declares and what the device's own entities are shaped
+    // like. Everything stays editable afterwards in the EV chargers
+    // section, and nothing is written until this button is pressed.
+    async _addSuggestedCharger(suggested) {
+        if (this._chargerBusy || !suggested || !suggested.id) return;
+        const existing = (this._options.ev_chargers || []);
+        const ids = new Set([
+            ...existing.map(c => c && c.id).filter(Boolean),
+            ...this._chargersList(),
+        ]);
+        let id = suggested.id, n = 1;
+        while (ids.has(id)) { id = `${suggested.id}_${n++}`; }
+        const charger = { ...suggested, id,
+                          ev_min_current: 6,
+                          ev_surplus_priority: existing.length + 3 };
+        this._chargerBusy = true;
+        this.requestUpdate();
+        try {
+            await this._saveOption('ev_chargers', [charger], 'ev_chargers_add');
+            await this._refreshOptions();
+        } finally {
+            this._chargerBusy = false;
+            this.requestUpdate();
+        }
+    }
+
+    // (#915) When SEM has nothing to offer, make the ask one click instead of
+    // a sentence. A prefilled issue carries the platform and the entity list,
+    // which is exactly what a detection row needs and exactly what a user
+    // should not have to assemble by hand.
+    _reportNearMissUrl(m) {
+        const ents = (m.entities || []).map(e => `- \`${e.entity}\` (${e.domain}${e.device_class ? '/' + e.device_class : ''})`).join('\n');
+        const name = m.roster?.name ? `${m.roster.name} (\`${m.platform}\`)` : `\`${m.platform}\``;
+        const body = [
+            `**Detected hardware — no role matched**`, '',
+            `Integration: ${name}`,
+            m.roster?.installs ? `Installs (HA analytics): ${m.roster.installs}` : '',
+            '', 'Entities on this device:', ents, '',
+            'What the device is and which entity does what:', '(please fill in)',
+        ].filter(Boolean).join('\n');
+        return 'https://github.com/traktore-org/sem-community/issues/new?labels=enhancement'
+            + '&title=' + encodeURIComponent(`Detected hardware: ${m.platform} — no role matched`)
+            + '&body=' + encodeURIComponent(body);
+    }
+
     // #528 Phase 4 — add a charger from the dashboard. Sends ONLY the new
     // skeleton; the backend smart-merge (#464) appends it by id and preserves
     // siblings. The new charger appears as a block to wire via the per-charger
@@ -1555,6 +1873,30 @@ class SEMConfigCard extends SEMLitBase {
                 ${status === 'saving' ? html`<div class="save-status">${this._t('config_saving')}…</div>` : nothing}
                 ${status === 'ok' ? html`<div class="save-status ok">✓ ${this._t('config_saved')}</div>` : nothing}
                 ${(this._showHelp && helpKey) ? html`<div class="setting-help-text">${this._t(helpKey)}</div>` : nothing}
+            </div>
+        `;
+    }
+
+    // (2.1 audit, item 1) A per-charger boolean — the phase-switching gate
+    // shipped with no UI at all. Saves through the same per-charger field
+    // path as the text/picker rows.
+    _renderToggleNested(chargerIndex, cid, chargerKey, labelKey, opts, helpKey) {
+        const chargers = opts.ev_chargers || [];
+        const cur = !!(chargers[chargerIndex]?.[chargerKey]);
+        const statusKey = `ev_chargers.${chargerIndex}.${chargerKey}`;
+        const status = this._saveStatus[statusKey];
+        return html`
+            <div class="picker-cell">
+                <div class="toggle-row">
+                    <span class="toggle-label">${this._t(labelKey)}${this._helpBtn(helpKey)}</span>
+                    <div class="toggle-track ${cur ? 'on' : ''}"
+                         @click=${() => this._saveChargerField(chargerIndex, cid, chargerKey, !cur, statusKey, opts)}>
+                        <div class="toggle-thumb"></div>
+                    </div>
+                </div>
+                ${status === 'saving' ? html`<div class="save-status">${this._t('config_saving')}…</div>` : nothing}
+                ${status === 'ok' ? html`<div class="save-status ok">✓ ${this._t('config_saved')}</div>` : nothing}
+                ${this._helpBlock(helpKey)}
             </div>
         `;
     }
@@ -2012,6 +2354,36 @@ class SEMConfigCard extends SEMLitBase {
         `;
     }
 
+    // (#801) A free-text option value. The SG-Ready contacts can point at a
+    // text/number/select entity instead of a switch, and then the two values
+    // SEM writes are the integration's own vocabulary (EMS-ESP carries them
+    // as bit strings) — never guessable, so they are typed beside the entity,
+    // the same shape as the charger phase-switch and charge-mode values.
+    _renderOptionTextInput(optionKey, labelKey, opts, helpKey, placeholder) {
+        if (!this._showsControl(optionKey)) return nothing;
+
+        const sid = 'opt:' + optionKey;
+        this._reg(sid);
+        const live = opts[optionKey] != null ? opts[optionKey] : '';
+        const dirty = this._isDirty(sid);
+        const cur = this._stagedVal(sid, live);
+        return html`
+            <div class="picker-cell ${dirty ? 'dirty' : ''}">
+                <div class="picker-row">
+                    <span class="picker-label">${this._t(labelKey)}${dirty ? html`<span class="dirty-dot">●</span>` : nothing}${this._helpBtn(helpKey)}</span>
+                    <input type="text" class="txt-opt" .value=${String(cur ?? '')}
+                           placeholder="${placeholder || ''}"
+                           @keydown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                           @blur=${(e) => {
+                               const v = e.target.value.trim();
+                               if (v !== String(cur ?? '')) this._stage(sid, 'option', v);
+                           }} />
+                </div>
+                ${this._helpBlock(helpKey, null, null, sid, 'option')}
+            </div>
+        `;
+    }
+
     // Slider that writes to entry.options on change. Use for option-only
     // numeric fields that don't have a runtime ``number.sem_*`` entity.
     // #528: option-key slider in the same colorful accent style as the
@@ -2083,6 +2455,46 @@ class SEMConfigCard extends SEMLitBase {
         `;
     }
 
+    _batteryIntelligenceSubtitle() {
+        const st = this._hass?.states?.['sensor.sem_battery_spendable_kwh'];
+        const phase = st?.attributes?.phase;
+        return phase ? this._t(`planning_phase_${phase}`) : '';
+    }
+
+    _renderBatteryIntelligence(T) {
+        const opts = this._options || {};
+        const deye = opts.battery_charge_platform === 'deye';
+        return html`
+            ${this._renderToggle('switch.sem_forecast_spending_enabled', 'forecast_spending', T, 'config_help_forecast_spending')}
+            ${this._renderToggle('switch.sem_battery_may_export', 'battery_may_export', T, 'config_help_battery_may_export')}
+            ${this._renderToggle('switch.sem_battery_may_assist_ev', 'battery_may_assist_ev', T, 'config_help_battery_may_assist_ev')}
+            <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle('switch.sem_battery_charge_pacing_enabled', 'battery_charge_pacing', T, 'config_help_battery_charge_pacing')}
+            ${this._renderPicker('battery_charge_power_limit_entity', 'config_charge_power_limit_entity',
+                'number', null, opts, 'config_help_charge_power_limit_entity')}
+            ${this._renderOptionNumberInput('inverter_ac_limit_w', 'config_inverter_ac_limit',
+                { min: 0, max: 100000, step: 100, unit: 'W', default: 0 }, opts, 'config_help_inverter_ac_limit')}
+            ${/* arc #921 — the grid is not always a sink. Four switches, all
+                  default OFF, and their numbers. Same pattern as the pacing
+                  switch above: the entity is the source of truth, the card stages. */ ''}
+            <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle('switch.sem_export_guard_enabled', 'export_guard', T, 'config_help_export_guard')}
+            ${this._renderStepper('number.sem_export_guard_engage_s', 'export_guard_engage_s', T, 'config_help_export_guard_engage_s')}
+            ${this._renderStepper('number.sem_export_guard_release_s', 'export_guard_release_s', T, 'config_help_export_guard_release_s')}
+            ${this._renderToggle('switch.sem_export_guard_override_external', 'export_guard_override', T, 'config_help_export_guard_override')}
+            ${this._renderToggle('switch.sem_battery_house_sink_enabled', 'battery_house_sink', T, 'config_help_battery_house_sink')}
+            ${this._renderToggle('switch.sem_ev_morning_window_enabled', 'ev_morning_window', T, 'config_help_ev_morning_window')}
+            ${this._renderStepper('number.sem_ev_morning_window_hours', 'ev_morning_window_hours', T, 'config_help_ev_morning_window_hours')}
+            ${this._renderStepper('number.sem_battery_morning_drain_floor_soc', 'battery_morning_drain_floor_soc', T, 'config_help_battery_morning_drain_floor_soc')}
+            ${deye ? html`
+                <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
+                ${this._renderOptionToggle('deye_system_work_mode_control', 'config_deye_system_work_mode',
+                    opts, 'config_help_deye_system_work_mode', false)}
+                ${this._renderPicker('deye_system_work_mode_entity', 'config_deye_system_work_mode_entity',
+                    'select', null, opts, 'config_help_deye_system_work_mode_entity')}` : nothing}
+        `;
+    }
+
     _renderLoadManagement(T) {
         const opts = this._options || {};
         // #716 — read the toggle's STAGED value, not just the persisted one,
@@ -2098,7 +2510,7 @@ class SEMConfigCard extends SEMLitBase {
                 <span class="readonly-value">${this._val('load_management_status') || '—'}</span>
             </div>
             ${this._renderOptionToggle('load_management_enabled', 'config_lm_enabled',
-                opts, 'config_help_lm_enabled', true)}
+                opts, 'config_help_lm_enabled', false)}
             ${this._renderOptionToggle('peak_limit_unlimited', 'config_lm_unlimited',
                 opts, 'config_help_lm_unlimited', false)}
             ${unlimited ? html`
@@ -2165,7 +2577,59 @@ class SEMConfigCard extends SEMLitBase {
             ${this._renderPlanesToday(attrs)}
             ${this._renderOptionSelect('solar_forecast_source', 'config_solar_forecast_source',
                 sourceOptions, opts, 'config_help_solar_forecast_source', 'auto')}
+            ${this._renderForecastComparison(attrs, raw)}
             ${raw === 'none' ? html`<div class="overview-help">${this._t('config_forecast_install_hint')}</div>` : nothing}
+        `;
+    }
+
+    // (#822) Side-by-side is not the feature — the SCORE is.
+    //
+    // Two integrations disagreeing does not make either wrong: measured on
+    // the dev rig they read 125.6 / 47.2 / 20.0 kWh for one day, and that
+    // spread was three differently CONFIGURED arrays, not three opinions.
+    // SEM cannot see how a third-party integration was set up, so the table
+    // shows each source's own number NEXT TO how well it has actually
+    // predicted THIS roof, and says "still learning" rather than inventing a
+    // score from thin evidence.
+    _renderForecastComparison(attrs, active) {
+        const now = attrs.sources_now || {};
+        const scores = attrs.source_accuracy || {};
+        const names = Object.keys(now);
+        if (names.length < 2) return nothing;   // nothing to compare against
+
+        const pct = (v) => (v === null || v === undefined
+            ? this._t('forecast_still_learning')
+            : `${Math.round(Number(v) * 100)}%`);
+
+        return html`
+            <div class="readonly-row" style="margin-top:8px">
+                <span class="ctrl-label">${this._t('forecast_compare_title')}</span>
+            </div>
+            <div class="overview-help">${this._t('forecast_compare_help')}</div>
+            <table class="sem-planes">
+                <tr>
+                    <th>${this._t('forecast_compare_source')}</th>
+                    <th>${this._t('forecast_compare_today')}</th>
+                    <th>${this._t('forecast_compare_accuracy')}</th>
+                </tr>
+                ${names.map((n) => {
+                    const row = now[n] || {};
+                    const sc = scores[n] || {};
+                    const days = Number(sc.settled_days || 0);
+                    return html`
+                        <tr class="${n === active ? 'is-total' : ''}">
+                            <td>
+                                ${this._forecastProviderLabel(n)}
+                                ${n === active ? html`<span style="font-size:10px;opacity:.75;margin-left:6px">${this._t('forecast_in_use')}</span>` : nothing}
+                                ${Number(row.planes || 0) > 1 ? html`<span style="font-size:10px;opacity:.6;margin-left:4px">${row.planes}×</span>` : nothing}
+                            </td>
+                            <td class="num">${Number(row.today_kwh || 0).toFixed(1)} kWh</td>
+                            <td class="num" title="${days} ${this._t('forecast_days_of_evidence')}">
+                                ${pct(sc.trust_today)}
+                            </td>
+                        </tr>`;
+                })}
+            </table>
         `;
     }
 
@@ -2649,6 +3113,7 @@ class SEMConfigCard extends SEMLitBase {
             heat_pump: (T) => this._renderHeatPump(T),
             hot_water: (T) => this._renderHotWater(T),
             battery_scheduler: (T) => this._renderBatteryScheduler(T),
+            battery_intelligence: (T) => this._renderBatteryIntelligence(T),
             load_management: (T) => this._renderLoadManagement(T),
             forecast: (T) => this._renderForecast(T),
             pv_strings: (T) => this._renderPvStrings(T),
@@ -3162,6 +3627,20 @@ class SEMConfigCard extends SEMLitBase {
                 }
                 .ha-settings-btn:hover { background: ${T.surfaceHover}; border-color: ${accent}; }
 
+                /* (#915) accept a proposed role — the same affordance,
+                   smaller, because it sits inside a row rather than under a
+                   section heading. */
+                .sem-btn {
+                    display: inline-flex; align-items: center; gap: 4px;
+                    padding: 3px 10px; border-radius: 7px;
+                    background: ${T.surface}; border: 1px solid ${T.surfaceBorder};
+                    color: var(--primary-text-color, ${T.text});
+                    font-size: 12px; cursor: pointer;
+                    transition: background 0.15s, border-color 0.15s;
+                }
+                .sem-btn:hover:not([disabled]) { background: ${T.surfaceHover}; border-color: ${accent}; }
+                .sem-btn[disabled] { opacity: 0.55; cursor: default; }
+
                 /* ── #605 staged-changes UI ── */
                 .zone-knob.dirty, .stepper-cell.dirty {
                     border-left: 3px solid var(--section-accent, ${accent});
@@ -3265,7 +3744,8 @@ class SEMConfigCard extends SEMLitBase {
                         // visible either way — hiding something someone set up
                         // is not simplification, it is losing their work.
                         .filter(s => this._advanced || ESSENTIAL_SECTIONS.has(s.id)
-                                     || this._sectionConfigured(s.id))
+                                     || this._sectionConfigured(s.id)
+                                     || this._revealed.has(s.id))
                         .map(s => this._renderSection(s, renderers[s.id], T))}
                 </div>
             </ha-card>

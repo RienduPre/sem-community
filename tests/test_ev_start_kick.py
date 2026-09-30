@@ -155,7 +155,7 @@ class TestStartEscalation:
         # Long past the give-up window, still no draw → IDLE.
         d = _filter(st, view, adapter, now=60.0 + 6 * START_KICK_GRACE_S + START_KICK_GIVEUP_S + 5)
         assert d.intent is ChargerIntent.IDLE
-        assert "not latching" in d.reason
+        assert "did not accept the start" in d.reason  # (#983)
 
     def test_post_latch_hold_then_gentle_settle(self):
         """First draw anchors the debounce, so the latch current holds a

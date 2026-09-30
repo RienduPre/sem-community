@@ -193,6 +193,77 @@ To confirm an install is protected from the first cycle, look for
 startup line, before any platform sets up. If observer is on and that line
 is missing, the flag is not reaching setup — report it.
 
+## Compressing time — an evening in minutes
+
+Waiting for the real evening is not a simulation. SEM's day/night clock is
+*derived*, so it can be held:
+
+- **Night start** is `max(sunset + 10 min, night_earliest_start)`; sunset is
+  read from `sun.sun` (`next_setting` / `next_rising` and the state).
+- **Hold `sun.sun`** by posting its state and attributes every 0.5 s (the sun
+  integration republishes within seconds; slower holds flap) with
+  `next_setting` a few minutes in the past, and set the night-floor number
+  (`number.sem_night_earliest_start`) to the evening you want. SEM now
+  believes the evening is minutes away: the forecast-spend block
+  `[night_start − 15 min, night_start)` opens, night top-up sizing runs,
+  pacing lands the pack "at day's end" — all as WOULD decisions.
+- **The floor's minimum is 18:00**, so the evening cannot be pulled earlier
+  than 17:45 local; the day side (pacing, spendable budget, the peak slot
+  guard) simulates at any hour.
+- **Release before the fake night begins**, and restore the floor. A held
+  night start that is allowed to arrive opens a real battery-night record in
+  the recorder (#800) — data the learner will later trust.
+- Read **both** observer surfaces every sample: `would_decisions` for the
+  decision, and `withheld_commands` (#855) for the exact service and payload
+  a charger would have received. A charger case is judged on the wire, not
+  on the reason string.
+- The meter has the same row (#955): `withheld_commands.export_guard` names the
+  exact call the export guard would make — `huawei_solar.set_zero_power_grid_connection`
+  with the INVERTER device on a cut, the captured prior's restore on a release
+  (`set_maximum_feed_grid_power_percent 100` under a `Limited to 100 %` mode) — or
+  the refusal in the verb's own words (`cannot read the inverter's active-power
+  mode …`, `under external scheduling …`). A held cut keeps its row every cycle.
+  Judge the export guard on this row, never on `would_decisions` alone.
+
+`~/bin/sem-sim-compress.sh <host> <floor-hours> [step] [charger-mode]` does
+all of this with auto-restore, and refuses to run unless observer mode is on.
+
+## Proving a hardware write end to end — the export guard, 17.09.2026
+
+Observer mode proves the decision and the exact call; it cannot prove that the
+call lands. When a write must be seen on the hardware, this is the shape that
+worked, on the shared rig, without touching a car or a battery:
+
+1. **Make the inputs synthetic, keep the output real.** Point the grid at two
+   synthetic split-grid sensors (`grid_import_power_entity` /
+   `grid_export_power_entity`) and the price at a synthetic feed-in sensor, and
+   hold them with a bounded re-post. A fake 2 kW of export is enough to engage
+   the guard; nothing physical has to flow, the register is the proof.
+2. **Run it in observer mode first** and read the LOG, not only the surface:
+   the seam logs `OBSERVER · WOULD LIMIT_EXPORT …` when its command branch
+   runs. A `withheld_commands.export_guard` row with `standing: true` is the
+   roster re-publishing a held cut — it looks like a command and is not. The
+   guard that never wrote (bug class 94) was found by the absence of that log
+   line, not by anything on the surface.
+3. **Before observer goes off, judge every other device on what would hit the
+   wire.** Withheld commands for the KEBA must be empty, the next planned
+   charge window must be hours away, the battery decision must be one this
+   host cannot write (no discharge-control entity), loads on hold. The shared
+   KEBA and LUNA are the whole risk; observer off makes this host a second
+   controller on them.
+4. **Then the live pass, bounded.** Observer off with the guard *idle*; close
+   the price; the guard engages after its delay and writes; open the price;
+   it releases after its delay and restores the mode it found. Watch the car's
+   charging sensor every sample and flip observer back on the moment it turns
+   on. The whole window is six minutes.
+5. **Read the register from a second host.** The writing host's mode sensor
+   refreshes on the write and then times out for ~60 s; another HA host on the
+   same inverter lags by up to ~15 minutes. `homeassistant.update_entity` on
+   that sensor forces a read — that is the register truth. Twice on 17.09:
+   cut → *Zero Power*, release → *Limited to 100 %*.
+6. **Put it back.** Observer on, the store restored to the real meter, one
+   restart; and write the timeline into the branch's challenge record.
+
 ## What this cannot test
 
 The last centimeter: brand adapters talking to real firmware (Modbus

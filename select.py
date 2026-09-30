@@ -14,6 +14,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import SEMCoordinator
+from .coordinator.charge_pause import (   # (#980)
+    DEFAULT_PAUSE_DURATION, PAUSE_DURATIONS,
+)
+from .coordinator.install_modules import Module, keeps, presence_of
 
 type SEMConfigEntry = ConfigEntry[SEMCoordinator]
 
@@ -98,25 +102,33 @@ def _battery_slugs(coordinator: SEMCoordinator) -> list[str]:
 
 
 def _has_battery(coordinator: SEMCoordinator) -> bool:
-    """Install has at least one (single/fleet) battery — so a global battery
-    mode selector is worth creating even without per-battery slugs."""
-    try:
-        reg = er.async_get(coordinator.hass)
-        if any(
-            e.entity_id == "sensor.sem_battery_soc"
-            for e in reg.entities.values()
-        ):
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    cfg = getattr(coordinator, "config", {}) or {}
-    return bool(cfg.get("battery_power_sensor") or cfg.get("battery_soc_sensor"))
+    """Install has a battery — so the global battery mode selector (and, via
+    number.py, the single-battery reserve number) is worth creating.
+
+    (#923) Asks the install-modules oracle, like every other battery entity:
+    kept unless the battery is definitively ABSENT. It used to look for
+    ``sensor.sem_battery_soc`` in the registry — circular now that the oracle
+    decides whether that sensor exists at all."""
+    return keeps(presence_of(coordinator), (Module.BATTERY,))
 
 
 SELECT_TYPES = [
     # ev_charging_mode and ev_target_type are PER-CHARGER only (#255) — the global
     # duplicates were removed (seeded per-charger by the v3→v4 migration). The old
-    # global entities are removed from the registry below. No global selects remain.
+    # global entities are removed from the registry below.
+    #
+    # (#980) How long the per-charger Pause buttons pause for. GLOBAL on
+    # purpose: the duration is a choice you make in the moment, not a
+    # property of a charger, and a copy per charger would be the same
+    # answer typed twice on a two-charger install. Each charger keeps its
+    # OWN button, so pausing one and leaving the other running still works
+    # — you just do not set the duration twice.
+    SelectEntityDescription(
+        key="pause_duration",
+        options=list(PAUSE_DURATIONS.keys()),
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:timer-pause-outline",
+    ),
 ]
 
 
@@ -314,13 +326,20 @@ class SEMSelectEntity(CoordinatorEntity, SelectEntity):
         if self._is_target_type:
             has_soc = bool(self.coordinator.config.get("vehicle_soc_entity"))
             return _target_type_options(has_soc)
-        return list(EV_CHARGING_MODES.keys())
+        # (#980) A description that declares its own options owns them. The
+        # EV-mode fallback below predates there being any other global
+        # select, and silently handing a pause dropdown the charging modes
+        # is the kind of wrong list that renders and does nothing.
+        declared = list(self.entity_description.options or [])
+        return declared or list(EV_CHARGING_MODES.keys())
 
     @property
     def _default_option(self) -> str:
         """Return the default option for this entity."""
         if self._is_target_type:
             return "kwh"
+        if self.entity_description.key == "pause_duration":
+            return DEFAULT_PAUSE_DURATION
         return "auto"
 
     @property
@@ -459,14 +478,55 @@ class SEMPerChargerSelect(CoordinatorEntity, SelectEntity):
         if self._config_key == "ev_charging_mode":
             return list(EV_CHARGING_MODES.keys())
         if self._config_key == "charge_mode":
-            has_dyn_tariff = (
-                self.coordinator.config.get("tariff_mode") == "dynamic"
-            )
-            return [
-                m for m in EV_CHARGE_MODES.keys()
-                if has_dyn_tariff or m != "solar_plus_cheap"
-            ]
+            # (#885 matrix, decision 3) ALL modes are always listed. #277 Q1
+            # hid ``solar_plus_cheap`` on tariff-less installs so nobody
+            # picked an option that silently degrades — but hiding made it
+            # undiscoverable, and Guido looked for it and could not find
+            # it. The protection moves to the CARD: it reads
+            # ``tariff_available`` below and renders the option disabled
+            # with the reason, which keeps both properties (cannot be
+            # mis-picked, can still be seen).
+            return list(EV_CHARGE_MODES.keys())
         return list(self.entity_description.options or [])
+
+    @property
+    def extra_state_attributes(self):
+        """(#885) Prerequisite state for the mode list, read by the card.
+
+        One rule, two severities: a mode that CANNOT function without its
+        prerequisite is disabled in the UI (``solar_plus_cheap`` without a
+        dynamic tariff has no cheap windows to use); a mode that functions
+        PARTIALLY shows an info instead (``solar_plus_battery`` assists on
+        live surplus from day one — the forecast-led bypass and the #878
+        dynamic floor stay dormant until the #800 learner graduates, and
+        the card reads that progress straight off
+        ``sensor.sem_battery_spendable_kwh``).
+        """
+        if self._config_key != "charge_mode":
+            return None
+        # (#980 follow-up) The running pause, visible: the deadline and the
+        # mode it returns to ride here while the mode reads Off. Picking a
+        # mode IS the cancel, so the moment the live mode is not Off the two
+        # read None — even if the record has not been swept yet (the tick
+        # forgets it on the next cycle). A deadline nobody can parse is not
+        # a pause to show.
+        paused_until = None
+        resume_mode = None
+        cfg = self._charger_cfg()
+        if str(cfg.get("charge_mode") or "") == "off":
+            from .coordinator import charge_pause as _cp
+            deadline = _cp.parse_deadline(cfg.get(_cp.PAUSE_UNTIL_KEY))
+            if deadline is not None:
+                paused_until = deadline.isoformat()
+                resume_mode = cfg.get(_cp.PAUSE_RESUME_MODE_KEY) or None
+        return {
+            "tariff_available": (
+                self.coordinator.config.get("tariff_mode") == "dynamic"
+            ),
+            "modes_needing_tariff": ["solar_plus_cheap"],
+            "paused_until": paused_until,
+            "pause_resume_mode": resume_mode,
+        }
 
     @property
     def current_option(self) -> str | None:
@@ -475,6 +535,22 @@ class SEMPerChargerSelect(CoordinatorEntity, SelectEntity):
         if self._value in opts:
             return self._value
         return opts[0] if opts else None
+
+    def _handle_coordinator_update(self) -> None:
+        """(#980 follow-up) The config is the truth; the entity follows it.
+
+        ``_value`` used to change only in ``async_select_option`` — the
+        user's own pick. A mode written anywhere else never reached the
+        entity: the Pause button wrote ``off`` into the charger's config and
+        the select kept showing the old mode, so the pause was invisible
+        ("when I click pause nothing seems to happen"), and the mode the
+        pause put back at expiry was invisible too. Every cycle now adopts
+        the config's value when it is one this select may show.
+        """
+        value = self._charger_cfg().get(self._config_key)
+        if isinstance(value, str) and value in self._valid_value_set() and value != self._value:
+            self._value = value
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
@@ -496,6 +572,13 @@ class SEMPerChargerSelect(CoordinatorEntity, SelectEntity):
         # mirror and reload-skip arming. Do NOT inline a copy here; the
         # copy-paste class already produced one missed writer (#469).
         from . import persist_per_charger_option
+        # (#980) Picking a mode IS cancelling a pause, and the pause has to
+        # be forgotten in the SAME write — a mode picked and Off picked
+        # again within one cycle kept the old record, and at expiry the old
+        # mode would have overwritten a deliberate Off (live on .175,
+        # 25.09). The writer itself applies that rule
+        # (``charge_pause.forget_on_mode_write``), so this entity, the
+        # set_option service and an automation all forget it the same way.
         persist_per_charger_option(
             self.hass, self._entry, self.coordinator,
             self._charger_id, self._config_key, option,

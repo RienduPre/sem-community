@@ -34,6 +34,12 @@ The dashboard is generated automatically on first install. If you need to regene
 
 ## Dashboard Tabs
 
+> **The tabs follow your hardware (#923).** The **Battery** tab appears only
+> when SEM knows of a home battery, the **EV** tab only when a charger is
+> configured, and cards on the other tabs drop the parts that belong to
+> hardware you do not have (the sankey's battery and EV nodes, for example).
+> See [Modules](USER_GUIDE.md#modules--sem-shows-what-you-have).
+
 ### Home
 
 The main at-a-glance view with real-time power flows.
@@ -127,7 +133,7 @@ The per-charger `Charge mode` selector replaces the v1.6.x toggle-soup (`Overnig
 | Mode | Behaviour | Typical user |
 |---|---|---|
 | **Solar only** | Surplus only — never imports from grid | Solar maximalist |
-| **Solar + cheapest hours** | Surplus by day, grid only in the cheapest contiguous tariff window at night (hidden if no dynamic tariff is configured) | Dynamic-tariff users |
+| **Solar + cheapest hours** | Surplus first, plus grid whenever the price is genuinely cheap — **day or night** (#856). A cheap/negative daytime hour tops the Min floor up from grid; the night defers to the cheapest contiguous window (hidden if no dynamic tariff is configured) | Dynamic-tariff users |
 | **Min + Solar** (default) | Guarantee Min by deadline (from night top-up), solar adds up to Max. Zone-adaptive during the day. | Daily commuter |
 | **Always (max)** | Charge at max regardless of source | "Just charge the car" / strict legacy `minpv` |
 | **Off** | No charging — SEM monitors but issues no commands | Disabled |
@@ -180,6 +186,30 @@ zones, Tariff & pricing, Heat pump, Hot water, Battery scheduler, Load
 management, Solar forecast, Notifications, and Advanced (update
 interval, deltas, min solar power, regulation offset, Observer Mode,
 SEM status history).
+
+##### Detected hardware (2.1)
+
+What SEM found, with the evidence: every charger and its roles, the entities
+it left unmapped, and **near misses** — hardware it saw but could not place.
+Since 2.1 a near miss carries **proposals** read from the integration's own
+words (entities *and* services), and an *add this charger* button when SEM
+can drive it as-is. When it cannot, the row says why ("wire by hand: fields
+SEM cannot fill"). Cars found on a transport such as MQTT are listed as
+**vehicles**. Nothing here is bound until you confirm it in a picker.
+
+##### Battery: setpoint model (2.1)
+
+Under *Battery*, **Setpoint model** says how SEM's watts reach your setpoint
+entity: `signed` (default), `inverted` (Victron ESS, + = import), or
+`direction_select` (Anker Solix: a charge/discharge select plus an unsigned
+watt number). The last one shows two more fields: the direction select and,
+if yours uses other words, its two option values.
+
+##### Sensor sources: house power sensor (2.1)
+
+Name the house-consumption sensor your inverter reports and SEM publishes it
+beside its own figure, with the difference (`sensor.sem_house_meter_power`,
+`sensor.sem_house_meter_gap`). SEM keeps deciding on its own figure.
 
 ##### SEM status history (Advanced)
 
@@ -291,6 +321,39 @@ Every card has its own section. The heading is the card's element tag, so
 The battery hero card: an SOC arc ring with charge/discharge power, today's
 throughput, and the current battery state in one glance.
 
+Since 2.1 it also carries the **Tonight** panel — the working behind
+forecast-led spending (#778), in the order a person would check it. It shows
+one of three states:
+
+| State | What it means |
+|---|---|
+| **Learning** | Fewer than five recorded nights. Nothing is spent, and the panel counts the progress. |
+| **Holding** | Enough evidence, and the honest answer is *nothing spare* — a long night against a weak forecast. |
+| **Spending** | There is a budget tonight, shown with the floor it will land on. |
+
+Below the headline sit the terms that produced it — overnight need, expected
+refill, tonight's floor — plus the charge-pacing line (#820) and the sell
+window when one is scheduled. The pace is solved for the whole bill — what the
+pack still needs plus what the house will draw back out of it in the deficit
+hours before sunset — and carries a fixed 10 % headroom so an evening that
+comes in under the forecast still lands the pack full; the sensor behind the
+line (`sensor.sem_battery_charge_pacing`) shows both terms as `drain_kwh`
+and `headroom_pct`. The other figures on the panel are entities too:
+`sensor.sem_battery_spendable_kwh`, `sensor.sem_battery_dynamic_floor_pct`,
+`sensor.sem_battery_measured_capacity_kwh`, `sensor.sem_battery_capacity_drift_pct`
+and `sensor.sem_forecast_trust_d1` / `_d2`. In the **Learning** state the panel also offers
+**Rebuild from history**, which reconstructs those nights from your battery's
+own recorded discharge instead of waiting a week for them to happen:
+
+![The Rebuild from history action on the battery
+card](screenshots/battery-rebuild-from-history.png)
+
+The evidence strip underneath names your forecast provider and each horizon in
+words, and says what that evidence *bought* — a measured accuracy means SEM
+spends against it with no extra safety margin, a learning one says how far
+along it is. A horizon your provider does not publish says exactly that,
+rather than showing a blank that looks like a fault.
+
 #### sem-battery-zones-card
 
 **SEM Battery Zones** · *Battery tab*
@@ -322,6 +385,13 @@ for costs, savings, energy, power, battery, and EV. It follows whichever
 The in-dashboard configuration surface. For most users this replaces
 Settings → Devices & Services → SEM → Configure entirely; changes are batched
 and applied together.
+
+The *Battery intelligence* group holds the export guard's four controls
+(2.1, #955): **Export guard** (the switch), **Engage delay (s)** and
+**Release delay (s)** (the hysteresis both ways — spot prices cross zero
+often), and **Override external scheduling** (let it act while a Huawei
+reports an operator's `DI Active Scheduling`). All off / at defaults until
+you turn them on.
 
 #### sem-control-card
 
@@ -385,6 +455,21 @@ The EV hero card: per-charger state, charge mode, target and deadline, with
 the intelligence readouts (taper, estimated SOC) and settings inline. This is
 the reference card for SEM's UI patterns — see [UI patterns](UI_PATTERNS.md).
 
+Its plan strip paints the charger's night as *wait*, *charging*,
+*done* — or *estimate* (a paler wait): by day, before the joint Energy Plan
+has covered the car, the strip is drawn from the charger's real remaining
+need at the rate the night charge will actually run, and it says so rather
+than promising a booked window. A segment only turns *charging* at the
+night-window open when a start actually sits there; a start later in the
+night — a planned block, or a cheap-hours hold through an expensive band —
+reads as *wait* until then (#967).
+
+The strip looks 12 hours ahead, or as far as the charger's own plan reaches —
+whichever is longer, up to 24 hours. Read in the morning, a fixed 12 hours
+stopped before the night it was describing: a charge booked for 00:00 against
+a 06:00 deadline sat past the right edge and only the wait band showed. Its
+title says how far it is looking.
+
 #### sem-flow-card
 
 **SEM Flow** · *Home tab, when `diagram_style: flow`*
@@ -410,6 +495,11 @@ Grid import/export with peak management, load control, tariff, and surplus in
 one consolidated card. Not on the generated dashboard — the System tab is
 health and diagnostics only.
 
+The peak section carries an *Export guard* row (2.1, #955) whenever the guard
+reports a state — idle · holding · engaged · releasing · refused — read from
+`export_guard_state`. The reason behind the state is on
+`sensor.sem_charging_state` → `export_guard`.
+
 #### sem-home-status-card
 
 **SEM Home Status** · *Home tab*
@@ -424,6 +514,13 @@ consuming, and whether anything needs attention.
 The one device list (#576): drag and drop to set the single priority order
 shared by loads, chargers, and the battery, with live power per device and a
 mode picker per row. See [Load priority](LOAD_PRIORITY.md).
+
+**Minimum run / minimum pause.** Under the Min/Max slider, two minute boxes stop
+a load flapping on a passing cloud. Leave them blank for the device's default
+(5/5 for a switch load, 10/5 for hot water and heat pumps); the greyed
+placeholder is the window the device is actually holding, or a dash until it
+comes up — never a made-up number (#914). A value you type survives restarts.
+They act only in the solar modes; see [LOAD_PRIORITY.md](LOAD_PRIORITY.md#minimum-run--minimum-pause--anti-cycling).
 
 #### sem-onboarding-banner
 

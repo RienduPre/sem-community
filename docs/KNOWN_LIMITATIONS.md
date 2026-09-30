@@ -1,8 +1,23 @@
 # Known Limitations
 
-## Energy Dashboard dependency
+## Energy Dashboard first, not Energy Dashboard only
 
-SEM reads solar, grid, and battery sensors from the **HA Energy Dashboard** configuration (`.storage/energy`). The Energy Dashboard must be configured with at least solar and grid sensors before SEM can be set up.
+SEM's first choice for its solar, grid and battery sensors is the **HA Energy
+Dashboard** configuration (`.storage/energy`), because it is already the
+canonical list of energy sensors in your system. Since 2.1 (#915) it is no
+longer a requirement: when that page is empty or missing solar or grid, the
+installer asks the energy integrations you already run what they create and
+offers the sensors pre-filled for you to confirm. See *If you have no Energy
+Dashboard* in [SETUP_GUIDE.md](SETUP_GUIDE.md). What SEM still cannot do is
+guess a sensor for a system that publishes nothing recognisable — every field
+then falls back to a plain entity picker.
+
+## Modules remove the entities of hardware you do not have (2.1, #923)
+
+SEM builds only the modules your install has — battery, EV, heat pump, hot
+water. The entities of an absent module are removed at start and come back
+when the hardware is added. This runs without a switch; a house SEM cannot
+place keeps everything.
 
 ## Single instance only
 
@@ -10,11 +25,53 @@ Only one SEM config entry is supported per Home Assistant instance. Creating a s
 
 ## EV charger requirements
 
-The EV charger must be controllable via a supported HA integration (KEBA, Easee, go-eCharger, Wallbox, Zaptec, ChargePoint, Heidelberg, OpenWB, OCPP-compatible, Ohme, Peblar, V2C Trydan, Alfen Eve, Blue Current, OpenEVSE) or through a generic `number` entity for current control. Manual configuration of entity IDs is required if the charger is not auto-detected.
+The EV charger must be controllable via a supported HA integration (KEBA, Easee, go-eCharger, Wallbox, Zaptec, ChargePoint, Heidelberg, OpenWB, OCPP-compatible, Ohme, Peblar, V2C Trydan, Alfen Eve, Blue Current, OpenEVSE) or through a generic `number` entity for current control. Manual configuration of entity IDs is required if the charger is not auto-detected, NRGkick, ABL eMH1, Wallbox behind the MQTT bridge
 
 ## Battery discharge protection
 
 Battery discharge protection requires a Huawei Solar inverter (or compatible) that exposes a `number` entity for the battery discharge power limit. Other inverters without this entity cannot have their discharge actively clamped.
+
+## Export guard: what the inverter allows (2.1, #955)
+
+The export guard works with what the brand integration exposes, and the
+hardware has the last word:
+
+- **Huawei.** Active-power control is one register with five modes. The
+  reference SUN2000 does **not accept `Unlimited`** (mode 0) — the service call
+  returns cleanly and the register lands on the operator's mode instead — so
+  "no cap" is expressed as *Limited to 100 %*. `DI Active Scheduling` is an
+  operator's mode and is not replaced unless *Override external scheduling*
+  is on. The mode readback (`sensor.<inverter>_active_power_control`) is polled
+  slowly: it lags a write by up to ~15 minutes on a second reader, goes
+  `unavailable` for ~60 s on the host that wrote, and can sit `unavailable`
+  for minutes after a restart. While it is unreadable the guard refuses to cut.
+- **Two HA hosts on one Huawei inverter** contend for the modbus session: the
+  second host's polls time out around the first host's writes. Run the guard
+  from one host only.
+- **A fixed feed-in tariff never closes the meter.** The guard engages on a
+  negative export price, which only a dynamic feed-in entity can report. On a
+  static tariff the guard is inert (the GUI export-rate number cannot go below
+  0).
+- **Deye** cuts through the System Work Mode select and needs that control
+  enabled; **any other inverter** needs a writable `number` export-limit entity.
+  A brand with neither refuses and says so.
+
+## The car's drain floor is only as good as the night estimate (#878)
+
+When forecast-led spending is on, the battery→EV assist stops at whichever is
+higher — your buffer SOC, or the floor computed from what your house has
+actually used overnight. Two honest limits on that second number:
+
+- **It is an estimate from your own history**, a high percentile of measured
+  nights rather than a forecast of tonight specifically. An unusually cold or
+  busy night can still exceed it, and the pack will then finish lower than
+  the floor intended. The buffer underneath is the hard backstop.
+- **It needs evidence.** Until five good nights are recorded the budget stays
+  in *Learning*, no floor is computed, and the buffer alone decides — exactly
+  as it did before. That is the intended fallback, not a fault.
+
+Turning forecast-led spending off restores the old behaviour completely: no
+floor is computed and the buffer is the only limit.
 
 ## Solar Gate (battery → EV assist)
 
@@ -49,9 +106,102 @@ Cost tracking uses either statically configured rates (HT/NT) or a dynamic tarif
 
 Forecast-based features (charging recommendations, battery-assist decisions) require **Solcast PV Solar** (HACS) or **Forecast.Solar** (built-in) to be installed and configured separately. Without a forecast integration, these features are disabled.
 
+## Forecast-led spending needs evidence before it will spend (2.1)
+
+The budget is measured, not assumed, so it will not offer a figure until it
+has the measurements. Two clocks run independently: **five recorded nights**
+of overnight battery use, and **seven settled days** of forecast accuracy for
+the horizon it wants to trust. Until both are met the Battery tab reads
+*Learning* and nothing is spent — which is the intended behaviour, not a
+fault.
+
+Both can be short-circuited from your own recorder history (**Rebuild from
+history** on the battery card, and *Learn forecast accuracy from past
+history*), but only if the counters exist — see below.
+
+Two things people expect from *Solar + battery* that it deliberately does not
+do:
+
+- **It stops a little above the computed floor, not exactly on it.** The offer
+  tapers as the pack nears the floor, and a car with a high minimum current
+  (a KEBA at 8 A wants ~3.2 kW) stops accepting before the taper reaches the
+  floor. Measured on a real install: stop at 81 % against a 78.6 % floor.
+  A car with a lower minimum gets closer.
+- **It does not use the battery for the overnight "At least" top-up.** Once
+  the night window opens, the guaranteed floor is filled from the **grid** by
+  design — after dark the pack's job is the house.
+
+## Reconstructed nights are an upper bound, and need four meters (2.1)
+
+Rebuilding overnight history reads cumulative energy counters rather than
+watching power, which is why it can reach back months. Two consequences:
+
+- **The battery's counter reports everything it sent out**, and cannot
+  separate what the house used from what went to the car or the grid. A
+  reconstructed drain is therefore an **upper bound** on household use. That
+  errs toward holding more back, which is the way of being wrong that cannot
+  strand you — but it does mean the estimate reads slightly conservative on an
+  install rebuilt from history rather than measured live.
+- **Closing the night's balance needs four counters** — battery discharge,
+  grid import, battery charge, and the charger's energy if you charge a car.
+  With any of them missing, SEM cannot tell how much of the night the *grid*
+  carried, so those nights report only the battery's share and under-state the
+  house. SEM raises a Repair naming the missing sensor rather than degrading
+  silently, and nights it measured live are always preferred over
+  reconstructed ones.
+
+## The peak slot guard protects the meter, not the wiring (2.1)
+
+The 15-minute slot guard bounds what SEM *commands* against your target peak
+limit. It cannot bound what it does not control: anything you switch by hand,
+another integration's commands, or a load with no SEM device entry still draws
+freely. Two further limits worth knowing:
+
+- **It floors at the charger's minimum current** rather than stopping a car,
+  by design — so a slot can still overrun if the house baseline alone exceeds
+  the target. The reactive EMERGENCY state remains the hard stop.
+- **It steers on the meter reading.** When the grid sensor drops out
+  mid-slot the tracker carries the last valid import across the gap and the
+  allowance is capped at the target until the meter is readable again
+  (#906) — the guard stays on, but it cannot see a load that starts *during*
+  the gap. An install whose meter is blind for minutes at a time still relies
+  on the reactive EMERGENCY stop for that window.
+
+Set the Control tab's Target Limit slider to MAX (*No grid limit*) to disable
+peak management entirely, guard included.
+
+
+## A blinking inverter feed is held, not shown
+
+Some inverter integrations (Huawei modbus in particular) drop out for a few
+seconds many times an hour. SEM's own measurement entities (solar, grid,
+battery power, SOC) keep their **last good value for up to 180 s** while the
+source is unreadable and carry a `stale_s` attribute meanwhile; only an
+outage longer than that shows as `unavailable`. The control layer does not
+use the held value — a dark cycle still counts as dark for every decision
+(`inputs degraded — holding`). A value that was never read (a sensor that has
+not reported since a restart) is not held: it stays unavailable rather than
+showing 0.
+
+A grid meter configured as a **separate import / export pair** (Growatt,
+Senec, Anker, any manual pair) follows the same rule from 2.1 on (#925): the
+combined grid reading is dark only when *both* halves are unreadable, and one
+dark half still marks the cycle degraded for control. Before that, a split
+pair could never report itself dark at all, so every blind-meter protection
+was silently off for those installs.
+
 ## Peak load management
 
 Peak load management requires controllable devices with switch entities for shedding. Devices without a discoverable switch entity must be configured manually. The 15-minute rolling average calculation starts fresh after each HA restart.
+
+## OCPP chargers stop through the charge-control switch (2.1, #976)
+
+On the OCPP integration the maximum-current number is a charging profile the
+charge point keeps, so a 0 A limit is a lockout, not a pause. SEM never writes
+0 A there; it stops through `switch.<charge point>_charge_control` (RemoteStop)
+and needs that switch — adopted from the charge point automatically, or set as
+the charger's *Start/stop entity*. Without it the "EV charger cannot be
+stopped" Repair says so.
 
 ## Charger Limitations
 
@@ -73,7 +223,7 @@ SEM supports SG-Ready heat pump control via two relay entities (Shelly, ESPHome,
 
 ## EV Intelligence
 
-- **Virtual SOC accuracy** — depends on taper detection or car API calibration for the initial anchor. Without either, the SOC estimate drifts over time based solely on energy tracking and predicted consumption.
+- **Virtual SOC accuracy** — depends on taper detection or car API calibration for the initial anchor. Without either, the SOC estimate drifts over time based solely on energy tracking and predicted consumption. A car that declines a start is recorded as *declined*, not as full — the estimate does not move on a refusal.
 - **Consumption predictor cold start** — needs at least 3 days of data before per-weekday predictions are useful. During the first 3 days, a conservative default is used.
 - **Temperature correction** — requires an outdoor temperature sensor (auto-detected from a `weather.*` entity). Without it, temperature correction is disabled and predictions assume 20°C.
 - **Battery health tracking** — requires multiple charge sessions over weeks/months to produce meaningful estimates. Short-term values may fluctuate.
@@ -176,3 +326,68 @@ When the EV is charging in `battery_assist` mode (Zone 4, home battery ≥ `batt
 SEM's proportional flow attribution (`coordinator/flow_calculator.py: calculate_power_flows`) splits the actual grid flow across EV and home loads by demand share, so during the battery-discharge ramp you may briefly see `sensor.sem_flow_grid_to_ev_power` rise to a few hundred watts even though SEM itself never asked the EV to pull from grid. **This is the physics of the ramp, not a bug**: it lasts a handful of cycles (≤ 30 s typically), and the daily integrated grid-to-EV figure usually stays under 5 % of the session total. The live sentinel `tests/live/test_solar_only_no_grid.sh` correctly only checks the strict grid-floor invariant for `solar_only` (where the canonical promise is "no grid at all"), and treats `battery_assist` grid flow as informational.
 
 If you want strict no-grid-ever behaviour, choose `Self-consumption` or `PV` charging mode instead of `Auto`, or lower `battery_buffer_soc` so the assist band ends higher (the former `battery_assist_floor_soc` option was removed — assist potential is already 0 below the buffer).
+
+## Tariff models SEM does not model (2.1, #994)
+
+SEM's price level is a comparison between the hours of a day. Two real
+tariff shapes cannot be expressed that way, and SEM says so rather than
+classifying them silently — see [TARIFF_MODELS.md](TARIFF_MODELS.md).
+
+**Critical peak pricing (CPP).** A handful of announced critical events a
+year, priced far above the normal band. SEM has no concept of an announced
+event: on a dynamic tariff the event hours will simply classify as expensive
+once they appear in the curve, which is late. If your contract has CPP
+events, treat SEM's plan as unaware of them.
+
+**Block / tiered pricing by consumption.** Some utilities charge by
+cumulative monthly kWh — the SCE pattern, where the rate steps from ~31 ct
+to ~42 ct once the monthly baseline allocation is passed. That price depends
+on how much you have used this month, not on the hour, so no per-hour level
+can represent it. SEM will classify such a tariff by whatever time structure
+it also has (or report `unknown` if it has none), and its savings figures
+will use the rate the integration reports at the time.
+
+Neither shape is dangerous — SEM does not act on a level it does not have —
+but neither will be optimised for.
+
+## A recognised brand is a proposal, not a binding (2.1, #915, #956)
+
+SEM reads what an integration declares about itself and proposes entities
+and services on the Configuration tab. It binds nothing you did not confirm.
+Two limits follow:
+
+- **A service SEM cannot drive as-is is named, not offered.** go-eCharger's
+  `set_max_current` wants a charger name SEM cannot fill in; some services
+  target an entity. Such a proposal reads *wire by hand* with the reason.
+- **A brand added from its source ships as *implemented*, not *tested
+  live*.** NRGkick, ABL eMH1 and Wallbox over the MQTT bridge were mapped
+  from the integrations' own code; the first owner who confirms makes the
+  row *tested live*.
+
+## Setpoint models (2.1, #809, #869)
+
+One setpoint model per install. A house with two batteries that need
+different models is not supported yet. With `direction_select` SEM writes
+the direction first and the watts only once the select reads it back, so a
+change of direction lands one cycle later by design.
+
+## The house sink is all-or-nothing (#970 open)
+
+When the battery is held, the grid pays for the whole house; when it is
+open, the battery does. A rate in between — grid up to the peak limit,
+battery for the rest — is not built.
+
+## Every control is shown (#996 open)
+
+A house on a flat tariff still sees the price controls, which can do nothing
+there. Hiding a control this house cannot use is planned, not built.
+
+## KEBA: Off and Pause hold for about 10 minutes
+
+The KEBA's failsafe brings the box back at its fallback current (usually
+8 A) about 10 minutes after any stop, because the official integration will
+not accept a 0 A fallback and SEM arms that failsafe at every start on
+purpose (a dead controller must not strand the car). SEM stops once and
+does not fight the box; it raises a Repair instead. A stop only holds if
+SEM's arming is turned off (`keba_arm_failsafe: false` via `set_option`)
+and the box's own `Curr FS` is set to 0.

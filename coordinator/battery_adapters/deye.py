@@ -57,7 +57,7 @@ from uuid import uuid4
 
 from homeassistant.util import dt as dt_util
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 from .base import BatteryControlAdapter
 from .deye_schedule import (
     DeyeScheduleError,
@@ -172,6 +172,32 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         self._force_charge_work_mode = self._clean_string(
             config.get("deye_force_charge_work_mode"),
         ).lower()
+        # (#827) System Work Mode — a DIFFERENT register from the
+        # Battery-First/Load-First selector above: the export-policy
+        # selector (Selling First / Zero Export To Load / Zero Export To
+        # CT). Its own 3-option dict and validator, never a widening of the
+        # 2-option one — that one is validated "exactly two, distinct".
+        self._system_work_mode_control = (
+            config.get("deye_system_work_mode_control", False) is True)
+        self._system_work_mode_entity = self._clean_string(
+            config.get("deye_system_work_mode_entity"),
+        )
+        self._system_work_mode_options = {
+            "selling_first": self._clean_string(
+                config.get("deye_system_work_mode_selling_option"),
+            ),
+            "zero_export_to_load": self._clean_string(
+                config.get("deye_system_work_mode_zero_load_option"),
+            ),
+            "zero_export_to_ct": self._clean_string(
+                config.get("deye_system_work_mode_zero_ct_option"),
+            ),
+        }
+        # The mode the inverter held before SEM's spend, restored on stop.
+        # Instance-scoped: a restart mid-spend loses it, and the stop then
+        # falls back to Zero Export To Load — the SAFE direction (no export)
+        # rather than leaving the pack selling.
+        self._system_mode_prior: str | None = None
         now_provider = config.get("deye_now_provider")
         self._now_provider = now_provider if callable(now_provider) else dt_util.now
         self._voltage_max_age_raw = config.get(
@@ -356,6 +382,169 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
             return "Deye force-charge Work Mode must be load_first or battery_first"
         return ""
 
+    def _validate_system_work_mode(self) -> str:
+        """(#827) Return an error for any ambiguous System Work Mode setup."""
+        if not self._system_work_mode_control:
+            return ""
+        if self._system_work_mode_entity.split(".", 1)[0] != "select":
+            return "Deye System Work Mode entity must be select.*"
+        state = self._get_state(self._system_work_mode_entity)
+        if state is None or not self._state_is_usable(state):
+            return "Deye System Work Mode state is unavailable"
+        options = getattr(state, "attributes", {}).get("options", [])
+        labels = list(self._system_work_mode_options.values())
+        if any(not v for v in labels) or len(set(labels)) != 3:
+            return "Deye System Work Mode mappings must be explicit and distinct"
+        missing = [v for v in labels if v not in options]
+        if missing:
+            return (f"Deye System Work Mode option not offered by the "
+                    f"entity: {missing[0]}")
+        if state.state not in options:
+            return "Deye System Work Mode state is not an offered option"
+        return ""
+
+    @staticmethod
+    def discharge_rate_caveat() -> str:
+        """(#827) Selling First sells at the INVERTER's own rate — SEM's
+        watts figure is advisory on this brand. Saying so beats pretending."""
+        return ("discharge rate is set by the inverter in Selling First — "
+                "SEM selects the mode, the inverter chooses the power")
+
+    async def command_force_discharge(self, watts: float,
+                                      floor_soc=None) -> bool:
+        """(#827) The brand's FIRST discharge surface: flip the export
+        policy to Selling First. ``watts`` is advisory here — see
+        discharge_rate_caveat — and the prior mode is captured for the
+        stop's restore."""
+        if not self._system_work_mode_control:
+            return False
+        if self._observer_mode or self._actuation_enabled is not True:
+            return False
+        err = self._validate_system_work_mode()
+        if err:
+            self._last_error = err
+            return False
+        state = self._get_state(self._system_work_mode_entity)
+        current = getattr(state, "state", None)
+        selling = self._system_work_mode_options["selling_first"]
+        if current == selling:
+            # (#827 follow-up) A spend window holds for HOURS and
+            # ``actuate_battery`` re-issues FORCE_DISCHARGE every cycle, so
+            # writing unconditionally re-hammers a Modbus-backed register
+            # thousands of times for one decision. That is bug class #538,
+            # and this adapter already guards its siblings against it
+            # ("a repeat is pure cost"). Already selling IS the satisfied
+            # intent, so report success without writing — a False here would
+            # read to the caller as "this adapter cannot sell".
+            return True
+        if current and current != selling:
+            self._system_mode_prior = str(current)
+        ok = await self._write_and_verify(
+            self._system_work_mode_entity, selling, "select")
+        return bool(ok)
+
+    # ── (#955) export control is the System Work Mode select on Deye ─────
+    async def command_limit_export(self, watts: float) -> None:
+        """Deye's zero-export is a MODE, not a wattage: any cap selects
+        ``zero_export_to_load``. The prior mode is captured exactly as the
+        force-discharge path captures it, and restored on release."""
+        if not self._system_work_mode_control:
+            # (review) the same consent command_force_discharge asks for: the
+            # entity is persisted even when the control checkbox is off, and a
+            # select SEM was never allowed to drive must not be driven here.
+            raise NotImplementedError("Deye system work mode control is off — SEM may not drive it")
+        ent = self._system_work_mode_entity
+        target = (self._system_work_mode_options or {}).get("zero_export_to_load")
+        if not ent or not target:
+            raise NotImplementedError("no Deye system work mode select configured")
+        current = self._get_state(ent)
+        if current == target:
+            self._last_export_limit_w = 0.0
+            return
+        if current and current in self._system_work_mode_options.values():
+            self._export_mode_prior = str(current)
+        if not await self._write_and_verify(ent, target, "select"):
+            raise RuntimeError("Deye work mode write did not verify")
+        self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
+
+    def export_release_recipe(self):
+        ent = self._system_work_mode_entity
+        prior = getattr(self, "_export_mode_prior", None)
+        if not ent or not prior:
+            return None
+        return {"domain": "select", "service": "select_option",
+                "data": {"entity_id": ent, "option": prior}}
+
+    def adopt_export_prior(self, recipe) -> None:
+        self._export_mode_prior = (recipe or {}).get("data", {}).get("option") or None
+        self._last_export_limit_w = 0.0
+
+    async def command_release_export(self) -> None:
+        ent = self._system_work_mode_entity
+        prior = getattr(self, "_export_mode_prior", None)
+        if not ent:
+            raise NotImplementedError("no Deye system work mode select configured")
+        if prior and self._get_state(ent) != prior:
+            if not await self._write_and_verify(ent, prior, "select"):
+                raise RuntimeError("Deye work mode restore did not verify")
+        self._export_mode_prior = None
+        self._last_export_limit_w = None
+        self._last_export_intent = ExportIntent.RELEASE
+
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) The work-mode select that WOULD be written — see the base class."""
+        if not self._system_work_mode_control:
+            return {"service": None, "data": None,
+                    "why": "Deye system work mode control is off — SEM may not drive it"}
+        ent = self._system_work_mode_entity
+        target = (self._system_work_mode_options or {}).get("zero_export_to_load")
+        if not ent or not target:
+            return {"service": None, "data": None,
+                    "why": "no Deye system work mode select configured"}
+        if intent is ExportIntent.LIMIT:
+            option = target
+        else:
+            # the prior the real release restores — captured, else what the
+            # select reads now (an observer rig has never cut)
+            option = getattr(self, "_export_mode_prior", None) or self._get_state(ent)
+            if not option:
+                return {"service": None, "data": None,
+                        "why": f"{ent} is unreadable — nothing to restore to"}
+        return {"service": "select.select_option",
+                "data": {"entity_id": ent, "option": str(option)}, "why": None}
+
+    async def command_stop_force_discharge(self) -> bool:
+        """(#827) Restore the pre-spend mode. With no captured prior (a
+        restart mid-spend), fall back to Zero Export To Load — the SAFE
+        direction: a Deye left in Selling First sells the whole pack."""
+        if not self._system_work_mode_control:
+            return False
+        if self._observer_mode or self._actuation_enabled is not True:
+            return False
+        state = self._get_state(self._system_work_mode_entity)
+        current = getattr(state, "state", None)
+        selling = self._system_work_mode_options["selling_first"]
+        # Not selling means there is nothing to restore. Only a CONFIDENT
+        # reading may skip the write: an unavailable/unknown/unrecognised
+        # state falls through and restores anyway, because the failure this
+        # guard must never cause is a Deye left in Selling First — that
+        # sells the whole pack.
+        if current != selling and current in self._system_work_mode_options.values():
+            self._system_mode_prior = None
+            return True
+        target = self._system_mode_prior or \
+            self._system_work_mode_options["zero_export_to_load"]
+        ok = await self._write_and_verify(
+            self._system_work_mode_entity, target, "select")
+        if ok:
+            # Cleared only once the restore has LANDED. Clearing first meant
+            # one transient failure permanently forgot the user's real mode
+            # (e.g. Zero Export To CT) and silently downgraded every later
+            # retry to Zero Export To Load.
+            self._system_mode_prior = None
+        return bool(ok)
+
     # ─── Capability ────────────────────────────────────────────
 
     def capability(self) -> DeyeCapability:
@@ -489,6 +678,18 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         work_mode_reason = self._validate_work_mode()
         if work_mode_reason:
             return self._unavailable(work_mode_reason)
+        system_mode_reason = self._validate_system_work_mode()
+        _hass = getattr(self, "_hass", None) or getattr(self, "hass", None)
+        if system_mode_reason:
+            if _hass is not None and self._system_work_mode_entity:
+                from ..repair_issues import raise_deye_system_work_mode_invalid
+                raise_deye_system_work_mode_invalid(
+                    _hass, self._system_work_mode_entity,
+                    reason=system_mode_reason)
+            return self._unavailable(system_mode_reason)
+        if _hass is not None and self._system_work_mode_entity:
+            from ..repair_issues import clear_deye_system_work_mode_invalid
+            clear_deye_system_work_mode_invalid(_hass, self._system_work_mode_entity)
 
         return DeyeCapability(
             available=True,
@@ -970,6 +1171,44 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         """Safe finite discharge config, else 0 (never a state read)."""
         return self._max_discharge_w
 
+    def force_charge_blocked_why(self) -> str:
+        """(#992, class 99) WHICH gate is shut, or "" when none is.
+
+        ``supports_forced_charge`` ANDs thirteen terms; the message that
+        explained a refusal named three of them and otherwise quoted
+        ``capability.reason`` — which says ``ok`` whenever the ENTITIES
+        validate. An install with `deye_program_control` left at its default
+        was therefore told "Deye force charge blocked: ok", with the switch
+        it needed nowhere in the sentence. One resolver now, so the boolean
+        and its explanation are the same evaluation.
+        """
+        capability = self.capability()
+        if self._unsafe_latched:
+            return "an unsafe latch is set — clear it first"
+        if self._observer_mode:
+            return "observer mode is active — SEM is watching, not writing"
+        if not self._actuation_enabled:
+            return "actuation is not enabled (deye_actuation_enabled)"
+        if not self._program_control:
+            return "program control is off (deye_program_control) — SEM may not write the charge programs"
+        if not capability.available:
+            return capability.reason or "the control entities are not usable"
+        if not capability.snapshot_supported:
+            return "this battery cannot snapshot its programs, so SEM cannot restore them"
+        if not capability.readback_supported:
+            return "this battery cannot read its programs back, so a write cannot be verified"
+        if not capability.restore_supported:
+            return "this battery cannot restore its programs, so SEM will not change them"
+        if not self._config_entry_id:
+            return "the Deye config entry is not known to SEM"
+        if not self._battery_id:
+            return "this battery has no id"
+        if not (self._readback_attempts > 0):
+            return "readback attempts are set to 0 — a write could never be verified"
+        if not (math.isfinite(self._readback_delay_s) and self._readback_delay_s >= 0):
+            return f"the readback delay is not a usable number ({self._readback_delay_s})"
+        return ""
+
     @property
     def supports_forced_charge(self) -> bool:
         """True only behind all hardware, transaction and operator gates."""
@@ -1075,16 +1314,12 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
         self, target_soc: float, charge_power_w: float, duration_min: int,
     ) -> None:
         if not self.supports_forced_charge:
-            capability = self.capability()
-            if self._unsafe_latched:
-                reason = "unsafe latch is set"
-            elif self._observer_mode:
-                reason = "observer mode is active"
-            elif not self._actuation_enabled:
-                reason = "actuation is not explicitly enabled"
-            else:
-                reason = capability.reason
-            self._last_error = f"Deye force charge blocked: {reason}"
+            # (#992) the resolver above, so the refusal names the gate that
+            # is actually shut rather than a capability reason that only
+            # covers four of the thirteen.
+            self._last_error = (
+                f"Deye force charge blocked: "
+                f"{self.force_charge_blocked_why() or 'reason not identified'}")
             return
         if any(
             isinstance(value, bool)

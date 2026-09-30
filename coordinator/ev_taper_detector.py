@@ -35,6 +35,16 @@ from .units import power_unit_scale
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _now_iso() -> str:
+    """HA's clock, as the rest of the coordinator uses it (#1011). Imported
+    lazily: the module never touches hass at import time (#786)."""
+    try:
+        from homeassistant.util import dt as dt_util
+        return dt_util.now().isoformat()
+    except Exception:  # noqa: BLE001 — a detector unit test without HA
+        return datetime.now().astimezone().isoformat()
+
 # Buffer and detection constants
 BUFFER_SIZE = 120          # 120 samples × 10s = 20 minutes
 MIN_SAMPLES = 12           # At least 2 min of BMS-only data for regression
@@ -183,6 +193,18 @@ class EVTaperDetector:
         # SOC anchor: set True after first reliable SOC reference point
         # (taper detection, car API calibration, or first session bootstrap)
         self._soc_anchored: bool = False
+        # (#1011) WHICH reference set the estimate, and WHEN — so the sensor
+        # can say "taper, 16:57" instead of a bare number and a wrong anchor
+        # is visible on the card. Kinds: "sensor" (a vehicle SOC reading),
+        # "taper" (a completed charge), "session" (energy delivered:
+        # bootstrap or self-heal). Persisted with the estimate they explain.
+        self._anchor_kind: Optional[str] = None
+        self._anchor_at: Optional[str] = None
+        # (#1011) A start the car did not take. Its own fact, never an
+        # anchor: a stall says "declined", only a taper or a sensor says
+        # "full" (#983). First and latest instant of this plug-in.
+        self._start_declined_at: Optional[str] = None
+        self._start_declined_last_at: Optional[str] = None
         # #774 — energy delivered in excess of the deficit the anchor claimed
         # was left. Session-scoped and NOT persisted: it is evidence about the
         # reference currently held, and a restart drops both together.
@@ -204,7 +226,11 @@ class EVTaperDetector:
         self._soc_anchor_session_kwh: Optional[float] = None
         # #708 — session latch: the estimate (not the sensor) ended a charge.
         # Read by the notification layer; cleared on resume or disconnect.
-        self._estimate_stop_active: bool = False
+        # (#939) It holds WHICH bound ("min"/"max") the estimate stopped at,
+        # not just that it did: the announcement evaluates both bounds, and a
+        # bare flag set on one was released by the other on the next cycle —
+        # see ``ev_soc_need.estimate_stop_step``.
+        self._estimate_stop_bound: Optional[str] = None
         # Hardware counter tracking for drift-free energy accounting
         self._hw_total_at_full: Optional[float] = None  # Charger total kWh when SOC was 100%
         self._hw_total_last: Optional[float] = None  # Last known charger total kWh
@@ -287,6 +313,7 @@ class EVTaperDetector:
         mono = time.monotonic()
 
         # Detect SEM setpoint changes
+        prev_setpoint = self._last_setpoint
         sem_changed = False
         if abs(current_setpoint - self._last_setpoint) > 0.5:
             sem_changed = True
@@ -312,6 +339,23 @@ class EVTaperDetector:
         if current_setpoint > 0:
             self._sem_has_offered = True
         sem_withdrew_offer = self._sem_has_offered and current_setpoint <= 0
+
+        # (#939) ...and a fresh offer is a fresh charge. Withdrawal only
+        # PAUSES the full-confirm: the decline latched before it, and the
+        # samples that latched it, sat there untouched — so when SEM offered
+        # again, the car's silence was scored against a decline that belonged
+        # to the charge before. Live (Victron EVCS + Tesla): the box wound
+        # down with the sun under a withdrawn offer, SEM re-offered 6 A when
+        # the night window opened, the car did not answer for 70 minutes, and
+        # 30 s after the offer the pack was "complete" at 71 %. The latch is
+        # re-earned by the new charge's own samples; a car that never answers
+        # never shows a decline, so it is never called full — the honest
+        # reading (#774: drop the reference, don't invent one). Absence of an
+        # offer is untouched: observer mode never crosses this edge.
+        if current_setpoint > 0 and prev_setpoint <= 0:
+            self._declining_phase = False
+            self._full_confirm_count = 0
+            self._buffer.clear()
 
         # Track session peak (only from sustained readings > threshold)
         if ev_power > self._session_peak_w and ev_power > SESSION_PEAK_MIN:
@@ -371,6 +415,8 @@ class EVTaperDetector:
                 self._energy_since_full = 0.0
                 self._estimated_soc = 100.0
                 self._soc_anchored = True
+                self._anchor_kind = "taper"                       # (#1011)
+                self._anchor_at = timestamp.isoformat()
                 self._energy_over_anchor_kwh = 0.0  # fresh reference (#774)
                 # Snapshot hardware counter at full for drift-free tracking
                 if self._hw_total_last is not None:
@@ -500,6 +546,11 @@ class EVTaperDetector:
         """
         capacity = self._config.get("ev_battery_capacity_kwh", 40)
 
+        # (#1011) Energy actually flowing ends a declined start: the car
+        # accepted current again (preconditioning, its timer, a wake-up).
+        if ev_energy_increment_kwh and ev_energy_increment_kwh > 0.005:
+            self.clear_declined_start()
+
         # Always track hardware counter (even after full detection)
         if hw_total_energy_kwh is not None and hw_total_energy_kwh > 0:
             self._hw_total_last = hw_total_energy_kwh
@@ -596,6 +647,11 @@ class EVTaperDetector:
                 # energy-accounted SOC; the sensor always wins.
                 self._soc_anchor_value = vehicle_soc
                 self._soc_anchor_session_kwh = self._current_session_energy_kwh
+                # (#1011) stamped HERE, on a changed reading — not on every
+                # cycle's re-read, which would move a timestamp attribute
+                # each cycle and re-arm the #581 recorder churn.
+                self._anchor_kind = "sensor"
+                self._anchor_at = _now_iso()
             elif self._soc_anchor_value is None:
                 # #708 — session-start bootstrap: after a disconnect cleared
                 # the anchor, the first present reading anchors even without
@@ -606,6 +662,8 @@ class EVTaperDetector:
                 # entirely unguarded.
                 self._soc_anchor_value = vehicle_soc
                 self._soc_anchor_session_kwh = self._current_session_energy_kwh
+                self._anchor_kind = "sensor"                          # (#1011)
+                self._anchor_at = _now_iso()
             self._last_real_soc = vehicle_soc
             self._soc_anchored = True
             self._energy_over_anchor_kwh = 0.0  # fresh reference (#774)
@@ -737,6 +795,8 @@ class EVTaperDetector:
             self._estimated_soc = min(100.0, pre_charge_soc + soc_added)
             self._energy_since_full = (100.0 - self._estimated_soc) / 100.0 * capacity
             self._soc_anchored = True
+            self._anchor_kind = "session"                             # (#1011)
+            self._anchor_at = _now_iso()
             self._energy_over_anchor_kwh = 0.0  # fresh reference (#774)
             _LOGGER.info(
                 "SOC bootstrapped from first session: %.1f kWh delivered "
@@ -753,6 +813,7 @@ class EVTaperDetector:
         self._declining_phase = False
         self._full_detected = False
         self._full_confirm_count = 0
+        self.clear_declined_start()     # (#1011) a new plug-in, a new car
         self._settling_counter = 0
         self._last_setpoint = 0.0
         self._sem_has_offered = False  # #708 — withdrawal is session-scoped
@@ -762,7 +823,7 @@ class EVTaperDetector:
         # re-arms it from the first reading of the next session.
         self._soc_anchor_value = None
         self._soc_anchor_session_kwh = None
-        self._estimate_stop_active = False
+        self._estimate_stop_bound = None
         # #438 — reset session-energy accumulator + integration state
         self._current_session_energy_kwh = 0.0
         self._last_energy_timestamp = None
@@ -781,9 +842,53 @@ class EVTaperDetector:
     # taper detector is display-only now (taper trend, estimated SOC,
     # battery health).
 
+    # ------------------------------------------------------------------
+    # (#1011) provenance of the estimate, and a refusal as its own fact
+    # ------------------------------------------------------------------
+
+    def set_anchor(self, kind: str, at: Optional[str]) -> None:
+        """Name the reference the estimate now rests on (see ``_anchor_kind``)."""
+        self._anchor_kind = kind
+        self._anchor_at = at
+
+    def note_declined_start(self, at: str) -> None:
+        """The car did not draw at an offered current. Recorded as exactly
+        that. Touches no anchor, no full-charge timestamp, no deficit: a
+        refusal is not evidence of a full pack — a departure timer, a
+        sleeping BMS and preconditioning refuse the same way, and #983's
+        install was at 54 % against 80 % when the old rule called it full.
+        On PROD 27.09.2026 that rule stamped a "full charge" on a day
+        nothing charged. Only a taper or a sensor may say full."""
+        if self._start_declined_at is None:
+            self._start_declined_at = at
+        self._start_declined_last_at = at
+
+    def clear_declined_start(self) -> None:
+        self._start_declined_at = None
+        self._start_declined_last_at = None
+
+    @property
+    def declined_start(self) -> bool:
+        """A start refused in this plug-in with nothing drawn since."""
+        return self._start_declined_at is not None
+
+    @property
+    def anchor_kind(self) -> Optional[str]:
+        return self._anchor_kind
+
+    @property
+    def anchor_at(self) -> Optional[str]:
+        return self._anchor_at
+
     def get_state(self) -> Dict[str, Any]:
         """Export persistent state for storage."""
         return {
+            # (#1011) the anchor's provenance persists with the estimate it
+            # explains. The DECLINE deliberately does not: a restart re-learns
+            # it within three minutes, while a stored one could outlive an
+            # unplug that happened while HA was down and brand a new car.
+            "anchor_kind": self._anchor_kind,
+            "anchor_at": self._anchor_at,
             "last_full_charge": self._last_full_timestamp,
             "energy_since_full": round(self._energy_since_full, 3),
             "estimated_soc": round(self._estimated_soc, 1),
@@ -797,6 +902,8 @@ class EVTaperDetector:
         """Restore persistent state from storage. (#440) ``consecutive_skips``
         is silently ignored on restore — older payloads remain compatible
         but the field is no longer tracked."""
+        self._anchor_kind = state.get("anchor_kind")                  # (#1011)
+        self._anchor_at = state.get("anchor_at")
         self._last_full_timestamp = state.get("last_full_charge")
         self._energy_since_full = state.get("energy_since_full", 0.0)
         self._estimated_soc = state.get("estimated_soc", 0.0)
@@ -832,35 +939,21 @@ class EVTaperDetector:
         if not ev_power_entity:
             return None
 
-        try:
-            from homeassistant.components.recorder import get_instance
-            from homeassistant.components.recorder.history import state_changes_during_period
-            from homeassistant.util import dt as dt_util
-            from datetime import timedelta as _timedelta
+        from .recorder_history import read_states
 
-            end = dt_util.utcnow()
-            start = end - _timedelta(days=days)
-
-            history = await get_instance(hass).async_add_executor_job(
-                state_changes_during_period,
-                hass, start, end, str(ev_power_entity),
-            )
-
-            states = history.get(ev_power_entity, [])
-            if len(states) < 10:
-                _LOGGER.debug("EV history: only %d entries, skipping seed", len(states))
-                return None
-
-        except Exception as e:
-            _LOGGER.debug("Could not read EV history from recorder: %s", e)
-            # (HA Repairs, 2026-06-06) Surface a one-time Repair so the
-            # user knows EV / forecast bootstrap won't work until the
-            # recorder integration is healthy. Idempotent.
+        states = await read_states(hass, ev_power_entity, days)
+        if states is None:
+            # (HA Repairs, 2026-06-06) The recorder could not answer at all.
+            # Surface a one-time Repair so the user knows EV / forecast
+            # bootstrap won't work until the recorder is healthy. Idempotent.
             try:
                 from . import repair_issues as _ri
                 _ri.raise_no_recorder(hass)
             except Exception:  # noqa: BLE001
                 pass
+            return None
+        if len(states) < 10:
+            _LOGGER.debug("EV history: only %d entries, skipping seed", len(states))
             return None
 
         # Detect sensor unit to apply correct scale factor. Some EV power
@@ -1051,6 +1144,12 @@ class EVTaperDetector:
     def full_detected(self) -> bool:
         """Whether a full charge was detected this session."""
         return self._full_detected
+
+    @property
+    def _estimate_stop_active(self) -> bool:
+        """(#708) Whether the estimate-stop latch is set — derived from the
+        bound it holds (#939), so the two can never disagree."""
+        return self._estimate_stop_bound is not None
 
     @property
     def still_full(self) -> bool:

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from ..utils.log_gate import log_on_change
 from .charger_types import ChargerDecision, ChargerIntent, ChargerPower
 
 if TYPE_CHECKING:
@@ -30,6 +31,7 @@ class DesiredState(Enum):
     OFF = auto()     # user-explicit OFF (ChargerIntent.DISABLE)
     IDLE = auto()    # temporary pause (ChargerIntent.IDLE)
     CHARGE = auto()  # charging (CHARGE_AT_AMPS / CHARGE_MAX)
+    RELEASED = auto()  # (#898) hands-off (ChargerIntent.RELEASE): SEM issues nothing
 
 
 #: A real unplug persists; a UDP blip is one cycle (project_ev_flap_udp_blip).
@@ -48,12 +50,17 @@ class ActionKind(Enum):
     REPORT_ENABLE_BLOCKED = auto()  # enable switch unavailable/locked — surface it (#536)
     REPORT_STOP_WAR = auto()        # box keeps re-starting against our stop — cease fire (#763)
     REPORT_STOP_UNENFORCEABLE = auto()  # no mechanism can open the contactor (#627)
+    REPORT_FAILSAFE_SUSPECTED = auto()  # box re-enables on a CONSTANT interval after our stop (#823)
+    CLEAR_FAILSAFE_SUSPECTED = auto()   # a stop finally HELD past the interval — the box was fixed (#823)
 
 
 @dataclass(frozen=True)
 class Action:
     kind: ActionKind
     amps: int = 0
+    # (#823) the learned stop→re-enable interval, on REPORT_FAILSAFE_SUSPECTED
+    # only — the Repair cannot point at "Tmo FS: 600" without the number.
+    interval_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,12 @@ class ObservedState:
     SEM can start but not stop must keep charging normally while the
     un-stoppability is surfaced. Conflating them would turn a reporting
     gap into a total loss of surplus charging."""
+    contactor_surface: bool = False
+    """(#940) True when SEM's own start/stop flips a relay (a start/stop
+    switch, a charge-mode select, a brand start/stop or enable/disable
+    service) rather than riding the current number — i.e. whether the
+    anti-cycle floor applies at all. Defaults False: a charger that cannot
+    say keeps today's behaviour, and the floor is opt-in on evidence."""
 
 
 def desired_from_decision(decision: ChargerDecision) -> Tuple[DesiredState, int]:
@@ -95,6 +108,8 @@ def desired_from_decision(decision: ChargerDecision) -> Tuple[DesiredState, int]
     the hardware max from the adapter (so this stays pure and the max
     isn't duplicated here)."""
     intent = decision.intent
+    if intent is ChargerIntent.RELEASE:
+        return DesiredState.RELEASED, 0
     if intent is ChargerIntent.DISABLE:
         return DesiredState.OFF, 0
     if intent is ChargerIntent.IDLE:
@@ -139,6 +154,53 @@ STOP_WAR_BACKOFF_MAX_FACTOR: int = 8
 # car's handshake. One DISABLE per dwell; the war accounting (edges,
 # ceasefire) is unaffected.
 STOP_REASSERT_DWELL_S: float = 60.0
+
+# (#940) THE CONTACTOR'S ANTI-CYCLE FLOOR.
+#
+# ``STOP_REASSERT_DWELL_S`` above paces the REPEAT of one command; it says
+# nothing about the OPPOSITE command arriving on the next cycle. On
+# alexmc1510's switch-controlled charger (09.09, 22:13-22:19) that read as
+# a stop paced to once a minute and a relay toggling anyway: 60 s on, 20 s
+# off, six times over — SEM's DISABLE opened the switch, the desired state
+# flipped back to CHARGE two cycles later, and ``ensure_enabled`` closed it
+# again with nothing in between to say no. Contactor wear and a car that
+# aborts a repeatedly-interrupted session are the cost, and it is invisible
+# from SEM's side: the card read CHARGING (6 A) while the box was off.
+#
+# The CLOSE floor is what bounds the cycle: once SEM has opened the relay
+# it stays open for ``CONTACTOR_MIN_OFF_S``, so the full period can never
+# be shorter than that however fast the decision flaps. Delaying a START is
+# always safe, so this side needs no exemption and gets the longer number —
+# 300 s, the same figure ``SwitchDevice`` gives every switch-actuated load
+# (#688) and the same as the #536 enable-retry interval.
+#
+# The OPEN floor only stops SEM from opening a relay it JUST closed, and it
+# is the expensive one: every second it holds is a second the car charges
+# against SEM's own judgement — off the grid, or out of the house battery.
+# 120 s, matching ``ev_phase_sequencer.MIN_SWITCH_GAP_S``, which is already
+# this codebase's "minimum gap between contactor operations". Long enough
+# to make a started session worth starting (the 4-cycle idle grace is 40 s
+# and the reassert dwell 60 s, so it changes something); short enough that
+# the worst case is ~0.05 kWh at 6 A and ~0.37 kWh at 11 kW.
+#
+# It applies to a DISCRETIONARY stop only — ``DesiredState.IDLE``, "SEM
+# would rather not charge just now": no surplus, target reached, waiting
+# for a cheaper hour. ``DesiredState.OFF`` never waits, and that is
+# structural rather than a list somebody has to remember to extend: every
+# producer of ``ChargerIntent.DISABLE`` in the tree is a demand, not a
+# preference — the #804 phase switch (never switch under load), the active
+# phase guard's conductor protection, the VPP export pause. Mode Off is
+# ``RELEASE`` and bypasses on its own row. The one demand that arrives as
+# an IDLE is the peak EMERGENCY shed, and it carries
+# ``ChargerDecision.safety_stop``.
+#
+# Both apply ONLY to a charger with a discrete on/off surface
+# (``CurrentControlDevice.contactor_surface``). A current-number charger
+# stops by writing 0 A — a pilot-signal pause, not a relay cycle — and
+# holding ITS restart for five minutes would cost surplus for no wear
+# saved.
+CONTACTOR_MIN_ON_S: float = 120.0
+CONTACTOR_MIN_OFF_S: float = 300.0
 
 
 class ChargerReconciler:
@@ -227,9 +289,92 @@ class ChargerReconciler:
         self._stop_war_last_round_at: float = 0.0
         self._stop_war_backoff_until: float = 0.0
         self._stop_war_draw_seen: bool = False
-        self._stop_war_reported: bool = False
         self._stop_war_ceasefires: int = 0
+        # (#944) Every ceasefire ever started (never reset) and the last one
+        # announced. The warning and the charger notification are once per
+        # CEASEFIRE. The old "re-arm on any other action" flag let a second
+        # ceasefire entered straight from a pause go unannounced (no action
+        # landed between the two), and a #823 clear inside one announce twice.
+        self._stop_war_ceasefire_serial: int = 0
+        self._stop_war_reported_serial: int = -1
+        # (#944) How long THIS stand-down lasts. The doubling makes it 30,
+        # 60, 120 or 240 min; the warning announced the first figure for all.
+        self._stop_war_backoff_s: float = 0.0
+        # (#944) The stand-down's surfaces — Repair, charger notification,
+        # published state — are up while SEM holds fire AND the box draws.
+        # None at boot: a reconciler rebuilt by an options reload cannot know
+        # whether its predecessor left the Repair up, so its first cycle
+        # without a stand-down clears once.
+        self._stand_down_surfaced: Optional[bool] = None
+        self._stand_down_power_w: float = 0.0
+        self._stand_down_raised_w: float = 0.0   # the figure the Repair shows
+        self._stand_down_raised_serial: int = 0  # …and the ceasefire it describes
+        self._stand_down_quiet: int = 0          # non-drawing cycles in the window
+        # (#823) stop→re-enable gap history. A failsafe timeout re-enables on
+        # a CONSTANT interval after our DISABLE — a retrying car or a human
+        # does not. Two matching gaps name it; the report never changes the
+        # stop cadence (that war the box always wins, #763).
+        self._failsafe_gaps: list = []
+        self._failsafe_reported: bool = False
+        self._failsafe_interval_s: float = 0.0
+        # (#1009) the hands-off row's OWN stop anchor. ``_last_disable_issued_at``
+        # is shared with the OFF/IDLE rows and survives an Off episode that
+        # issued no stop (nothing was charging) — a gap measured from it
+        # would be from some earlier row's stop. Set only by this row's one
+        # stop, cleared when the mode leaves Off.
+        self._released_stop_at: float = 0.0
+        # (#1009) …and its OWN gap list. The OFF row's gaps come from stop-war
+        # rounds any DISABLE producer can start (VPP export pause, phase
+        # guard); mixing them with this row's would let a first Off episode
+        # pair with an older gap and speak early. One Repair per charger
+        # either way: the reported flag and interval stay shared.
+        self._released_gaps: list = []
+        # (#823) A gap only counts if the stop actually TOOK in between —
+        # the box settled and then returned. Continuous drawing against a
+        # stop is a DIFFERENT fault (stop-not-taking, #548) and produced
+        # cycle-cadence "gaps" of 1-2 s that the tolerance floor happily
+        # called constant. A failsafe that never lets the stop land is
+        # indistinguishable from that case and is already reported by the
+        # stop-war / stop-not-taking surfaces.
+        self._failsafe_settled_since_disable: bool = False
+        self._last_disable_issued_at: float = 0.0
         self._last_disable_at: float = float("-inf")
+        # (#940) The contactor's anti-cycle clocks — when SEM last MOVED the
+        # relay, closed and open. ``-inf`` = never, so a fresh reconciler
+        # holds nothing (and a restart therefore costs one free operation;
+        # unlike the #461 stability epochs these are not persisted).
+        #
+        # Armed on a believed TRANSITION, never on a re-assert. That is bug
+        # class 73 and it is not hypothetical here: START_AND_WRITE is
+        # re-emitted on every CHARGE cycle after an OFF cycle cleared
+        # ``_charging_intent_active``, and DISABLE is re-emitted once per
+        # reassert dwell while a stop is not taking. Stamping either would
+        # refresh the floor from SEM's own idempotent repeats — under a
+        # flapping decision the minimum ON would never expire and SEM would
+        # lose the stop entirely, which is strictly worse than the bug.
+        #
+        # They track SEM's OWN commands: a box that closes its own contactor
+        # (#315 KEBA auto-start) never earns a minimum ON, so the rogue-start
+        # DISABLE still lands on the first cycle.
+        self._contactor_closed_at: float = float("-inf")
+        self._contactor_opened_at: float = float("-inf")
+        self._contactor_closed: Optional[bool] = None
+        """SEM's belief about the relay: True closed, False open, None at
+        boot (SEM has commanded nothing). A readable enable switch
+        overrides it in both directions — see the adoption in
+        ``reconcile``."""
+        self._contactor_surface: bool = False
+        self._anticycle_hold_kind: str = ""
+        self._anticycle_hold_until: float = 0.0
+        self._anticycle_episodes: int = 0
+        # (10.09.2026) Off issues ONE stop, then never again — see the
+        # RELEASED row. Starts LATCHED on purpose: a reconciler that opens
+        # its eyes already in Off cannot know whether the user chose Off just
+        # now or an hour ago, and #898's case (a charge started at the box
+        # while Off was already set) must survive a restart. Only the
+        # TRANSITION into Off — a cycle that saw some other desired state
+        # first — clears it and earns the one stop.
+        self._released_stop_issued = True
 
     def snapshot_war(self, now: float) -> dict:
         """(#763 beta.7) The war state for the diagnostics download.
@@ -251,24 +396,278 @@ class ChargerReconciler:
                 self._stop_commanded_while_drawing,
             "last_desired": self._last_desired,
             "last_actions": list(self._last_actions),
+            "anticycle": self.anticycle_snapshot(now),
+            "stand_down": self.stand_down_snapshot(now),
         }
 
-    def _gated_disable(self, now: float) -> List[Action]:
-        """One DISABLE per STOP_REASSERT_DWELL_S (#763 round 3)."""
+    def stand_down_snapshot(self, now: float) -> dict:
+        """(#944) SEM holding fire while the box draws, for the EV surface.
+
+        The ceasefire (#763) is the right call for the car, and it was
+        invisible: the tile passed for an ordinary charge while 3 kW ran out
+        of the house battery for an hour. Counts only while the car draws AND
+        the window is open, so a reconciler that stopped being called cannot
+        leave a stale "standing down" behind.
+        """
+        active = (bool(self._stand_down_surfaced)
+                  and now < self._stop_war_backoff_until)
+        return {
+            "standing_down": active,
+            "remaining_s": round(max(0.0, self._stop_war_backoff_until - now), 1)
+            if active else 0.0,
+            "power_w": round(self._stand_down_power_w) if active else 0,
+        }
+
+    # ── #940 contactor anti-cycle ────────────────────────────────────
+    def contactor_hold_s(self, *, closing: bool, now: float) -> float:
+        """Seconds the anti-cycle floor still refuses this transition.
+
+        ``closing`` asks about closing the relay (min OFF since SEM opened
+        it); False asks about opening it (min ON since SEM closed it). 0.0
+        on a charger with no discrete contactor surface — its stop is a 0 A
+        write, which is not a relay cycle."""
+        if not self._contactor_surface:
+            return 0.0
+        if closing:
+            return max(0.0, CONTACTOR_MIN_OFF_S - (now - self._contactor_opened_at))
+        return max(0.0, CONTACTOR_MIN_ON_S - (now - self._contactor_closed_at))
+
+    def _note_contactor(self, closed: bool, now: float) -> None:
+        """Arm the anti-cycle clock on a believed TRANSITION.
+
+        A re-assert of a command already in force moved no relay, so it is
+        not an event and must not re-arm the floor (bug class 73)."""
+        if self._contactor_closed is closed:
+            return
+        self._contactor_closed = closed
+        if closed:
+            self._contactor_closed_at = now
+        else:
+            self._contactor_opened_at = now
+
+    def _note_anticycle_hold(self, kind: str, hold: float, now: float) -> None:
+        if not self._anticycle_hold_kind:
+            # A new episode. ``log_on_change`` dedups on the digit-stripped
+            # message, and the countdown is the only thing that varies — so
+            # without an episode in the key this would log once per process
+            # and then go quiet forever (#799: a refusal nobody can see is
+            # not a surface).
+            self._anticycle_episodes += 1
+        self._anticycle_hold_kind = kind
+        self._anticycle_hold_until = now + hold
+        log_on_change(
+            _LOGGER,
+            f"anticycle:{self.charger_id}:{kind}:{self._anticycle_episodes}",
+            logging.INFO,
+            "reconcile(%s): anti-cycle — holding the contactor %s for "
+            "another %.0f s (%s floor). A switch-controlled charger is a "
+            "relay: SEM does not toggle it faster than this (#940).",
+            self.charger_id, "OFF" if kind == "min_off" else "ON",
+            hold, kind,
+        )
+
+    def _clear_anticycle_hold(self) -> None:
+        self._anticycle_hold_kind = ""
+        self._anticycle_hold_until = 0.0
+
+    def anticycle_snapshot(self, now: float) -> dict:
+        """(#940) The hold, for the diagnostics dump and the EV surface."""
+        remaining = max(0.0, self._anticycle_hold_until - now)
+        return {
+            "surface": self._contactor_surface,
+            "closed": self._contactor_closed,
+            "holding": self._anticycle_hold_kind or None,
+            "remaining_s": round(remaining, 1),
+            "min_on_s": CONTACTOR_MIN_ON_S,
+            "min_off_s": CONTACTOR_MIN_OFF_S,
+        }
+
+    def _stamp_close(self, actions: List[Action], now: float) -> List[Action]:
+        """Record the contactor CLOSE that ``actions`` is about to command.
+
+        ENABLE and START_AND_WRITE are the only two actions that close a
+        relay; stamping here rather than at each ``return`` is what keeps a
+        future row from acquiring a close without a clock."""
+        for a in actions:
+            if a.kind in (ActionKind.ENABLE, ActionKind.START_AND_WRITE):
+                self._note_contactor(True, now)
+                break
+        return actions
+
+    def _gated_disable(self, now: float, *,
+                       bypass_anticycle: bool = False) -> List[Action]:
+        """One DISABLE per STOP_REASSERT_DWELL_S (#763 round 3), and never
+        inside the contactor's minimum ON (#940) unless the caller says the
+        stop is a demand rather than a preference."""
+        if not bypass_anticycle:
+            hold = self.contactor_hold_s(closing=False, now=now)
+            if hold > 0:
+                self._note_anticycle_hold("min_on", hold, now)
+                return [Action(ActionKind.NONE)]
         if now - self._last_disable_at < STOP_REASSERT_DWELL_S:
             return [Action(ActionKind.NONE)]
+        self._clear_anticycle_hold()
         self._last_disable_at = now
+        self._last_disable_issued_at = now          # (#823) gap anchor
+        self._note_contactor(False, now)            # (#940) anti-cycle clock
         return [Action(ActionKind.DISABLE)]
+
+    def _failsafe_action(self, gaps: Optional[list] = None) -> List[Action]:
+        """(#823) Name a constant-interval self-re-enable, once.
+
+        Two gaps within 2% (or 5 s) of each other is the signature — a
+        failsafe timeout is periodic TO THE SECOND, which is the whole
+        discriminator. The tolerance is deliberately tight: onkelfu's
+        Mercedes retried "every ~12 minutes", and a 10% band at that scale
+        (72 s) would swallow a car timer's jitter and cry wolf (#611).
+        The action only ever ACCOMPANIES the row's normal decision: naming
+        the fault must not change the stop cadence."""
+        gaps = self._failsafe_gaps if gaps is None else gaps
+        if self._failsafe_reported or len(gaps) < 2:
+            return []
+        a, b = gaps[-2], gaps[-1]
+        mean = (a + b) / 2.0
+        if mean <= 0 or abs(a - b) > max(5.0, 0.02 * mean):
+            return []
+        self._failsafe_reported = True
+        self._failsafe_interval_s = round(mean, 1)
+        return [Action(ActionKind.REPORT_FAILSAFE_SUSPECTED,
+                       interval_s=self._failsafe_interval_s)]
+
+    def _observe_self_reenable(self, observed: "ObservedState", now: float) -> List[Action]:
+        """(#1009) While hands-off: record a stop→return gap, and name it.
+
+        Mirrors the OFF row's accounting (#823): a gap counts only when the
+        stop actually took (a settle was seen since the disable) and is
+        failsafe-scale (≥ 60 s). Recovery mirrors the other rows too: a stop
+        that has held quiet for twice the learned interval retires the
+        Repair. This row never answers with a DISABLE — hands-off holds.
+        """
+        anchor = self._released_stop_at
+        if not anchor:
+            return []                       # this episode issued no stop: nothing to measure
+        if not observed.charging:
+            self._failsafe_settled_since_disable = True
+            if (self._failsafe_reported and self._failsafe_interval_s
+                    and now - anchor > 2.0 * self._failsafe_interval_s):
+                self._failsafe_reported = False
+                self._released_gaps.clear()
+                self._failsafe_gaps.clear()
+                self._failsafe_interval_s = 0.0
+                return [Action(ActionKind.CLEAR_FAILSAFE_SUSPECTED)]
+            return []
+        if self._failsafe_settled_since_disable and now - anchor >= 60.0:
+            self._released_gaps.append(now - anchor)
+            del self._released_gaps[:-4]
+            self._failsafe_settled_since_disable = False
+            return self._failsafe_action(self._released_gaps)
+        return []
 
     def _end_stop_war(self) -> None:
         self._stop_war_rounds = 0
         self._stop_war_backoff_until = 0.0
+        self._stop_war_backoff_s = 0.0
         self._stop_war_draw_seen = False
         self._stop_war_ceasefires = 0
 
     def reconcile(self, desired: DesiredState, amps: int,
-                  observed: ObservedState, now: float) -> List[Action]:
-        """Pure decision table (spec rows 1-8, first match wins)."""
+                  observed: ObservedState, now: float, *,
+                  safety_stop: bool = False) -> List[Action]:
+        """Pure decision table (spec rows 1-8, first match wins).
+
+        ``safety_stop`` (#940) — this cycle's stop is a SAFETY stop (a peak
+        emergency, a VPP export pause), so the contactor's minimum-ON floor
+        yields to it. Defaults False: a caller that does not say is asking
+        for an ordinary stop, and an ordinary stop waits."""
+        # (#940) The floor applies only to a relay surface; latched per
+        # cycle so every row below (and ``_gated_disable``) reads one
+        # answer from one place.
+        self._contactor_surface = bool(observed.contactor_surface)
+        # (#940) A readable enable switch IS the relay's answer, and SEM's
+        # belief follows it in both directions: a box that let go on its own
+        # leaves a minimum ON with nothing to protect, and a stop that did
+        # NOT take leaves the relay closed — where holding the close side
+        # would also hold the heartbeat current write that feeds a device
+        # failsafe watchdog. No clock is stamped here: the floor measures
+        # SEM's OWN operations, and a move SEM did not make earns neither
+        # the protection nor the penalty. Unreadable (KEBA, service or
+        # button control) → the belief stays SEM's command history.
+        if (observed.enabled is not None
+                and bool(observed.enabled) is not self._contactor_closed):
+            self._contactor_closed = bool(observed.enabled)
+        # (#898) Row 0 — RELEASED: hands-off, senior to every row below.
+        # Charge mode Off used to be DISABLE, and the rogue-start guard
+        # (#315/#552) re-asserted it on a session the USER started. Now:
+        # leaving CHARGE for RELEASED ends SEM's OWN session with one
+        # DISABLE (the user asked for Off, not for the car to finish); from
+        # then on SEM issues nothing — no park-off on unplug, no failsafe
+        # naming, no stop-war rounds. Whatever draws, draws.
+        # (10.09.2026) The one closing stop was conditional on
+        # ``_charging_intent_active``, which narrowed Off from "the car
+        # stops" to "the car stops IF SEM believes it started the session".
+        # The commit said as much: "whatever draws, draws". On a live install
+        # that cost 80 minutes of unattended charging — the box auto-restarts
+        # every ~10 min, SEM had stopped it seven times, then stood down from
+        # the stop-war ceasefire (so intent was False), and the owner selected
+        # Off to stop the car. Precisely the case where the session is not
+        # SEM's, so this row answered NONE.
+        #
+        # #898 reported a DIFFERENT moment: "if the charger is now started
+        # elsewhere in HA, SEM stops it soon after" — a session that begins
+        # AFTER Off was chosen. One rule serves both:
+        #   entering Off → ONE stop for whatever is charging, whoever started
+        #                  it, because that is what the user just asked for;
+        #   from then on → nothing, ever, so a charge the user starts at the
+        #                  box afterwards is left alone (#898 stays fixed).
+        # ``_released_stop_issued`` is that latch, cleared below when the mode
+        # leaves Off so the NEXT Off is again an instruction to stop.
+        if desired is DesiredState.RELEASED:
+            self._end_stop_war()
+            self._consecutive_idle_count = 0
+            self._idle_settled = False
+            if observed.connected:
+                self._seen_connected = True
+                self._disconnect_run = 0
+            if not self._released_stop_issued and (
+                    self._charging_intent_active or observed.charging):
+                self._charging_intent_active = False
+                self._released_stop_issued = True
+                self._enable_attempts = 0
+                self._enable_gave_up_at = 0.0
+                self._last_disable_at = now
+                self._last_disable_issued_at = now
+                self._released_stop_at = now                   # (#1009) gap anchor
+                self._failsafe_settled_since_disable = False
+                self._note_contactor(False, now)     # (#940) anti-cycle clock
+                return [Action(ActionKind.DISABLE)]
+            self._released_stop_issued = True
+            # (#1009) Observe-only, never a command: after OUR one stop, a
+            # box that comes back by itself is still worth NAMING. The "no
+            # failsafe naming" above was written believing the #740 dead-man
+            # OFF holds the box; on a KEBA it cannot (the integration's
+            # fallback floor is 6 A, the 0 A is refused without an error), so
+            # the charging failsafe SEM armed at start (#546, 600 s) brings
+            # the box back ~10 min after every Off or Pause (PROD 26.09.2026,
+            # twice, to the second). Same #823 signature, tolerance and
+            # Repair — one gap per Off episode, so it speaks on the second.
+            return [Action(ActionKind.NONE)] + self._observe_self_reenable(observed, now)
+        # Left Off: the next Off selection is a fresh instruction to stop.
+        self._released_stop_issued = False
+        self._released_stop_at = 0.0
+        # (#823) Recovery: a reported failsafe whose LAST stop has now held
+        # quiet for twice the learned interval means the user fixed the box —
+        # retire the Repair and re-arm the recogniser, so a later relapse is
+        # named again rather than silently absorbed by a spent flag.
+        if not observed.charging and self._last_disable_issued_at:
+            self._failsafe_settled_since_disable = True
+        if (self._failsafe_reported and self._failsafe_interval_s
+                and not observed.charging and self._last_disable_issued_at
+                and now - self._last_disable_issued_at
+                > 2.0 * self._failsafe_interval_s):
+            self._failsafe_reported = False
+            self._failsafe_gaps.clear()
+            self._failsafe_interval_s = 0.0
+            return [Action(ActionKind.CLEAR_FAILSAFE_SUSPECTED)]
         # (#763) Unplugged = the war is over — its other party left.
         # (park-on-disconnect) …and the box must be left actively OFF, not
         # merely not-drawing: an enabled KEBA auto-starts the NEXT plug-in.
@@ -286,11 +685,21 @@ class ChargerReconciler:
                     and self._disconnect_run >= PARK_ON_DISCONNECT_CYCLES
                     and not self._parked_off):
                 self._parked_off = True
+                self._note_contactor(False, now)     # (#940) anti-cycle clock
                 return [Action(ActionKind.PARK_OFF)]
 
         # OFF / IDLE share the convergence target (contactor open). The
         # only difference is the flicker grace, which OFF never gets.
         if desired in (DesiredState.OFF, DesiredState.IDLE):
+            # (#940) Which stops may the contactor's minimum ON delay? Only
+            # the DISCRETIONARY ones. OFF is a demand by construction —
+            # every producer of ChargerIntent.DISABLE in the tree is one
+            # (the #804 phase switch: never switch under load; the active
+            # phase guard: conductor protection; the VPP export pause) —
+            # and it already gets no flicker grace on the same reasoning.
+            # The single demand that arrives as an IDLE is the peak
+            # EMERGENCY shed, which says so on the decision.
+            _stop_is_a_demand = (desired is DesiredState.OFF) or safety_stop
             # Leaving CHARGE — the next CHARGE episode must START + re-arm,
             # and gets a fresh round of enable re-asserts (#536 backoff).
             # #552: a fresh CHARGE→IDLE transition begins a WIND-DOWN — the
@@ -321,6 +730,12 @@ class ChargerReconciler:
                 # instead of counting failures into a log line nobody reads.
                 # Applies to IDLE as well as OFF: the reporter's 4.1 kW came
                 # out of the house batteries either way.
+                # (#940) Deliberately NOT stamped: ``stop_controllable``
+                # False means no configured mechanism can open this
+                # contactor, so this DISABLE moves no relay. Arming the
+                # close floor off it would lock the CHARGE rows — and with
+                # them every current correction — out for five minutes at a
+                # time while the car keeps drawing (#627's own symptom).
                 return [Action(ActionKind.DISABLE),
                         Action(ActionKind.REPORT_STOP_UNENFORCEABLE)]
             # #763 — stop-war ceasefire, covering BOTH the OFF row and the
@@ -341,17 +756,36 @@ class ChargerReconciler:
                         self._stop_war_rounds = 0
                     self._stop_war_rounds += 1
                     self._stop_war_last_round_at = now
+                    # (#823) the gap from OUR stop to the box's return —
+                    # counted only when the stop actually took (a settle was
+                    # observed since the disable) and the gap is failsafe-
+                    # scale. No real controller timeout is under a minute;
+                    # sub-minute returns are cars, humans, or cycle noise.
+                    if (self._last_disable_issued_at
+                            and self._failsafe_settled_since_disable
+                            and now - self._last_disable_issued_at >= 60.0):
+                        self._failsafe_gaps.append(
+                            now - self._last_disable_issued_at)
+                        del self._failsafe_gaps[:-4]
+                    self._failsafe_settled_since_disable = False
                     if self._stop_war_rounds > STOP_WAR_ROUNDS:
                         self._stop_war_ceasefires += 1
+                        self._stop_war_ceasefire_serial += 1  # (#944) onset identity
                         factor = min(
                             2 ** (self._stop_war_ceasefires - 1),
                             STOP_WAR_BACKOFF_MAX_FACTOR,
                         )
+                        self._stop_war_backoff_s = STOP_WAR_BACKOFF_S * factor
                         self._stop_war_backoff_until = (
-                            now + STOP_WAR_BACKOFF_S * factor)
+                            now + self._stop_war_backoff_s)
                         return [Action(ActionKind.REPORT_STOP_WAR)]
 
             if desired is DesiredState.OFF:
+                fs = self._failsafe_action()
+                if fs:
+                    if not observed.enable_controllable:
+                        return fs + [Action(ActionKind.REPORT_ENABLE_BLOCKED)]
+                    return fs + self._gated_disable(now, bypass_anticycle=_stop_is_a_demand)
                 if not observed.enable_controllable:
                     # #548 — the contactor is app/cloud-locked (Wallbox
                     # Eco-Smart / Scheduled / Power-Sharing): SEM cannot
@@ -360,20 +794,20 @@ class ChargerReconciler:
                     return [Action(ActionKind.REPORT_ENABLE_BLOCKED)]
                 # Row 1 — user-explicit OFF: open immediately, no grace —
                 # then re-assert at the dwell, not every cycle.
-                return self._gated_disable(now)
+                return self._gated_disable(now, bypass_anticycle=_stop_is_a_demand)
             # #552 — draw appeared AFTER idle had settled: not our wind-down
             # but a rogue self-start (KEBA auto-start, #315). Open the
             # contactor immediately, re-asserted every cycle it persists —
             # parity with the OFF row. The grace below stays reserved for
             # winding down a session SEM itself just stopped.
             if self._idle_settled:
-                return self._gated_disable(now)
+                return self._gated_disable(now, bypass_anticycle=_stop_is_a_demand)
             # IDLE + drawing — flicker hold then confirm (rows 3-4).
             self._consecutive_idle_count += 1
             self._consecutive_idle_count = min(self._consecutive_idle_count, self._idle_disable_threshold)
             if self._consecutive_idle_count < self._idle_disable_threshold:
                 return [Action(ActionKind.NONE)]
-            return self._gated_disable(now)
+            return self._gated_disable(now, bypass_anticycle=_stop_is_a_demand)
 
         # desired is CHARGE — reset idle grace, and end any stop war: SEM
         # wanting the box to charge dissolves the disagreement (#763).
@@ -392,6 +826,31 @@ class ChargerReconciler:
         # rows above (where drawing IS against intent). Pinned by
         # ``test_charge_self_charging_does_not_disable_first``.
         self._consecutive_idle_count = 0
+
+        # (#940) ANTI-CYCLE, close side — evaluated BEFORE the #536 enable
+        # block on purpose. A hold enforced further down (inside the
+        # adapter, or at ``send``) would be a SWALLOWED command: the
+        # reconciler would still spend an ``_enable_attempts`` slot per
+        # cycle, give up after five, and raise the "enable switch
+        # unavailable/locked" Repair on a charger whose switch is fine.
+        # A refusal must be visible to the layer that would retry, so it
+        # lives where the retry is decided.
+        #
+        # Keyed on the RELAY's believed state, not on ``_charging_intent_
+        # active``: that flag is SEM's session belief and is cleared by any
+        # OFF cycle, so a stop that did not take (box still drawing, relay
+        # still closed) would have had its heartbeat WRITE_CURRENT — the one
+        # that feeds a KEBA failsafe watchdog — and its drift correction held
+        # for five minutes along with the close. A relay already closed keeps
+        # taking amp writes; the floor is about the relay, not the current.
+        # An uncontrollable enable switch is excluded so #536 still reports.
+        closes = self._contactor_closed is not True
+        if closes and observed.enable_controllable:
+            _hold = self.contactor_hold_s(closing=True, now=now)
+            if _hold > 0:
+                self._note_anticycle_hold("min_off", _hold, now)
+                return [Action(ActionKind.NONE)]
+        self._clear_anticycle_hold()
 
         # #536 — enable-switch reconciliation (prepended to the current
         # action). Keyed on the ACTUAL switch state, NOT on power, so a
@@ -444,18 +903,21 @@ class ChargerReconciler:
             # failsafe fed) — no re-arm spam needed.
             self._charging_intent_active = True
             self._last_write_at = now
-            return enable_actions + [Action(ActionKind.START_AND_WRITE, amps)]
+            return self._stamp_close(
+                enable_actions + [Action(ActionKind.START_AND_WRITE, amps)], now)
         if amps and observed.setpoint_a != amps:
             # Row 6 — target change or drift (failsafe revert) correction.
             self._last_write_at = now
-            return enable_actions + [Action(ActionKind.WRITE_CURRENT, amps)]
+            return self._stamp_close(
+                enable_actions + [Action(ActionKind.WRITE_CURRENT, amps)], now)
         if (now - self._last_write_at) >= self._heartbeat_s:
             # Row 7 — refresh to feed the device failsafe watchdog.
             self._last_write_at = now
-            return enable_actions + [Action(ActionKind.WRITE_CURRENT, amps)]
+            return self._stamp_close(
+                enable_actions + [Action(ActionKind.WRITE_CURRENT, amps)], now)
         # Row 8 — current converged; still re-assert the enable switch if
         # it drifted off (enable_actions is empty in the common case).
-        return enable_actions or [Action(ActionKind.NONE)]
+        return self._stamp_close(enable_actions or [Action(ActionKind.NONE)], now)
 
     async def reconcile_and_apply(self, decision: ChargerDecision,
                                  adapter: "ChargerAdapter",
@@ -467,7 +929,11 @@ class ChargerReconciler:
             # adapter writes a real value and drift detection works.
             amps = int(getattr(adapter, "max_current_a", 0)) or amps
         observed = observe(adapter, power)
-        actions = self.reconcile(desired, amps, observed, now)
+        actions = self.reconcile(
+            desired, amps, observed, now,
+            # (#940) a peak emergency / VPP pause bypasses the min-ON floor
+            safety_stop=bool(decision.safety_stop),
+        )
 
         # #548 actuation observability — record desired + actions + whether a
         # stop is failing to take (charger still drawing while we DISABLE).
@@ -552,11 +1018,54 @@ class ChargerReconciler:
             except Exception:  # the probe must never break actuation
                 pass
 
-        await self._apply_actions(actions, adapter, decision, power)
+        await self._apply_actions(actions, adapter, decision, power, now=now)
 
-    async def _apply_actions(self, actions, adapter, decision, power) -> None:
+    async def _apply_actions(self, actions, adapter, decision, power,
+                             now: Optional[float] = None) -> None:
         """Execute the reconcile actions. Extracted (#700) so the one-shot
-        warning behaviour is testable against the real action loop."""
+        warning behaviour is testable against the real action loop.
+
+        ``now`` (#944) dates the stand-down's surfaces; it defaults to the
+        cycle ``reconcile_and_apply`` just stamped."""
+        if now is None:
+            # getattr, like the #700 flag below: this loop is driven on bare
+            # instances by the tests it was extracted for.
+            now = getattr(self, "_last_apply_at", 0.0)
+        # (#945) The other half of the enable-block hold, keyed on this
+        # cycle's ACTIONS rather than on ``observed.enable_controllable``. A
+        # switch that is readable but stuck OFF is controllable AND blocked,
+        # so retiring the hold on readability reset it every single cycle:
+        # the window never elapsed, the #536 Repair could never stand, and
+        # the retire deleted one a previous lifetime had raised. "Is SEM
+        # asserting this switch and not getting it?" is the question the
+        # hold is actually about, and it is answered here for both sub-cases
+        # at once.
+        #
+        # (#945 round 2) ENABLE counts as asserting. The re-asserts ARE the
+        # episode — five of them, one per cycle, and only then does the
+        # backoff turn into a REPORT. Treating them as quiet cycles both
+        # restarted the clock 50 s before the verdict (so the warm-up hold
+        # covered the wrong half of a restart) and DELETED a standing Repair
+        # once per switch drop, re-raising it five cycles later: the same
+        # churn the write side was taught not to cause, one layer up.
+        _asserting = any(
+            a.kind in (ActionKind.ENABLE, ActionKind.REPORT_ENABLE_BLOCKED)
+            for a in actions)
+        _dev = getattr(adapter, "_device", None)
+        if _asserting:
+            _arm = getattr(_dev, "_note_enable_unasserted", None)
+            if callable(_arm):
+                try:
+                    _arm(now)     # opens/advances the clock; never a verdict
+                except Exception as exc:  # noqa: BLE001 — never cost a cycle
+                    _LOGGER.debug("_note_enable_unasserted() failed: %s", exc)
+        else:
+            _note_ok = getattr(_dev, "_note_enable_unblocked", None)
+            if callable(_note_ok):
+                try:
+                    _note_ok(now)
+                except Exception as exc:  # noqa: BLE001 — never cost a cycle
+                    _LOGGER.debug("_note_enable_unblocked() failed: %s", exc)
         for action in actions:
             if action.kind is ActionKind.NONE:
                 continue
@@ -565,8 +1074,6 @@ class ChargerReconciler:
             # warning so the NEXT unenforceable episode warns again.
             if action.kind is not ActionKind.REPORT_STOP_UNENFORCEABLE:
                 self._stop_unenforceable_warned = False
-            if action.kind is not ActionKind.REPORT_STOP_WAR:
-                self._stop_war_reported = False
             if action.kind is ActionKind.ENABLE:
                 # #536 — re-assert the start/stop switch (idempotent).
                 await adapter.ensure_enabled()
@@ -580,31 +1087,72 @@ class ChargerReconciler:
                     "leave eco-smart mode) — %s", self.charger_id, decision.reason)
                 report = getattr(adapter, "report_enable_blocked", None)
                 if report is not None:
-                    await report()
+                    # One clock for the whole episode — the cycle stamp the
+                    # arm above used, never a second read of the wall (#945).
+                    await report(now)
             elif action.kind is ActionKind.REPORT_STOP_WAR:
                 # #763 — once per ONSET (the #700 pattern): the ceasefire
                 # holds for half an hour and re-warning every 10 s cycle
-                # would be its own flood. Re-armed below when any other
-                # action lands (the war ended or the intent moved).
-                if not self._stop_war_reported:
-                    self._stop_war_reported = True
+                # would be its own flood. (#944) The onset is the CEASEFIRE:
+                # each new one — the doubled window after a probe, or one
+                # entered straight from a pause — is announced exactly once.
+                serial = getattr(self, "_stop_war_ceasefire_serial", 0)
+                onset = serial != getattr(self, "_stop_war_reported_serial", -1)
+                if onset:
+                    self._stop_war_reported_serial = serial
                     _LOGGER.warning(
                         "reconcile(%s): stop war detected — the charger keeps "
                         "restarting itself against SEM's stop (%d stop→redraw "
                         "round-trips). Standing down for %.0f min so the car "
                         "is not strobed into a charging fault; it may charge "
-                        "at the box's stored minimum meanwhile. Likely cause: "
-                        "the wallbox's own auto-start/authorization re-closes "
-                        "the contactor on the car's retry — disable charger-"
-                        "side auto-start, or give SEM a stop mechanism the "
-                        "box respects. — %s",
+                        "at the box's stored minimum meanwhile. Two causes "
+                        "look IDENTICAL from here. (1) The wallbox's own "
+                        "auto-start/authorization re-closes the contactor on "
+                        "the car's retry — disable charger-side auto-start, or "
+                        "give SEM a stop mechanism the box respects. (2) "
+                        "ANOTHER controller is commanding this same charger — "
+                        "a second SEM instance (a test rig sharing the "
+                        "hardware, with observer mode off), an HA automation, "
+                        "or a vendor app. Check that first if one could "
+                        "exist: it is cheap to rule out, and a stop that "
+                        "starts holding the moment the other writer is "
+                        "silenced is the proof. — %s",
                         self.charger_id, self._stop_war_rounds,
-                        STOP_WAR_BACKOFF_S / 60.0, decision.reason)
+                        (self._stop_war_backoff_s or STOP_WAR_BACKOFF_S) / 60.0,
+                        decision.reason)
                 else:
                     _LOGGER.debug(
                         "reconcile(%s): stop-war ceasefire holding (%d rounds)",
                         self.charger_id, self._stop_war_rounds)
+                # (#944) …and not only in the log. The warning was the whole
+                # surface, and "SEM has given up" looked exactly like "all is
+                # well" while the car drew from the house battery.
+                await self._surface_stand_down(adapter, power, now, notify=onset)
                 continue
+            elif action.kind is ActionKind.REPORT_FAILSAFE_SUSPECTED:
+                # (#823) once, by construction (_failsafe_reported). SEM
+                # cannot write failsafe registers on a generic charger and
+                # must not guess register numbers — the fix is a one-time
+                # change on the box, so the output is instruction, not war.
+                _LOGGER.warning(
+                    "reconcile(%s): the charger re-enabled itself %.0f s "
+                    "after SEM's stop, twice, to the second — that is a "
+                    "charger-side failsafe/controller-timeout fallback, not "
+                    "a car retrying. SEM will not fight it (#763). Fix it on "
+                    "the box: look for a failsafe/fallback current setting "
+                    "(KEBA: 'Curr FS' / 'Tmo FS') and set the fallback "
+                    "current to 0.", self.charger_id, action.interval_s)
+                report = getattr(adapter, "report_failsafe_suspected", None)
+                if report is not None:
+                    await report(action.interval_s)
+            elif action.kind is ActionKind.CLEAR_FAILSAFE_SUSPECTED:
+                _LOGGER.info(
+                    "reconcile(%s): a stop has held past the learned failsafe "
+                    "interval — the box appears fixed; retiring the repair",
+                    self.charger_id)
+                clear = getattr(adapter, "clear_failsafe_suspected", None)
+                if clear is not None:
+                    await clear()
             elif action.kind is ActionKind.REPORT_STOP_UNENFORCEABLE:
                 # #627 — the stop is structurally impossible on this config.
                 # (#700) Once per ONSET, not per cycle: the condition persists
@@ -658,6 +1206,23 @@ class ChargerReconciler:
                 await adapter.command_current(action.amps)
                 _LOGGER.debug("reconcile(%s): WRITE %dA — %s",
                               self.charger_id, action.amps, decision.reason)
+        # (#944) The stand-down's surfaces follow the CONDITION, not the
+        # warning: up while SEM holds fire against a live draw, down once it
+        # stops being true. The war ending or the window closing takes them
+        # down at once. The draw stopping inside the window takes them down
+        # after the debounce a disconnect gets (a real stop persists; a UDP
+        # blip, or a car tapering at the threshold, is one cycle) — else the
+        # Repair, and the user's "ignore" with it, would be deleted and
+        # re-created every other cycle.
+        if any(a.kind is ActionKind.REPORT_STOP_WAR for a in actions):
+            self._stand_down_quiet = 0
+            return
+        if (getattr(self, "_stand_down_surfaced", None) is True
+                and now < self._stop_war_backoff_until):
+            self._stand_down_quiet += 1
+            if self._stand_down_quiet < PARK_ON_DISCONNECT_CYCLES:
+                return
+        self._retire_stand_down(adapter)
 
     # ── #627 stop-unenforceable repair plumbing ──────────────────────────
     def _device_and_hass(self, adapter):
@@ -683,6 +1248,70 @@ class ChargerReconciler:
             return
         from .repair_issues import clear_charger_stop_unenforceable
         clear_charger_stop_unenforceable(hass, self.charger_id)
+
+    # ── #944 stop-war stand-down surfaces ────────────────────────────────
+    async def _surface_stand_down(self, adapter, power, now: float, *,
+                                  notify: bool) -> None:
+        """Put the stand-down where the owner can see it (#944).
+
+        The Repair is raised once when the stand-down meets a live draw and
+        taken down by ``_retire_stand_down``. The charger notification is once
+        per CEASEFIRE (``notify``, keyed on the ceasefire serial), so a car
+        that pauses and resumes inside one ceasefire is not a second push."""
+        power_w = float(getattr(power, "power_w", 0.0) or 0.0)
+        self._stand_down_power_w = power_w
+        dev, hass = self._device_and_hass(adapter)
+        name = str(getattr(dev, "name", None) or self.charger_id)
+        minutes = max(0.0, self._stop_war_backoff_until - now) / 60.0
+        # Raised on the edge, and updated in place (same issue id, so an
+        # "ignore" survives) when what it says went stale: a new ceasefire
+        # began without the draw ever stopping (a longer window), or the
+        # onset read no watts (a cloud-polled box says "charging" a cycle
+        # before its power does).
+        serial = self._stop_war_ceasefire_serial
+        if (self._stand_down_surfaced is not True
+                or self._stand_down_raised_serial != serial
+                or self._stand_down_raised_w <= 0.0 < power_w):
+            self._stand_down_surfaced = True
+            self._stand_down_raised_w = power_w
+            self._stand_down_raised_serial = serial
+            if hass is not None:
+                from .repair_issues import raise_charger_stop_war_stand_down
+                raise_charger_stop_war_stand_down(
+                    hass, self.charger_id,
+                    name=name, power_w=power_w, minutes=minutes)
+        if not notify or dev is None:
+            return
+        # An observer rig may share the physical box (#855): its display is
+        # somebody else's, and "SEM stood down" there would be a lie told by
+        # an instance that commands nothing.
+        if getattr(dev, "observer_mode", False) is True:
+            return
+        nm = getattr(getattr(dev, "_coordinator", None),
+                     "_notification_manager", None)
+        send = getattr(nm, "notify_charger_stand_down", None)
+        if send is None:
+            return
+        try:
+            await send(charger_id=self.charger_id, charger_name=name,
+                       power_w=power_w, minutes=minutes)
+        except Exception as e:  # noqa: BLE001 — a notification never costs a cycle
+            _LOGGER.debug("reconcile(%s): stand-down notification failed: %s",
+                          self.charger_id, e)
+
+    def _retire_stand_down(self, adapter) -> None:
+        """Take the stand-down's surfaces down (#944). Once per offset; from
+        ``None`` (boot) it clears once, in case a predecessor rebuilt away by
+        an options reload left the Repair up."""
+        if getattr(self, "_stand_down_surfaced", None) is False:
+            return
+        self._stand_down_surfaced = False
+        self._stand_down_power_w = 0.0
+        dev, hass = self._device_and_hass(adapter)
+        if hass is None:
+            return
+        from .repair_issues import clear_charger_stop_war_stand_down
+        clear_charger_stop_war_stand_down(hass, self.charger_id)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -712,6 +1341,14 @@ def observe(adapter, power) -> ObservedState:
             stop_ok = bool(_can_stop())
         except Exception as exc:  # noqa: BLE001 — never let observe() throw
             _LOGGER.debug("can_stop_charging() failed: %s", exc)
+    # (#940) Does SEM's own start/stop flip a relay on this charger? Read
+    # from the device, which owns the dispatch list ``stop_session`` and
+    # ``ensure_enabled`` actually walk. Unreadable (no device / a mock) →
+    # False: no floor rather than a floor on a charger that never asked.
+    surface = False
+    _surface = getattr(getattr(adapter, "_device", None), "contactor_surface", None)
+    if isinstance(_surface, bool):
+        surface = _surface
     return ObservedState(
         charging=adapter.actual_charging(power),
         setpoint_a=setpoint,
@@ -721,4 +1358,5 @@ def observe(adapter, power) -> ObservedState:
         enabled=enabled,
         enable_controllable=controllable,
         stop_controllable=stop_ok,
+        contactor_surface=surface,
     )

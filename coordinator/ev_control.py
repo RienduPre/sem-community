@@ -66,6 +66,58 @@ def amps_from_headroom(
 PHASE_NOT_TAKING_AFTER = 2
 
 
+def _power_on_offer_w(decision, charger_cfg: dict, config: dict,
+                      voltage: float, peak_allowed_w=None) -> float:
+    """(#1008) Watts this charger may draw — what the phase planner asks.
+
+    ``budget_w`` answers a narrower question: how much SOLAR ``decide``
+    sized for this car. Under ``CHARGE_MAX`` there is no such number —
+    Always (max) is not budget-limited, so the field is 0.0 by
+    construction. Read raw, the planner saw "no power at all": it never
+    scaled a one-phase car up to three, and a three-phase car scaled
+    DOWN ten minutes in. The charger may in fact draw its own ceiling,
+    with the grid paying for whatever the sun does not.
+
+    Three phases is the question, so the ceiling is priced at three —
+    a charger whose maximum is the three-phase minimum then correctly
+    shows no headroom to switch for. The ceiling itself comes from
+    ``resolve_max_current``, the one place that key is read (#746).
+
+    ``peak_allowed_w`` is what the meter may still buy for the rest of
+    this quarter hour, and it caps the answer. ``clamp_to_peak_slot``
+    prices its own clamp with the CONFIGURED phase count, so on a
+    charger configured 1-phase it can leave ``CHARGE_MAX`` standing at
+    an allowance that three phases would blow straight through. Never
+    ask for three phases the meter cannot pay for.
+
+    Every other reader of a decision's watts already asks the intent
+    first (``solar_commitment_w``, ``commanded_power_w``, the per-phase
+    guard). This is that same question, asked once, for this one.
+    """
+    from ..devices.base import resolve_max_current
+    from .charger_types import ChargerIntent, commanded_power_w
+    if decision.intent is not ChargerIntent.CHARGE_MAX:
+        return float(decision.budget_w or 0.0)
+
+    def _get(key, default=None):
+        for src in (charger_cfg, config):
+            val = (src or {}).get(key)
+            if val is not None:
+                return val
+        return default
+
+    offer = commanded_power_w(
+        decision, phases=3, voltage=float(voltage),
+        max_current_a=resolve_max_current(_get),
+    )
+    if peak_allowed_w is not None:
+        try:
+            offer = min(offer, max(0.0, float(peak_allowed_w)))
+        except (TypeError, ValueError):
+            pass
+    return offer
+
+
 class EVControlMixin:
     """EV control methods for SEMCoordinator.
 
@@ -241,6 +293,12 @@ class EVControlMixin:
             night_end=night_end,
             tariff_optimized=tariff_optimized,
             peak_managed_amps=peak_managed_amps,
+            # (#967) the tariff's own classification, so an UNCOVERED night in
+            # a cheap-hours mode holds through an expensive hour instead of
+            # starting at the window open. The overlay still wins when the
+            # joint plan covers the car.
+            level_at=getattr(getattr(self, "_tariff_provider", None),
+                             "get_price_level_at", None),
         )
         return plan
 
@@ -564,8 +622,10 @@ class EVControlMixin:
         False-stall guard (#243): a car left plugged in at ~100% SOC never
         draws power despite an offered current, which would otherwise re-enable
         (and log a warning) on every cycle forever. After a few failed
-        re-enables we conclude the car is not accepting charge (likely full),
-        latch ``_ev_charge_refused``, log once, and go quiet. The latch clears
+        re-enables we conclude the car is not accepting charge — (#983) NOT
+        that it is full: the evidence here is a setpoint and a zero, the same
+        evidence ``charge_stability``'s give-up has, and neither can see a
+        BMS. Latch ``_ev_charge_refused``, log once, and go quiet. The latch clears
         the moment the car actually draws power (>=50 W), is unplugged, or SEM
         stops offering current — so genuine stalls still self-heal within the
         first few attempts and a re-plug starts fresh. Charger-agnostic; does
@@ -591,11 +651,13 @@ class EVControlMixin:
                 max_attempts = int(self.config.get("ev_max_reenable_attempts", 3))
                 self._ev_reenable_attempts = getattr(self, "_ev_reenable_attempts", 0) + 1
                 if self._ev_reenable_attempts > max_attempts:
-                    # Car keeps refusing — likely full. Stop re-enabling.
+                    # (#983) Car keeps declining. Why is the car's to say —
+                    # report the offer and the draw. Stop re-enabling.
                     self._ev_charge_refused = True
                     _LOGGER.info(
                         "EV not accepting charge after %d re-enable attempts "
-                        "(setpoint=%.0fA, power=%.0fW) — car likely full; "
+                        "(setpoint=%.0fA, power=%.0fW) — check the car's own "
+                        "charge limit / departure timer; "
                         "pausing re-enable until power resumes or car unplugged",
                         max_attempts, ev._current_setpoint, this_power_w,
                     )
@@ -708,8 +770,11 @@ class EVControlMixin:
             rec_cache[cid] = reconciler
 
         mode = str(charger_cfg.get("charge_mode", "off"))
+        # (#898) Off is hands-off here too: the night gate polices only the
+        # solar_only charger (a rogue self-start gets IDLE's immediate
+        # DISABLE); an off charger is released — nothing is sent.
         intent = (
-            ChargerIntent.DISABLE if mode == "off" else ChargerIntent.IDLE
+            ChargerIntent.RELEASE if mode == "off" else ChargerIntent.IDLE
         )
         decision = ChargerDecision(
             charger_id=cid,
@@ -739,7 +804,8 @@ class EVControlMixin:
 
     async def _phase_switch_tick(self, cid: str, charger_cfg: dict,
                                  decision, cp, now: float,
-                                 setpoint_a: int = 0):
+                                 setpoint_a: int = 0,
+                                 peak_allowed_w=None):
         """(#804 Phase B/C) One cycle of the phase model for this charger.
 
         Returns the decision, replaced with IDLE while the sequencer holds
@@ -773,7 +839,9 @@ class EVControlMixin:
         from dataclasses import replace
 
         from .charger_types import ChargerIntent
-        from .ev_phase_sequencer import PhaseAutoPlanner, PhaseSwitchSequencer
+        from .ev_phase_sequencer import (
+            STOP_WAIT_S, PhaseAutoPlanner, PhaseSwitchSequencer,
+        )
         from .ev_phases import (
             estimate_active_phases, phase_switch_command,
             resolve_switch_values, validate_phase_switch_entity,
@@ -854,18 +922,53 @@ class EVControlMixin:
                 contra["target"], contra["count"] = desired, 0
             if contra["count"] >= PHASE_NOT_TAKING_AFTER:
                 desired = None          # give up on this target
+        elif not cp.connected:
+            # (#1008) No car, no power question. The planner steers on the
+            # watts a decision offers, and an IDLE "EV disconnected" offers
+            # none — so a parked 3-phase charger was scaled back down to 1
+            # ten minutes after every unplug, and the next session started
+            # on one phase and had to earn its way back up.
+            desired = None
         else:
-            contra["target"], contra["count"] = None, 0
-            # auto (Phase C): the planner answers from THIS charger's
-            # allocated budget — sustained starvation scales down,
+            # auto (Phase C): the planner answers from the power THIS
+            # charger may draw — sustained starvation scales down,
             # sustained headroom scales up, caps protect the contactor.
             desired = planner.desired(
-                now, believed, float(decision.budget_w or 0.0))
+                now, believed, _power_on_offer_w(
+                    decision, charger_cfg,
+                    getattr(self, "config", {}) or {}, voltage,
+                    peak_allowed_w=peak_allowed_w),
+            )
+            # (#1008) …and the same give-up the manual target gets. Under
+            # CHARGE_MAX the offer is a constant that always clears the
+            # threshold, so a box that does not actually switch would be
+            # stopped and retried for every switch the session cap allows.
+            if desired is not None:
+                if contra["target"] != desired:
+                    contra["target"], contra["count"] = desired, 0
+                if contra["count"] >= PHASE_NOT_TAKING_AFTER:
+                    desired = None
 
         r = seq.tick(now=now, desired_phases=desired,
                      believed_phases=believed, charging=cp.charging,
                      capability_ready=ready)
         self._phase_switch_states[cid] = r.state
+
+        # (#804) The box kept drawing through the stop. That is not a slow
+        # cycle, it is a charger SEM cannot open, and asking again every few
+        # minutes holds every charge command hostage for the session. Mark
+        # the target not-taking now — a new target or a replug clears it.
+        # Never in observer mode: there SEM sends no stop at all, so a box
+        # that keeps drawing is SEM's own doing and blaming it would be a lie.
+        if r.gave_up and desired is not None and not self._observer_mode:
+            _LOGGER.warning(
+                "#804 %s: gave up switching to %sp — the charger still drew "
+                "%.0f W %.0f s after SEM stopped it. Phase switching needs a "
+                "stop SEM can actually make (start/stop switch, charge-mode "
+                "stop option, or a current entity that accepts 0 A).",
+                cid, desired, cp.power_w, STOP_WAIT_S)
+            contra["target"] = desired
+            contra["count"] = PHASE_NOT_TAKING_AFTER
 
         if r.issue_switch is not None:
             value = v1 if r.issue_switch == 1 else v3
@@ -882,6 +985,12 @@ class EVControlMixin:
                         "#804 %s: switching to %sp via %s.%s %s",
                         cid, r.issue_switch, domain, service, data)
                     try:
+                        # OBSERVER-GATED: the phase switch is commanded from
+                        # the control loop, which sits above the device layer
+                        # and so cannot reach `ControllableDevice.send` (#855).
+                        # The `if self._observer_mode` branch above IS this
+                        # call's seam — keep them together, and never add an
+                        # un-gated hardware call beside it.
                         await self.hass.services.async_call(
                             domain, service, data, blocking=False)
                     except Exception:  # noqa: BLE001 — surfaced, never fatal
@@ -893,7 +1002,7 @@ class EVControlMixin:
             self._phase_believed[cid] = r.believed_phases
             contra["last_asserted"] = r.believed_phases
         if (contra["count"] >= PHASE_NOT_TAKING_AFTER
-                and str(charger_cfg.get("phase_mode") or "auto") in ("1", "3")):
+                and contra["target"] is not None):
             self._phase_switch_states[cid] = "not_taking"
 
         # Only ever WEAKEN a charge into IDLE — an emergency stop from the

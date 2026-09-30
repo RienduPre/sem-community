@@ -15,7 +15,9 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import SEMCoordinator
+from .coordinator.install_modules import kept_descriptions, presence_of
 from .persisted_flags import PERSISTED_FLAG_DEFAULTS
+from .utils.attr_budget import fit_state_attributes
 
 type SEMConfigEntry = ConfigEntry[SEMCoordinator]
 
@@ -46,7 +48,92 @@ SWITCH_TYPES = [
         entity_category=EntityCategory.CONFIG,
         icon="mdi:calendar-clock",
     ),
+    # (#778 phase 6) The master switch for forecast-led spending. Default OFF:
+    # the whole arc ships inert and is woken deliberately. It had no GUI at
+    # all until this entity existed — the config key was readable only by
+    # editing options by hand, which does not satisfy "every setting is
+    # reachable on the dashboard".
+    SwitchEntityDescription(
+        key="forecast_spending_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:chart-timeline-variant-shimmer",
+    ),
+    # (#820) Charge pacing master switch. Default OFF — the pack fills
+    # greedily exactly as before until a person flips this, and the pacing
+    # additionally requires a named charge-power-limit entity to act on.
+    SwitchEntityDescription(
+        key="battery_charge_pacing_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:speedometer-slow",
+    ),
+    # (#778 phase 6) The two battery permissions. Switches rather than another
+    # battery mode because a mode is single-select and cannot say "may sell,
+    # may not touch the car". Both default to UNSET, which resolves to today's
+    # behaviour exactly — see consts/battery_permissions.
+    SwitchEntityDescription(
+        key="battery_may_export",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:transmission-tower-export",
+    ),
+    SwitchEntityDescription(
+        key="battery_may_assist_ev",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:car-electric",
+    ),
+    # (arc #921) Four switches, all default OFF — the arc ships asleep like
+    # the spending arc (#778) and charge pacing (#820), and is woken
+    # deliberately per install. Persisted in PERSISTED_FLAG_DEFAULTS.
+    SwitchEntityDescription(
+        key="export_guard_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:transmission-tower-off",
+    ),
+    SwitchEntityDescription(
+        key="export_guard_override_external",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:shield-alert-outline",
+    ),
+    SwitchEntityDescription(
+        key="battery_house_sink_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:home-lightning-bolt-outline",
+    ),
+    SwitchEntityDescription(
+        key="ev_morning_window_enabled",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:car-clock",
+    ),
 ]
+
+# (#778 phase 6) Switch key -> its slot in the nested ``battery_permissions``
+# dict. That dict is the ONE representation the resolver reads; persisting a
+# flat ``battery_may_export`` option beside it would create a second spelling
+# of one fact, which is precisely the drift class this arc has been closing.
+def battery_may_export_display(mode, stored, arbitrage_on, spend_on) -> bool:
+    """(#920) Will SEM sell to the grid? — asked of EVERY path that can.
+
+    The switch is labelled "Battery may sell to grid", so that is the
+    question it must answer. Two features can sell: #533's arbitrage under
+    ``battery_grid_arbitrage_enabled`` and #778's forecast spend under
+    ``forecast_spending_enabled``. Each asks the permission with its own
+    flag — correctly, they are separate features — and this switch used to
+    ask with only the arbitrage one, so on PROD it read OFF while a 5 kW
+    sell block was open.
+
+    Defined as the decision itself rather than as a parallel calculation:
+    the two cannot disagree if there is only one of them.
+    """
+    from .consts.battery_modes import arbitrage_allowed_for_mode
+    from .consts.battery_permissions import effective_permissions
+    perms = effective_permissions(mode or "auto", stored or {})
+    return bool(arbitrage_allowed_for_mode(mode, bool(arbitrage_on), perms)
+                or arbitrage_allowed_for_mode(mode, bool(spend_on), perms))
+
+
+PERMISSION_SWITCHES = {
+    "battery_may_export": "may_export",
+    "battery_may_assist_ev": "may_assist_ev",
+}
 
 # (ev_limit_surplus (#235) was folded into the optional Max ceiling (#245); its
 # global config-switch mechanism + entity are gone. Old entities are auto-removed
@@ -73,9 +160,12 @@ async def async_setup_entry(
     # The remaining global switch (``observer_mode``) is the only one
     # left in SWITCH_TYPES. The stale-entity cleanup at the bottom of
     # this function purges the removed entries from the registry.
+    # (#923) Only the switches of modules this install has — UNKNOWN keeps.
+    static_descriptions = kept_descriptions(
+        "switch", SWITCH_TYPES, presence_of(coordinator))
     switches = [
         SEMSolarSwitch(coordinator, description, entry.entry_id)
-        for description in SWITCH_TYPES
+        for description in static_descriptions
     ]
     per_charger_keys: set[str] = set()
 
@@ -84,7 +174,7 @@ async def async_setup_entry(
     # Fix entity_ids from pre-translation installs
     try:
         registry = er.async_get(hass)
-        for desc in SWITCH_TYPES:
+        for desc in static_descriptions:
             uid = f"sem_{desc.key}"
             correct_eid = f"switch.sem_{desc.key}"
             for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
@@ -99,7 +189,7 @@ async def async_setup_entry(
     # Clean up stale switch entities from previous versions
     try:
         registry = er.async_get(hass)
-        valid_keys = {d.key for d in SWITCH_TYPES} | per_charger_keys
+        valid_keys = {d.key for d in static_descriptions} | per_charger_keys
         for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
             if entity_entry.domain != "switch":
                 continue
@@ -123,15 +213,39 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
     _attr_has_entity_name = True
     _logged_unavailable: bool = False
 
+    # (#979) The switch's only large attributes — observer mode's WOULD map
+    # and the withheld service calls — grow with the controlled fleet and are
+    # rebuilt every cycle for the live sim surface. Nothing about them charts,
+    # and a recorded set that crosses HA's 16 KB cap costs the entity its
+    # whole history, not just the oversize key. Same rule as the sensors'
+    # ``_unrecorded_attributes`` (#581), which this platform never had.
+    _unrecorded_attributes = frozenset({
+        "would_decisions",
+        "withheld_commands",
+    })
+
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
+        """Return if entity is available.
+
+        (#979) The unavailability line is DEBUG, not WARNING. One failed
+        coordinator update makes every SEM entity unavailable at once, so a
+        per-entity warning is ~200 lines describing one event — and that
+        noise is what buries the warnings that mean something. The
+        coordinator logs its own failed update once for the whole
+        integration; this line only says which entity noticed.
+        """
         is_available = self.coordinator.last_update_success and self.coordinator.data is not None
         if not is_available and not self._logged_unavailable:
-            _LOGGER.warning("Switch %s is unavailable (coordinator update failed)", self.entity_description.key)
+            _LOGGER.debug(
+                "Switch %s is unavailable: %s", self.entity_description.key,
+                "the coordinator's last update failed"
+                if not self.coordinator.last_update_success
+                else "the coordinator has published no cycle yet",
+            )
             self._logged_unavailable = True
         elif is_available and self._logged_unavailable:
-            _LOGGER.info("Switch %s is available again", self.entity_description.key)
+            _LOGGER.debug("Switch %s is available again", self.entity_description.key)
             self._logged_unavailable = False
         return is_available
 
@@ -151,18 +265,76 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         # Force stable entity ID regardless of HA language
         self.entity_id = f"switch.sem_{description.key}"
 
-        if description.key in self._PERSISTED_DEFAULTS:
-            # (#777) Seed from the EXPLICIT config — options first (every
-            # flip persists there via ``_persist_flag``), then entry data
-            # (the install flow writes there), then the per-key default.
-            # The old seed read options only, so "observer checked at
-            # install" showed an OFF switch while the coordinator
-            # observed.
-            explicit = self._configured(description.key)
-            self._is_on = (explicit if explicit is not None
-                           else self._PERSISTED_DEFAULTS[description.key])
-        else:
-            self._is_on = False
+        self._is_on = self._seed_state()
+
+    def _seed_state(self) -> bool:
+        """This switch's state at attach time.
+
+        (#777) Seed from the EXPLICIT config — options first (every flip
+        persists there via ``_persist_flag``), then entry data (the install
+        flow writes there), then the per-key default. The old seed read
+        options only, so "observer checked at install" showed an OFF switch
+        while the coordinator observed.
+
+        (#778) A permission switch is different: it seeds from the RESOLVED
+        permission, not from a stored boolean. Both permissions are UNSET on
+        an untouched install and resolve to True — the battery already assists
+        the car and already exports. Seeding those entities to False would
+        show two switches in the off position for behaviour that is running,
+        and a user flipping one "on" to enable something that was never off
+        has been actively misled about their own system.
+        """
+        key = self.entity_description.key
+        if key in PERMISSION_SWITCHES:
+            from .consts.battery_permissions import (
+                effective_permissions, may_assist_ev,
+            )
+            cfg = getattr(self.coordinator, "config", None) or {}
+            mode = cfg.get("battery_mode") or "auto"
+            stored = cfg.get("battery_permissions") or {}
+            try:
+                stored = {**stored, **((
+                    getattr(self.coordinator.config_entry, "options", None)
+                    or {}).get("battery_permissions") or {})}
+            except (AttributeError, TypeError):
+                pass
+            perms = effective_permissions(mode, stored)
+            if PERMISSION_SWITCHES[key] == "may_export":
+                # The kill switch is ``battery_grid_arbitrage_enabled`` and it
+                # defaults OFF. Seeding from a misspelled key meant the .get
+                # default (True) always won, so this switch displayed ON while
+                # the decision path was OFF — the same knob-that-lies bug this
+                # class was written to prevent, pointing the other way.
+                #
+                # (#920) …and it pointed that way again, because TWO features
+                # can sell: #533's arbitrage, gated by the kill switch, and
+                # #778's forecast spend, gated by its own switch. Each asks
+                # ``may_export`` with ITS OWN flag — correctly, they are
+                # separate features — but this switch asked with only the
+                # arbitrage one. Seen on PROD 06.09: the switch read OFF while
+                # the spend path opened a 5 kW sell block, because the
+                # question it answered ("may the ARBITRAGE feature sell?") is
+                # not the question it is labelled with ("Battery may sell to
+                # grid"). The label is the user's question, so the answer is
+                # over EVERY path that can sell: a permission the user has
+                # revoked still blocks both, and an untouched install now sees
+                # the switch agree with what SEM actually does.
+                # options FIRST for the two feature flags, exactly as
+                # `stored` does above and as `_configured` does for every
+                # persisted switch: a runtime flip lands in options, and
+                # reading `config` alone made this switch answer with the
+                # value from before the user touched anything.
+                return battery_may_export_display(
+                    mode, stored,
+                    self._flag("battery_grid_arbitrage_enabled", cfg),
+                    self._flag("forecast_spending_enabled", cfg))
+            return bool(may_assist_ev(mode, perms))
+
+        if key in self._PERSISTED_DEFAULTS:
+            explicit = self._configured(key)
+            return bool(explicit if explicit is not None
+                        else self._PERSISTED_DEFAULTS[key])
+        return False
 
     # (#777) The three persisted toggles and what a fresh install means by
     # silence. Defined in ``persisted_flags`` and shared by reference, not
@@ -200,6 +372,15 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         install upgrading, the one case where it is the only record.
         """
         key = self.entity_description.key
+        if key in PERMISSION_SWITCHES:
+            # (#778) A permission is never restored. Absence is MEANINGFUL —
+            # no entry in ``battery_permissions`` means UNSET, which resolves
+            # through the legacy rule for the mode — so a ghost in the restore
+            # store has nothing to say and can only contradict it. Re-resolve
+            # instead. Live proof this is needed: the misspelled-key bug wrote
+            # ON into the store, and without this the bug outlived its own fix.
+            self._is_on = self._seed_state()
+            return
         if key not in self._PERSISTED_DEFAULTS:
             if last_state is not None:
                 self._is_on = last_state.state == "on"
@@ -258,6 +439,21 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
             return  # pre-add lifecycle / bare test stubs — nothing to persist to
         key = self.entity_description.key
         entry = self.coordinator.config_entry
+        if key in PERMISSION_SWITCHES:
+            # Merge into the existing dict rather than replacing it: the two
+            # permissions share one mapping, and a replace would silently
+            # drop whichever one this switch does not own.
+            slot = PERMISSION_SWITCHES[key]
+            existing = dict((entry.options or {}).get("battery_permissions") or {})
+            existing[slot] = bool(value)
+            new_options = {**(entry.options or {}), "battery_permissions": existing}
+            self.coordinator._skip_options_reload = dict(new_options)
+            try:
+                self.coordinator.config["battery_permissions"] = dict(existing)
+            except Exception:  # noqa: BLE001
+                pass
+            self.hass.config_entries.async_update_entry(entry, options=new_options)
+            return
         new_options = {**(entry.options or {}), key: value}
         self.coordinator._skip_options_reload = dict(new_options)
         try:
@@ -268,8 +464,43 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return true if switch is on."""
+        """Return true if switch is on.
+
+        (#920) A permission the user has never set is DERIVED, not stored —
+        computed on every read rather than seeded once. The restore path
+        already re-resolves an UNSET permission at startup ("a ghost in the
+        restore store has nothing to say and can only contradict it"); a
+        value that follows two FEATURE switches has to follow them between
+        restarts too. Turning the forecast spend on made SEM able to sell,
+        and this switch went on reading "off" until the next reboot — the
+        same lie the seed fix had just closed, one layer up. An explicit
+        choice is still a stored boolean, and still wins.
+        """
+        key = self.entity_description.key
+        if key in PERMISSION_SWITCHES and self._permission_is_unset(key):
+            return self._seed_state()
         return self._is_on
+
+    def _flag(self, key: str, cfg) -> bool:
+        """A feature flag as the rest of SEM sees it: the user's runtime flip
+        (options) first, then the install-time value, then config."""
+        explicit = self._configured(key)
+        if explicit is not None:
+            return bool(explicit)
+        return bool((cfg or {}).get(key, False))
+
+    def _permission_is_unset(self, key: str) -> bool:
+        """True when the user has never chosen this permission either way."""
+        from .consts.battery_permissions import _perm
+        cfg = getattr(self.coordinator, "config", None) or {}
+        stored = cfg.get("battery_permissions") or {}
+        try:
+            stored = {**stored, **((
+                getattr(self.coordinator.config_entry, "options", None)
+                or {}).get("battery_permissions") or {})}
+        except (AttributeError, TypeError):
+            pass
+        return _perm(stored, PERMISSION_SWITCHES[key]) is None
 
     @property
     def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
@@ -287,7 +518,23 @@ class SEMSolarSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
                 "observer_decisions", {}) or {}
         except Exception:  # noqa: BLE001 — attributes must never break the entity
             decisions = {}
-        return {"would_decisions": dict(decisions) if self._is_on else {}}
+        try:
+            withheld = (self.coordinator.observer_withheld_commands()
+                        if hasattr(self.coordinator,
+                                   "observer_withheld_commands") else {})
+        except Exception:  # noqa: BLE001 — attributes must never break the entity
+            withheld = {}
+        if not self._is_on:
+            return {"would_decisions": {}, "withheld_commands": {}}
+        # (#979) Bounded on the way out, like the sensors': the recorded half
+        # of an entity's attributes has a hard 16 KB cap and crossing it costs
+        # the entity its entire history.
+        return fit_state_attributes(
+            {"would_decisions": dict(decisions),
+             # (#855) the seam-level half: the exact service calls
+             # withheld this cycle, keyed by device.
+             "withheld_commands": withheld},
+            self._unrecorded_attributes)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""

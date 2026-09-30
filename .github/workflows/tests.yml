@@ -14,11 +14,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    name: test HA ${{ matrix.ha }}
     # The matrix is an HA matrix wearing a Python label (#787). Each rung
     # installs a different pytest-homeassistant-custom-component pin — see
     # tests/requirements_test.txt — so this list reads:
-    #   3.13 -> HA 2026.2.3  (the hacs.json floor)
-    #   3.14 -> HA 2026.8.2  (what HA-PROD runs)
+    #   3.13 -> HA 2026.2.3  (the hacs.json floor)  -> check "test HA 2026.2"
+    #   3.14 -> HA 2026.8.2  (what HA-PROD runs)     -> check "test HA 2026.8"
+    # (28.09.2026) The check is NAMED by the HA version, not the Python: "3.13"
+    # kept reading as a Python rung to drop, when it is really the old-HA test.
+    # The Python is only how each HA is reached. The 2026.2 rung is bumped to a
+    # newer HA when one arrives; until then it holds the declared floor.
     # (#836) The 3.12 -> HA 2025.1.4 rung was removed with the 2025.1 floor:
     # no SEM user has ever reported an HA below 2026.4, so it verified a
     # version nobody runs.
@@ -43,6 +48,11 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
+        include:
+          - python-version: "3.13"
+            ha: "2026.2"
+          - python-version: "3.14"
+            ha: "2026.8"
 
     steps:
       - uses: actions/checkout@v4

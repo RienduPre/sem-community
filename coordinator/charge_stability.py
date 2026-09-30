@@ -64,7 +64,10 @@ _LOGGER = logging.getLogger(__name__)
 # Modes whose DAY decisions are surplus-driven and therefore flicker
 # with the solar signal. Night decisions (floors, cheap windows) and
 # always_max are deliberate, not flicker — they bypass the filter.
-SURPLUS_DAY_MODES = frozenset({"solar_only", "min_plus_solar", "solar_plus_cheap"})
+SURPLUS_DAY_MODES = frozenset({
+        "solar_only", "solar_plus_battery", "min_plus_solar",
+        "solar_plus_cheap",
+    })
 
 DEFAULT_ENABLE_DELAY_S = 60   # evcc enable.delay = 1 min
 DEFAULT_DISABLE_DELAY_S = 180  # evcc disable.delay = 3 min (was 300)
@@ -122,30 +125,42 @@ START_KICK_STEP_A = 2
 
 # Ceiling for the start escalation. Bounded WELL below the charger max so a
 # car that suddenly accepts a high offer can't spike the grid, and a
-# full/refusing car is never held at 32 A. Known fussy cars latch under
-# this (a Renault Zoe begins at ~9-10 A). The escalation actually climbs to
+# car that keeps declining is never held at 32 A. Known fussy cars latch
+# under this (a Renault Zoe begins at ~9-10 A). The escalation actually climbs to
 # ``max(target_current, START_KICK_MAX_A)`` so a high deadline target is
 # still reachable.
 START_KICK_MAX_A = 10
 
 # After holding the escalation ceiling this long with the car still drawing
-# nothing, conclude it won't latch (full / refusing / needs more than we'll
-# safely offer) and stop offering — let decide()/the stall detector own the
+# nothing, conclude it won't latch (the car is declining, or needs more
+# than we'll safely offer) and stop offering — let decide()/the stall detector own the
 # refusal instead of holding a high current forever.
 START_KICK_GIVEUP_S = 90.0
 
-# #610 — full-car offer backoff. A single give-up re-armed as soon as the
-# surplus persisted again, which against a genuinely-full car produced
-# continuous kick-ladder chatter all afternoon (PROD 2026-07-18: car at
-# 100 %, kWh-target mode, no vehicle SOC sensor — UDP set_current noise
-# against a BMS that kept declining). After this many CONSECUTIVE
+# #610 — declined-start offer backoff. A single give-up re-armed as soon
+# as the surplus persisted again, which against a car that keeps declining
+# produced continuous kick-ladder chatter all afternoon (PROD 2026-07-18:
+# car at 100 %, kWh-target mode, no vehicle SOC sensor — UDP set_current
+# noise against a BMS that kept declining). After this many CONSECUTIVE
 # no-latch give-ups the offers stop for FULL_CAR_BACKOFF_S, ended early
 # by a real draw (car accepts again, e.g. after preconditioning) or by
 # an unplug / mode change / DISABLE. Per the #440 truth model the
 # estimated SOC still never gates charging — this tunes the RETRY
 # CADENCE only.
+#
+# (#983) The CONSTANT keeps #610's name; the SENTENCE no longer does.
+# "Full" was never observable here — a car at its ceiling is stopped by
+# #548 in ``decide`` and never reaches this ladder — so every give-up
+# that got as far as printing it was guessing, and RienduPre's car was
+# at 54 % against an 80 % target while SEM called it full.
 FULL_CAR_GIVEUP_STREAK = 3
 FULL_CAR_BACKOFF_S = 1200.0
+# (#1011) The wait GROWS with the refusals: 20 → 40 → 80 min, capped. A
+# fixed 20 min offered a full car a 2-minute ladder three times an hour
+# all day (PROD 27.09.2026: 14 current writes an hour to the box, every
+# hour from sunrise). Same doubling the stop-war ceasefire uses. Reset by
+# a real draw, an unplug, a mode change or DISABLE — unchanged.
+FULL_CAR_BACKOFF_MAX_FACTOR = 4
 
 # Once a car has drawn, treat a low/zero power reading as a transient and
 # HOLD the steady current for this long before concluding it really stopped.
@@ -153,6 +168,85 @@ FULL_CAR_BACKOFF_S = 1200.0
 # different current — the change that makes a Zoe drop the session. Longer
 # than a couple of cycles, shorter than a real "car finished / unplugged".
 LATCH_HOLD_S = 60.0
+
+# (#975) The per-plug-in INTERRUPTION BUDGET. Every guard above bounds how
+# FAST SEM may stop — the median, the deadband, the disable delay, the
+# post-stop settle. None of them bounds how OFTEN, and some chargers count
+# exactly that: @hoyte's Zaptec Go 2 locks itself out with an error after too
+# many session interruptions, and a cloudy day's surplus flicker spends that
+# budget in an afternoon (measured on SEM's own loop: 6-8 stops an hour,
+# ~30 on a charger driven by a current number alone).
+#
+# So the hysteresis GROWS with the churn it has already caused: after this
+# many stops in one plug-in, each further stop widens the enable delay and
+# the TRANSIENT bridge by ``SESSION_CHURN_PER_STOP``, to a ceiling. A
+# charger that flaps once or twice an hour never notices; one that is being
+# interrupted every few minutes ends up bridging through the clouds instead,
+# which is what @hoyte asked for ("allow a bit more slack ... and when
+# turning off leave it off for a longer period").
+#
+# Deliberately NOT applied to the STRUCTURAL stop (#461): when the sun is
+# genuinely gone there is nothing to bridge to, and stretching that hold
+# would import grid to hold a contactor closed — the exact defect #461 fixed
+# on @RienduPre's PROD. Slack is for flicker, never for nightfall.
+SESSION_STOP_BUDGET = 4
+SESSION_CHURN_PER_STOP = 0.5
+SESSION_CHURN_MAX = 4.0
+
+
+def _meanwhile(decision: ChargerDecision) -> str:
+    """(#983) What a stand-down COSTS, on the surface that announces it.
+
+    Class 82's sweep question — *for every place SEM decides to stop acting,
+    what is still running while it holds back, and who can see it?* — was
+    answered "nothing" for this give-up, because the car is not drawing. The
+    other half of the answer is RienduPre's #983: the surplus SEM had already
+    sized for that car keeps arriving and SEM stops offering it, for twenty
+    minutes at a time, all afternoon. So the line that announces the hold
+    carries the number the hold is about.
+
+    It reports the OFFER and nothing about its funding — not "surplus", not
+    "exported". ``budget_w`` is what ``decide`` sized for THIS car, and the
+    reviewer's two counterexamples show why the word matters: at night under a
+    peak clamp it is grid headroom (``decide.clamp_to_peak_slot``), and in
+    Zone 3/4 it is solar PLUS the pack's assist share (``assist_w``). Calling
+    either "surplus going to the grid" would be this very class, committed by
+    its own fix. What SEM knows here is that it sized a number and is not
+    offering it; where those watts go is another scope's reading.
+
+    Rounded to 100 W like every other watt in a reason string (``decide._cw``),
+    so a steady hold does not rewrite the sensor every cycle, and non-finite
+    input is swallowed INSIDE the guard — a text helper must never raise into
+    the control path it decorates.
+    """
+    try:
+        watts = float(getattr(decision, "budget_w", 0.0) or 0.0)
+        if watts <= 0.0:
+            return ""
+        rounded = int(round(watts / 100.0) * 100)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    return f"; SEM is withholding the {rounded}W it had sized for this car"
+
+
+def _dark_inputs_phrase(view) -> str:
+    """Name the reads that actually went dark this cycle (#992, class 99).
+
+    ``inputs_degraded`` is raised by three different gates: an entity that
+    will not read, a battery power no battery could produce (#902), and a
+    solar zero the energy balance refutes (#988). This verdict used to say
+    "sensor unavailable" for all three — and two of them are sensors that
+    answered perfectly well with a number SEM chose to disbelieve, so the
+    reader went hunting for a broken entity that was fine. #988 added one
+    of those two the week this was written.
+
+    Falls back to the honest general phrase when the names did not travel,
+    rather than to the specific claim that was wrong.
+    """
+    names = tuple(getattr(getattr(view, "fleet", None), "dark_inputs", ()) or ())
+    if not names:
+        return "a steering read came back dark"
+    return f"{', '.join(names)} read dark"
 
 
 class ChargeStability:
@@ -175,6 +269,18 @@ class ChargeStability:
         # the current start offer being climbed toward a latch.
         self._start_since: Dict[str, float] = {}
         self._start_offer: Dict[str, int] = {}
+        # (#893) The car's DEMONSTRATED latch floor for this session. The
+        # start ladder climbs until the car draws, then settles back to the
+        # budget minimum — assuming a latched car keeps drawing there. A
+        # fussy vehicle does not (live on .175, 01.09: latched and drew
+        # 3.1 kW at 8 A, refused 6 A at 0.13 kW standby), so every settle
+        # re-ran the whole cycle: ladder up, draw, settle, un-latch — a
+        # contactor click every ~3 minutes for as long as the budget sat
+        # under the car's floor. Un-latching after a settle to LOWER amps
+        # teaches the floor (= the amps it was last drawing at); a draw at
+        # lower amps decays it; a disconnect clears it (new car, new floor).
+        self._car_floor_a: Dict[str, int] = {}
+        self._draw_amps: Dict[str, int] = {}
         # Last time the car was observed drawing — latch hysteresis.
         self._latched: Dict[str, float] = {}
         # #610 — consecutive no-latch give-ups and the full-car backoff
@@ -182,6 +288,11 @@ class ChargeStability:
         # give-up path itself calls _reset, and the whole point is that
         # the streak/backoff survive it. Cleared by a real draw, by the
         # out-of-scope branch (unplug / mode change / DISABLE), or expiry.
+        # (#975) Stops SEM has commanded in THIS plug-in, per charger. Not
+        # cleared by _reset() (a stop calls it) and not by a mode change —
+        # the charger's own interruption counter does not reset for either.
+        # Only a disconnect starts a fresh budget.
+        self._session_stops: Dict[str, int] = {}
         self._giveup_streak: Dict[str, int] = {}
         self._giveup_backoff_until: Dict[str, float] = {}
         # Set when the disable-bridge STOPS. While present, an IDLE decision is
@@ -236,9 +347,12 @@ class ChargeStability:
             "start": _elapsed(self._start_since),
             "latched": _elapsed(self._latched),
             "stopped_at": _elapsed(self._stopped_at),
-            # #610 — full-car backoff survives a restart: the streak as-is,
+            # #610 — the declined-start backoff survives a restart: the streak as-is,
             # the deadline as REMAINING seconds (it's a future deadline, not
             # an elapsed timer, so the _elapsed shape doesn't fit).
+            # (#975) the plug-in's interruption budget — a restart is not a
+            # new plug-in, and the charger's own counter did not reset either.
+            "session_stops": dict(self._session_stops),
             "giveup_streak": dict(self._giveup_streak),
             "giveup_backoff_remaining": {
                 cid: bu - now_mono
@@ -303,11 +417,23 @@ class ChargeStability:
                     continue
                 target[cid] = now_mono - elapsed_f
 
-        # #610 — full-car backoff round-trip. Streak: plain ints. Deadline:
+        # #610 — declined-start backoff round-trip. Streak: plain ints. Deadline:
         # persisted as REMAINING seconds, rebased to now + remaining (same
         # no-downtime-credit philosophy as the elapsed timers — a backoff
         # with 10 min left before restart has 10 min left after). Bounds
         # guard against stale/corrupt blobs.
+        # (#975) the plug-in's interruption budget, same shape. A restart is
+        # not a new plug-in: the charger's own counter did not reset, so
+        # neither does ours. Bounded against a stale blob.
+        stops = saved.get("session_stops")
+        if isinstance(stops, dict):
+            for cid, n in stops.items():
+                try:
+                    n_i = int(n)
+                except (TypeError, ValueError):
+                    continue
+                if 0 < n_i <= 1000:
+                    self._session_stops[str(cid)] = n_i
         streaks = saved.get("giveup_streak")
         if isinstance(streaks, dict):
             for cid, n in streaks.items():
@@ -324,7 +450,10 @@ class ChargeStability:
                     rem_f = float(rem)
                 except (TypeError, ValueError):
                     continue
-                if 0.0 < rem_f <= FULL_CAR_BACKOFF_S:
+                # (#1011) the wait can be up to the capped factor now; a
+                # bound at the base value silently dropped a 40/80-minute
+                # deadline on restart and the ladder fired at once.
+                if 0.0 < rem_f <= FULL_CAR_BACKOFF_S * FULL_CAR_BACKOFF_MAX_FACTOR:
                     self._giveup_backoff_until[str(cid)] = now_mono + rem_f
 
     def _reset(self, cid: str) -> None:
@@ -339,6 +468,16 @@ class ChargeStability:
         self._start_offer.pop(cid, None)
         self._latched.pop(cid, None)
         self._sem_session.discard(cid)
+
+    def session_churn_factor(self, cid: str) -> float:
+        """(#975) How much this session's own churn has widened the delays.
+
+        1.0 until the budget is spent, then ``SESSION_CHURN_PER_STOP`` per
+        further stop, capped at ``SESSION_CHURN_MAX``. Public so the observer
+        surface and the tests can read the same number the filter applies.
+        """
+        over = max(0, int(self._session_stops.get(cid, 0)) - SESSION_STOP_BUDGET)
+        return min(SESSION_CHURN_MAX, 1.0 + over * SESSION_CHURN_PER_STOP)
 
     def _median_amps(self, cid: str, raw_amps: int, window: int) -> int:
         """Layer 1 — rolling median of the raw target-amps stream.
@@ -399,6 +538,13 @@ class ChargeStability:
         # 6 A) is handled identically day or night.
         night = bool(view.fleet.is_night)
 
+        # (#975) This session's interruption budget widens the anti-flap
+        # delays — the start delay and the TRANSIENT bridge only. The
+        # structural grace below is untouched on purpose (#461).
+        _churn = self.session_churn_factor(cid)
+        enable_delay_s = float(enable_delay_s) * _churn
+        disable_delay_s = float(disable_delay_s) * _churn
+
         # Out of scope → transparent. DISABLE (user off / self-resume
         # guard) and disconnects also clear all state: the next
         # session starts a fresh window with a cold history.
@@ -406,6 +552,7 @@ class ChargeStability:
             view.mode not in SURPLUS_DAY_MODES
             or not view.power.connected
             or decision.intent is ChargerIntent.DISABLE
+            or decision.intent is ChargerIntent.RELEASE   # (#898) hands-off
         ):
             self._reset(cid)
             # #610 — an unplug / mode change / DISABLE ends the full-car
@@ -413,6 +560,13 @@ class ChargeStability:
             # that should re-open start offers.
             self._giveup_streak.pop(cid, None)
             self._giveup_backoff_until.pop(cid, None)
+            self._car_floor_a.pop(cid, None)   # (#893) new plug, new floor
+            self._draw_amps.pop(cid, None)
+            # (#975) A new PLUG-IN is a new interruption budget — and only a
+            # plug-in. A mode change or a user OFF does not reset the
+            # charger's own session counter, so it must not reset ours.
+            if not view.power.connected:
+                self._session_stops.pop(cid, None)
             return decision
 
         cfg = view.config if isinstance(view.config, dict) else {}
@@ -446,6 +600,25 @@ class ChargeStability:
         # threshold compare. A 1-cycle dip or spike never reaches the
         # timers below.
         med_amps = self._median_amps(cid, raw_amps, smooth_window)
+        # (#905) A limit's cap is not a flicker for the median to out-vote:
+        # one capped sample against a window of higher ones left "delta
+        # guard — holding 14A" on the wire while the guard said 10 (PROD
+        # 02.09 20:45:14). Take the capped value now and re-seat the window
+        # on it, so the way back up starts from the cap, not from the past.
+        if (getattr(decision, "capped_by_limit", False)
+                and decision.intent is ChargerIntent.CHARGE_AT_AMPS
+                and raw_amps < med_amps):
+            med_amps = raw_amps
+            hist = self._amps_history.get(cid)
+            if hist:
+                self._amps_history[cid] = [raw_amps] * len(hist)
+        # (#907) At night the planner's verdict is steady by construction —
+        # a deadline floor, a peak-managed rate, target reached. The median
+        # exists for solar wobble; at night it only delays the planner's
+        # own idle by half a window ("delta guard — holding 8A" on a
+        # target-reached cycle, PROD 02.09 21:26). Honour the raw verdict.
+        if night:
+            med_amps = raw_amps
         charge_wanted = med_amps >= min_amps
 
         # "Charging" = the adapter last commanded a charge OR the EV is
@@ -480,10 +653,24 @@ class ChargeStability:
         #     precisely a hold that preserved a floor-violating value;
         #   - DISABLE, disconnect and non-surplus modes never arrive here
         #     (returned above) — a stop must never wait for a sensor.
-        if view.fleet.inputs_degraded and charging:
+        # (#907) …and only by DAY. A night verdict — target reached, a
+        # deadline floor, a planned wait — comes from the charger's own
+        # counter and the planner; no blind modbus sensor can move it. Held
+        # anyway, a night idle turned back into CHARGE on every dropout,
+        # the reconciler's idle grace never completed, and the car drew
+        # grid for minutes past its target (PROD 02.09). Same rule the
+        # deficit bridge below already follows: the night planner owns
+        # start/stop, honour whatever it decided.
+        if view.fleet.inputs_degraded and charging and not night:
             held = self._last_amps.get(cid)
             if held is not None:
                 held = max(min_amps, min(max_amps, int(held)))
+                # (#905) never above a limit's cap — a blind cycle may keep
+                # a command, not overrule the peak guard that just lowered it.
+                if (getattr(decision, "capped_by_limit", False)
+                        and decision.intent is ChargerIntent.CHARGE_AT_AMPS
+                        and int(decision.commanded_amps) < held):
+                    held = max(min_amps, int(decision.commanded_amps))
                 # Feed the smoothed stream too, so a dark stretch leaves no
                 # hole for the median to snap through on recovery.
                 self._median_amps(cid, held, smooth_window)
@@ -492,10 +679,11 @@ class ChargeStability:
                     decision,
                     intent=ChargerIntent.CHARGE_AT_AMPS,
                     commanded_amps=held,
-                    reason=f"inputs degraded (sensor unavailable) — holding {held}A",
+                    reason=(f"inputs degraded ({_dark_inputs_phrase(view)}) "
+                            f"— holding {held}A"),
                 )
 
-        # #610 — full-car backoff gate. MUST sit ABOVE the ``charge_wanted``
+        # #610 — declined-start backoff gate. MUST sit ABOVE the ``charge_wanted``
         # split, not inside it. It has now moved twice, for two different
         # bypasses of the same shape (a guard on one branch, an unguarded
         # passthrough on the other):
@@ -527,11 +715,11 @@ class ChargeStability:
                     intent=ChargerIntent.IDLE,
                     commanded_amps=0,
                     reason=(
-                        f"stability: full-car backoff — car declined "
+                        f"stability: start backoff — car declined "
                         f"{self._giveup_streak.get(cid, 0)} start "
                         f"ladders; next offer in "
-                        f"{max(0.0, backoff_until - now) / 60.0:.0f} min "
-                        f"— {decision.reason}"
+                        f"{max(0.0, backoff_until - now) / 60.0:.0f} min"
+                        f"{_meanwhile(decision)} — {decision.reason}"
                     ),
                 )
             self._giveup_backoff_until.pop(cid, None)
@@ -543,6 +731,47 @@ class ChargeStability:
             target = max(min_amps, min(max_amps, med_amps))
             if drawing:
                 self._latched[cid] = now
+                # (#893) remember the amps the car is ACTUALLY drawing at,
+                # and let a draw at lower amps decay a learned floor.
+                _drawn = int(self._last_amps.get(cid) or 0)
+                if _drawn > 0:
+                    self._draw_amps[cid] = _drawn
+                    _f = self._car_floor_a.get(cid)
+                    if _f is not None and _drawn < _f:
+                        self._car_floor_a[cid] = _drawn
+            else:
+                # (#893) not drawing while the last recorded draw sat ABOVE
+                # this cycle's target = the car told us its floor — both the
+                # un-latch right after a settle to lower amps, and a stale
+                # draw record from the previous same-plug session (each
+                # give-up round used to re-poke 6 A and click the contactor;
+                # re-flooring immediately keeps the whole night quiet).
+                _ld = self._draw_amps.get(cid)
+                if _ld and _ld > target:
+                    self._car_floor_a[cid] = _ld
+            _floor = self._car_floor_a.get(cid)
+            if _floor and target < _floor and not drawing:
+                # Offering sub-floor amps is a stop this car executes and a
+                # click the contactor pays for; laddering back up just to
+                # settle below the floor again is the churn. Hold off until
+                # the budget clears the floor (or the night lane sizes it).
+                # NEVER while the car is drawing: easing an active draw is
+                # _adjust's job, and the ease-below-floor is the one probe
+                # that lets the floor DECAY when the car's appetite changes.
+                self._reset(cid)
+                return replace(
+                    decision, intent=ChargerIntent.IDLE, commanded_amps=0,
+                    # CAUSE: the guard above is `target < _floor and not
+                    # drawing`, so both halves of this sentence — below the
+                    # floor, and not currently drawing — are the branch's
+                    # own condition.
+                    reason=(
+                        f"stability: budget {target}A is below this car's "
+                        f"demonstrated {_floor}A latch floor — holding off "
+                        f"instead of cycling the contactor (#893) — "
+                        f"{decision.reason}"
+                    ),
+                )
             # Latch hysteresis: once a car has drawn, a single low/zero power
             # reading is almost always a transient (the car blips, a sensor
             # hiccup) — NOT a reason to re-start at a different current. Any
@@ -583,13 +812,20 @@ class ChargeStability:
                 held = now - since
                 if night or held >= max(0.0, float(enable_delay_s)):
                     self._surplus_since.pop(cid, None)
+                    # (#893) same as the ladder default: a known latch
+                    # floor starts AT the floor, not at a min the car
+                    # already refused. Guard above ensures target >= floor.
+                    start_a = max(
+                        min_amps,
+                        min(max_amps, int(self._car_floor_a.get(cid, min_amps))),
+                    )
                     self._start_since[cid] = now
-                    self._start_offer[cid] = min_amps
-                    self._commit_amps(cid, min_amps, now)
+                    self._start_offer[cid] = start_a
+                    self._commit_amps(cid, start_a, now)
                     return replace(
                         decision, intent=ChargerIntent.CHARGE_AT_AMPS,
-                        commanded_amps=min_amps,
-                        reason=(f"stability: starting at {min_amps}A "
+                        commanded_amps=start_a,
+                        reason=(f"stability: starting at {start_a}A "
                                 f"(auto-raises if no draw) — {decision.reason}"),
                     )
                 return replace(
@@ -617,7 +853,16 @@ class ChargeStability:
             # capped at the charger max. Protects the grid from a sudden
             # high-current latch and stops a refusing car being held at 32 A.
             kick_ceiling = min(max_amps, max(target, START_KICK_MAX_A))
-            offer = int(self._start_offer.get(cid, min_amps))
+            # (#893) A car that demonstrated a latch floor gets offered
+            # that floor straight away — poking it at 6 A again is a
+            # handshake we already know it refuses (one wasted grace
+            # period per start, live on the 31.08 KEBA night). The floor
+            # guard above guarantees target >= floor whenever we get here.
+            _start_default = max(
+                min_amps,
+                min(kick_ceiling, int(self._car_floor_a.get(cid, min_amps))),
+            )
+            offer = int(self._start_offer.get(cid, _start_default))
             s0 = self._start_since.setdefault(cid, now)
             if offer < kick_ceiling and (now - s0) >= START_KICK_GRACE_S:
                 offer = min(kick_ceiling, offer + START_KICK_STEP_A)
@@ -629,16 +874,19 @@ class ChargeStability:
                 # detector / planner own the refusal.
                 self._reset(cid)
                 # #610 — count consecutive give-ups; enough in a row means
-                # the car is genuinely full/refusing → long backoff before
-                # the next ladder (streak survives expiry, so a still-full
+                # the car keeps declining (why is its own to say, #983) →
+                # long backoff before the next ladder (streak survives expiry, so a still-full
                 # car re-arms after ONE further ladder, not three).
                 streak = self._giveup_streak.get(cid, 0) + 1
                 self._giveup_streak[cid] = streak
                 backoff_note = ""
                 if streak >= FULL_CAR_GIVEUP_STREAK:
-                    self._giveup_backoff_until[cid] = now + FULL_CAR_BACKOFF_S
+                    factor = min(2 ** (streak - FULL_CAR_GIVEUP_STREAK),
+                                 FULL_CAR_BACKOFF_MAX_FACTOR)         # (#1011)
+                    backoff_s = FULL_CAR_BACKOFF_S * factor
+                    self._giveup_backoff_until[cid] = now + backoff_s
                     backoff_note = (
-                        f" — backing off {FULL_CAR_BACKOFF_S / 60.0:.0f} min "
+                        f" — backing off {backoff_s / 60.0:.0f} min "
                         f"after {streak} declined ladders"
                     )
                 return replace(
@@ -646,9 +894,19 @@ class ChargeStability:
                     intent=ChargerIntent.IDLE,
                     commanded_amps=0,
                     reason=(
+                        # (#983) What SEM SAW, not what SEM guessed. "full/
+                        # refusing" was a hypothesis printed as a finding —
+                        # and one this branch can never have evidence for,
+                        # because a car at its ceiling is stopped by #548
+                        # in ``decide`` and never reaches the ladder at all.
+                        # RienduPre read "full-car backoff" off a car his
+                        # own dashboard showed at 54 % against an 80 %
+                        # target (#983). The offer and the draw are the
+                        # evidence; the cause is the car's to explain.
                         f"stability: no draw at {offer}A after escalation "
-                        f"— car not latching (full/refusing)"
-                        f"{backoff_note} — "
+                        f"— the car did not accept the start (check its own "
+                        f"charge limit / departure timer)"
+                        f"{backoff_note}{_meanwhile(decision)} — "
                         f"{decision.reason}"
                     ),
                 )
@@ -782,6 +1040,10 @@ class ChargeStability:
             # Arm the post-stop settle so actuator lag (car still drawing next
             # cycle) can't re-open the hold before KEBA cuts the contactor.
             self._stopped_at[cid] = now
+            # (#975) …and spend one of this plug-in's interruptions. The count
+            # is what widens the delays above on the next pass, so a charger
+            # SEM keeps interrupting gets bridged instead of cycled.
+            self._session_stops[cid] = self._session_stops.get(cid, 0) + 1
             # #552 — SEM ended this session; ownership ends WITH it. Without
             # this, a stability stop that lands while the car blips 0 W never
             # reaches the adapter (reconciler sees idle+no-draw → no-op), the
@@ -794,6 +1056,12 @@ class ChargeStability:
                 # decision.reason already carries the structural cause.
                 return replace(
                     decision, intent=ChargerIntent.IDLE, commanded_amps=0,
+                    # CAUSE: `stop_for_short` is this scope's own variable
+                    # (short_grace and deep_held past the floor), so "not
+                    # bridging" is the branch we are standing in. The
+                    # STRUCTURAL half is not ours to assert — it is quoted
+                    # verbatim from `decision.reason`, which is the layer
+                    # that evaluated it.
                     reason=f"stability: structural idle — not bridging — "
                            f"{decision.reason}",
                 )
@@ -848,6 +1116,25 @@ class ChargeStability:
                 reason=f"stability: smoothed → {target}A — {decision.reason}",
             )
 
+        # (#905) A LIMIT lowering the current lands NOW. The ramp and the
+        # debounce exist for the car's sake — steadiness on the way up and
+        # on budget wobble. A slot-guard cap or a shed order is not a
+        # preference: every cycle spent above it is billed. PROD 02.09: the
+        # guard said 10 A at 20:45:14, the wire carried 14→12 A until
+        # 20:47:44, and that slot set the month's peak.
+        if getattr(decision, "capped_by_limit", False) and target < last:
+            self._commit_amps(cid, target, now)
+            if decision.commanded_amps == target \
+                    and decision.intent is ChargerIntent.CHARGE_AT_AMPS:
+                return replace(
+                    decision,
+                    reason=f"stability: limit clamp → {target}A — {decision.reason}",
+                )
+            return replace(
+                decision, intent=ChargerIntent.CHARGE_AT_AMPS,
+                commanded_amps=target,
+                reason=f"stability: limit clamp → {target}A — {decision.reason}",
+            )
         ramp = max(1, int(ramp_amps))
         ramped = max(last - ramp, min(last + ramp, target))
         suppressed = None

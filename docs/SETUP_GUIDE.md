@@ -33,6 +33,33 @@ For developer and architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
+## If you have no Energy Dashboard (#915)
+
+SEM used to require Home Assistant's Energy Dashboard to be set up first, and
+refused to install without it. It no longer does. When that page is empty or
+missing solar or grid, the installer asks your system instead: it looks at the
+energy integrations you already run, reads what each one calls its own
+entities, and offers **Solar power**, **Grid power** and **Battery power**
+pre-filled for you to confirm or change.
+
+Two things worth knowing:
+
+- **Live power, not daily totals.** SEM steers on watts. If a suggestion looks
+  like a total for today, replace it.
+- **One signed grid sensor is fine.** You do not need separate import and
+  export entities, and you do not need to tell SEM which direction is
+  positive — it works that out by watching the value.
+- **…and if your meter has no signed sensor, use the pair.** Growatt, Senec
+  and Anker's official integration publish grid import and grid export as two
+  always-positive sensors and no combined one. Fill **Grid import power** and
+  **Grid export power** instead — both of them, or neither — and leave *Grid
+  power* empty. SEM computes export minus import, so there is no direction
+  left to guess.
+
+Setting up the Energy Dashboard later does no harm; SEM keeps using what you
+chose. If it recognises nothing at all, every field is still a normal entity
+picker.
+
 ## What SEM detected — and how to correct it
 
 After setup, the dashboard **Configuration tab → Detected hardware** shows
@@ -45,6 +72,19 @@ with the pickers in the charger and sensor-source sections; the same report
 is included in the diagnostics download for bug reports. The full support
 matrix with an honest status per brand lives in
 [SUPPORTED_HARDWARE.md](SUPPORTED_HARDWARE.md).
+
+Since #915, an integration SEM has no row for is shown by **name** rather than
+by domain (*"EG4 Web Monitor · 412 installs"*), and a near-miss may come with
+**proposed roles** — entities of yours whose names match what that integration
+declares it creates, marked *unconfirmed*. Treat them as a shortcut for filling
+in the pickers, not as a verdict: SEM binds nothing it has not been told.
+
+Since 2.1 the proposals also cover **services** (KEBA's `keba.set_current`
+has no entity, and is proposed anyway), a near miss SEM can drive as-is gets
+an *add this charger* button, one it cannot says *wire by hand* with the
+reason, and a car on a transport such as MQTT is listed as a **vehicle**
+instead of unknown hardware (#956, #887). See the user guide's *What SEM
+detected* section for the three cases.
 
 ## 1. Prerequisites
 
@@ -61,11 +101,13 @@ not have HACS installed, follow the official instructions at
 
 ### The Energy Dashboard
 
-SEM reads all its source sensors from the **HA Energy Dashboard**, not from a
-manual sensor list you provide. This design means SEM works with any inverter
-brand automatically — it just asks the Energy Dashboard what you have.
+SEM's first choice for its source sensors is the **HA Energy Dashboard**,
+because it is already the canonical list of energy sensors in your system —
+which is how SEM works with any inverter brand without a per-brand setup.
 
-Before installing SEM, go to **Settings > Dashboards > Energy** and confirm:
+It is the easiest path, not a requirement (see *If you have no Energy
+Dashboard* above). If you want to use it, go to **Settings > Dashboards >
+Energy** and confirm:
 
 - "Solar panels" section has at least one solar production sensor
 - "Grid consumption" and "Grid return" sections have sensors assigned
@@ -73,9 +115,10 @@ Before installing SEM, go to **Settings > Dashboards > Energy** and confirm:
 
 ![Energy Dashboard configuration](images/sem_energy_dashboard_config.png)
 
-If the Energy Dashboard is blank or partially configured, SEM detects fewer
-sensors and may fail to calculate energy flows correctly. Configure it first,
-then install SEM.
+If it is blank or half-filled, the installer will ask your system directly and
+offer the sensors it recognises — you confirm them and carry on. Filling in the
+Energy Dashboard afterwards is still worth doing (HA's own energy history uses
+it), and it will not overwrite what you chose.
 
 > **Why the Energy Dashboard?** HA's Energy Dashboard is already the canonical
 > registry of energy sensors in your installation. SEM leverages this so you
@@ -89,7 +132,7 @@ then install SEM.
 Fronius, Enphase, Powerwall, Kostal, SolarEdge, GoodWe, Sonnen, SolaX,
 Growatt, and any inverter that exposes watt-level sensors to HA.
 
-**EV chargers:** KEBA P30 (service-based), Easee (service-based), Zaptec
+**EV chargers:** KEBA P30 (service-based), Easee (service-based), Zaptec Since 2.1 also NRGkick, ABL eMH1 (through matfroh's `ABL_emh1_modbus`) and Wallbox behind the MQTT bridge, found on their own.
 (service-based), Wallbox, go-eCharger, ChargePoint, Heidelberg, OpenWB 2.x,
 OCPP-compatible, Ohme, Peblar, V2C Trydan, Alfen Eve, Blue Current, OpenEVSE,
 and any charger with a controllable number entity.
@@ -164,7 +207,7 @@ solar production, grid import/export, battery charge/discharge, and EV charger.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| **Observer mode** | Off | When ON, SEM only reads data and provides the dashboard — it will not send any commands to your hardware. Use this for testing, secondary HA instances, or monitoring-only setups. You can toggle it later via `switch.sem_observer_mode`. |
+| **Observer mode** | **On** | A new install observes first: SEM reads your system, builds the dashboard, and publishes the decisions it *would* make — without sending a single command to your hardware. Look at those decisions, and when they match what you'd want, turn observer mode off (`switch.sem_observer_mode`) to let SEM act. Leave it on permanently for test rigs, secondary HA instances that mirror a production one, or monitoring-only setups. |
 
 > **Tip:** If a sensor you expect is missing from the detection summary,
 > check your Energy Dashboard (**Settings > Dashboards > Energy**) and ensure
@@ -223,7 +266,9 @@ Click **Submit**. SEM starts running immediately. The SEM dashboard appears
 in your sidebar within a few seconds if dashboard generation is enabled.
 
 Every install starts with a 5.0 kW target peak limit — SEM no longer asks for
-your grid ceiling during setup. Tune it afterward from the **Control** tab's
+your grid ceiling during setup. The ceiling only *sizes* what SEM offers (the
+EV charger above all); load **shedding** stays off until you enable it on the
+Configuration tab. Tune it afterward from the **Control** tab's
 Load Management card (drag the slider up to **80 kW**, or all the way to
 **Uncapped** if the connection has no limit worth defending), or type an exact
 kW value on the **Configuration** tab. See
@@ -607,7 +652,7 @@ needed. The current factor is exposed on the forecast sensor's attributes.
 
 | Entity | Purpose |
 |--------|---------|
-| `select.sem_charger_<id>_charge_mode` | Per-charger EV intent (v1.6.3) — Solar only / Solar + cheapest hours / Min + Solar / Always (max) / Off. Replaces the legacy `night_charging`, `smart_night_charging`, `tariff_optimized` switches and `ev_charging_mode` select. |
+| `select.sem_charger_<id>_charge_mode` | Per-charger EV intent (v1.6.3, extended 2.1) — Solar only / **Solar + battery** / Solar + cheapest hours / Min + Solar / Always (max) / Off. Replaces the legacy `night_charging`, `smart_night_charging`, `tariff_optimized` switches and `ev_charging_mode` select. |
 | `switch.sem_observer_mode` | Toggle read-only mode without reinstalling |
 
 ### Dashboard settings
@@ -881,6 +926,26 @@ auto-start SOC) the EV starts even without solar surplus.
 Scenario: 1.5 kW solar surplus, SOC 85%. Battery contributes ~2.5 kW assist,
 giving the EV ~4 kW. Charger runs continuously instead of intermittently.
 
+**Solar + battery (2.1)**
+
+Choose this mode when you want your own stored power in the car rather than
+grid power in the evening. Above the Solar Gate it behaves like Battery
+Assist. Below it — the hour after the sun has gone, which is exactly when a
+car is usually plugged in — it keeps charging from the pack, bounded by two
+things:
+
+- **How deep:** the drain stops at the higher of your Buffer SoC and
+  *tonight's computed floor* — the amount that must still be in the pack at
+  dawn for the house to get through the night on what it has measured itself
+  using. Never below your buffer, whatever the forecast says.
+- **Whether at all below the gate:** only while tonight's *spendable* budget
+  is positive, which requires a trusted forecast that tomorrow will refill
+  what is spent. No trust, no budget, no evening drain.
+
+Choosing the mode is the permission; there is no second switch to enable.
+Once the night window opens the mode still never grid-charges without an
+"At least" floor, and that floor is filled from the grid, not the pack.
+
 **Min+PV**
 
 A hybrid mode for overcast days. The charger runs at minimum current (using
@@ -934,7 +999,7 @@ characteristic staircase pattern (for example: 7 kW to 5 kW to 3 kW over
 
 When taper is detected:
 - `sensor.sem_ev_taper_trend` shows "declining"
-- `sensor.sem_ev_taper_minutes_to_full` estimates time remaining
+- `sensor.sem_charger_<id>_taper_minutes_to_full` estimates time remaining (one per charger)
 - A push notification is sent if mobile notifications are enabled
 
 This lets you see in the dashboard when the car is nearly full, even without
@@ -1085,17 +1150,87 @@ contacts are probably wired normally-closed rather than normally-open. Turn
 on *Invert SG-Ready* in the heat pump section — it flips both contacts —
 rather than rewiring or swapping the two relay entities.
 
-### Relay configuration
+### Contact configuration
 
-You need two switch entities in HA to control the SG-Ready pins — typically
-a Shelly or ESPHome device connected to the heat pump's input terminals.
+You need two HA entities to drive the SG-Ready pins — typically a Shelly or
+ESPHome device wired to the heat pump's input terminals.
 
 | Config field | What to set |
 |--------------|------------|
-| Relay 1 entity | `switch.` entity for the first SG-Ready pin |
-| Relay 2 entity | `switch.` entity for the second SG-Ready pin |
+| SG-Ready contact 1 | The entity for the first SG-Ready pin |
+| SG-Ready contact 2 | The entity for the second SG-Ready pin |
 | Climate entity (optional) | Your heat pump's `climate.` entity for setpoint boost |
 | Power sensor (optional) | Power consumption sensor for the heat pump |
+
+#### When the contact is not a switch (#801)
+
+A contact is usually a `switch.`, and SEM turns it on and off. Some pumps do
+not expose one. A Buderus/Bosch behind **EMS-ESP**, for example, carries its
+SG-Ready inputs as `text.` entities holding a bit string — a switch service
+would do nothing to them.
+
+So a contact may also be a `text.`, `number.`, `select.` or the matching
+`input_*` helper. Pick it in the same field; SEM then asks for the two
+values it should write:
+
+| Config field | What to set |
+|--------------|------------|
+| Contact N — ON value | The value that CLOSES that contact |
+| Contact N — OFF value | The value that OPENS that contact |
+
+SEM writes them verbatim through the entity's own service (`text.set_value`,
+`number.set_value`, `select.select_option`). The values belong to your
+integration's vocabulary, not SEM's — they cannot be guessed, so both are
+required and the config refuses to save a value contact with either missing.
+The two contacts keep their own pair: on EMS-ESP the two inputs carry bit
+strings of different widths.
+
+Everything else is unchanged — the SG-Ready truth table, *Invert SG-Ready*
+for normally-closed wiring, and the restart read-back that re-owns a boost
+SEM left running all work the same way on a value contact.
+
+Worked example — EMS-ESP, where SG-Ready is inputs 1 and 4:
+
+| Field | Value |
+|-------|-------|
+| SG-Ready contact 1 | `text.ems_esp_boiler_input_1_options` |
+| Contact 1 — ON value | the bit string that activates input 1 |
+| Contact 1 — OFF value | the bit string that deactivates it |
+| SG-Ready contact 2 | `text.ems_esp_boiler_input_4_options` |
+| Contact 2 — ON / OFF value | the same, for input 4 |
+
+#### When the control surface is a service (#801)
+
+Some pumps are not driven through an entity at all — the integration exposes
+a command service instead. Fill the **SG-Ready service** fields and SEM calls
+it rather than touching the contacts:
+
+| Config field | What to set |
+|--------------|------------|
+| SG-Ready service | `domain.service` — e.g. `ems_esp.send_command`, or a `script.` of your own |
+| SG-Ready service data | A JSON object, the service's payload |
+| SG-Ready state read-back entity | Optional: an entity reporting the pump's current SG-Ready state |
+
+Any string value in the payload may use three placeholders, which SEM
+substitutes per call:
+
+| Placeholder | Becomes |
+|-------------|---------|
+| `{state}` | the SG-Ready state number, `1`–`4` |
+| `{relay1}` | `true` / `false` — contact 1 in the truth table |
+| `{relay2}` | `true` / `false` — contact 2 |
+
+```json
+{"command": "sgready", "value": "{state}"}
+```
+
+When a read-back entity is set, SEM checks after the write that the pump
+reports the state it commanded and logs a mismatch rather than assuming the
+command landed. The same entity lets SEM re-own a boost it left running
+across a restart.
+
+The service path and the contact path are alternatives: if a service is
+configured it IS the actuation, and the contacts are left alone.
 
 ### Setpoint boost
 

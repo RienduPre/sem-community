@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from homeassistant.config_entries import ConfigEntry
@@ -32,11 +33,14 @@ from homeassistant.util import dt as dt_util
 import voluptuous as vol
 from homeassistant.helpers import config_validation as cv
 
+from .coordinator.charge_pause import forget_on_mode_write
+from .coordinator.install_modules import MODULE_EVIDENCE_KEYS
 from .const import (
     DOMAIN,
     MIN_PEAK_LIMIT_KW,
     MAX_PEAK_LIMIT_KW,
 )
+from .consts.core import DEFAULT_LOAD_MANAGEMENT_ENABLED
 from .coordinator.sensor_reader import GRID_TRIGGER_HINTS
 from .coordinator import SEMCoordinator
 
@@ -44,6 +48,39 @@ if TYPE_CHECKING:
     from .devices.base import ControllableDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# (#901) ``sem-localize.<lang>.js`` is an ASSET, never a Lovelace resource.
+# Since the #738 split, ``sem-localize.js`` is a loader that injects the
+# user's own language on demand over ``/local``; the siblings must be copied
+# to ``/config/www`` so that fetch resolves, and registered nowhere.
+#
+# Upgraded installs still carried 15 of them, registered by the pre-#738
+# generate_dashboard path and refreshed by nothing (HA-PROD on 2.1.0-beta.5
+# had the bundle and the loader at the current version and every sibling
+# still pinned at 1.7.6-beta.13). Two costs: the same language table gets
+# written from two URLs — the stale resource and the loader's fresh
+# injection, last write wins — which is the #240 stale-cache class reopened
+# for the siblings; and every registered resource loads at frontend boot, so
+# ~1.3 MB of language tables was fetched per page for a user who needs one.
+#
+# One predicate, used by BOTH registration paths, so neither can re-register
+# what the other just swept.
+_LOCALIZE_SIBLING_RE = re.compile(r"sem-localize\.[A-Za-z]{2,3}(?:-[A-Za-z]+)?\.js$")
+
+
+def _is_localize_sibling(name: str) -> bool:
+    """True for ``sem-localize.<lang>.js`` — never for the loader itself.
+
+    Accepts a bare filename, a path or a full resource URL with its ``?v=``
+    cache-bust suffix, because the two call sites hold different shapes.
+    """
+    return bool(_LOCALIZE_SIBLING_RE.search(str(name).split("?")[0]))
+
+
+def _registrable_card_files(fnames: "list[str]") -> "list[str]":
+    """The installed card files that may become Lovelace resources."""
+    return [f for f in fnames if not _is_localize_sibling(f)]
 
 
 def _content_hash_cache_bust(card_root: str, base_url: str, version: str) -> str:
@@ -82,6 +119,22 @@ _VERSION_STORE_KEY_PREFIX = "sem_seen_version_"
 # device objects live here. A reload drops the stash in ``async_setup_entry``
 # without deactivating anything.
 _PENDING_LOAD_TEARDOWN: Dict[str, List["ControllableDevice"]] = {}
+
+# (#949) Same shape, for the charge pacer's hold on the inverter's
+# max-charge-power register: ``(entity_id, captured_value, store)`` parked at
+# unload and either replayed by ``async_remove_entry`` or dropped by the next
+# ``async_setup_entry``. A removed or disabled entry has no next lifetime to
+# adopt the engagement, so without this the register keeps SEM's cap for good.
+_PENDING_PACING_RESTORE: Dict[str, tuple] = {}
+#: (#955) entry_id -> {battery_id: release recipe} stashed by unload for a
+#: removal, exactly like the pacer's tuple above; a reload never pops it and
+#: the next setup clears it.
+_PENDING_EXPORT_RELEASE: dict = {}
+
+# (#935) And the same for a wallbox SEM parked: the box holds a standing "no"
+# — disabled contactor, 0 A stored, a persisted dead-man failsafe — which is
+# the point while SEM is away for a moment, and abandonment once SEM is gone.
+_PENDING_CHARGER_RELEASE: Dict[str, List[Any]] = {}
 
 
 async def _maybe_emit_upgrade_notification(hass, entry) -> None:
@@ -181,6 +234,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.BINARY_SENSOR,
     Platform.SELECT,
+    Platform.BUTTON,
     Platform.TIME,
 ]
 
@@ -215,9 +269,17 @@ _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
     # set_option change must reload for it to take effect; without this the
     # override only applied on the next full restart.
     "solar_production_sensor", "battery_power_sensor", "grid_power_sensor",
+    # (#891) the fourth source. It also decides whether the two house-meter
+    # SENSORS exist at all, so naming one has to reload or the entities do
+    # not appear until the next restart.
+    "house_power_sensor",
     # #593: hardware battery lifetime-cycle sensor (preferred over the estimate).
     "battery_cycles_sensor",
     "heat_pump_relay1_entity", "heat_pump_relay2_entity",
+    # (#801) the ON/OFF values of a text/number/select contact — read at
+    # controller construction, so a change must reload like the entity itself.
+    "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+    "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
     "heat_pump_climate_entity", "heat_pump_power_sensor",
     "heat_pump_temperature_sensor",
     # #600 — load-device kWh energy counters (derive power when no power sensor);
@@ -255,10 +317,49 @@ _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
     # #523 AC-coupled bidirectional setpoint (charge = negative on the
     # force-discharge entity) — read at adapter construction.
     "battery_setpoint_bidirectional",
-})
+    # (#809/#869) the setpoint model and its direction select — read at
+    # adapter construction like the flag above.
+    "battery_setpoint_model",
+    "battery_power_direction_entity",
+    "battery_direction_discharge_value",
+    "battery_direction_charge_value",
+    # (#923) ...plus every module wiring key the install-modules oracle
+    # reads (MODULE_EVIDENCE_KEYS, joined below): setting one through
+    # set_option must reload, or the module's entities wait for the next
+    # restart. Joined from the oracle, not listed here, so the two cannot
+    # drift — and so this file never names a key it must not write (#845).
+}) | MODULE_EVIDENCE_KEYS
 
 
-def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
+def _require_load_manager(coordinator):
+    """(#913) The load manager, or the honest reason there is none.
+
+    Four service handlers used to gate on ``coordinator._load_manager`` and
+    answer "not initialized — wait" when it was None. Since #897 it is None
+    BY DEFAULT: load management ships off, so the sentence blamed the clock
+    for a setting, and for two of the four handlers the gate tested the
+    wrong precondition altogether (their own branch never touched the
+    manager). This helper exists for the two that genuinely need it, and
+    it says which of the two things is actually true.
+    """
+    lm = getattr(coordinator, "_load_manager", None)
+    if lm is not None:
+        return lm
+    enabled = bool(coordinator.config.get(
+        "load_management_enabled", DEFAULT_LOAD_MANAGEMENT_ENABLED))
+    if not enabled:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="load_management_disabled",
+        )
+    raise HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="load_management_failed_to_start",
+    )
+
+
+def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check,
+                                   charger_service=None):
     """Warn about configured charger entity_ids absent from the state
     registry — DEFERRED past HA's warm-up (#763 beta.7).
 
@@ -269,6 +370,23 @@ def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
     that's the real #315/#357/#462 symptom — and entities that appeared
     in the meantime log the recovery at DEBUG only. Returns the
     still-missing pairs.
+
+    (#991) One of those entities is not like the others. The current
+    control entity is how SEM commands a `number`-driven charger, and the
+    only thing that can stand in for it is a brand ``charger_service``;
+    with neither there is no way to set this charger's current at all — and
+    a fallback that has nowhere to fall is an error, not a line in a list.
+    This is the honest place to say so: past warm-up the absence is a FACT,
+    where the same read at registration would have been a warm-up artefact
+    (the defect this issue is about).
+
+    "Has a service" is not the same question as "has a fallback". An
+    ENTITY-PLATFORM service (`number.set_value` and its `input_number` /
+    `select` twins, #462 / #485 K1) is not its own transport: it writes
+    THROUGH ``ev_current_control_entity or ev_charger_service_entity_id``,
+    current entity first. So when the current entity is the thing that
+    vanished, such a service falls exactly where the entity did — it is not
+    an alternative and must not buy silence here.
     """
     missing = []
     for _attr, _eid in to_check:
@@ -276,6 +394,31 @@ def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
             continue
         if hass.states.get(_eid) is None:
             missing.append((_attr, _eid))
+    # (#991) No current entity and nothing that can stand in for it = no
+    # control method. Said before the generic warning so the ERROR is the
+    # first thing in the log.
+    _svc = str(charger_service or "").strip().lower()
+    _svc_is_own_transport = bool(_svc) and not (
+        "." in _svc
+        and _svc.split(".", 1)[0] in ("number", "input_number", "select")
+    )
+    _no_control = (
+        any(_attr == "ev_current_control_entity" for _attr, _ in missing)
+        and not _svc_is_own_transport
+    )
+    if _no_control:
+        _LOGGER.error(
+            "EV charger '%s' (%s): its current control entity (%s) is "
+            "missing past warm-up and there is no charger service that "
+            "could stand in for it (configured: %s) — SEM has NO way to set "
+            "this charger's current and will not throttle it. Check the "
+            "entity ID, or configure a brand charger service as the "
+            "fallback.",
+            charger_name, charger_id,
+            ", ".join(e for a, e in missing
+                      if a == "ev_current_control_entity"),
+            charger_service or "none",
+        )
     if missing:
         _LOGGER.warning(
             "EV charger '%s' (%s): %d configured entity ID(s) "
@@ -295,7 +438,7 @@ def _warn_missing_charger_entities(hass, charger_name, charger_id, to_check):
     return missing
 
 
-def build_welcome_message(config: dict) -> str:
+def build_welcome_message(config: dict, presence: dict | None = None) -> str:
     """The first-run checklist, describing THIS install (#805 fix 2).
 
     The old text told everyone to "pick an EV charge mode on the EV tab",
@@ -309,12 +452,19 @@ def build_welcome_message(config: dict) -> str:
     wording promised "sensible defaults" while SEM was about to manage
     auto-discovered devices; since #805 those are monitor-only, and saying
     so is how the user can consent to it.
+
+    (#923) Both answers come from the install-modules oracle: the EV line
+    from ``has_managed_charger`` (the #595 tab rule), the battery line from
+    the setup verdict — PRESENT only, because an UNKNOWN battery must be
+    invited, not sent to a tab.
     """
-    has_ev = bool(config.get("ev_chargers")
-                  or config.get("ev_charging_power_sensor"))
-    has_battery = bool(config.get("battery_capacity_kwh")
-                       or config.get("battery_soc_sensor")
-                       or config.get("battery_power_sensor"))
+    from .coordinator.install_modules import (
+        Module, Presence, has_managed_charger, module_verdict,
+    )
+    if presence is None:
+        presence = module_verdict(config, None, False)
+    has_ev = has_managed_charger(config)
+    has_battery = presence.get(Module.BATTERY) is Presence.PRESENT
 
     lines = ["1. Confirm solar is reporting on the Energy tab"]
     if has_ev:
@@ -440,7 +590,10 @@ def _merge_ev_chargers_by_id(
     * Each entry in ``incoming`` is merged INTO the matching entry in
       ``existing`` by ``id``, with incoming fields winning. Fields
       present in the existing entry but absent from the incoming entry
-      are preserved (no key is silently removed).
+      are preserved (no key is silently removed) — with ONE exception:
+      an incoming ``charge_mode`` other than ``off`` drops the (#980)
+      pause record, ``pause_charging_until`` / ``pause_resume_mode``. A
+      pause is Off; a charger written into another mode carries none.
     * Existing chargers whose ``id`` is NOT in the incoming list are
       kept verbatim. This is the actual fix for the cross-talk: a
       one-charger update never affects siblings.
@@ -496,11 +649,16 @@ def _merge_ev_chargers_by_id(
             continue
         base = dict(c)
         if cid in incoming_by_id:
-            base.update(incoming_by_id[cid])
+            inc = incoming_by_id[cid]
+            base.update(inc)
+            if "charge_mode" in inc:
+                forget_on_mode_write(base, "charge_mode", inc["charge_mode"])
         merged.append(base)
         merged_ids.add(cid)
     for cid in new_ids:
-        merged.append(dict(incoming_by_id[cid]))
+        fresh = dict(incoming_by_id[cid])
+        forget_on_mode_write(fresh, "charge_mode", fresh.get("charge_mode"))
+        merged.append(fresh)
     return merged
 
 
@@ -524,6 +682,9 @@ def persist_per_charger_option(
       no-op'ing the write.
     * Mirrors into ``coordinator.config`` and arms the reload-skip
       snapshot before the entry write.
+    * (#980) A ``charge_mode`` other than ``off`` drops the pause record in
+      the same write — ``charge_pause.forget_on_mode_write``, the one rule
+      both config writers apply (see ``_merge_ev_chargers_by_id``).
     """
     new_options = {**(entry.options or {})}
     data_chargers = (entry.data or {}).get("ev_chargers") or []
@@ -532,6 +693,7 @@ def persist_per_charger_option(
     for charger in ev_chargers:
         if charger.get("id") == charger_id:
             charger[key] = value
+            forget_on_mode_write(charger, key, value)    # (#980)
             break
     else:
         recovered = next(
@@ -540,6 +702,7 @@ def persist_per_charger_option(
             {"id": charger_id},
         )
         recovered[key] = value
+        forget_on_mode_write(recovered, key, value)      # (#980)
         ev_chargers.append(recovered)
         _LOGGER.warning(
             "Charger '%s' was missing from the stored ev_chargers list "
@@ -677,6 +840,20 @@ def _heal_ev_chargers_options(
     if healed == list(opts_chargers or []):
         return None
     return healed
+
+
+#: (#876) The Energy-Dashboard ENERGY COUNTERS, and only those.
+#: ``EnergyDashboardConfig.to_dict()`` also carries power sensors and
+#: ``has_*`` flags; those are live steering inputs the coordinator resolves
+#: itself every cycle, and a migration that silently rewrote them would be a
+#: far larger promise than the one being made here.
+_ENERGY_COUNTER_KEYS = (
+    "solar_energy_sensor",
+    "grid_import_energy_sensor",
+    "grid_export_energy_sensor",
+    "battery_charge_energy_sensor",
+    "battery_discharge_energy_sensor",
+)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
@@ -1548,8 +1725,124 @@ async def async_migrate_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> boo
             )
             return False
 
+    if entry.version == 18 and entry.minor_version < 2:
+        # (#876) The Energy-Dashboard COUNTER keys are written by the config
+        # flow when an entry is CREATED and by nothing else, so an entry that
+        # predates that merge never acquires them — and no migration between
+        # v1 and v18 added them.
+        #
+        # It hides in plain sight because the coordinator re-reads the Energy
+        # Dashboard every cycle, so live operation is unaffected. Only code
+        # that reads the ENTRY breaks, and there is one that matters:
+        # ``night_backfill.py`` looks up ``battery_discharge_energy_sensor``
+        # and, not finding it, answers "no battery discharge energy sensor
+        # configured" and writes nothing. The service that exists to spare a
+        # new install the five-night wait was dead on precisely the OLDEST
+        # installs — the ones whose history was worth recovering. Measured:
+        # PROD's entry (created 2025-11-10, never re-installed) carried 35
+        # data keys against the branch rig's 40 on identical hardware, the
+        # difference being exactly these five, with every counter present and
+        # years deep in the recorder.
+        #
+        # Additive only. A key already set — in data OR in options, because
+        # options shadow data and the coordinator reads the merged view — is
+        # the user's own answer and is left alone.
+        try:
+            merged = {**accumulated_data, **accumulated_options}
+            missing = [k for k in _ENERGY_COUNTER_KEYS if not merged.get(k)]
+            new_data = {**accumulated_data}
+            filled: dict = {}
+            if missing:
+                from .ha_energy_reader import read_energy_dashboard_config
+                ed = await read_energy_dashboard_config(hass, quiet=True)
+                if ed is not None:
+                    found = ed.to_dict()
+                    filled = {k: found[k] for k in missing if found.get(k)}
+                    new_data.update(filled)
+            hass.config_entries.async_update_entry(
+                entry, data=new_data, options=accumulated_options,
+                version=18, minor_version=2,
+            )
+            accumulated_data = new_data
+            if filled:
+                _LOGGER.info(
+                    "#876: filled %d Energy-Dashboard counter(s) this entry "
+                    "never received (%s) — battery-night backfill can now "
+                    "read this install's own history",
+                    len(filled), ", ".join(sorted(filled)),
+                )
+        except Exception as e:  # noqa: BLE001
+            # Deliberately NOT a failed migration, and deliberately NOT
+            # bumped: the Energy Dashboard may simply not be readable this
+            # early. Leaving the entry at 18.1 means HA calls us again next
+            # restart, which is the retry. Setup proceeds either way — an
+            # install must never fail to load over a key it has lived
+            # without for months.
+            _LOGGER.warning(
+                "#876: could not read the Energy Dashboard to fill the "
+                "counter keys (will retry on next restart): %s", e,
+            )
+
     _LOGGER.info("Migration to version %s.%s done", entry.version, entry.minor_version)
     return True
+
+
+def _heat_pump_rows(full_config: dict) -> list[dict]:
+    """#685: one row per heat pump — flat keys are the PRIMARY unit
+    (device_id "heat_pump", full back-compat), the ``heat_pumps`` list
+    holds additional units with the same key names."""
+    rows: list[dict] = [{
+        "id": "heat_pump",
+        "name": full_config.get("heat_pump_name", "Heat Pump"),
+        **{k: full_config.get(k) for k in (
+            "heat_pump_relay1_entity", "heat_pump_relay2_entity",
+            "heat_pump_climate_entity", "heat_pump_power_sensor",
+            "heat_pump_energy_sensor", "heat_pump_temperature_sensor",
+            "heat_pump_rated_power", "heat_pump_priority",
+            "heat_pump_boost_offset", "heat_pump_max_setpoint",
+            "heat_pump_force_on_threshold", "heat_pump_invert_sg_ready",
+            "heat_pump_sg_ready_service", "heat_pump_sg_ready_service_data",
+            "heat_pump_sg_ready_state_entity",
+            "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+            "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
+        ) if full_config.get(k) not in (None, "")},
+    }]
+    # (#990) Two rows may carry the SAME id — a config written by a build
+    # that minted ids from the list position survives a removal that
+    # renumbers it. ``register_device`` keys on device_id, so a collision
+    # does not fail: the second unit quietly replaces the first and one
+    # physical pump is never driven again, while the log still counts two.
+    # A duplicate is therefore renamed onto the first free number here —
+    # losing a device is the one outcome that must not be silent.
+    _seen = {"heat_pump"}
+    for _i, _row in enumerate(full_config.get("heat_pumps") or []):
+        if not isinstance(_row, dict):
+            continue
+        _id = str(_row.get("id") or f"heat_pump_{_i + 2}")
+        if _id in _seen:
+            _n = _i + 2
+            while f"heat_pump_{_n}" in _seen:
+                _n += 1
+            _LOGGER.warning(
+                "Heat pump #%d reuses device id '%s' — registering it as "
+                "'heat_pump_%d' so it is not dropped (#990)",
+                _i + 2, _id, _n,
+            )
+            _id = f"heat_pump_{_n}"
+        _seen.add(_id)
+        rows.append({**_row, "id": _id,
+                     "name": _row.get("name") or f"Heat Pump {_i + 2}"})
+    return rows
+
+
+def _heat_pump_row_controllable(row: dict) -> bool:
+    """A row is registrable when it has a control path: both SG-Ready
+    relays, a climate entity, or a service call (#801)."""
+    r1 = row.get("heat_pump_relay1_entity")
+    r2 = row.get("heat_pump_relay2_entity")
+    cl = row.get("heat_pump_climate_entity")
+    svc = (row.get("heat_pump_sg_ready_service") or "").strip()
+    return bool(r1 and r2) or bool(cl) or bool(svc)
 
 
 def _derive_charge_mode(
@@ -1619,6 +1912,51 @@ def _derive_charge_mode(
     # unrecognised mode value.
     from .consts.ev_charge_modes import DEFAULT_EV_CHARGE_MODE
     return DEFAULT_EV_CHARGE_MODE
+
+
+def _migrate_legacy_arbitrage_mode(hass: HomeAssistant, entry: SEMConfigEntry) -> None:
+    """(#930) Make a stored ``allow_arbitrage`` mode the explicit permission
+    it always meant, ONCE, on disk.
+
+    The mode left the selector in v1.7.3 and ``migrate_mode()`` has read it
+    as ``auto`` + ``may_export=True`` ever since — but only ephemerally, inside
+    ``effective_permissions()``, so the stored value never went away. And
+    ``consts/battery_modes.py`` short-circuits that legacy value past BOTH
+    master switches unless ``may_export`` was explicitly set False: a battery
+    still carrying it kept selling under a switch that read "off". Written
+    down as the permission, the master switches apply to it like every other
+    battery, and the user's revocation (an explicit False) is left alone.
+
+    Idempotent: acts only while the legacy value is present in options or
+    data; a key living only in read-only ``entry.data`` is overridden from
+    options, which win the merge.
+    """
+    opts = {**entry.options}
+    merged = {**entry.data, **opts}
+    perms = dict(opts.get("battery_permissions") or {})
+    changed = False
+    legacy = "allow_arbitrage"
+    if str(merged.get("battery_mode") or "").lower() == legacy:
+        opts["battery_mode"] = "auto"
+        changed = True
+    modes = merged.get("battery_modes")
+    if isinstance(modes, list) and any(
+            str(m or "").lower() == legacy for m in modes):
+        opts["battery_modes"] = [
+            "auto" if str(m or "").lower() == legacy else m for m in modes]
+        changed = True
+    if not changed:
+        return
+    # the permission the mode stood for — never overwriting a revocation
+    if perms.get("may_export") is None:
+        perms["may_export"] = True
+    opts["battery_permissions"] = perms
+    hass.config_entries.async_update_entry(entry, options=opts)
+    _LOGGER.warning(
+        "(#930) migrated the retired 'allow_arbitrage' battery mode to auto "
+        "with an explicit may_export=%s — the arbitrage master switch applies "
+        "to this battery from now on", perms.get("may_export"),
+    )
 
 
 def _migrate_limit_surplus_to_max(hass: HomeAssistant, entry: SEMConfigEntry) -> None:
@@ -1714,6 +2052,64 @@ def build_discovered_charger_storage(
     )
 
 
+def _online_twin_from_registry(hass, offline_eid: str):
+    """(#886) The online current-control twin of a persisted offline register,
+    resolved through the entity registry (same device). ``None`` when the
+    device is gone or exposes no live counterpart. The registry is persisted,
+    so the twin is found regardless of the charger integration's load order."""
+    from homeassistant.helpers import entity_registry as er
+    from .hardware_detection import _online_current_control
+    reg = er.async_get(hass)
+    ent = reg.async_get(offline_eid)
+    if ent is None or not getattr(ent, "device_id", None):
+        return None
+    siblings = [e for e in reg.entities.values()
+                if e.device_id == ent.device_id]
+    return _online_current_control(offline_eid, siblings)
+
+
+def _heal_offline_current_control_in_list(hass, chargers):
+    """(#886, bug class 56) Repair chargers already PERSISTED with an offline
+    fallback register as ``ev_current_control_entity`` — bound by pre-fix
+    detection. Detection only re-runs when NO charger is configured, so an
+    adopted install never self-corrects; this heals the stored list once, at
+    setup, idempotently. Returns a new list if anything changed, else ``None``.
+
+    Unlike the detection-time guard (which may drop the binding — it is only
+    choosing whether to configure control at all), the heal ONLY swaps to a
+    found online twin. It never drops: silently disabling an already-working
+    charger's control on a registry read would be a heavier, harder-to-notice
+    change than the mis-binding it repairs. In practice the twin is always
+    present (the reporter's JuiceBox exposes both), so the swap is clean."""
+    if not chargers:
+        return None
+    changed = False
+    healed = []
+    for c in chargers:
+        if not isinstance(c, dict):
+            healed.append(c)
+            continue
+        eid = c.get("ev_current_control_entity")
+        if not eid or "offline" not in str(eid).lower():
+            healed.append(c)
+            continue
+        online = _online_twin_from_registry(hass, str(eid))
+        if online:
+            new_c = dict(c)
+            new_c["ev_current_control_entity"] = online
+            healed.append(new_c)
+            changed = True
+        else:
+            _LOGGER.warning(
+                "Charger %s binds an offline current-control register (%s) and "
+                "no online twin was found in the registry — leaving it in place; "
+                "re-run charger auto-detection to fix (#886).",
+                c.get("id", "?"), eid,
+            )
+            healed.append(c)
+    return healed if changed else None
+
+
 # (#638) The kill-switch's unique_id is ``sem_{key}``, so renaming the
 # planner mints a new identity. Left alone HA would register a SECOND
 # switch and strand the first as an unavailable orphan — the user would
@@ -1742,6 +2138,44 @@ def _async_rename_actuation_switch(registry) -> None:
     registry.async_update_entity(old, **changes)
 
 
+# (#923) HA's EnergyManager.async_listen_updates has no unsubscribe, so SEM
+# registers ONE listener per hass and looks the live coordinators up when it
+# fires — binding it to a coordinator would leak a stale listener per reload.
+_ENERGY_PREFS_LISTENER = f"{DOMAIN}_energy_prefs_listener"
+
+
+async def _async_listen_energy_prefs(hass: HomeAssistant) -> None:
+    """Re-read the Energy Dashboard when the user edits it, so a battery or
+    EV consumer added there reaches SEM without a restart (#923)."""
+    if hass.data.get(_ENERGY_PREFS_LISTENER):
+        return
+    if "energy" not in hass.config.components:
+        return  # nobody can edit the Energy Dashboard without it; re-read on restart
+    try:
+        from homeassistant.components.energy.data import async_get_manager
+        manager = await async_get_manager(hass)
+    except Exception as err:  # noqa: BLE001 — no energy manager: re-read on restart
+        _LOGGER.debug("Energy Dashboard listener not installed: %s", err)
+        return
+
+    async def _on_energy_prefs_updated() -> None:
+        from homeassistant.config_entries import ConfigEntryState
+        for sem_entry in hass.config_entries.async_entries(DOMAIN):
+            if sem_entry.state is not ConfigEntryState.LOADED:
+                continue
+            coordinator = getattr(sem_entry, "runtime_data", None)
+            if coordinator is None:
+                continue
+            try:
+                await coordinator.async_initialize_energy_dashboard(quiet=True)
+            except Exception as err:  # noqa: BLE001 — never raise into HA's energy save
+                _LOGGER.debug("Energy Dashboard re-read after an edit failed: %s", err)
+
+    manager.async_listen_updates(_on_energy_prefs_updated)
+    hass.data[_ENERGY_PREFS_LISTENER] = True
+
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     """Set up Solar Energy Management from a config entry.
 
@@ -1766,6 +2200,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     # and bouncing a running heat pump on every options change is not a safety
     # improvement.
     _PENDING_LOAD_TEARDOWN.pop(entry.entry_id, None)
+    # (#949) Same reasoning for the paced charge limit: SEM is back, and the
+    # fresh writer adopts the engagement from its own record.
+    _PENDING_PACING_RESTORE.pop(entry.entry_id, None)
+    _PENDING_EXPORT_RELEASE.pop(entry.entry_id, None)   # (#955) a stale stash never replays
+    # (#935) A reload is not an abandonment: the charger stays parked and the
+    # fresh cycle decides again in seconds.
+    _PENDING_CHARGER_RELEASE.pop(entry.entry_id, None)
+
+    # (#935) Sweep the stores of SEM entries that no longer exist. A removed
+    # and re-added install keeps the previous entry id's pair for ever — the
+    # .46 rig carried seven pairs and ninety-six version markers — and they
+    # make "is this a fresh install?" unanswerable. SEM's OWN files, so they
+    # go without asking; what is the user's is offered instead (the Repair
+    # below points at `remove_leftovers`).
+    hass.async_create_task(_async_sweep_orphan_stores(hass))
 
     # In-memory SEM log ring buffer for the diagnose surface (#461/#462
     # triage gap on Supervisor installs — no flat log file to tail).
@@ -1785,6 +2234,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     # Fold the removed ev_limit_surplus switch (#235) into the Max ceiling (#245).
     # Idempotent; only acts while the legacy key is present.
     _migrate_limit_surplus_to_max(hass, entry)
+    _migrate_legacy_arbitrage_mode(hass, entry)   # (#930)
 
     # Heal a poisoned ``options.ev_chargers`` list (#462/#464 follow-up).
     # v1.7.2..v1.7.3-beta.3 builds could leave options with a partial or
@@ -1816,6 +2266,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             hass.config_entries.async_update_entry(
                 entry, options={**entry.options, "ev_chargers": _healed},
             )
+
+    # (#886) Repair a charger persisted with its OFFLINE fallback register as
+    # ev_current_control_entity (pre-fix JuiceBox detection bound
+    # number.*_max_current_offline_* where the online twin belongs). Detection
+    # re-runs only when NO charger is configured, so an already-adopted install
+    # never self-corrects — swap to the online twin here, once, idempotently.
+    try:
+        _off_data = _heal_offline_current_control_in_list(
+            hass, (entry.data or {}).get("ev_chargers"))
+        _off_opts = _heal_offline_current_control_in_list(
+            hass, (entry.options or {}).get("ev_chargers"))
+        if _off_data is not None or _off_opts is not None:
+            _new_data = dict(entry.data or {})
+            _new_options = dict(entry.options or {})
+            if _off_data is not None:
+                _new_data["ev_chargers"] = _off_data
+            if _off_opts is not None:
+                _new_options["ev_chargers"] = _off_opts
+            _LOGGER.warning(
+                "Healed offline EV current-control binding(s) to the online "
+                "twin (see #886).",
+            )
+            hass.config_entries.async_update_entry(
+                entry, data=_new_data, options=_new_options,
+            )
+    except Exception as exc:  # noqa: BLE001 — a heal must never block setup
+        _LOGGER.debug("Offline current-control heal skipped: %s", exc)
 
     # Remove orphaned per-charger set-default button entities — the
     # button itself was retired in v1.7.0-beta.11 (#355 follow-up).
@@ -2163,6 +2640,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
                 ev_device.service_device_id = _cfg("ev_service_device_id")
             if _cfg("ev_start_stop_entity"):
                 ev_device.start_stop_entity = _cfg("ev_start_stop_entity")
+            # (#976) what the current entity's platform implies for control —
+            # ONE producer with the coordinator's late retry (the 0 A refusal
+            # flag, the OCPP charge-control switch adoption).
+            from .hardware_detection import wire_current_entity
+            wire_current_entity(hass, ev_device, charger_id, ev_current_entity)
             if _cfg("ev_charge_mode_entity"):
                 ev_device.charge_mode_entity = _cfg("ev_charge_mode_entity")
                 ev_device.charge_mode_start = _cfg("ev_charge_mode_start")
@@ -2176,6 +2658,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
 
             coordinator._surplus_controller.register_device(ev_device)
             coordinator._ev_devices[charger_id] = ev_device
+            # (#935) The park debt has to outlive the process that took it —
+            # see `_remember_parked`. One store per entry, every charger in
+            # it; adopted just below, once, when they are all built.
+            ev_device._park_store = _park_store(hass, entry)
+            ev_device.charger_id = charger_id
             ev_device.managed_externally = True
             _LOGGER.info(
                 "EV charger '%s' registered as CurrentControlDevice "
@@ -2207,8 +2694,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             # a dead end. 120 s is comfortably past integration setup.
             def _deferred_entity_check(_now, _name=charger_name,
                                        _cid=charger_id,
-                                       _chk=tuple(_to_check)):
-                _warn_missing_charger_entities(hass, _name, _cid, _chk)
+                                       _chk=tuple(_to_check),
+                                       _svc=ev_charger_service):
+                # (#991) The helper needs the service to tell "one of
+                # several handles is missing" from "there is no handle at
+                # all" — and to tell a brand service, which is its own
+                # transport, from an entity-platform one, which is not.
+                _warn_missing_charger_entities(hass, _name, _cid, _chk,
+                                               charger_service=_svc)
 
             from homeassistant.helpers.event import async_call_later
             async_call_later(hass, 120, _deferred_entity_check)
@@ -2250,52 +2743,68 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
         else:
             _LOGGER.debug("EV charger not configured (no power sensor or control method)")
 
-        # Register heat pump SG-Ready controller if configured
+        # Register heat pump SG-Ready controller(s) if configured.
+        # (#685) The flat heat_pump_* keys are the PRIMARY unit (device_id
+        # "heat_pump", untouched compat); additional units come from the
+        # ``heat_pumps`` list, same key names per row.
+        hp_rows = _heat_pump_rows(full_config)
+        hp_registered = 0
+        for _row in hp_rows:
+            if not _heat_pump_row_controllable(_row):
+                continue
+            _r1 = _row.get("heat_pump_relay1_entity")
+            _r2 = _row.get("heat_pump_relay2_entity")
+            _cl = _row.get("heat_pump_climate_entity")
+            _svc = (_row.get("heat_pump_sg_ready_service") or "").strip()
+            from .config_flow import _parse_service_data
+            from .devices.heat_pump_controller import HeatPumpController
+            _svc_data = _parse_service_data(
+                _row.get("heat_pump_sg_ready_service_data")) or {}
+            hp_extra = HeatPumpController(
+                hass=hass,
+                device_id=str(_row["id"]),
+                name=str(_row.get("name") or "Heat Pump"),
+                rated_power=float(_row.get("heat_pump_rated_power", 2000)),
+                priority=int(_row.get("heat_pump_priority", 4)),
+                relay1_entity_id=_r1,
+                relay2_entity_id=_r2,
+                climate_entity_id=_cl,
+                power_entity_id=_row.get("heat_pump_power_sensor"),
+                energy_entity_id=_row.get("heat_pump_energy_sensor"),
+                temperature_entity_id=_row.get("heat_pump_temperature_sensor"),
+                boost_offset=float(_row.get("heat_pump_boost_offset", 2.0)),
+                max_setpoint=float(_row.get("heat_pump_max_setpoint", 55.0)),
+                force_on_threshold=float(_row.get("heat_pump_force_on_threshold", 5000)),
+                invert_sg_ready=bool(_row.get("heat_pump_invert_sg_ready", False)),
+                sg_ready_service=_svc or None,
+                sg_ready_service_data=_svc_data,
+                sg_ready_state_entity=_row.get("heat_pump_sg_ready_state_entity"),
+                relay1_on_value=_row.get("heat_pump_relay1_on_value"),
+                relay1_off_value=_row.get("heat_pump_relay1_off_value"),
+                relay2_on_value=_row.get("heat_pump_relay2_on_value"),
+                relay2_off_value=_row.get("heat_pump_relay2_off_value"),
+            )
+            # (#914) A reload or an HA restart leaves the relays as SEM had
+            # them (#656) — re-own a boost SEM left on, so the next stop path
+            # returns the pump to NORMAL. A relay still loading is decided on
+            # the first readable cycle (the per-cycle belief sync retries it).
+            hp_extra.adopt_if_running()
+            coordinator._surplus_controller.register_device(hp_extra)
+            hp_registered += 1
+            _LOGGER.info(
+                "Heat pump '%s' registered (id=%s, priority=%d, relay1=%s, "
+                "relay2=%s, climate=%s, service=%s)",
+                hp_extra.name, _row["id"], hp_extra.priority,
+                _r1 or "—", _r2 or "—", _cl or "—", _svc or "—",
+            )
+        if hp_registered > 1:
+            _LOGGER.info("#685: %d heat pumps active", hp_registered)
+
+        # Primary-row visibility (kept from the single-unit era, #432/#437)
         hp_relay1 = full_config.get("heat_pump_relay1_entity")
         hp_relay2 = full_config.get("heat_pump_relay2_entity")
         hp_climate = full_config.get("heat_pump_climate_entity")
-        has_sg_ready = bool(hp_relay1 and hp_relay2)
-        has_climate = bool(hp_climate)
-        # #437: registration was gated on (relay1 AND relay2) — too
-        # strict for non-SG-Ready heat pumps (Nibe, Mitsubishi, Daikin
-        # etc.) that only expose a ``climate`` entity. The controller
-        # itself already handles climate-only mode internally (the
-        # ``_set_sg_ready_state`` ``no_relays_configured`` branch is
-        # exercised by the #421 audit telemetry tests). Widen the gate
-        # to (relays) OR (climate) so climate-only installs get
-        # automatic setpoint boost on surplus.
-        if has_sg_ready or has_climate:
-            from .devices.heat_pump_controller import HeatPumpController
-            hp_device = HeatPumpController(
-                hass=hass,
-                device_id="heat_pump",
-                name=full_config.get("heat_pump_name", "Heat Pump"),
-                rated_power=float(full_config.get("heat_pump_rated_power", 2000)),
-                priority=int(full_config.get("heat_pump_priority", 4)),
-                relay1_entity_id=hp_relay1,
-                relay2_entity_id=hp_relay2,
-                climate_entity_id=hp_climate,
-                power_entity_id=full_config.get("heat_pump_power_sensor"),
-                energy_entity_id=full_config.get("heat_pump_energy_sensor"),  # #600
-                temperature_entity_id=full_config.get("heat_pump_temperature_sensor"),
-                boost_offset=float(full_config.get("heat_pump_boost_offset", 2.0)),
-                max_setpoint=float(full_config.get("heat_pump_max_setpoint", 55.0)),
-                force_on_threshold=float(full_config.get("heat_pump_force_on_threshold", 5000)),
-                invert_sg_ready=bool(full_config.get("heat_pump_invert_sg_ready", False)),
-            )
-            coordinator._surplus_controller.register_device(hp_device)
-            mode_label = (
-                "SG-Ready+climate" if has_sg_ready and has_climate
-                else "SG-Ready only" if has_sg_ready
-                else "climate-only setpoint boost"
-            )
-            _LOGGER.info(
-                "Heat pump registered (mode=%s, priority=%d, "
-                "relay1=%s, relay2=%s, climate=%s)",
-                mode_label, hp_device.priority,
-                hp_relay1 or "—", hp_relay2 or "—", hp_climate or "—",
-            )
-        else:
+        if hp_registered == 0:
             # #432: promote from DEBUG to INFO so users self-diagnosing
             # heat-pump setup see this in the standard log view. Mirrors
             # the success-path INFO above. The detailed config values are
@@ -2335,6 +2844,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
                 legionella_target_temp=float(full_config.get("hot_water_legionella_target", 65.0)),
                 legionella_interval_hours=float(full_config.get("hot_water_legionella_interval_hours", 168.0)),
             )
+            # (#914) …and a tank SEM left at its boost setpoint. Without this
+            # SEM came back believing it idle and the tank reheated to SEM's
+            # own setpoint all night, with nothing left to release it.
+            hw_device.adopt_if_running()
             coordinator._surplus_controller.register_device(hw_device)
             _seed_legionella_time(coordinator, hw_device)
             _LOGGER.info(
@@ -2362,10 +2875,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             "Load management features will be unavailable."
         )
 
+    # (#935) Every charger is built by now, so take back any park a previous
+    # lifetime left on the hardware — the reconciler cannot re-derive it
+    # (PARK_OFF fires on an edge; an already-empty box at boot is not one).
+    hass.async_create_task(_async_adopt_parked_chargers(hass, entry, coordinator))
+
+    # (#923) ONE module verdict for every platform: captured here, after the
+    # Energy Dashboard read above and before any platform builds entities —
+    # so sensor, number, switch, the dashboard and the welcome text can never
+    # disagree about what this install has. A verdict that cannot be formed
+    # must never fail setup: None means "keep every entity".
+    try:
+        from .coordinator.install_modules import presence_summary
+        coordinator.setup_presence = coordinator.install_presence()
+        _LOGGER.info("Install modules: %s", presence_summary(coordinator.setup_presence))
+    except Exception as err:  # noqa: BLE001 — no verdict means keep every entity
+        coordinator.setup_presence = None
+        _LOGGER.warning("Install-modules verdict failed, keeping every entity: %s", err)
+
     # Setup platforms (critical - must succeed)
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         _LOGGER.info("Platforms setup completed: %s", PLATFORMS)
+        await _async_listen_energy_prefs(hass)
     except Exception as err:
         _LOGGER.error("Failed to setup platforms: %s", err, exc_info=True)
         # Cleanup coordinator data
@@ -2423,7 +2955,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
                 {
                     "notification_id": "sem_first_install_welcome",
                     "title": "Solar Energy Management installed",
-                    "message": build_welcome_message(full_config),
+                    "message": build_welcome_message(full_config, coordinator.setup_presence),
                 },
                 blocking=False,
             )
@@ -2502,6 +3034,17 @@ def _schedule_post_startup_tasks(
         if reader is not None:
             reader.invalidate_split_grid_cache()
             hass.async_create_task(coordinator.async_request_refresh())
+        # (#915) The detection report is built during first refresh, while
+        # other integrations are still loading — every proposal read
+        # "not loaded" on a fresh boot of the .46 rig because Huawei's
+        # states did not exist yet. Same trap #166 hit for split-grid
+        # discovery, same fix: ask again once HA says everything is up.
+        try:
+            coordinator.refresh_detection_report()
+            _LOGGER.info("Detection report rebuilt after startup (judged=%s)",
+                         (getattr(coordinator, "_detection_report", None) or {}).get("judged"))
+        except Exception:  # noqa: BLE001 — evidence never costs startup
+            _LOGGER.debug("post-startup detection refresh failed", exc_info=True)
 
     @callback
     def _on_new_sensor(event) -> None:
@@ -2520,7 +3063,9 @@ def _schedule_post_startup_tasks(
         if not getattr(reader, "_uses_split_grid", False):
             return
         disc = getattr(reader, "_split_grid_discovery", None)
-        if disc is None or disc.get("confidence") == "same-device":
+        # (#947) a DECLARED pick is settled evidence too — rediscovering it on
+        # every new energy-shaped entity is work with no possible new answer.
+        if disc is None or disc.get("confidence") in ("declared", "same-device"):
             return  # already locked in, nothing to upgrade
         eid = event.data.get("entity_id", "")
         if not any(hint in eid for hint in GRID_TRIGGER_HINTS):
@@ -2534,6 +3079,23 @@ def _schedule_post_startup_tasks(
 
     # Schedule tasks to run when Home Assistant is fully started
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_post_startup_init)
+
+    # (#967) Everything that reads the recorder starts HERE, on a task
+    # nothing in setup waits for. Home Assistant cancels a setup that
+    # overruns its start-up budget, and the cancel is not an exception any
+    # of the "never cost us the setup" handlers can catch — SEM simply did
+    # not load. Unlike the listener above, this also fires on a reload,
+    # where HA is already running and the started event never comes again.
+    from .coordinator.recorder_history import run_after_start
+    entry.async_on_unload(run_after_start(
+        hass, coordinator.async_seed_from_recorder, name="sem recorder seeds",
+    ))
+    _registry = getattr(coordinator, "_device_registry", None)
+    if _registry is not None:
+        entry.async_on_unload(run_after_start(
+            hass, _registry.async_seed_ratings_from_history,
+            name="sem rated-power seed",
+        ))
 
     # React live to new sensor entities from other integrations (e.g. DSMR loading
     # after SEM's first refresh). Cheap: only fires on entity creation, not state
@@ -2631,10 +3193,148 @@ async def async_remove_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> None
     re-install won't fix it either: ``DeviceReconciler`` classifies a
     leftover-ON load as ``external_on`` and deliberately refuses to fight it.
     """
+    # (#949) The charge pacer's hold, before the loads: a removed SEM that
+    # leaves the inverter's max-charge-power at its last cap throttles the
+    # battery with nothing left on the system that knows why, and a re-install
+    # would capture that cap as the hardware maximum.
+    # (#935) The wallbox first: it is the one leftover a person meets rather
+    # than finds — a box that will not charge and gives no reason.
+    for _dev in _PENDING_CHARGER_RELEASE.pop(entry.entry_id, None) or []:
+        try:
+            said = await _dev.release_to_user(reason="integration removed")
+            if said:
+                _LOGGER.info("SEM removed: %s", said)
+        except Exception as e:  # noqa: BLE001 — a removal always completes
+            _LOGGER.warning("SEM removed: charger hand-back failed: %s", e)
+
+    # (#955) the export cut, replayed from the recipes unload stashed — no
+    # coordinator, no adapters exist any more; the recipe is the release.
+    for _bid, _rec in (_PENDING_EXPORT_RELEASE.pop(entry.entry_id, None) or {}).items():
+        try:
+            await hass.services.async_call(_rec["domain"], _rec["service"],
+                                           dict(_rec.get("data") or {}), blocking=False)
+            _LOGGER.info("SEM removed: export cut released on %s via %s.%s",
+                         _bid, _rec["domain"], _rec["service"])
+        except Exception as e:  # noqa: BLE001 — a removal always completes
+            _LOGGER.warning("SEM removed: export cut release failed on %s: %s", _bid, e)
+
+    held = _PENDING_PACING_RESTORE.pop(entry.entry_id, None)
+    if held:
+        from .coordinator.charge_pacing import async_release_pacing
+        said = await async_release_pacing(hass, held, "integration removed")
+        if said:
+            _LOGGER.info("SEM removed: %s", said)
+
     devices = _PENDING_LOAD_TEARDOWN.pop(entry.entry_id, None)
-    if not devices:
+    if devices:
+        await _async_deactivate_surplus_loads(devices, "integration removed")
+
+    # (#935) ...and then SEM takes its OWN files. Everything below belongs to
+    # SEM and to nobody else: this entry's stores, its version marker, its
+    # Repairs, and the Lovelace resources pointing at a module that is about
+    # to stop existing. What is the USER's — the generated dashboard, the
+    # long-term statistics — is deliberately NOT here; it goes through the
+    # `remove_leftovers` service, on an explicit choice.
+    await _async_take_sems_own_files(hass, entry)
+
+
+async def _async_take_sems_own_files(hass: HomeAssistant,
+                                     entry: SEMConfigEntry) -> None:
+    """(#935) Delete what SEM created, on removal. Never raises."""
+    from . import cleanup
+
+    try:
+        stores = await cleanup.async_entry_stores_removed(hass, entry.entry_id)
+        # Install-wide stores go with the LAST entry only: a second SEM entry
+        # still needs the device mappings and the load priorities.
+        remaining = [
+            e for e in hass.config_entries.async_entries(DOMAIN)
+            if e.entry_id != entry.entry_id
+        ]
+        if not remaining:
+            stores += await cleanup.async_delete_stores(
+                hass, cleanup.install_wide_store_keys())
+        repairs = cleanup.delete_repairs(hass)
+        resources = await cleanup.async_deregister_resources(hass)
+        _LOGGER.info(
+            "SEM removed: took its own files — %d store(s), %d repair(s), "
+            "%d frontend resource(s)%s",
+            len(stores), repairs, len(resources),
+            "" if remaining else " (last entry: install-wide stores too)")
+    except Exception as e:  # noqa: BLE001 — a removal must always complete
+        _LOGGER.warning("SEM removed: cleanup incomplete (non-blocking): %s", e)
+
+
+def _park_store(hass: HomeAssistant, entry: SEMConfigEntry):
+    """(#935) Where "SEM parked this box" lives across restarts."""
+    entry_id = str(getattr(entry, "entry_id", "") or "")
+    if not entry_id:
+        return None
+    try:
+        from homeassistant.helpers.storage import Store
+        return Store(hass, 1, f"sem.parked.{entry_id}")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _async_adopt_parked_chargers(hass: HomeAssistant,
+                                       entry: SEMConfigEntry,
+                                       coordinator) -> None:
+    """(#935) Take over the parks a previous lifetime left on the hardware.
+
+    The reconciler cannot re-derive them: PARK_OFF fires on the
+    connect→disconnect EDGE, and a box that is already empty at boot is a
+    steady state. Without this, park → restart → remove left the charger
+    disabled with its own persisted dead-man failsafe holding it at 0 A, and
+    nothing left on the system that knew why.
+    """
+    store = _park_store(hass, entry)
+    if store is None:
         return
-    await _async_deactivate_surplus_loads(devices, "integration removed")
+    try:
+        record = await store.async_load() or {}
+        ids = record.get("parked") or []
+        if not ids:
+            return
+        for dev in (getattr(coordinator, "_ev_devices", None) or {}).values():
+            adopt = getattr(dev, "adopt_park_state", None)
+            if callable(adopt):
+                adopt(ids)
+        _LOGGER.info("#935 — adopted %d charger park(s) this install was "
+                     "left with: %s", len(ids), ", ".join(map(str, ids)))
+    except Exception as e:  # noqa: BLE001 — never block a setup
+        _LOGGER.debug("#935 park adoption skipped: %s", e)
+
+
+async def _async_sweep_orphan_stores(hass: HomeAssistant) -> None:
+    """(#935) Delete SEM stores whose config entry is gone, and say so.
+
+    Runs on setup rather than on removal, because the install that left them
+    behind is the one that could not clean up: every SEM before this change,
+    and any removal that never reached ``async_remove_entry`` (a disk full, a
+    kill during shutdown). Files SEM does not recognise are never touched —
+    they are named in the log and left where they are.
+    """
+    from . import cleanup
+
+    try:
+        live = [e.entry_id for e in hass.config_entries.async_entries(DOMAIN)]
+        on_disk = await cleanup.async_existing_store_files(hass)
+        orphans = cleanup.orphan_store_keys(on_disk, live)
+        if not orphans:
+            return
+        removed = await cleanup.async_delete_stores(hass, orphans)
+        _LOGGER.info(
+            "#935 — removed %d store(s) left by a previous SEM install: %s",
+            len(removed), ", ".join(removed[:6])
+            + ("…" if len(removed) > 6 else ""))
+        # What is the USER's cannot be swept: a previous install's dashboard
+        # and its long-term statistics are theirs to keep or drop. Say that
+        # once, where they will see it, and give them the one-click path.
+        from .coordinator.repair_issues import raise_previous_install_leftovers
+        raise_previous_install_leftovers(hass, len(removed))
+    except Exception as e:  # noqa: BLE001 — a sweep never blocks a setup
+        _LOGGER.debug("#935 orphan sweep skipped: %s", e)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
@@ -2647,23 +3347,76 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
         # would otherwise grow the list. Guarded — coordinator may be
         # missing if setup never completed.
         if coordinator is not None:
-            # Part B (#589): clear any active force-op before dropping adapters.
-            # Prevents a reload mid-force-op stranding the inverter in a
-            # forced charge/discharge mode that SEM will no longer manage.
-            # Only issues a STOP (command_normal) — never a new command.
-            # Failures are swallowed so a flaky Modbus never blocks unload.
-            _battery_adapters = getattr(coordinator, "_battery_adapters", {}) or {}
-            for _bid, _adapter in _battery_adapters.items():
-                try:
-                    await _adapter.command_normal()
-                    _LOGGER.debug(
-                        "Battery adapter %s: command_normal on unload", _bid,
-                    )
-                except Exception as _e:  # noqa: BLE001
-                    _LOGGER.debug(
-                        "Battery adapter %s: command_normal on unload failed "
-                        "(non-blocking): %s", _bid, _e,
-                    )
+            # (#936 — Guido, 08.09.2026: "on uninstall SEM should go to
+            # observation mode on and then uninstall.") Observer ON first, so
+            # nothing still in flight commands anything; then hand back ONLY
+            # what SEM itself commanded in this lifetime — a force op it
+            # started (#589 Part B: never strand the inverter in a forced
+            # mode), a discharge limit it wrote. A battery SEM never
+            # commanded, and every battery of a rig that already was in
+            # observer mode, is left exactly as found. Before this,
+            # command_normal ran on every adapter on every unload, and the
+            # .46 observer rig rewrote the SHARED Huawei discharge-limit
+            # register (750 → 5000 W) while PROD was holding it. The #908
+            # rule, extended from loads to batteries.
+            # (#949) Read the pacer's hold FIRST: the battery release below
+            # flips the coordinator into observer mode, and everything after
+            # that point is reasoning about a rig, not about this install.
+            # (#955) The export cut FIRST — same branch structure as the pacer
+            # below and the charger above: a DISABLE hands the inverter back now;
+            # a plain RELOAD leaves the cut in place (SEM is back in seconds and
+            # the store lets the next lifetime adopt it — releasing here would
+            # open the meter for a whole engage hold in a negative hour); a
+            # REMOVAL is replayed from async_remove_entry, without the adapters.
+            try:
+                if entry.disabled_by is not None:
+                    _said = await coordinator.async_release_export_guard(reason="disabled")
+                    if _said:
+                        _LOGGER.info("%s", _said)
+                else:
+                    _recipes = coordinator.export_release_recipes()
+                    if _recipes:
+                        _PENDING_EXPORT_RELEASE[entry.entry_id] = _recipes
+            except Exception as exc:  # noqa: BLE001 — teardown must finish
+                _LOGGER.warning("export guard hand-back failed on unload: %s", exc)
+            from .coordinator.charge_pacing import (
+                async_release_pacing, pending_pacing_release,
+            )
+            # (#935) The charger, on the same "only what SEM commanded"
+            # rule and the same branch structure: a reload leaves a parked
+            # box parked (SEM is coming back in seconds and will decide
+            # again), a disable hands it back now, a removal replays it
+            # from async_remove_entry.
+            _parked = [
+                dev for dev in (getattr(coordinator, "_ev_devices", None)
+                                or {}).values()
+                if getattr(dev, "_sem_parked", False)
+            ]
+            if _parked:
+                if entry.disabled_by is not None:
+                    for _dev in _parked:
+                        _said = await _dev.release_to_user(reason="disabled")
+                        if _said:
+                            _LOGGER.info("SEM disabled: %s", _said)
+                else:
+                    _PENDING_CHARGER_RELEASE[entry.entry_id] = _parked
+
+            _held = pending_pacing_release(coordinator)
+            if _held:
+                if entry.disabled_by is not None:
+                    # Nothing is coming back — hand the register back now.
+                    _said = await async_release_pacing(hass, _held, "disabled")
+                    if _said:
+                        _LOGGER.info("SEM disabled: %s", _said)
+                else:
+                    # A reload adopts it; a removal replays it from here.
+                    _PENDING_PACING_RESTORE[entry.entry_id] = _held
+
+            from .coordinator.battery_adapters.base import (
+                async_release_batteries_on_unload,
+            )
+            for _bid, _what in (await async_release_batteries_on_unload(coordinator)).items():
+                _LOGGER.info("Battery adapter %s on unload: %s", _bid, _what)
 
             # #656 — loads must not be stranded ON when SEM goes away.
             #
@@ -2686,6 +3439,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             #   dropped by the next ``async_setup_entry`` (i.e. a reload), so a
             #   device list only lingers between an unload and whatever
             #   follows it.
+            # (#967) Drop any recorder work this coordinator was still
+            # waiting on. A reload during the boot would otherwise leave the
+            # old one on the start event beside the new one.
+            try:
+                coordinator.cancel_pending_recorder_work()
+            except Exception:  # noqa: BLE001 — teardown must finish
+                _LOGGER.debug("could not cancel pending recorder work")
+
             sc = getattr(coordinator, "_surplus_controller", None)
             if sc is not None:
                 # detach_devices() clears the registry AND hands the devices
@@ -2709,6 +3470,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             "register_surplus_device",
             "schedule_appliance",
             "cancel_appliance_schedule",
+            "remove_leftovers",
         ):
             hass.services.async_remove(DOMAIN, service_name)
 
@@ -2751,6 +3513,208 @@ async def _async_register_services(
             len(purged), days,
         )
 
+    async def async_backfill_forecast_ledger_service(call) -> None:
+        """(#778) Recover forecast accuracy from history the install already has.
+
+        The ledger normally learns forward, seven settled days before it will
+        offer a trust figure. An install that has been running for months has
+        already proven how good its forecast is — the statistics are sitting
+        there — so this reads them and settles the ledger in one pass. Days the
+        coordinator recorded live are never overwritten.
+        """
+        from .coordinator.ledger_backfill import DEFAULT_LOOKBACK_DAYS, run_backfill
+
+        days = call.data.get("days") or DEFAULT_LOOKBACK_DAYS
+        ledger = getattr(coordinator, "_forecast_ledger", None)
+        if ledger is None:
+            _LOGGER.warning(
+                "backfill_forecast_ledger: no ledger on the coordinator yet — "
+                "try again once SEM has completed a cycle")
+            return
+        try:
+            report = await run_backfill(hass, ledger, days=int(days))
+        except Exception as err:  # noqa: BLE001 — a service must not kill setup
+            _LOGGER.error("backfill_forecast_ledger failed: %s", err)
+            return
+
+        try:
+            coordinator._storage.set_forecast_ledger_state(ledger.to_dict())
+            await coordinator._storage.async_save_energy_now()
+        except (AttributeError, TypeError, ValueError) as err:
+            _LOGGER.warning("backfilled ledger not persisted: %s", err)
+
+        _LOGGER.info(
+            "Service backfill_forecast_ledger: %d actual day(s) in history; "
+            "added d1=%s d0=%s; trust now d1=%s d0=%s",
+            report.get("actual_days", 0),
+            report.get("added", {}).get(1), report.get("added", {}).get(0),
+            report.get("trust", {}).get(1), report.get("trust", {}).get(0),
+        )
+        await coordinator.async_request_refresh()
+
+    try:
+        hass.services.async_register(
+            DOMAIN, "backfill_forecast_ledger",
+            async_backfill_forecast_ledger_service)
+        _LOGGER.debug("Registered service: %s.backfill_forecast_ledger", DOMAIN)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.error("Failed to register backfill_forecast_ledger: %s", err)
+
+    async def async_backfill_battery_nights_service(call) -> None:
+        """(#815) Recover the battery's night history from statistics.
+
+        #778's need envelope wants five trainable nights and live recording
+        produces one a day, so a fresh install waits a working week to learn
+        what its own database usually already proves. This reads the pack's
+        cumulative discharge counter and reconstructs the nights in one pass.
+
+        Sounder as well as faster: live recording integrates POWER, so a
+        dropped sample loses that energy for good (#837). A counter keeps
+        counting while nobody is looking, so missing hours between the
+        endpoints cost nothing. Nights SEM measured live are never
+        overwritten — live separates house drain from EV assist and export,
+        and this cannot.
+        """
+        from .coordinator.night_backfill import run_backfill as _night_backfill
+
+        days = call.data.get("days") or 365
+        tracker = getattr(coordinator, "_battery_night", None)
+        if tracker is None:
+            _LOGGER.warning(
+                "backfill_battery_nights: no night tracker on the coordinator "
+                "yet — try again once SEM has completed a cycle")
+            return
+        try:
+            report = await _night_backfill(
+                hass, tracker, coordinator.config, days=int(days))
+        except Exception as err:  # noqa: BLE001 — a service must not kill setup
+            _LOGGER.error("backfill_battery_nights failed: %s", err)
+            return
+
+        if report.get("error"):
+            # (#877) The user asked a direct question by pressing a button
+            # and the answer outlives the moment: a notification is dismissed
+            # and gone, the missing sensor is not. So the refusal goes where
+            # unfinished setup lives, naming the sensor and linking the docs
+            # section that says why it is needed.
+            _LOGGER.warning("backfill_battery_nights: %s", report["error"])
+            try:
+                from .coordinator.repair_issues import (
+                    raise_battery_night_backfill_blocked,
+                )
+                raise_battery_night_backfill_blocked(
+                    hass,
+                    missing=", ".join(report.get("missing_counters")
+                                      or ["battery discharge energy"]),
+                )
+            except Exception:  # noqa: BLE001 — a repair never fails a service
+                pass
+            return
+
+        try:
+            coordinator._storage.set_battery_night_state(tracker.to_dict())
+            await coordinator._storage.async_save_energy_now()
+        except (AttributeError, TypeError, ValueError) as err:
+            _LOGGER.warning("backfilled nights not persisted: %s", err)
+
+        # (#877) How many reconstructed nights could close the energy
+        # balance. A shortfall is not an error — it is a meter this install
+        # does not keep — but it is the difference between a night comparable
+        # to a measured one and a night that under-reports the house, so it
+        # is said out loud rather than left in a service response nobody
+        # reads.
+        _recovered = report.get("recovered", 0)
+        _balanced = report.get("with_grid_term", 0)
+        # (#877) What matters is the history SEM KEEPS. A 365-day rebuild
+        # recovers several times ``max_nights``; counting the whole haul
+        # reports a shortfall about nights that were pruned seconds later.
+        _unbalanced = int(report.get("kept_without_grid_term", 0) or 0)
+        _missing = report.get("missing_counters") or []
+        _LOGGER.info(
+            "Service backfill_battery_nights: %d hour(s) of history from %s; "
+            "recovered %d night(s) (%d trainable, %d with the grid's share); "
+            "history now %d night(s), %d usable",
+            report.get("hours_of_history", 0), report.get("statistic"),
+            _recovered, report.get("trainable_recovered", 0), _balanced,
+            report.get("nights_total", 0), report.get("usable_total", 0),
+        )
+        try:
+            from .coordinator.repair_issues import (
+                clear_battery_night_backfill,
+                raise_battery_night_backfill_incomplete,
+            )
+            if _unbalanced and _missing:
+                # A counter this install does not keep — actionable, so it
+                # gets the card and names the sensor.
+                _LOGGER.warning(
+                    "backfill_battery_nights: %d KEPT night(s) could not "
+                    "account for the grid's share, so they report only what "
+                    "the BATTERY gave and under-state what the house took. "
+                    "Missing: %s. The overnight-need estimate reads low "
+                    "until those exist.",
+                    _unbalanced, ", ".join(_missing),
+                )
+                raise_battery_night_backfill_incomplete(
+                    hass, missing=", ".join(_missing),
+                    unbalanced=_unbalanced,
+                    recovered=report.get("nights_total", _recovered),
+                )
+            elif _unbalanced:
+                # Every counter exists; those particular nights had a gap in
+                # the statistics or a counter reset inside their window.
+                # Nothing to add and nothing to fix — raising a card that
+                # says "add a sensor" would name a cause we have not
+                # established and hand the user an instruction that does not
+                # apply (#872's lesson). Say it once, at INFO, and clear any
+                # stale card.
+                _LOGGER.info(
+                    "backfill_battery_nights: %d of the %d kept night(s) "
+                    "have no grid share — every counter is configured, so "
+                    "those nights had a gap or a counter reset in their "
+                    "window. They are treated as the battery's share alone.",
+                    _unbalanced, report.get("nights_total", 0),
+                )
+                clear_battery_night_backfill(hass)
+            else:
+                # Every leg accounted for — retract any earlier complaint,
+                # including one raised before the user added the sensor.
+                clear_battery_night_backfill(hass)
+        except Exception:  # noqa: BLE001
+            pass
+        # (2.1 audit, item 8) the result where a person looks, not the log
+        try:
+            from homeassistant.components import persistent_notification
+            persistent_notification.async_create(
+                hass,
+                (f"Recovered {_recovered} night(s) "
+                 f"({report.get('trainable_recovered', 0)} trainable) from "
+                 f"{report.get('hours_of_history', 0)} hour(s) of history. "
+                 f"Battery-night history now holds "
+                 f"{report.get('nights_total', 0)} night(s), "
+                 f"{report.get('usable_total', 0)} usable."
+                 + ("" if not _unbalanced else
+                    f"\n\n⚠️ {_unbalanced} of them could only measure what "
+                    f"the battery gave, not what the grid added, so they "
+                    f"under-state what your house took overnight — and the "
+                    f"spendable-battery figure will read low. Add "
+                    f"grid-import and battery-charge energy sensors (and "
+                    f"your charger's, if you charge a car) to the Energy "
+                    f"Dashboard, then press the button again.")),
+                title="SEM: battery-night history rebuilt",
+                notification_id="sem_backfill_battery_nights",
+            )
+        except Exception:  # noqa: BLE001 — a notice never fails the service
+            pass
+        await coordinator.async_request_refresh()
+
+    try:
+        hass.services.async_register(
+            DOMAIN, "backfill_battery_nights",
+            async_backfill_battery_nights_service)
+        _LOGGER.debug("Registered service: %s.backfill_battery_nights", DOMAIN)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.error("Failed to register backfill_battery_nights: %s", err)
+
     try:
         hass.services.async_register(
             DOMAIN, "purge_status_history", async_purge_status_history_service)
@@ -2763,6 +3727,63 @@ async def _async_register_services(
         _LOGGER.debug("Registered service: %s.replan", DOMAIN)
     except Exception as err:  # noqa: BLE001
         _LOGGER.error("Failed to register replan service: %s", err)
+
+    async def async_remove_leftovers_service(call) -> None:
+        """(#935) Delete what is the USER's, on their explicit say-so.
+
+        SEM takes its own files on removal without asking. This service is the
+        other half: the generated dashboard and the long-term statistics of
+        SEM's entities are the user's history — a year of solar yield is not
+        SEM's to throw away because it is being uninstalled — so they are only
+        ever removed by someone choosing to remove them.
+
+        Documented as "run this BEFORE removing SEM", because after removal
+        there is no SEM left to run it.
+        """
+        from . import cleanup
+        from .coordinator.repair_issues import clear_previous_install_leftovers
+
+        # The schema has already coerced and defaulted these.
+        want_stats = call.data["statistics"]
+        want_dashboard = call.data["dashboard"]
+        done = {"statistics": 0, "dashboard": False}
+
+        if want_stats:
+            # Scoped to THIS entry: a second SEM entry's history is not part
+            # of this entry's leftovers (#935 review).
+            _entry_id = str(getattr(
+                getattr(coordinator, "config_entry", None), "entry_id", "") or "")
+            ids = cleanup.sem_statistic_ids(hass, _entry_id or None)
+            done["statistics"] = await cleanup.async_clear_statistics(hass, ids)
+        if want_dashboard:
+            done["dashboard"] = await cleanup.async_remove_dashboard(hass)
+
+        clear_previous_install_leftovers(hass)
+        _LOGGER.info(
+            "#935 remove_leftovers: cleared %d statistic(s), dashboard %s",
+            done["statistics"],
+            "removed" if done["dashboard"] else "kept")
+
+    try:
+        # (#935) A SCHEMA, because the two fields are destructive and their
+        # asymmetry is the safety: statistics default on, the dashboard off.
+        # Registered bare, `dashboard: 12345` reached `bool(12345)` and the
+        # off-by-default option armed itself — the rig's dashboard was
+        # deleted by a junk value in a fault-injection call (13.09).
+        hass.services.async_register(
+            DOMAIN, "remove_leftovers", async_remove_leftovers_service,
+            schema=vol.Schema({
+                # A real boolean, not cv.boolean: that accepts any non-zero
+                # NUMBER as yes (cv.boolean(12345) is True), and a truthy
+                # number is not consent to an irreversible delete. Both of
+                # these throw away history that cannot be got back, so they
+                # take true or false and nothing else.
+                vol.Optional("statistics", default=True): bool,
+                vol.Optional("dashboard", default=False): bool,
+            }))
+        _LOGGER.debug("Registered service: %s.remove_leftovers", DOMAIN)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.error("Failed to register remove_leftovers service: %s", err)
 
     # Check if services are already registered (prevents conflicts on reload)
     services_already_registered = hass.services.has_service(DOMAIN, "sync_priorities_from_dashboard")
@@ -2926,9 +3947,14 @@ async def _async_register_services(
             # executor moves it off the loop.
             manifest_path_l = os.path.join(component_dir, "manifest.json")
 
+            # (#901) The per-language siblings are COPIED above (the loader
+            # fetches them over /local) but never registered — so they are
+            # absent from installed_bases too, and the orphan sweep below
+            # removes any an older version left behind.
+            registrable_cards = _registrable_card_files(installed_cards)
             installed_bases = {
                 f"/local/custom_components/{DOMAIN}/dashboard/card/{fname}"
-                for fname in installed_cards
+                for fname in registrable_cards
             }
             # The Lit bundle lives under dist/ so it never appears in the
             # root-level listdir above; whitelist it explicitly or the orphan
@@ -2967,7 +3993,7 @@ async def _async_register_services(
 
             added_resources = []
             updated_resources = 0
-            for fname in installed_cards:
+            for fname in registrable_cards:
                 base_url = f"/local/custom_components/{DOMAIN}/dashboard/card/{fname}"
                 if base_url not in existing_bases:
                     import uuid as _uuid
@@ -3166,11 +4192,9 @@ async def _async_register_services(
         dashboard_storage_key = call.data.get("dashboard_storage_key", "lovelace.dashboard_test")
         view_path = call.data.get("view_path", "peak-load-management")
 
-        if not coordinator._load_manager:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="load_management_not_initialized",
-            )
+        # (#913) this handler reads coordinator._load_manager._devices below,
+        # so it genuinely needs the manager — ask with the true reason.
+        _require_load_manager(coordinator)
 
         try:
             # Load dashboard configuration
@@ -3372,11 +4396,9 @@ async def _async_register_services(
             _LOGGER.info("Updated priorities for %d devices via registry", len(priorities))
             return
 
-        if not coordinator._load_manager:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="load_management_not_initialized",
-            )
+        # (#913) only the fallback below touches the manager; the registry
+        # fast-path above already returned for every normal install.
+        _require_load_manager(coordinator)
 
         updated = 0
         for item in priorities:
@@ -3401,13 +4423,16 @@ async def _async_register_services(
         _LOGGER.error("Failed to register update_device_priorities service: %s", err)
 
     async def async_update_device_config(call) -> None:
-        """Update a single device property (controllable or critical)."""
-        if not coordinator._load_manager:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="load_management_not_initialized",
-            )
+        """Update a single device property.
 
+        (#913) No load-manager gate here. It used to sit above every
+        branch, and 15 of the 18 properties this accepts — control mode,
+        dependencies, every goal, the comfort band, the anti-cycle windows
+        — go through the device registry and never touch the manager. With
+        load management off (the default since #897) they were all refused
+        with "not initialized — wait", for a manager that was never going
+        to arrive. The three flag properties tolerate its absence below.
+        """
         device_id = call.data.get("device_id")
         prop = call.data.get("property")
         value = call.data.get("value")
@@ -3425,17 +4450,49 @@ async def _async_register_services(
             # (#780) ``controllable`` / ``hands_off`` are the SAME toggle under
             # two names, and ``value`` keeps the card's polarity throughout:
             # True = "SEM may touch this load".
-            if prop == "critical":
-                await coordinator._load_manager.update_device_critical_status(device_id, bool(value))
-            else:
-                await coordinator._load_manager.async_set_hands_off(device_id, not bool(value))
+            # (#888) ``value`` arrives as cv.string, and ``bool("false")`` is
+            # True — every falsey word a caller would naturally send ("false",
+            # "0", "no", "off") turned into the opposite instruction. The
+            # permission axis therefore had no way to be switched OFF through
+            # the service even once its name was accepted.
+            _flag = str(value).strip().lower() in ("true", "1", "on", "yes")
+            # (#913) The registry write is the durable half (see the #650
+            # note above); the manager write takes effect this cycle IF the
+            # manager exists. With load management off it does not, and the
+            # registry heals a later-enabled manager's row on its own sync
+            # — so its absence is not a refusal. Only BOTH missing is.
+            lm = getattr(coordinator, "_load_manager", None)
+            if lm is not None:
+                if prop == "critical":
+                    await lm.update_device_critical_status(device_id, _flag)
+                else:
+                    await lm.async_set_hands_off(device_id, not _flag)
             reg = getattr(coordinator, "_device_registry", None)
             if reg is not None:
-                await reg.async_set_device_flag(device_id, prop, bool(value))
+                if not reg.knows_device(device_id):
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="device_not_found",
+                        translation_placeholders={"device_id": device_id},
+                    )
+                await reg.async_set_device_flag(device_id, prop, _flag)
+            elif lm is None:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="device_registry_not_initialized",
+                )
         elif prop == "control_mode":
             # Update device control mode: off / peak_only / surplus (#49)
             registry = getattr(coordinator, '_device_registry', None)
             if registry:
+                # (#913 follow-up) same rule as the goals: an unknown id is
+                # refused, not silently stored.
+                if not registry.knows_device(device_id):
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="device_not_found",
+                        translation_placeholders={"device_id": device_id},
+                    )
                 await registry.update_device_control_mode(device_id, str(value))
             else:
                 raise HomeAssistantError(
@@ -3479,6 +4536,14 @@ async def _async_register_services(
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
                     translation_key="device_registry_not_initialized",
+                )
+            # (#913 follow-up) a goal for a device this install does not
+            # have is a silent no-op stored forever — say so instead.
+            if not registry.knows_device(device_id):
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="device_not_found",
+                    translation_placeholders={"device_id": device_id},
                 )
             if prop == "top_up_policy" and str(value) not in (
                 "solar_only", "cheap_hours"
@@ -3538,6 +4603,12 @@ async def _async_register_services(
                 vol.Required("device_id"): cv.string,
                 vol.Required("property"): vol.In([
                     "controllable", "critical", "control_mode", "depends_on",
+                    # (#888) the permission axis under its own name. The
+                    # handler has accepted "hands_off" since #780; it was
+                    # never added HERE, so voluptuous refused the call before
+                    # it arrived — the axis had a reader, a store and a
+                    # handler, and no way in.
+                    "hands_off",
                     # (#559) goal engine — grounded core
                     "daily_min_runtime_min", "top_up_policy",
                     "stop_entity", "stop_at",
@@ -3557,18 +4628,39 @@ async def _async_register_services(
         _LOGGER.error("Failed to register update_device_config service: %s", err)
 
     async def async_update_target_peak(call) -> None:
-        """Update target peak limit."""
-        if not coordinator._load_manager:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="load_management_not_initialized",
-            )
+        """Update target peak limit.
 
+        (#913) Never refuses for a missing load manager. The limit is a
+        config-entry option that the EV planner reads as its ceiling whether
+        or not shedding is armed (``ev_control._get_peak_limit_w`` falls back
+        to the option), so refusing to SET it while telling the user to
+        enable load management prescribed the exact thing #897 exists to
+        keep off. With a live manager the write goes through it (live
+        re-plan); without one it takes the same ``set_option`` path the key
+        already falls into today.
+        """
         target = call.data.get("target_peak_limit")
         unlimited = call.data.get("peak_limit_unlimited")
-        await coordinator._load_manager.update_target_peak_limit(
-            float(target), unlimited=unlimited
-        )
+        lm = getattr(coordinator, "_load_manager", None)
+        if lm is not None:
+            await lm.update_target_peak_limit(float(target), unlimited=unlimited)
+            return
+        # (#913, REFUTED once) The first version of this branch went through
+        # ``set_option``, where ``target_peak_limit`` is UNROUTED — no number
+        # entity, not a live key — and the unrouted path ends in a full
+        # integration reload: a slider drag on every default install tore
+        # down the coordinator managing the live inverter, battery and
+        # charger, with a Modbus "stop forced charge" on the way out. A ruflo
+        # reviewer caught it before PROD. ``persist_global_option`` is the
+        # no-reload seam (#523/#547): it writes the option, updates
+        # ``coordinator.config`` — which ``_get_peak_limit_w`` reads live — and
+        # arms the skip so the update listener does not reload either.
+        _entry = coordinator.config_entry
+        persist_global_option(hass, _entry, coordinator,
+                              "target_peak_limit", float(target))
+        if unlimited is not None:
+            persist_global_option(hass, _entry, coordinator,
+                                  "peak_limit_unlimited", bool(unlimited))
         _LOGGER.info(
             "Updated target peak limit to %.1f kW%s", target,
             "" if unlimited is None else f" (unlimited={unlimited})",
@@ -3808,6 +4900,20 @@ async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
                     await resources.async_delete_item(legacy_item["id"])
                     _LOGGER.info("Removed legacy SEM resource (now in Lit bundle): %s", legacy_base)
 
+            # (#901) Sweep per-language localize siblings. They cannot be
+            # named in _legacy_bases — the language set is whatever
+            # translations.json holds — so they are matched by shape. An
+            # install that never had them registered sees no delete at all,
+            # which is why this reads the store instead of writing blindly.
+            for sibling_base, sibling_item in existing_by_base.items():
+                if not _is_localize_sibling(sibling_base):
+                    continue
+                await resources.async_delete_item(sibling_item["id"])
+                _LOGGER.info(
+                    "Removed per-language localize resource (the loader "
+                    "injects it on demand since #738): %s", sibling_base
+                )
+
             # Register single Lit bundle
             bundle_item = existing_by_base.get(cards_bundle_base)
             if bundle_item is None:
@@ -3969,7 +5075,13 @@ async def _async_register_phase_services(
             # #600 — optional kWh energy counter; SEM autodetects a companion
             # power sensor on the device first, else derives power from this.
             "energy_entity_id": call.data.get("energy_entity_id"),
-            "control_mode": call.data.get("control_mode", "surplus"),
+            # (#847) New devices start UNMANAGED — the user opts them in.
+            # Same principle as #805's DEFAULT_DISCOVERED_CONTROL_MODE: on a
+            # fresh install SEM must not adopt (and later actuate) loads
+            # nobody handed it. hoyte's report: mode→Off on just-added
+            # devices switched them OFF, because "surplus" was the silent
+            # default and running loads were adopted under it.
+            "control_mode": call.data.get("control_mode", "off"),
             "depends_on": call.data.get("depends_on") or [],
             # (#569) climate device support
             "device_type": call.data.get("device_type", "switch"),
@@ -4004,7 +5116,7 @@ async def _async_register_phase_services(
             try:
                 device.control_mode = DeviceControlMode(spec["control_mode"])
             except ValueError:
-                device.control_mode = DeviceControlMode.SURPLUS
+                device.control_mode = DeviceControlMode.OFF  # (#847) creation default
             coordinator._surplus_controller.register_device(device)
             summary = {**spec, "persisted": False,
                        "total_devices": len(coordinator._surplus_controller._devices)}
@@ -4031,7 +5143,8 @@ async def _async_register_phase_services(
             vol.Optional("rated_power"): vol.Coerce(float),
             vol.Optional("power_entity_id"): cv.string,
             vol.Optional("energy_entity_id"): cv.string,  # #600
-            vol.Optional("control_mode", default="surplus"): vol.In(
+            # (#847) default "off" — devices are opted IN, never pre-owned
+            vol.Optional("control_mode", default="off"): vol.In(
                 ["off", "peak_only", "surplus"]
             ),
             vol.Optional("depends_on"): vol.All(cv.ensure_list, [cv.string]),
@@ -4580,7 +5693,8 @@ async def _async_register_phase_services(
         grid_flip = bool(opts.get("grid_sign_user_flip", False))
         batt_flip = bool(opts.get("battery_sign_user_flip", False))  # #588 H3
         if grid_flip or batt_flip:
-            cleared = {**opts, "grid_sign_user_flip": False, "battery_sign_user_flip": False}
+            cleared = {**opts, "grid_sign_user_flip": False, "battery_sign_user_flip": False,
+                       "grid_sign_user_flip_source": None}   # (#971) the binding goes with it
             if coordinator is not None:
                 coordinator._skip_options_reload = dict(cleared)
             hass.config_entries.async_update_entry(target, options=cleared)
@@ -4633,7 +5747,13 @@ async def _async_register_phase_services(
 
         current = bool((target.options or {}).get("grid_sign_user_flip", False))
         new_flip = not current
-        new_options = {**(target.options or {}), "grid_sign_user_flip": new_flip}
+        # (#971) the tap is bound to the grid source it corrects; the reader
+        # knows which branch read the meter this cycle.
+        if reader is not None:
+            new_options = reader.user_flip_options(target.options or {}, new_flip)
+        else:
+            new_options = {**(target.options or {}), "grid_sign_user_flip": new_flip,
+                           "grid_sign_user_flip_source": None}
         # Suppress the update-listener reload; we issue one explicit reload
         # so the new sign is live without a double tear-down (set_option
         # pattern).
@@ -4754,6 +5874,10 @@ async def _async_register_phase_services(
         "heat_pump_max_setpoint", "heat_pump_priority",
         "heat_pump_power_sensor", "heat_pump_temperature_sensor",
         "heat_pump_rated_power", "heat_pump_force_on_threshold",
+        "heat_pump_sg_ready_service", "heat_pump_sg_ready_service_data",
+        "heat_pump_sg_ready_state_entity", "heat_pumps",
+        "heat_pump_relay1_on_value", "heat_pump_relay1_off_value",
+        "heat_pump_relay2_on_value", "heat_pump_relay2_off_value",
     }
     # Hot water — config visibility (controller not currently wired
     # into the production path; v1.7.2-beta.2 surfaces config so
@@ -4797,6 +5921,7 @@ async def _async_register_phase_services(
         "dynamic_tariff_entity", "dynamic_forecast_entity", "dynamic_feedin_entity",
         "electricity_import_rate", "electricity_off_peak_rate",
         "electricity_export_rate", "demand_charge_rate",
+        "grid_import_surcharge",
         "cheap_price_threshold", "expensive_price_threshold",
     }
     _DIAGNOSE_TARIFF_STATE = {
@@ -4852,6 +5977,10 @@ async def _async_register_phase_services(
         "loads_currently_shed", "controllable_devices_count",
         "consecutive_peak_15min", "monthly_consecutive_peak",
         "current_vs_peak_percentage", "available_load_reduction",
+        # (#433, #896) why: the state machine's paths and the shed verdict
+        "state_decision_path", "process_path", "action_path", "last_error",
+        "shed_path", "shed_need_w", "shed_sheddable_w", "shed_futile",
+        "uncontrolled_w",
     }
     # Forecast
     _DIAGNOSE_FORECAST_OPTION = {
@@ -4959,6 +6088,12 @@ async def _async_register_phase_services(
                 "status_raw": _state(getattr(dev, "charging_status_entity", None)),
                 "believed_setpoint_a": getattr(dev, "_current_setpoint", None),
                 "session_active": getattr(dev, "_session_active", None),
+                # (#940) WHICH mechanism start_session dispatches — the one
+                # fact that decides whether the enable switch is the start
+                # or merely beside it, and the round-trip #940 needed.
+                "session_start_mechanism": (
+                    dev.session_start_mechanism()
+                    if hasattr(dev, "session_start_mechanism") else None),
                 # #553 — SEM's belief that the KEBA runaway-cap energy target
                 # is armed (stop arms, start releases).
                 "idle_guard_armed": getattr(dev, "_idle_guard_armed", None),
@@ -5135,6 +6270,18 @@ async def _async_register_phase_services(
                 payload["ev_actuation"] = _charger_actuation_diag(hass, coordinator)
             except Exception as exc:  # noqa: BLE001
                 payload["ev_actuation"] = {"error": str(exc)}
+
+        if section in ("all", "battery_zones", "battery_scheduler"):
+            # (#983) the battery half of the #548 actuation truth: what the
+            # power-strategy select READS versus what SEM believes it set, and
+            # whether the setpoint was refused. Both were needed to answer
+            # #978/#983 and neither was in the download.
+            try:
+                from .coordinator.battery_diag import battery_actuation_diag
+                payload["battery_actuation"] = battery_actuation_diag(
+                    hass, coordinator)
+            except Exception as exc:  # noqa: BLE001
+                payload["battery_actuation"] = {"error": str(exc)}
 
         if section in ("all", "trace", "ev_chargers"):
             # Layered-trace observability (1.7.5) — the recent

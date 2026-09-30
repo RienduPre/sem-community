@@ -41,9 +41,24 @@ _LOGGER = logging.getLogger(__name__)
 # is the kill-switch, and a default-off would leave a solar_plus_cheap
 # install with no cheap-window timing at all).
 PERSISTED_FLAG_DEFAULTS: Final[Dict[str, bool]] = {
-    "observer_mode": False,
+    # (29.08.2026) Observe first — see DEFAULT_OBSERVER_MODE. Kept in step
+    # with the constant by tests/test_new_install_observes_first.py.
+    "observer_mode": True,
     "vacation_mode": False,
     "energy_plan_actuation": True,
+    # (#778) Forecast-led spending ships INERT: the whole arc measures and
+    # publishes with this off, and is woken deliberately. It belongs in this
+    # table (not just as a switch default) so the coordinator resolves it the
+    # same way at setup — the drift this table exists to prevent.
+    "forecast_spending_enabled": False,
+    # (#820) charge pacing ships asleep like the spending arc.
+    "battery_charge_pacing_enabled": False,
+    # (arc #921) the export guard, the house sink and the morning EV window
+    # ship asleep like the spending arc — woken deliberately.
+    "export_guard_enabled": False,
+    "export_guard_override_external": False,
+    "battery_house_sink_enabled": False,
+    "ev_morning_window_enabled": False,
 }
 
 

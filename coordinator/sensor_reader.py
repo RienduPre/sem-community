@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import logging
+import math
+import re
+import time
 from collections import deque
 from typing import Any, Dict, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+
+from . import repair_issues as _ri
 
 from .types import FleetEvPower, PowerReadings
 from .charger_adapters.status_enum import (
@@ -24,6 +29,16 @@ from .units import (
 )
 
 from ..utils.log_gate import log_on_change
+from ..consts.core import (
+    EV_POWER_BLINK_HOLD_CYCLES,
+    EV_POWER_BLINK_MIN_W,
+    EV_POWER_BLINK_RATIO,
+    BATTERY_POWER_PLAUSIBLE_MAX_W,
+    BATTERY_SOC_MAX_STEP_PCT,
+    BATTERY_SOC_STEP_CONFIRM_READS,
+    SOLAR_ZERO_REFUTED_W,
+    SENSOR_DARK_READ_GRACE_S,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,22 +131,53 @@ def parse_export_limited(state, unit) -> "Optional[bool]":
 # inferred a phantom connection (#739, live on PROD 08.08.2026).
 EV_ACTIVE_CHARGE_FLOOR_W = 500.0
 
-# Known patterns for split grid power sensors — single source of truth.
+# Known patterns for split grid power sensors — the LAST tier, and the weakest.
 # GRID_TRIGGER_HINTS is derived from these and used in __init__.py to
 # pre-filter new sensor events. Adding a new brand here automatically
 # updates the trigger filter — no second file to keep in sync.
+#
+# (#947) These match ENTITY IDS — a guess about one house — where the #915
+# roster matches an integration's own DECLARED keys. ``_declared_split_grid_power``
+# runs first for exactly that reason, and whatever these still pick has to
+# corroborate against the grid energy counters before SEM steers on it.
+#
+# The trailing comments used to be claims; they are now evidence, from an audit
+# of every cached upstream vocabulary (#947). Read "declared by" as: integrations
+# whose own repository declares a key containing this string.
+#   * ``power_production`` is declared by forecast_solar
+#     (``power_production_next_12hours``) and enphase_envoy
+#     (``current_power_production``) — SOLAR production — and by NO grid meter
+#     found. It is the string that made SEM read a solar forecast as the
+#     reporter's grid export meter. It is kept because it IS a real older-DSMR
+#     entity_id, and entity_ids are the namespace these match in; it is now
+#     harmless because a guess no longer steers unproven.
+#   * ``power_consumption`` is likewise declared by blebox, connectlife and a
+#     Daikin COMPRESSOR, and by no grid meter found.
+#   * ``from_grid_power`` and ``consumption_from_grid`` matched NOTHING in any
+#     cached vocabulary. They are kept rather than deleted because absence from
+#     the declared corpus is not proof of absence from a user's entity_ids, and
+#     the corroboration gate makes an idle pattern cost nothing.
+# Real DSMR declares ``current_power_usage``/``current_power_return``
+# (dsmr_reader) or per-phase keys (core dsmr); both now live in the lexicon,
+# which is where a name becomes evidence.
 IMPORT_PATTERNS: tuple[str, ...] = (
-    "import_from_grid", "pac_to_user", "grid_import", "from_grid_power",
-    "power_consumption",      # DSMR/P1 (NL/BE)
-    "consumption_from_grid",  # E3DC
-    "import_power",           # GivEnergy
-    "grid_imported_power",    # Senec
+    "import_from_grid",       # growatt_server (declared)
+    "pac_to_user",            # growatt_server TLX (declared)
+    "grid_import",            # anker_solix, eg4_web_monitor, abb (declared)
+    "from_grid_power",        # no declared match found
+    "power_consumption",      # NOT a grid meter in any declared vocabulary
+    "consumption_from_grid",  # no declared match found
+    "import_power",           # eg4_web_monitor (declared); also easee, a CHARGER
+    "grid_imported_power",    # senec (declared)
 )
 EXPORT_PATTERNS: tuple[str, ...] = (
-    "export_to_grid", "pac_to_grid", "grid_export", "to_grid_power",
-    "power_production",       # DSMR/P1 (NL/BE)
-    "export_power",           # GivEnergy
-    "grid_exported_power",    # Senec
+    "export_to_grid",         # growatt_server (declared)
+    "pac_to_grid",            # growatt_server TLX (declared)
+    "grid_export",            # anker_solix, eg4_web_monitor, abb (declared)
+    "to_grid_power",          # anker_solix sub-flows only (battery_to_grid_power)
+    "power_production",       # SOLAR production in every declared vocabulary
+    "export_power",           # eg4_web_monitor (declared); also easee, a CHARGER
+    "grid_exported_power",    # senec (declared)
 )
 GRID_TRIGGER_HINTS: tuple[str, ...] = tuple(set(IMPORT_PATTERNS + EXPORT_PATTERNS))
 
@@ -188,6 +234,87 @@ PLATFORM_BATTERY_SIGN_INVERT: dict[str, bool] = {
 }
 
 
+# ── (#947) Corroborating a name-matched grid meter ──────────────────────
+#
+# When the Energy Dashboard hands SEM grid COUNTERS but no grid power entity,
+# SEM scans every sensor in the house and matches import/export meters by a
+# SUBSTRING of the entity_id (IMPORT_PATTERNS / EXPORT_PATTERNS above). Those
+# patterns are brand names — ``power_production`` is the DSMR/P1 feed-in
+# meter — and a substring is not evidence: on the #947 reporter's install it
+# matched ``sensor.power_production_now``, a SOLAR FORECAST entity, which SEM
+# then read as its grid export meter and steered the whole optimiser on.
+#
+# #911 answered that instance by EXCLUDING forecasts. A blacklist over every
+# sensor in a house can never be complete — the import patterns alone reach
+# ``power_consumption``, which names a heat pump, an appliance monitor and a
+# UPS as readily as a meter. The root cause is not which names collide; it is
+# that a pick made on NAME evidence is stored indistinguishably from one the
+# user configured, and is trusted forever after.
+#
+# So a name-only pick is a CANDIDATE. It becomes a meter when it agrees with
+# the thing SEM already has and did not guess at: the grid energy counter.
+# Integrate the candidate over a window, compare against the counter's own
+# delta over the SAME window, and let the house answer the question. A real
+# meter tracks its counter; a forecast, a heat pump or a charger does not.
+# Until the answer arrives SEM reports NO grid power and says so — "I could
+# not tell" is a third value, never folded into a confident number.
+#
+# A pick with DEVICE evidence (a power sensor on the grid counter's own
+# device — Growatt, DSMR, E3DC, Senec, every brand these patterns were
+# written for) is not a guess and never enters this path.
+
+#: Minimum energy on either side before a window may return a verdict. Below
+#: this the comparison is noise against noise — a quiet night says nothing
+#: about whether the candidate is the meter.
+GRID_PROOF_MIN_KWH: float = 0.05
+#: Minimum window length. Cloud counters (FusionSolar northbound, which is
+#: what #947 runs) publish every few minutes; a window shorter than this
+#: compares a 10 s integral against a counter that has not been written yet.
+GRID_PROOF_MIN_S: float = 900.0
+#: How far the integrated candidate may sit from the counter and still be the
+#: same meter. Generous on purpose: the question is "is this the grid meter or
+#: something else in the house", not "is it calibrated". A sub-load or an
+#: unrelated sensor misses by far more than half.
+GRID_PROOF_TOLERANCE: float = 0.5
+#: A real meter cannot read nothing while its OWN counter advances. A sub-load
+#: can and constantly does — a heat pump stops, the house keeps importing. Each
+#: time a counter moves, the candidate must account for at least this fraction
+#: of that move; one failure disqualifies the pair for the window. This is the
+#: discriminator the energy tolerance cannot be: a sub-load that runs at 87 %
+#: of house import passes any tolerance loose enough for a real meter's
+#: sampling error, and is caught here the first time it switches off.
+GRID_PROOF_MIN_SHARE: float = 0.2
+#: A window cannot run forever waiting for MIN_KWH — a house that neither
+#: imports nor exports for hours would leave the candidate unjudged and SEM
+#: blind. At this age the window restarts with fresh baselines instead.
+GRID_PROOF_MAX_S: float = 7200.0
+
+
+#: Sentinel for "carry the previous verdict", so None (still asking) is
+#: a value a caller can pass deliberately rather than a missing argument.
+_UNSET = object()
+
+
+def _fresh_grid_proof() -> dict:
+    """A corroboration window with nothing in it yet."""
+    return {
+        "pair": None,        # the (import, export) pick this window judges
+        "verdict": None,     # None = still asking, True = agrees, False = does not
+        "started": None,     # monotonic seconds
+        "last_sample": None,
+        "import_wh": 0.0,    # integral of the candidate import power
+        "export_wh": 0.0,
+        "import_base": None,  # counter reading at window start
+        "export_base": None,
+        "step_import": None,  # counter + integral at the last counter MOVE
+        "step_export": None,
+        "step_wh_import": 0.0,
+        "step_wh_export": 0.0,
+        "contradictions": 0,  # counter advanced while the candidate read ~nothing
+        "reported": None,    # last verdict pushed to the log/Repair
+    }
+
+
 @dataclass
 class SensorConfig:
     """Configuration for sensor reading."""
@@ -213,11 +340,24 @@ class SensorConfig:
 # (#818) ``_read_sensor`` names its caller; these three are the power
 # inputs whose 0.0 fallback is indistinguishable from a real reading
 # and which the surplus maths steers on.
-_DEGRADABLE_POWER_INPUTS = frozenset({"solar", "grid", "battery"})
+# (#925 audit, REFUTED once) The split halves of a grid meter are steering
+# inputs too. ``_all_dark_any("grid", "grid_import", "grid_export")`` was
+# added so a split-grid install could report a dark meter — and it could
+# not, because THIS set gates whether ``_read_sensor`` records a read into
+# the dark/reads tallies at all, and the split names were never in it. The
+# fix summed two counters that were never written; its test hand-filled
+# the dicts and proved the arithmetic, not the product. A ruflo reviewer
+# caught it before PROD. Membership here is the whole fix.
+_DEGRADABLE_POWER_INPUTS = frozenset(
+    {"solar", "grid", "grid_import", "grid_export", "battery"})
 
 
 class SensorReader:
     """Reads power and state values from Home Assistant sensors."""
+
+    # (#934) Overridable clock for the SOC hold's age — the same seam the
+    # entity layer's dark-read grace uses (``SEMSolarSensor._now_monotonic``).
+    _now_monotonic = staticmethod(time.monotonic)
 
     def __init__(self, hass: HomeAssistant, config: Dict[str, Any]):
         """Initialize sensor reader."""
@@ -257,6 +397,10 @@ class SensorReader:
         self._pv_string_names: Dict[str, str] = {}  # (#566) slot -> custom name
         self._grid_sign_inverted = False
         self._grid_sign_detected = False  # True once sign is reliably determined
+        #: (#971) Which branch produced this cycle's grid_power — the key a
+        #: one-tap user flip is bound to. ``None`` until the first read.
+        self._grid_source_key = None
+        self._flip_ignored_logged = False
         # #461: accumulated sign-of-correlation evidence. The old ±1 vote
         # locked after three *consecutive* instantaneous matches — and a
         # contradicting sample only reset the run counter to ±1, never the
@@ -303,6 +447,16 @@ class SensorReader:
         self._prev_solar_w: Optional[float] = None
         self._prev_grid_raw_w: Optional[float] = None
         self._SOLAR_SWING_MIN_W: float = 500.0
+        # (#889) A vote is an OBSERVATION of the grid answering solar. A
+        # cycle in which the meter moved less than this share of the solar
+        # swing did not show that answer — the register is stale (polled
+        # Huawei modbus lands the inverter and meter reads in different
+        # cycles) or the swing went somewhere the voter cannot see — and
+        # casts nothing. ``(d_grid * d_solar) < 0`` is False at d_grid == 0,
+        # so without this every stale-meter cycle was a full-weight
+        # "normal" vote: four of them locked SEM convention on an
+        # HA-convention meter at confidence 1.00.
+        self._SOLAR_GRID_ANSWER_MIN_RATIO: float = 0.25
         self._SOLAR_SIGN_MIN_SAMPLES: int = 4
         self._SOLAR_SIGN_MIN_CONFIDENCE: float = 0.80
         # Battery-quiet filter: a charging/discharging battery intercepts
@@ -392,6 +546,12 @@ class SensorReader:
         # Per-entity flag — was the Repair already raised this outage?
         # Avoids re-raising every cycle past the threshold.
         self._sensor_repair_raised: set[str] = set()
+        # (#933) Entities whose unavailable-Repair this reader has already
+        # reconciled once. The Repair is persistent and the two sets above
+        # are not, so one raised before a restart — or before the reload
+        # that fixing the sensor caused — was never cleared: the recovery
+        # branch only runs for an outage THIS reader saw.
+        self._sensor_repair_reconciled: set[str] = set()
         # W3 — frozen (available-but-not-updating) fast-power-sensor detector.
         # A Huawei modbus stall / Growatt cloud freeze keeps the entity
         # "available" with a stale value that silently poisons the energy
@@ -401,12 +561,41 @@ class SensorReader:
         # seconds) are checked, with a generous threshold, so a legitimately
         # slow sensor never false-positives.
         self._frozen_sensors: set[str] = set()
+        # (#933) Same gap for the stale-Repair: ``_frozen_sensors`` is per
+        # lifetime, the Repair is not. A predecessor's Repair is cleared
+        # once this reader has SEEN the entity report — its report stamp
+        # moving past the one it first saw. Mere freshness is not enough:
+        # after a restart a frozen sensor's restored state looks fresh for
+        # ten minutes.
+        self._stale_first_report: dict[str, Any] = {}
+        self._stale_reconciled: set[str] = set()
         self._FAST_POWER_NAMES = frozenset(
             {"solar", "grid", "grid_import", "grid_export", "battery"}
         )
         self._STALE_THRESHOLD_S = 600  # 10 min: a fast power sensor stale this long is frozen
-        # Cache last valid SOC to avoid 0% during sensor gaps
-        self._last_valid_soc: float = 0.0
+        # (#912) per config entry: (monotonic stamp, any sibling reported within
+        # the threshold). A flat entity from a LIVE integration is honest —
+        # integrations that skip identical writes (foxess_modbus) never advance
+        # ``last_reported`` on a flat value, at any hour, in any domain.
+        self._entry_alive_cache: Dict[str, tuple[float, bool]] = {}
+        self._ENTRY_ALIVE_CACHE_S = 5.0
+        # (#912) warn-once latch for a core with no entity source map
+        self._source_map_unavailable_logged = False
+        # Cache last valid SOC to avoid 0% during sensor gaps. (#875) None
+        # until the first successful read: a hold needs something to hold,
+        # and 0.0 before the first report was published as an empty pack.
+        self._last_valid_soc: Optional[float] = None
+        # (#934) monotonic stamp of that read — a held value carries its age.
+        self._last_valid_soc_mono: Optional[float] = None
+        # (#902) a SOC level rejected as an impossible step, and how many
+        # consecutive reads have repeated it — see _accept_battery_soc.
+        self._soc_step_candidate: Optional[float] = None
+        self._soc_step_streak: int = 0
+        self._battery_power_implausible: bool = False
+        #: (#988) is the current solar zero refuted by the balance?
+        self._solar_zero_refuted = False
+        #: (#988) when solar was last a positive number (monotonic)
+        self._last_solar_seen_mono = None
         # EV flap fix (2026-07-10): the KEBA charging-power sensor polls over
         # UDP and blips to ~0 for a cycle while the car is really drawing 10 kW.
         # ``ev_power`` feeds the home energy balance (``home = solar + grid −
@@ -419,6 +608,10 @@ class SensorReader:
         # charger (plus a "_fleet" key) so the multi-charger per-charger dict
         # stays consistent with the smoothed fleet sum.
         self._ev_power_hist: Dict[str, deque] = {}
+        # (#910) last accepted EV power per key + how many cycles it has
+        # been held over a blink (status charging, read collapsed).
+        self._ev_power_last: Dict[str, float] = {}
+        self._ev_power_hold: Dict[str, int] = {}
         # Split grid power sensors (Growatt, DSMR, etc.) — discovered on first read.
         # confidence: "same-device" picks are permanently cached; "any-device" picks
         # are re-evaluated each cycle so a late-loading DSMR meter wins once it shows
@@ -429,6 +622,15 @@ class SensorReader:
             "confidence": None,  # "same-device" | "any-device" | None
             "warned": False,
         }
+        # (#947) Corroboration state for a NAME-ONLY pick — see
+        # ``_corroborate_split_grid``. A pick with device evidence skips it.
+        self._split_grid_proof: dict[str, Any] = _fresh_grid_proof()
+        #: Last (import, export, state) said about an unproven pair — the
+        #: warn-once guard for ``_report_unproven_grid``.
+        self._split_grid_unproven_said: Optional[tuple] = None
+        #: (#933) once per reader lifetime: the first PROVEN grid read clears a
+        #: guess Repair a previous lifetime left, whatever tier proved it.
+        self._split_proof_reconciled: bool = False
         self._uses_split_grid: bool = False
         # Warn-once guard for the discovery-*exception* path (#259); distinct from the
         # dict "warned" key (which guards "no sensor found"). Reset on cache invalidate.
@@ -643,6 +845,8 @@ class SensorReader:
             readings = self._read_from_energy_dashboard()
         else:
             readings = self._read_from_legacy_config()
+        # (#902) A value no battery can produce is a dark read, not a number.
+        self._gate_battery_power(readings)
         # (#758) An unreadable battery power sensor reads as 0.0 W, which is
         # also what an idle battery reads. Say which one this is, once, here.
         readings.battery_power_unavailable = self._battery_power_missing
@@ -651,8 +855,15 @@ class SensorReader:
         # the per-input flags gate PUBLISHING (only a total with nothing
         # real left in it should read unavailable).
         readings.inputs_degraded = any(self._input_dark.values())
+        readings.dark_inputs = tuple(sorted(
+            n for n, c in self._input_dark.items() if c))
         readings.solar_power_unavailable = self._all_dark("solar")
-        readings.grid_power_unavailable = self._all_dark("grid")
+        # (#925 audit) BOTH shapes of grid meter — a combined sensor tags
+        # "grid", a split pair tags "grid_import"/"grid_export" and never
+        # "grid", so asking about one category answered False forever for
+        # every split-grid install.
+        readings.grid_power_unavailable = self._all_dark_any(
+            "grid", "grid_import", "grid_export")
         readings.battery_power_all_unavailable = self._all_dark("battery")
 
         # #661 — forget audits for pairs that are no longer being netted, so a
@@ -703,7 +914,13 @@ class SensorReader:
         # one tap regardless of how it was derived — without touching the
         # ``grid_sign_invert`` semantics that Enphase/Powerwall installs rely
         # on. Persisted as a config option, so it survives restart.
-        if bool(self._raw_config.get("grid_sign_user_flip", False)):
+        # (#971) …but bound to the grid SOURCE it was tapped against. A tap
+        # that corrected the combined meter's auto-lock must not follow the
+        # install onto a declared import/export pair, whose convention is
+        # fixed by declaration and has no lock to correct: on .175 exactly
+        # that inverted a synthetic pair (export 2000 → −2000) under a flip
+        # tapped months earlier against `sensor.power_meter_wirkleistung`.
+        if self.user_flip_applies():
             readings.grid_power = -readings.grid_power
             readings.calculate_derived()
 
@@ -814,6 +1031,23 @@ class SensorReader:
         if ed is not None:
             self._audit_battery_sign_lock(readings.battery_power, ed, readings)
 
+        # (#988) A solar ZERO the balance refutes is a dark read — LAST, after
+        # every sign correction above. The first cut ran it beside the battery
+        # gate at the top and the merge-gate challenge refuted it: at that
+        # point ``grid_power`` and ``battery_power`` are still in the SENSOR's
+        # convention, not SEM's. On a ``grid_sign_invert`` install, or any
+        # Pattern-B combined meter (SolarEdge, Fronius, Enphase, Powerwall,
+        # Kostal — negated a few lines above), a 2.5 kW night IMPORT read as
+        # export, and the gate would have marked solar dark every night cycle.
+        # The terms only mean what they say down here.
+        self._gate_solar_power(readings)
+        # …and the two flags it can move are computed from the dark map, so
+        # they are re-derived now rather than upstream of their own input.
+        readings.inputs_degraded = any(self._input_dark.values())
+        readings.dark_inputs = tuple(sorted(
+            n for n, c in self._input_dark.items() if c))
+        readings.solar_power_unavailable = self._all_dark("solar")
+
         return readings
 
     # ── Sign-state persistence (#476 item 5) ─────────────────────────
@@ -871,8 +1105,11 @@ class SensorReader:
             if st is not None:
                 raw_state = st.state
             try:
-                entry = er.async_get(self.hass).async_get(grid_entity)
-                pf = entry.platform if entry else None
+                # (#912, class 87) via _entity_owner, not the registry alone:
+                # this is the triage payload a reporter pastes into an issue,
+                # and reporting null for a YAML-declared sensor is how three
+                # betas went by without anyone seeing it was a template.
+                pf = self._entity_owner(grid_entity)[0]
                 grid_platform = pf if isinstance(pf, str) else None
             except Exception:  # noqa: BLE001 — diagnostics must never raise
                 grid_platform = None
@@ -891,6 +1128,11 @@ class SensorReader:
                 self._raw_config.get("grid_sign_invert", False)
             ),
             "user_flip": bool(self._raw_config.get("grid_sign_user_flip", False)),
+            # (#971) the tap is bound to a source; both halves are shown so a
+            # flip that no longer applies is visible, never silent.
+            "user_flip_source": self._raw_config.get("grid_sign_user_flip_source"),
+            "grid_source": self._grid_source_key,
+            "user_flip_applies": self.user_flip_applies(),
             "auto_detected": self._grid_sign_detected,
             "auto_inverted": self._grid_sign_inverted,
             "evidence": round(self._grid_sign_evidence, 1),
@@ -936,8 +1178,8 @@ class SensorReader:
             if st is not None:
                 raw_state = st.state
             try:
-                entry = er.async_get(self.hass).async_get(battery_entity)
-                pf = entry.platform if entry else None
+                # (#912, class 87) same as the grid payload above.
+                pf = self._entity_owner(battery_entity)[0]
                 battery_platform = pf if isinstance(pf, str) else None
             except Exception:  # noqa: BLE001 — diagnostics must never raise
                 battery_platform = None
@@ -1227,10 +1469,14 @@ class SensorReader:
         if not entity_id:
             return
         try:
-            registry = er.async_get(self.hass)
-            entry = registry.async_get(entity_id)
-            platform = entry.platform if entry else None
-        except Exception as e:  # noqa: BLE001 — registry hiccup must not block reads
+            # (#912, class 87) the brand is the entity's OWNER, and the entity
+            # registry lists only entities that carry a unique_id — a
+            # YAML-declared brand sensor got no seed at all, for no better
+            # reason than that. _entity_owner reads the same fact from HA's
+            # source map when the registry cannot see the entity.
+            platform = self._entity_owner(entity_id)[0]
+        except Exception as e:  # noqa: BLE001 — belt and braces: _entity_owner
+            # contains its own registry/source-map failures and answers None.
             _LOGGER.debug("Grid-sign brand lookup failed for %s: %s", entity_id, e)
             return
         if not isinstance(platform, str) or platform not in PLATFORM_GRID_SIGN_INVERT:
@@ -1279,10 +1525,10 @@ class SensorReader:
         if not power_entity:
             return
         try:
-            registry = er.async_get(self.hass)
-            entry = registry.async_get(power_entity)
-            platform = entry.platform if entry else None
-        except Exception as e:  # noqa: BLE001 — registry hiccup must not block reads
+            # (#912, class 87) same owner lookup as the grid seed above.
+            platform = self._entity_owner(power_entity)[0]
+        except Exception as e:  # noqa: BLE001 — belt and braces: _entity_owner
+            # contains its own registry/source-map failures and answers None.
             _LOGGER.debug("Battery-sign brand lookup failed for %s (%s): %s", bid, power_entity, e)
             return
         if not isinstance(platform, str) or platform not in PLATFORM_BATTERY_SIGN_INVERT:
@@ -1312,7 +1558,10 @@ class SensorReader:
           * grid falls as solar rises  → +import meter (HA)  → negate
 
         Only large solar swings (``_SOLAR_SWING_MIN_W``) vote, so the
-        solar-driven component of Δgrid dominates home-load jitter. Locks
+        solar-driven component of Δgrid dominates home-load jitter — and
+        only cycles in which the meter ANSWERED the swing (#889): a dark
+        steering input or a grid delta below ``_SOLAR_GRID_ANSWER_MIN_RATIO``
+        of the solar delta is not an observation and casts nothing. Locks
         the sign before the counter path for solar installs, and can
         OVERRIDE a wrong counter-derived lock once it is highly confident
         and sustained — a correctly-signed install computes the same sign
@@ -1326,6 +1575,17 @@ class SensorReader:
         if not isinstance(solar, (int, float)) or isinstance(solar, bool):
             return
         if not isinstance(grid_raw, (int, float)) or isinstance(grid_raw, bool):
+            return
+
+        # (#889) A dark steering input this cycle reads as 0.0 W (#818), so
+        # this cycle is neither a sample nor a baseline: the delta INTO it
+        # and the delta OUT of it are both artefacts (a solar dropout looks
+        # like a ±4 kW swing; a dark battery looks quiet while it absorbs
+        # the swing). Drop the baseline; the next clean cycle re-arms it.
+        if any(self._input_dark.values()):
+            self._prev_solar_w = None
+            self._prev_grid_raw_w = None
+            self._prev_batt_w = None
             return
 
         batt = getattr(readings, "battery_power", None)
@@ -1353,6 +1613,14 @@ class SensorReader:
         if batt_q >= self._SOLAR_BATTERY_QUIET_W or (
             prev_batt_q is not None and prev_batt_q >= self._SOLAR_BATTERY_QUIET_W
         ):
+            return
+        # (#889) The grid must have ANSWERED the swing. A meter that did not
+        # move (a stale polled register) or moved only marginally has shown
+        # nothing about its sign; the skewed-poll cycle that carries the
+        # answer arrives with Δsolar = 0 and abstains on the swing gate.
+        # No vote is the right verdict — the counter voter is not gated on
+        # a lock that was never made.
+        if abs(d_grid) < self._SOLAR_GRID_ANSWER_MIN_RATIO * abs(d_solar):
             return
 
         # product > 0 → grid co-moves with solar → SEM (no negate);
@@ -1404,6 +1672,48 @@ class SensorReader:
                 confidence, self._grid_sign_solar_samples,
             )
             self._grid_sign_inverted = implied_inverted
+
+    #: Grid sources whose sign comes from a LOCK (brand seed, counter or
+    #: solar vote) — what the #461 one-tap flip exists to correct. A declared
+    #: pair (manual or the Energy Dashboard's from/to) has no lock.
+    _AUTO_GRID_SOURCES = ("combined", "sum", "discovered")
+
+    def user_flip_applies(self) -> bool:
+        """(#971) Does the persisted one-tap flip apply to THIS cycle's source?
+
+        A flip recorded with a source key applies only while the grid is read
+        from that same source. A flip from before the key existed (no source
+        recorded) applies to the auto-derived sources it was designed for, and
+        never to a declared pair — that is the case found live on .175. When a
+        flip is present but does not apply, it is said once in the log and
+        always in the diagnostics (``user_flip_applies``).
+        """
+        if not bool(self._raw_config.get("grid_sign_user_flip", False)):
+            return False
+        recorded = self._raw_config.get("grid_sign_user_flip_source") or None
+        current = self._grid_source_key
+        if recorded is not None:
+            applies = (current == recorded)
+        else:
+            kind = (current or "").split(":", 1)[0]
+            applies = kind in self._AUTO_GRID_SOURCES
+        if not applies and not self._flip_ignored_logged:
+            self._flip_ignored_logged = True
+            _LOGGER.warning(
+                "grid sign: the one-tap user flip is bound to %s and the grid is "
+                "now read from %s — not applying it (#971). Tap 'Fix grid sign' "
+                "again on the new source if it is inverted, or reset_sign_detection.",
+                recorded or "an auto-detected source", current,
+            )
+        return applies
+
+    def user_flip_options(self, options: dict, new_flip: bool) -> dict:
+        """(#971) The options dict the flip service persists: the flip, and —
+        when turning it ON — the grid source it was tapped against. Turning it
+        off drops the binding. The ONE production caller is the service."""
+        out = {**(options or {}), "grid_sign_user_flip": bool(new_flip)}
+        out["grid_sign_user_flip_source"] = self._grid_source_key if new_flip else None
+        return out
 
     def _detect_grid_sign(self, readings: PowerReadings) -> bool:
         """Detect if grid power needs negation using Energy Dashboard counters.
@@ -1772,6 +2082,31 @@ class SensorReader:
 
         return self._battery_sign_inverted[bid]
 
+    def _all_dark_any(self, *names: str) -> bool:
+        """(#925 audit) ``_all_dark`` across SEVERAL contributing categories.
+
+        The grid reading has two shapes. A combined meter tags its reads
+        ``"grid"``; a SPLIT pair — Growatt, Anker, Senec, DSMR, and every
+        manual import+export pair, including the new one #915 added — tags
+        them ``"grid_import"`` and ``"grid_export"`` and never ``"grid"``
+        at all. So ``_all_dark("grid")`` asked about a category those
+        installs never write, found no reads, and answered False. Not "the
+        meter is fine" — *structurally always* False, on every cycle, for
+        that entire hardware class.
+
+        What that silently disabled, for split-grid installs only: #906's
+        peak-guard gate, ``grid_import_known`` in the charger view, the
+        #925 surplus-controller clamp — every protection built against a
+        blind meter — plus it booked a fabricated 0 W into HA's long-term
+        statistics as though it were a reading.
+
+        Union semantics, same rule: dark if something was read across
+        these categories and every one of those reads came back dark.
+        """
+        dark = sum(self._input_dark.get(n, 0) for n in names)
+        reads = sum(self._input_reads.get(n, 0) for n in names)
+        return bool(dark) and reads == 0
+
     def _all_dark(self, name: str) -> bool:
         """(#818) Was EVERY contributing read of this input unavailable?
 
@@ -1851,7 +2186,26 @@ class SensorReader:
         #    Both always positive — SEM calculates: grid_power = export - import
         manual_import = self._raw_config.get("grid_import_power_entity")
         manual_export = self._raw_config.get("grid_export_power_entity")
-        if manual_import or manual_export:
+        guessing = False                # (#933) set by the discovery branch only
+        if (manual_import and not manual_export) and ed.grid_import_power:
+            # (07.09 re-audit) HALF a manual pair, and a combined sensor
+            # exists: prefer the combined one. Reading the import half alone
+            # says "export − import" with export pinned at 0.0 — a house
+            # that exports then reads as one that never does, permanently,
+            # with only a one-time log line. Same resolution as the legacy
+            # path. A house with NO combined sensor keeps today's behaviour:
+            # for a zero-export install the import half IS the whole story,
+            # which is what tests/test_split_grid_integration.py pins.
+            if not getattr(self, "_half_pair_ed_warned", False):
+                self._half_pair_ed_warned = True
+                _LOGGER.warning(
+                    "Only grid_import_power_entity is set (%s) with no export "
+                    "half — using the Energy Dashboard's combined grid sensor "
+                    "%s instead, so export is measured rather than assumed 0",
+                    manual_import, ed.grid_import_power)
+            readings.grid_power = self._read_sensor(ed.grid_import_power, "grid")
+            self._grid_source_key = f"combined:{ed.grid_import_power}"
+        elif manual_import or manual_export:
             # Manual override — user explicitly set grid power sensors.
             # NO auto-detection runs on this path, so misconfiguration
             # (swapped roles, one side missing, energy counter instead of
@@ -1862,6 +2216,7 @@ class SensorReader:
             export_w = self._read_sensor(manual_export, "grid_export") if manual_export else 0.0
             readings.grid_power = export_w - import_w
             self._grid_sign_detected = True
+            self._grid_source_key = f"manual:{manual_import}|{manual_export}"
             self._audit_manual_grid_sign(readings.grid_power, ed)
             if manual_import and manual_export:
                 self._audit_split_pair(
@@ -1878,6 +2233,12 @@ class SensorReader:
             export_w = self._read_sensor(ed.grid_power_to, "grid_export")
             readings.grid_power = export_w - import_w
             self._grid_sign_detected = True
+            self._grid_source_key = f"ed_pair:{ed.grid_power_from}|{ed.grid_power_to}"
+            # (#911) an explicit pair ends any guess — and its Repair.
+            if self._split_grid_discovery.get("guess_reported"):
+                self._forget_split_grid_picks(self._split_grid_discovery, keep=(None, None))
+                self._split_grid_discovery["guess_reported"] = None
+                _ri.clear_split_grid_guessed(self.hass)
             self._audit_split_pair(
                 "grid", "Grid (declared two-sensor pair)",
                 import_w, ed.grid_power_from, export_w, ed.grid_power_to,
@@ -1885,8 +2246,10 @@ class SensorReader:
         elif len(ed.grid_power_list) > 1:
             # Multiple grid power sensors — sum all (e.g. multi-meter setups)
             readings.grid_power = self._read_sensors_sum(ed.grid_power_list, "grid")
+            self._grid_source_key = f"sum:{len(ed.grid_power_list)}"
         elif ed.grid_import_power:
             readings.grid_power = self._read_sensor(ed.grid_import_power, "grid")
+            self._grid_source_key = f"combined:{ed.grid_import_power}"
         elif not ed.grid_import_power and ed.grid_import_energy:
             # No combined power sensor — try to find split import/export power sensors
             # from the same device as the energy sensors.
@@ -1894,13 +2257,14 @@ class SensorReader:
             # any-device matches stay re-evaluated so a late-loading DSMR meter
             # (issue #166) takes over within one update interval.
             self._uses_split_grid = True
+            guessing = True
             disc = self._split_grid_discovery
             # The same-device lock only holds for a COMPLETE pair
             # (#485 H2): an import-only same-device pick used to stop
             # re-discovery entirely, so a later-loading export sensor
             # was never adopted until restart.
             locked = (
-                disc["confidence"] == "same-device"
+                disc["confidence"] in ("declared", "same-device")
                 and disc["import"] and disc["export"]
             )
             if not locked and self._split_grid_scan_due(disc):
@@ -1923,9 +2287,11 @@ class SensorReader:
                 _prev_exp = disc["export"]
                 imp, exp, conf = self._discover_split_grid_power(ed)
                 if self._should_adopt_split_grid_picks(disc, conf):
+                    self._forget_split_grid_picks(disc, keep=(imp, exp))
                     disc["import"] = imp
                     disc["export"] = exp
                     disc["confidence"] = conf
+                    self._report_split_grid_confidence(disc)
                     if (_prev_imp is not None or _prev_exp is not None) and (
                         _prev_imp != imp or _prev_exp != exp
                     ):
@@ -1956,20 +2322,66 @@ class SensorReader:
             if disc["import"]:
                 import_w = self._read_sensor(disc["import"], "grid_import")
                 export_w = self._read_sensor(disc["export"], "grid_export") if disc["export"] else 0.0
-                # SEM convention: negative = import, positive = export
-                readings.grid_power = export_w - import_w
-                self._grid_sign_detected = True  # No sign correction needed
-                if disc["export"]:
-                    self._audit_split_pair(
-                        "grid", "Grid (auto-discovered split pair)",
-                        import_w, disc["import"], export_w, disc["export"],
-                    )
+                # (#947) A pick with DEVICE evidence is a meter. A name-only
+                # pick has to earn it against the energy counters first, and
+                # steers nothing while the answer is still "I cannot tell".
+                if disc["confidence"] in ("declared", "same-device"):
+                    proven = True          # device evidence; nothing to prove
+                else:
+                    proven = self._corroborate_split_grid(
+                        disc, ed, import_w, export_w)
+                if proven:
+                    # (#933) A fresh reader's FIRST healthy verdict clears what
+                    # a previous lifetime left, once. Without this the clear is
+                    # gated on a per-lifetime memo: a pick that IMPROVES across
+                    # a restart — a name guess that becomes `declared` because
+                    # the roster learned the brand — never runs the corroborator
+                    # at all, so the old Repair would outlive the problem
+                    # forever. The Repair is persistent; the memo is not.
+                    if not self._split_proof_reconciled:
+                        self._split_proof_reconciled = True
+                        _ri.clear_split_grid_guessed(self.hass)
+                    # SEM convention: negative = import, positive = export
+                    readings.grid_power = export_w - import_w
+                    self._grid_sign_detected = True  # No sign correction needed
+                    self._grid_source_key = f"discovered:{disc['import']}|{disc['export']}"
+                    if disc["export"]:
+                        self._audit_split_pair(
+                            "grid", "Grid (auto-discovered split pair)",
+                            import_w, disc["import"], export_w, disc["export"],
+                        )
+                else:
+                    self._report_unproven_grid(disc, proven)
             elif not disc["warned"]:
                 disc["warned"] = True
-                _LOGGER.warning(
-                    "No grid power sensor found (no combined and no split import/export). "
-                    "Grid power will be 0. Check Energy Dashboard grid configuration."
-                )
+                # (#947) Say which of the two silences this is. An export-only
+                # discovery is NOT "nothing found" — SEM has half a pair and
+                # declines to read "export minus zero" as the grid, because a
+                # house that imports would then read as one that never does.
+                if disc["export"]:
+                    _LOGGER.warning(
+                        "Only a grid EXPORT power sensor was found (%s) and no "
+                        "import half. SEM will not read export-minus-zero as the "
+                        "grid — grid power stays 0. Set grid_import_power_entity "
+                        "/ grid_export_power_entity to name both meters.",
+                        disc["export"],
+                    )
+                else:
+                    _LOGGER.warning(
+                        "No grid power sensor found (no combined and no split import/export). "
+                        "Grid power will be 0. Check Energy Dashboard grid configuration."
+                    )
+
+        # (#933) The grid was read by an explicit path — SEM's own pair (the
+        # guess Repair's own remedy, which reloads the entry), a declared
+        # pair, a combined sensor — so nothing is guessed, and a guess Repair
+        # the reader before the reload left goes, once per reader. The
+        # discovery branch reports its own verdict every scan; the startup
+        # sweep in invalidate_split_grid_cache() hangs off
+        # EVENT_HOMEASSISTANT_STARTED, which a reload never fires.
+        if not guessing and not getattr(self, "_split_guess_reconciled", False):
+            self._split_guess_reconciled = True
+            _ri.clear_split_grid_guessed(self.hass)
 
         # Battery power — sum all battery units if multiple configured.
         # v1.7.0 arch: also populate the per-battery dict so multi-
@@ -2134,13 +2546,7 @@ class SensorReader:
             if soc_entity:
                 soc_val = self._read_sensor(soc_entity, "battery_soc", allow_none=True)
 
-        if soc_val is not None:
-            readings.battery_soc = soc_val
-            self._last_valid_soc = soc_val
-        else:
-            # Use last known SOC to avoid charging logic seeing 0% during sensor gaps
-            readings.battery_soc = self._last_valid_soc
-            readings.battery_soc_unavailable = True
+        self._accept_battery_soc(readings, soc_val)
 
         # EV power — sum all chargers if multi-charger (#193), else single sensor.
         # v1.6.9 also populates ``ev_power_per_charger`` so the flow calculator
@@ -2167,10 +2573,12 @@ class SensorReader:
             pass  # nested per-charger sensors handled the read (#642 helper)
         elif ed.ev_power:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
-                self._read_sensor(ed.ev_power, "ev")))
+                self._read_sensor(ed.ev_power, "ev"),
+                charging=self._fleet_charging_status(), readings=readings))
         elif self.config.ev_power_sensor:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
-                self._read_sensor(self.config.ev_power_sensor, "ev")
+                self._read_sensor(self.config.ev_power_sensor, "ev"),
+                charging=self._fleet_charging_status(), readings=readings,
             ))
 
         # EV connection status — per-charger OR'd for global (#193), plus
@@ -2210,6 +2618,179 @@ class SensorReader:
         self._read_inverter_temperature(readings)
 
         return readings
+
+    def _accept_battery_soc(self, readings: PowerReadings,
+                            soc_val: Optional[float]) -> None:
+        """Take a SOC read into the readings — or refuse it.
+
+        (#902) A read is not a measurement just because the sensor answered.
+        Out of a modbus dropout the Huawei published ``0.0`` for one cycle
+        from a 93 % pack, and the fleet was steered as EMPTY for that cycle
+        (Zone 1: car idled, discharge clamped) — the #875 symptom through a
+        different door. A step no battery can make between two reads is
+        treated exactly like a dark read: the last valid value is held.
+
+        But a level that PERSISTS is the truth — the sensor may have been
+        dark for hours while the pack really did drain — so a rejected level
+        is accepted once it has repeated for ``BATTERY_SOC_STEP_CONFIRM_READS``
+        consecutive reads. Garbage does not repeat itself; a real level does.
+        """
+        if soc_val is None:
+            self._hold_battery_soc(readings)
+            return
+        last = self._last_valid_soc
+        if last is not None and abs(soc_val - last) > BATTERY_SOC_MAX_STEP_PCT:
+            cand = self._soc_step_candidate
+            if cand is not None and abs(soc_val - cand) <= BATTERY_SOC_MAX_STEP_PCT:
+                self._soc_step_streak += 1
+            else:
+                self._soc_step_candidate = soc_val
+                self._soc_step_streak = 1
+            if self._soc_step_streak < BATTERY_SOC_STEP_CONFIRM_READS:
+                log_on_change(
+                    _LOGGER, "implausible:soc", logging.WARNING,
+                    "Battery SOC %.0f%% -> %.0f%% in one read is not a "
+                    "measurement — holding %.0f%% (#902; accepted if the level "
+                    "persists for %d reads)",
+                    last, soc_val, last, BATTERY_SOC_STEP_CONFIRM_READS,
+                )
+                self._hold_battery_soc(readings)
+                return
+            log_on_change(
+                _LOGGER, "implausible:soc", logging.INFO,
+                "Battery SOC level %.0f%% held for %d reads — accepting (#902)",
+                soc_val, self._soc_step_streak,
+            )
+        self._soc_step_candidate = None
+        self._soc_step_streak = 0
+        readings.battery_soc = soc_val
+        self._last_valid_soc = soc_val
+        self._last_valid_soc_mono = float(self._now_monotonic())
+
+    def _gate_battery_power(self, readings: PowerReadings) -> None:
+        """(#902) A battery power no home battery can produce is a dark read.
+
+        22 806 824 W arrived from a 5 kW LUNA on the cycle its modbus link
+        came back. Published, it lands in a ``state_class: measurement``
+        entity and in every consumer of the balance. Treated here exactly as
+        an unreadable sensor: 0.0 with the unavailable flags set, counted as
+        dark for #818 (the cycle must not steer) and NOT as a read (so the
+        entity says unavailable rather than 0 W). Per-unit entries are
+        zeroed the same way.
+        """
+        bad = abs(float(readings.battery_power or 0.0)) > BATTERY_POWER_PLAUSIBLE_MAX_W
+        for bid, bp in list(readings.batteries.items()):
+            if abs(float(getattr(bp, "power_w", 0.0) or 0.0)) > BATTERY_POWER_PLAUSIBLE_MAX_W:
+                readings.batteries[bid] = replace(bp, power_w=0.0)
+                bad = True
+        if not bad:
+            if self._battery_power_implausible:
+                self._battery_power_implausible = False
+                log_on_change(
+                    _LOGGER, "implausible:battery_power", logging.DEBUG,
+                    "Battery power reading plausible again (#902)",
+                )
+            return
+        log_on_change(
+            _LOGGER, "implausible:battery_power", logging.WARNING,
+            "Battery power %.0f W is not a measurement (bound %.0f W) — "
+            "treated as a dark read (#902)",
+            float(readings.battery_power or 0.0), BATTERY_POWER_PLAUSIBLE_MAX_W,
+        )
+        self._battery_power_implausible = True
+        readings.battery_power = 0.0
+        self._battery_power_missing = True
+        self._input_dark["battery"] = self._input_dark.get("battery", 0) + 1
+        self._input_reads["battery"] = max(0, self._input_reads.get("battery", 0) - 1)
+
+    def _gate_solar_power(self, readings: PowerReadings) -> None:
+        """(#988) A solar zero the rest of the balance refutes is a dark read.
+
+        A dropping inverter surfaces in two shapes. ``unavailable`` is
+        bridged already — the reference install spent 151 min in it over
+        24 h and SEM's own ``solar_power`` lost only 2 — but the same
+        dropout also arrives as a hard **0 W**, and 0 W is what night looks
+        like, so the grace that catches the first shape never sees the
+        second. The zero is then spent: PROD, 19.09 08:24, ``solar=0W
+        grid_import=0W battery_discharge=0W | battery_charge=1267W``. A
+        house does not charge its battery from nothing; SEM repaired the
+        symptom by clamping the residual and kept the false zero in the
+        inputs every decision is built on.
+
+        The test is physics, not a threshold on the sensor: what LEAVES the
+        house (battery charge + export) minus what enters it other than
+        solar (import + battery discharge) is energy only the sun can have
+        supplied. Past ``SOLAR_ZERO_REFUTED_W`` of it, the zero is not a
+        measurement — counted dark exactly as an unavailable read is
+        (#902), so this cycle does not steer (#818) and the entity says
+        unavailable rather than publishing a zero it cannot stand behind.
+
+        Deliberately one-directional: it can only refuse a zero, never
+        invent a number. What solar WAS during the gap is not knowable
+        here, and a held value would be a second producer of it.
+        """
+        now_mono = float(self._now_monotonic())
+        if float(readings.solar_power or 0.0) > 0.0:
+            self._last_solar_seen_mono = now_mono
+            if self._solar_zero_refuted:
+                self._solar_zero_refuted = False
+                log_on_change(
+                    _LOGGER, "implausible:solar_zero", logging.DEBUG,
+                    "Solar reading is a number again (#988)",
+                )
+            return
+        # Only a reading that WAS a number can have stopped being one. Without
+        # this, a house with a producer SEM cannot see — a second array, a
+        # generator, an AC-coupled battery fed behind its own meter — has its
+        # honest zero refuted every time that producer charges the pack. The
+        # window is the dark-read grace: the same "how long may a reading be
+        # missing" this file already answers everywhere else.
+        seen = getattr(self, "_last_solar_seen_mono", None)
+        if seen is None or (now_mono - seen) > SENSOR_DARK_READ_GRACE_S:
+            return
+        battery_w = float(readings.battery_power or 0.0)
+        grid_w = float(readings.grid_power or 0.0)
+        charge_w, discharge_w = max(0.0, battery_w), max(0.0, -battery_w)
+        export_w, import_w = max(0.0, grid_w), max(0.0, -grid_w)
+        unexplained_w = (charge_w + export_w) - (import_w + discharge_w)
+        if unexplained_w <= SOLAR_ZERO_REFUTED_W:
+            return                      # a real zero: night, or fully explained
+        log_on_change(
+            _LOGGER, "implausible:solar_zero", logging.WARNING,
+            "Solar reads 0 W while %.0f W leaves the house with no other "
+            "source (battery charge %.0f W + export %.0f W − import %.0f W "
+            "− discharge %.0f W) — treated as a dark read, not a "
+            "measurement (#988)",
+            unexplained_w, charge_w, export_w, import_w, discharge_w,
+        )
+        self._solar_zero_refuted = True
+        self._input_dark["solar"] = self._input_dark.get("solar", 0) + 1
+        self._input_reads["solar"] = max(0, self._input_reads.get("solar", 0) - 1)
+
+    def _hold_battery_soc(self, readings: PowerReadings) -> None:
+        """The SOC sensor is dark this cycle: hold the last value read so the
+        charging logic never sees 0 % during a sensor gap.
+
+        (#875) Before the first successful read there is nothing to hold.
+        The field stays 0.0 for the callers that need a number, and
+        ``battery_soc_known`` says it is not a measurement — the charger
+        path then treats the pack as UNKNOWN (neither a source nor a
+        blocker) instead of as empty, which is what a held 0.0 used to
+        say for up to a few minutes after every restart."""
+        readings.battery_soc_unavailable = True
+        if self._last_valid_soc is None:
+            readings.battery_soc_known = False
+            return
+        readings.battery_soc = self._last_valid_soc
+        # (#934) The flag says "dark this cycle"; it cannot say for how
+        # long. A limit-type consumer (the #820 charge cap) holds through a
+        # blink and lets go only past the dark-read grace — so the held
+        # value carries its age, counted from the last ACCEPTED read.
+        # Rounded UP, so "age <= grace" here is the entity layer's own
+        # float comparison and not a second boundary one second wide.
+        if self._last_valid_soc_mono is not None:
+            readings.battery_soc_stale_s = max(0, math.ceil(
+                float(self._now_monotonic()) - self._last_valid_soc_mono))
 
     def _read_battery_temperature(self, readings) -> None:
         """(#564) Fill battery_temperature honestly.
@@ -2399,20 +2980,28 @@ class SensorReader:
         return delta_a, delta_b
 
     def _sum_counter_states(self, entity_ids: list) -> Optional[float]:
-        """Sum energy-counter states; ``None`` when any is unreadable.
+        """Sum energy-counter states IN kWh; ``None`` when any is unreadable.
 
         Partial sums are worse than no judgement — one missing tariff
         counter mid-cycle would look like a counter reset.
+
+        (#947 review) The unit conversion is not cosmetic. This used to sum
+        ``float(state.state)`` raw while the POWER side was normalised to watts
+        by ``_read_sensor``, so a Wh counter (real hardware — #551) put the two
+        sides 1000x apart. For the sign voter that only compares DIRECTIONS,
+        scale never mattered; the #947 corroborator compares MAGNITUDES, and a
+        Wh install would have failed every window forever and been left
+        reporting no grid power — a regression on an install that worked.
         """
         total = 0.0
         for eid in entity_ids:
             state = self.hass.states.get(eid)
             if not state or state.state in ("unknown", "unavailable"):
                 return None
-            try:
-                total += float(state.state)
-            except (ValueError, TypeError):
+            kwh = energy_state_to_kwh(state, default=None)
+            if kwh is None:
                 return None
+            total += kwh
         return total
 
     def _audit_split_pair(
@@ -2785,6 +3374,85 @@ class SensorReader:
                 return True
         return False
 
+    def _declared_split_grid_power(self, ed) -> tuple[Optional[str], Optional[str]]:
+        """(#947) The grid meters this install's integrations DECLARE.
+
+        The #915 roster reads each integration's OWN repository and records
+        what it calls things — ``growatt_modbus`` declares
+        ``grid_import_power``/``grid_export_power``, ``senec`` declares
+        ``grid_imported_power``/``grid_exported_power``. That is evidence of a
+        different kind from a substring of an entity_id: it is the integration
+        author's semantic label, matched on ``translation_key`` (or a
+        ``unique_id`` segment), never on the entity_id the user renamed.
+
+        A forecast integration declares no grid role at all, so the #947
+        collision — ``power_production`` matching a solar forecast's
+        ``power_production_now`` — cannot arise on this tier. It is a narrow
+        tier on purpose: only a minority of roster rows carry vocabulary, and
+        everything it does not answer falls through to the name patterns,
+        which must still earn their place against the counters.
+
+        Returns ``(import_entity, export_entity, on_grid_device)``. The third
+        value is the DEVICE question, kept separate from the naming one:
+        declaring a grid meter says the entity measures a grid, not that it
+        measures THIS install's grid connection. A Senec battery retrofitted
+        behind an existing DSMR meter declares both halves and sits on another
+        device from the Energy Dashboard's counters, and its grid-tie point is
+        not the utility meter's. So a declared pick that cannot show device
+        affinity is still a strong CANDIDATE and still goes through the
+        corroboration window (#947 review — it was trusted unconditionally,
+        which reopened the very risk this issue closed, one tier up).
+        """
+        try:
+            from ..hardware_detection import (
+                roster_role_vocab as _vocab,
+                _entry_matches_declared as _matches,
+            )
+            registry = er.async_get(self.hass)
+        except Exception as e:  # noqa: BLE001 — no roster, no verdict
+            _LOGGER.debug("Declared grid-meter lookup unavailable: %s (#947)", e)
+            return None, None
+
+        wanted = {"grid_import_power": None, "grid_export_power": None}
+        grid_device_id = self._get_device_for_entity(
+            getattr(ed, "grid_import_energy", None))
+        # Deterministic order (#485 H6): the registry's iteration order is not
+        # contractual, and first-match-wins over an unsorted scan could swap
+        # which sensor plays import vs export between restarts.
+        entries = sorted(
+            (e for e in registry.entities.values()
+             if str(getattr(e, "entity_id", "")).startswith("sensor.")),
+            key=lambda e: e.entity_id,
+        )
+        best: dict[str, tuple] = {}
+        for entry in entries:
+            platform = str(getattr(entry, "platform", "") or "")
+            if not platform:
+                continue
+            for role in wanted:
+                body = _vocab(platform, role)
+                if not body["keys"]:
+                    continue
+                if _matches(entry, body["keys"], body["exact_only"]) is None:
+                    continue
+                # A declared entity on the grid counter's own device outranks
+                # a declared entity elsewhere — same brand, two inverters.
+                same_device = bool(
+                    grid_device_id
+                    and getattr(entry, "device_id", None) == grid_device_id)
+                rank = (1 if same_device else 0,)
+                if role not in best or rank > best[role][0]:
+                    best[role] = (rank, entry.entity_id)
+        imp = best.get("grid_import_power")
+        exp = best.get("grid_export_power")
+        # Affinity is claimed only when EVERY side SEM resolved sits on the
+        # grid counter's device — a mixed pair is not evidence about the pair.
+        sides = [x for x in (imp, exp) if x]
+        on_grid_device = bool(sides) and all(x[0][0] == 1 for x in sides)
+        return (imp[1] if imp else None,
+                exp[1] if exp else None,
+                on_grid_device)
+
     def _discover_split_grid_power(self, ed) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Discover separate import/export power sensors for setups without combined grid power.
 
@@ -2804,6 +3472,25 @@ class SensorReader:
         "same-device" if either side came from a device matching the grid energy
         sensor, "any-device" if matched by pattern only, or None if nothing matched.
         """
+        # (#947) TIER 1 — what the install's own integrations DECLARE. This
+        # runs before any name matching, because a declared role is evidence
+        # and a substring is not. A declared pair needs no corroboration.
+        declared_import, declared_export, on_grid_device = (
+            self._declared_split_grid_power(ed))
+        if declared_import or declared_export:
+            # "declared" is the trusted tier; "declared-elsewhere" names the
+            # same evidence WITHOUT device affinity, and corroborates.
+            conf = "declared" if on_grid_device else "declared-elsewhere"
+            result_key = (declared_import, declared_export, conf)
+            if result_key != self._last_split_grid_log:
+                self._last_split_grid_log = result_key
+                _LOGGER.info(
+                    "Grid power meters DECLARED by their integrations "
+                    "(%s): import=%s, export=%s (#947)",
+                    conf, declared_import, declared_export,
+                )
+            return declared_import, declared_export, conf
+
         import_patterns = IMPORT_PATTERNS
         export_patterns = EXPORT_PATTERNS
 
@@ -2829,6 +3516,16 @@ class SensorReader:
                 attrs = state.attributes
                 # Must be a power sensor
                 if attrs.get("device_class") != "power" and attrs.get("unit_of_measurement") not in ("W", "kW"):
+                    continue
+                # (#911) …and a MEASUREMENT. A forecast or estimate carries
+                # ``device_class: power`` and a unit but no ``state_class`` —
+                # verified on the reporter's install, where forecast_solar's
+                # "+12 h production" was adopted as the grid export meter on
+                # the substring ``power_production``. A meter always says
+                # ``measurement``.
+                if attrs.get("state_class") != "measurement":
+                    continue
+                if self._looks_like_a_forecast(state.entity_id):
                     continue
 
                 is_import = any(p in eid for p in import_patterns)
@@ -2905,16 +3602,313 @@ class SensorReader:
         Called from __init__.py when a new sensor appears or after HA has fully
         started. Same-device locks are wiped along with any-device picks.
         """
+        # (#911) A dropped pick takes its ``sensor_stale`` Repair with it,
+        # and a guess that is being redone is no longer a guess to report.
+        self._forget_split_grid_picks(self._split_grid_discovery, keep=(None, None))
+        _ri.clear_split_grid_guessed(self.hass)
         self._split_grid_discovery = {
             "import": None,
             "export": None,
             "confidence": None,
             "warned": self._split_grid_discovery.get("warned", False),
         }
+        # (#947) A rediscovery invalidates the proof with the picks it judged.
+        self._split_grid_proof = _fresh_grid_proof()
+        self._split_grid_unproven_said = None
         # Re-allow the discovery-exception warning after a rediscovery (#259) — circumstances
         # have changed (e.g. a new sensor appeared), so a fresh failure is worth surfacing.
         self._split_grid_discovery_warned = False
         self._last_split_grid_log = None  # next discovery logs at INFO again
+
+    _FORECAST_PLATFORMS = frozenset({
+        "forecast_solar", "open_meteo_solar_forecast", "solcast_solar",
+    })
+    _FORECAST_NAME_MARKERS = ("forecast", "_next_", "estimate", "predict")
+
+    def _looks_like_a_forecast(self, entity_id: str) -> bool:
+        """(#911) A forecast/estimate entity is never a grid meter — by
+        registry platform where the registry answers, by name otherwise."""
+        eid = (entity_id or "").lower()
+        if any(m in eid for m in self._FORECAST_NAME_MARKERS):
+            return True
+        try:
+            entry = er.async_get(self.hass).async_get(entity_id)
+            platform = getattr(entry, "platform", None) if entry else None
+            return isinstance(platform, str) and platform in self._FORECAST_PLATFORMS
+        except Exception:  # noqa: BLE001 — no registry, no verdict
+            return False
+
+    def _grid_counter_entities(self, ed) -> "tuple[list, list]":
+        """The grid import / export counter entity lists, tariff splits and
+        all (#485 H4). Same resolution the sign voter uses."""
+        def _lst(single, plural):
+            v = getattr(ed, plural, None)
+            if isinstance(v, (list, tuple)) and v:
+                return list(v)
+            one = getattr(ed, single, None)
+            return [one] if one else []
+        return (_lst("grid_import_energy", "grid_import_energy_list"),
+                _lst("grid_export_energy", "grid_export_energy_list"))
+
+    def _corroborate_split_grid(self, disc: dict, ed, import_w, export_w) -> Optional[bool]:
+        """(#947) Does this NAME-MATCHED pair actually measure the grid?
+
+        Integrates the candidate power over a window and compares it against
+        the grid energy counters' own movement over the same window. Returns
+        ``True`` (agrees — it is the meter), ``False`` (it is not) or ``None``
+        (not enough has happened yet to say). ``None`` is a verdict of its
+        own: the caller declines to steer rather than guessing.
+
+        The window restarts whenever the picks change, on a counter reset, and
+        once it ages past ``GRID_PROOF_MAX_S`` without meeting the energy
+        floor — so a quiet day never strands the pair unjudged.
+        """
+        proof = self._split_grid_proof
+        pair = (disc.get("import"), disc.get("export"))
+        if proof.get("pair") != pair:
+            self._split_grid_proof = proof = _fresh_grid_proof()
+            proof["pair"] = pair
+
+        imports, exports = self._grid_counter_entities(ed)
+        if not imports and not exports:
+            return None                      # nothing to corroborate against
+        now = time.monotonic()
+        import_val = self._sum_counter_states(imports) if imports else 0.0
+        export_val = self._sum_counter_states(exports) if exports else 0.0
+        if import_val is None or export_val is None:
+            return proof["verdict"]          # a counter is unreadable this cycle
+
+        if self._sign_vote_warmup > 0:
+            # (#947 review, open item closed) While HA's recorder is still
+            # replaying, counter states arrive in bursts that are not elapsed
+            # time. The sign voter already sits those cycles out and keeps its
+            # baselines fresh; the corroborator compares MAGNITUDES, so a
+            # replayed jump against a real-time integral would convict a good
+            # meter. Same gate, same reason: keep the baseline current, score
+            # nothing.
+            proof["started"] = None
+            proof["import_base"] = import_val
+            proof["export_base"] = export_val
+            proof["step_import"] = None
+            proof["step_export"] = None
+            return proof["verdict"]
+
+        if proof["started"] is None:
+            proof["started"] = now
+            proof["last_sample"] = now
+            proof["import_base"] = import_val
+            proof["export_base"] = export_val
+            # The verdict a previous window reached carries into this one —
+            # opening a fresh window must not un-steer a proven meter for a
+            # cycle, nor re-trust a rejected one.
+            return proof["verdict"]
+
+        # Integrate the candidates over the real elapsed time, not the nominal
+        # cycle — a slow or skipped cycle must not shrink the integral.
+        dt_s = max(0.0, now - (proof["last_sample"] or now))
+        proof["last_sample"] = now
+        proof["import_wh"] += max(0.0, float(import_w or 0.0)) * dt_s / 3600.0
+        proof["export_wh"] += max(0.0, float(export_w or 0.0)) * dt_s / 3600.0
+
+        # (#947 review) Judge each COUNTER MOVE as it happens. Two reasons:
+        # the sub-load discriminator needs the per-move share, and aligning the
+        # comparison to counter movements removes the edge error that forced a
+        # loose tolerance — a cloud counter several minutes stale at an
+        # arbitrary window end makes the integral and the delta cover different
+        # intervals, which is not the candidate's fault and must not count
+        # against it.
+        self._score_counter_move(proof, import_val, export_val)
+
+        deltas = self._counter_deltas(
+            proof["import_base"], proof["export_base"], import_val, export_val)
+        if deltas is None:
+            # Counter reset mid-window (#476) — the comparison is garbage.
+            self._restart_grid_proof(pair, proof)
+            return proof["verdict"]
+        counter_import_kwh, counter_export_kwh = deltas
+
+        age = now - proof["started"]
+        observed = max(proof["import_wh"], proof["export_wh"]) / 1000.0
+        counted = max(counter_import_kwh, counter_export_kwh)
+        if max(observed, counted) < GRID_PROOF_MIN_KWH:
+            if age >= GRID_PROOF_MAX_S:
+                # Nothing has flowed for two hours. Re-baseline rather than
+                # judge a pair on noise, and keep any verdict already reached.
+                self._restart_grid_proof(pair, proof)
+            return proof["verdict"]
+        if age < GRID_PROOF_MIN_S:
+            return proof["verdict"]
+
+        agrees = (
+            proof["contradictions"] == 0
+            and self._sides_agree(
+                proof["import_wh"] / 1000.0, counter_import_kwh, disc.get("import"))
+            and self._sides_agree(
+                proof["export_wh"] / 1000.0, counter_export_kwh, disc.get("export"))
+        )
+        self._report_grid_proof(disc, proof, agrees, counter_import_kwh,
+                                counter_export_kwh)
+        # Next window starts clean: a meter that agreed once must keep
+        # agreeing, and one that did not gets another chance on new evidence.
+        self._restart_grid_proof(pair, proof, verdict=agrees)
+        return agrees
+
+    def _restart_grid_proof(self, pair, prev: dict, *, verdict=_UNSET) -> None:
+        """Open a fresh window for pair, carrying what must survive one.
+
+        The VERDICT carries so a new window never un-steers a proven meter
+        for a cycle, and reported carries so the verdict is said once and
+        not re-logged every quarter of an hour. Forgetting the second was a
+        bug in the first draft: the reporter's warn-once guard lived on the
+        object that was thrown away right after it was set.
+        """
+        fresh = _fresh_grid_proof()
+        fresh["pair"] = pair
+        fresh["verdict"] = prev.get("verdict") if verdict is _UNSET else verdict
+        fresh["reported"] = prev.get("reported")
+        self._split_grid_proof = fresh
+
+    def _score_counter_move(self, proof: dict, import_val: float, export_val: float) -> None:
+        """Score the candidate against each COUNTER MOVE, as it happens.
+
+        A move is the only moment at which the counter and the integral are
+        known to cover the same interval. When one happens, the candidate must
+        account for at least ``GRID_PROOF_MIN_SHARE`` of it — a real meter
+        always does, because it is measuring the same electricity. A sub-load
+        does not: it switches off while the house keeps importing, and that
+        single moment disqualifies it however well the totals happen to line up.
+        """
+        for side, val in (("import", import_val), ("export", export_val)):
+            step = proof[f"step_{side}"]
+            wh_now = proof[f"{side}_wh"]
+            if step is None:
+                proof[f"step_{side}"] = val
+                proof[f"step_wh_{side}"] = wh_now
+                continue
+            moved = val - step
+            if moved < 0:
+                # A reset; the caller re-baselines the whole window.
+                proof[f"step_{side}"] = val
+                proof[f"step_wh_{side}"] = wh_now
+                continue
+            if moved < GRID_PROOF_MIN_KWH:
+                continue          # not a move worth judging yet
+            seen_kwh = (wh_now - proof[f"step_wh_{side}"]) / 1000.0
+            if seen_kwh < GRID_PROOF_MIN_SHARE * moved:
+                proof["contradictions"] += 1
+                _LOGGER.debug(
+                    "Split-grid candidate accounted for only %.3f of the "
+                    "%.3f kWh the %s counter moved — not this meter (#947)",
+                    seen_kwh, moved, side,
+                )
+            proof[f"step_{side}"] = val
+            proof[f"step_wh_{side}"] = wh_now
+
+    @staticmethod
+    def _sides_agree(observed_kwh: float, counted_kwh: float, entity) -> bool:
+        """One side of the pair: does the integrated candidate match what its
+        counter counted? A side with NO pick is vacuously fine — its zero is
+        an absence, not a contradicted measurement."""
+        if entity is None:
+            return True
+        scale = max(observed_kwh, counted_kwh)
+        if scale < GRID_PROOF_MIN_KWH:
+            return True                      # neither side moved: no dispute
+        return abs(observed_kwh - counted_kwh) <= GRID_PROOF_TOLERANCE * scale
+
+    def _report_grid_proof(self, disc, proof, agrees, counted_import, counted_export) -> None:
+        """Say what the counters answered — once per verdict change.
+
+        A rejection is the interesting line and it names the numbers, because
+        the alternative (#947 as filed) was a square wave of phantom import
+        that looked exactly like a measurement in the history graph.
+        """
+        if proof.get("reported") is agrees:
+            return
+        proof["reported"] = agrees
+        if agrees:
+            _LOGGER.info(
+                "Split-grid meters CORROBORATED by the energy counters "
+                "(import=%s, export=%s) — SEM will steer on them (#947)",
+                disc.get("import"), disc.get("export"),
+            )
+            _ri.clear_split_grid_guessed(self.hass)
+            return
+        _LOGGER.warning(
+            "Split-grid meters REJECTED: the name-matched sensors do not "
+            "track the grid energy counters. import=%s measured %.3f kWh "
+            "while the import counter moved %.3f kWh; export=%s measured "
+            "%.3f kWh while the export counter moved %.3f kWh. SEM reports NO "
+            "grid power rather than a wrong one — set "
+            "grid_import_power_entity / grid_export_power_entity to name the "
+            "real meters. (#947)",
+            disc.get("import"), proof["import_wh"] / 1000.0, counted_import,
+            disc.get("export"), proof["export_wh"] / 1000.0, counted_export,
+        )
+        _ri.raise_split_grid_rejected(
+            self.hass, import_entity=disc.get("import"),
+            export_entity=disc.get("export"),
+        )
+
+    def _report_unproven_grid(self, disc: dict, verdict) -> None:
+        """(#947) SEM has candidate grid meters it has not proven. Say so
+        ONCE per state, and leave ``grid_power`` at 0.
+
+        The distinction matters to the reader of the log: ``None`` is "still
+        watching", ``False`` is "asked and answered, these are not the
+        meters". Reporting them as one line would fold the failure to answer
+        into the negative — the exact confusion #925 was about.
+        """
+        state = "rejected" if verdict is False else "unproven"
+        if self._split_grid_unproven_said == (disc.get("import"), disc.get("export"), state):
+            return
+        self._split_grid_unproven_said = (disc.get("import"), disc.get("export"), state)
+        if verdict is False:
+            return          # _report_grid_proof already said it, with numbers
+        _LOGGER.info(
+            "Split-grid meters matched by NAME only (import=%s, export=%s) — "
+            "SEM reads 0 grid power until they agree with the grid energy "
+            "counters. (#947)",
+            disc.get("import"), disc.get("export"),
+        )
+
+    def _report_split_grid_confidence(self, disc: dict) -> None:
+        """(#911) An ``any-device`` adoption is a GUESS — pattern-matched
+        entity names with no device evidence — and a guess presented as a
+        measurement is worse than no number: the reporter's install read
+        10 W of import while the house drew 1466 W, for weeks, and the pick
+        appeared only in the diagnostics download. Say it once per pair, on
+        the log and as a persistent Repair with the next step; a same-device
+        pair retires it."""
+        pair = (disc.get("import"), disc.get("export"))
+        if disc.get("confidence") == "any-device" and any(pair):
+            if disc.get("guess_reported") != pair:
+                disc["guess_reported"] = pair
+                _LOGGER.warning(
+                    "Split-grid meters GUESSED by name (any-device, no device "
+                    "evidence): import=%s, export=%s. If these are not your grid "
+                    "meters, SEM is steering on a wrong number — set "
+                    "grid_import_power_entity / grid_export_power_entity to lock "
+                    "the real pair. (#911)",
+                    pair[0], pair[1],
+                )
+                _ri.raise_split_grid_guessed(
+                    self.hass, import_entity=pair[0], export_entity=pair[1],
+                )
+        elif disc.get("guess_reported"):
+            disc["guess_reported"] = None
+            _ri.clear_split_grid_guessed(self.hass)
+        elif disc.get("confidence") == "same-device":
+            _ri.clear_split_grid_guessed(self.hass)
+
+    def _forget_split_grid_picks(self, disc: dict, *, keep) -> None:
+        """(#911) Clear the ``sensor_stale`` Repair of any pick that is
+        being dropped. The freshness check only runs for entities SEM still
+        reads, so a Repair filed against a dropped pick used to live in the
+        issue registry forever."""
+        for old in (disc.get("import"), disc.get("export")):
+            if old and old not in keep:
+                _ri.clear_sensor_stale(self.hass, old)
 
     def _get_device_for_entity(self, entity_id: str) -> Optional[str]:
         """Get device_id for an entity from the entity registry."""
@@ -3028,7 +4022,44 @@ class SensorReader:
                 )
 
         # Grid power (hardware convention: negative=import, positive=export)
-        if self.config.grid_power_sensor:
+        #
+        # (#915) The SPLIT PAIR first. Some brands cannot give any other
+        # answer — Growatt (pattern E), Anker's official integration and
+        # Senec publish import and export as separate positive magnitudes
+        # and no combined sensor at all. The Energy-Dashboard reader has
+        # honoured these two keys since #461; this path did not, so an
+        # install that never had a dashboard could be offered them by the
+        # config flow and the Detected-hardware card and then read a flat
+        # 0 W grid forever. Same semantics as there: grid = export − import,
+        # both sides positive, and the convention is fixed BY DECLARATION so
+        # no sign detection is needed (the solar voter computes the same
+        # sign and therefore never flips it).
+        manual_import = self._raw_config.get("grid_import_power_entity")
+        manual_export = self._raw_config.get("grid_export_power_entity")
+        if manual_import and manual_export:
+            import_w = self._read_sensor(manual_import, "grid_import")
+            export_w = self._read_sensor(manual_export, "grid_export")
+            readings.grid_power = export_w - import_w
+            self._grid_sign_detected = True
+            self._audit_split_pair(
+                "grid", "Grid (manual import/export override)",
+                import_w, manual_import, export_w, manual_export,
+            )
+        elif manual_import or manual_export:
+            # (06.09 audit) HALF a pair is a meter that only ever imports (or
+            # exports): reading it as the whole grid is a silent, permanent
+            # sign error. Say so once and fall through to the combined sensor.
+            if not getattr(self, "_half_pair_warned", False):
+                self._half_pair_warned = True
+                _LOGGER.warning(
+                    "Only one of grid_import_power_entity / "
+                    "grid_export_power_entity is set (%s / %s) — a split pair "
+                    "needs both; ignoring it and using the combined grid sensor",
+                    manual_import, manual_export)
+            if self.config.grid_power_sensor:
+                readings.grid_power = self._read_sensor(
+                    self.config.grid_power_sensor, "grid")
+        elif self.config.grid_power_sensor:
             readings.grid_power = self._read_sensor(
                 self.config.grid_power_sensor, "grid"
             )
@@ -3039,17 +4070,16 @@ class SensorReader:
                 self.config.battery_power_sensor, "battery"
             )
 
-        # Battery SOC — use allow_none to distinguish 0% from unavailable
+        # Battery SOC — use allow_none to distinguish 0% from unavailable.
+        # (#875) No sensor configured is the same "nothing measured" as a
+        # dark one — the Energy-Dashboard path already says so; this path
+        # published 0.0 as a measurement.
+        soc_val = None
         if self.config.battery_soc_sensor:
             soc_val = self._read_sensor(
                 self.config.battery_soc_sensor, "battery_soc", allow_none=True,
             )
-            if soc_val is not None:
-                readings.battery_soc = soc_val
-                self._last_valid_soc = soc_val
-            else:
-                readings.battery_soc = self._last_valid_soc
-                readings.battery_soc_unavailable = True
+        self._accept_battery_soc(readings, soc_val)
 
         # Battery temperature (#564: configured sensor, else device sibling)
         self._read_battery_temperature(readings)
@@ -3065,7 +4095,8 @@ class SensorReader:
             pass  # nested per-charger sensors handled the read (#642 helper)
         elif self.config.ev_power_sensor:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
-                self._read_sensor(self.config.ev_power_sensor, "ev")
+                self._read_sensor(self.config.ev_power_sensor, "ev"),
+                charging=self._fleet_charging_status(), readings=readings,
             ))
 
         # EV connection status — per-charger OR'd for global (#193), plus
@@ -3113,8 +4144,12 @@ class SensorReader:
             if cps:
                 # Smooth per charger so the per-charger dict stays
                 # consistent with the fleet sum (both blip-filtered).
+                chrg = charger_cfg.get("ev_charging_sensor")
                 cw = self._smooth_ev_power(
                     self._read_sensor(cps, "ev"), key=cid or cps,
+                    charging=(self._read_binary_sensor(chrg, "ev_charging")
+                              if chrg else None),
+                    readings=readings,
                 )
                 total_ev += cw
                 if cid:
@@ -3126,8 +4161,22 @@ class SensorReader:
         readings.ev_power = FleetEvPower(total_ev)
         return True
 
-    def _smooth_ev_power(self, raw: float, key: str = "_fleet") -> float:
-        """Median-of-3 filter for EV power (2026-07-10 flap fix).
+    def _fleet_charging_status(self) -> Optional[bool]:
+        """(#910) The fleet-level charging status for the blink hold, or
+        None when no status sensor is configured (then the hold never
+        engages — the median alone stands, exactly as before)."""
+        ent = self.config.ev_charging_sensor
+        if not ent:
+            return None
+        return self._read_binary_sensor(ent, "ev_charging")
+
+    def _smooth_ev_power(
+        self, raw: float, key: str = "_fleet", *,
+        charging: Optional[bool] = None,
+        readings: Optional[PowerReadings] = None,
+    ) -> float:
+        """Median-of-3 filter for EV power (2026-07-10 flap fix), plus the
+        #910 blink hold on top of it.
 
         UDP-polled chargers (KEBA P30) blip to ~0 for a single cycle while
         the car is really drawing. Left raw, that blip corrupts the home
@@ -3146,9 +4195,44 @@ class SensorReader:
         if hist is None:
             hist = self._ev_power_hist[key] = deque(maxlen=3)
         hist.append(float(raw))
-        if len(hist) < 3:
-            return float(raw)
-        return sorted(hist)[1]
+        med = float(raw) if len(hist) < 3 else sorted(hist)[1]
+        return self._hold_ev_blink(med, key, charging, readings)
+
+    def _hold_ev_blink(
+        self, value: float, key: str, charging: Optional[bool],
+        readings: Optional[PowerReadings],
+    ) -> float:
+        """(#910) A read that collapses below ``EV_POWER_BLINK_RATIO`` of
+        the last accepted value while the charger's own status still says
+        charging is a dark read, not a measurement (PROD 03.09: the KEBA
+        reported 0.13 kW at 10 A for one report cycle, status ``on``, and
+        the median-of-3 let it through because the blink spanned two SEM
+        reads). Hold the accepted value for at most
+        ``EV_POWER_BLINK_HOLD_CYCLES`` cycles and mark the cycle on the
+        readings. The hold lives on the STATUS: a real stop flips it off and
+        the very next read passes unheld; no status sensor → no hold.
+        """
+        prev = self._ev_power_last.get(key)
+        held = self._ev_power_hold.get(key, 0)
+        if (
+            charging is True
+            and prev is not None
+            and prev >= EV_POWER_BLINK_MIN_W
+            and value < prev * EV_POWER_BLINK_RATIO
+            and held < EV_POWER_BLINK_HOLD_CYCLES
+        ):
+            self._ev_power_hold[key] = held + 1
+            if readings is not None:
+                readings.ev_power_held = True
+            _LOGGER.debug(
+                "EV power %s: read %.0f W while the charger says charging "
+                "— blink, holding %.0f W (cycle %d/%d) (#910)",
+                key, value, prev, held + 1, EV_POWER_BLINK_HOLD_CYCLES,
+            )
+            return prev
+        self._ev_power_hold[key] = 0
+        self._ev_power_last[key] = value
+        return value
 
     def _read_sensor(
         self, entity_id: Optional[str], name: str, *, allow_none: bool = False,
@@ -3240,19 +4324,24 @@ class SensorReader:
                     "Sensor %s (%s) recovered — now reading %.1f",
                     entity_id, name, value,
                 )
-                # (HA Repairs) Reset the outage clock and clear any
-                # Repair issue we may have filed for this sensor.
+                # (HA Repairs) Reset the outage clock.
                 self._sensor_unavailable_since.pop(entity_id, None)
-                if entity_id in self._sensor_repair_raised:
-                    self._sensor_repair_raised.discard(entity_id)
-                    from . import repair_issues as _ri
-                    _ri.clear_sensor_unavailable(self.hass, entity_id)
+            # (HA Repairs) Clear the Repair we filed for this outage — or
+            # (#933) one a predecessor filed: the Repair is persistent and our
+            # sets are not, so the first live read of this reader's life
+            # clears it once, as a recovery does.
+            if (entity_id in self._sensor_repair_raised
+                    or entity_id not in self._sensor_repair_reconciled):
+                self._sensor_repair_raised.discard(entity_id)
+                self._sensor_repair_reconciled.add(entity_id)
+                from . import repair_issues as _ri
+                _ri.clear_sensor_unavailable(self.hass, entity_id)
 
             # W3 — observe-only frozen-sensor detection (does NOT alter value).
             # Wrapped so the audit can NEVER corrupt the read: an exception here
             # would otherwise hit the outer except → a wrong 0.0.
             try:
-                self._audit_sensor_freshness(entity_id, name, state)
+                self._audit_sensor_freshness(entity_id, name, state, value)
             except Exception:  # noqa: BLE001 — freshness must never break a read
                 pass
             return value
@@ -3260,7 +4349,47 @@ class SensorReader:
             _LOGGER.debug(f"Could not parse {entity_id} ({name}): {e}")
             return None if allow_none else 0.0
 
-    def _audit_sensor_freshness(self, entity_id: str, name: str, state) -> None:
+    # (#851) A solar reading at or below this (W) counts as "producing
+    # nothing". Generous enough for an inverter idling on standby draw,
+    # far below anything that could be mistaken for real production.
+    _SOLAR_ASLEEP_W = 25.0
+
+    def _stillness_is_expected(self, name: str, value: float | None) -> bool:
+        """True when the sensor's own domain explains why it stopped reporting.
+
+        #851: RienduPre's Growatt raised the W3 freeze warning + a Repair for
+        three PV sensors every single night. The detector is right that they
+        stopped reporting — a cloud/inverter integration that powers down at
+        dusk does not poll — but at night that is the correct behaviour, and a
+        warning that fires every night for a healthy system trains the user to
+        ignore the one that matters.
+
+        This is deliberately a PREDICATE and not a user-facing exclusion list:
+        SEM already knows it is night, so it should decide this for itself
+        rather than ask. It stays narrow on purpose — all three conditions
+        must hold, so everything the check exists to catch still warns:
+
+        * a NON-solar sensor (the meter and battery keep reporting at night);
+        * solar frozen in daylight (the real modbus/cloud stall);
+        * solar frozen at a non-zero value (a stuck reading, not an inverter
+          asleep — an inverter that is off reads 0, not 4 kW).
+
+        Unknown sun state is never treated as night: missing information must
+        not silence a warning.
+        """
+        if name != "solar":
+            return False
+        if value is None or abs(float(value)) > self._SOLAR_ASLEEP_W:
+            return False
+        try:
+            sun = self.hass.states.get("sun.sun")
+        except Exception:  # noqa: BLE001 — never break a read over the sun
+            return False
+        return sun is not None and getattr(sun, "state", None) == "below_horizon"
+
+    def _audit_sensor_freshness(
+        self, entity_id: str, name: str, state, value: float | None = None,
+    ) -> None:
         """W3 — warn ONCE when a FAST power sensor is available but frozen.
 
         Only ``solar``/``grid``/``battery`` power sensors are checked (they
@@ -3300,7 +4429,30 @@ class SensorReader:
         # TypeError would be swallowed by _read_sensor's except → wrong 0.0.
         if not isinstance(age_s, (int, float)) or isinstance(age_s, bool):
             return
-        if age_s >= self._STALE_THRESHOLD_S:
+        # (#933) the report stamp this reader saw first, for the reconcile below
+        first_report = self._stale_first_report.setdefault(entity_id, last_seen)
+        rescued = False                 # (#933) set by the #912 live-source rule
+        stale = age_s >= self._STALE_THRESHOLD_S
+        if stale and self._stillness_is_expected(name, value):
+            # (#851) A stall the sensor's own domain explains is not a fault.
+            return
+        if stale and self._source_is_alive(entity_id):
+            # (#912) The reading's SOURCE is still alive — so this entity is
+            # FLAT, not frozen. For a directly-polled sensor that means a
+            # sibling of its own config entry reported within the threshold
+            # (foxess_modbus and any integration that skips identical writes
+            # never advances ``last_reported`` while a value holds still, and
+            # grid_export sits at 0 all afternoon while the house imports).
+            # For a DERIVED sensor (bekovan's template negating a Shelly plug,
+            # 2026-09-06) it means a SOURCE entity it draws from is alive: a
+            # template writes only when its value changes and is the sole
+            # entity of its helper config entry, so it has no sibling to vouch
+            # and its liveness is its source's. Falls through to the recovery
+            # branch so a Repair raised during a real stall clears once the
+            # source reports again.
+            stale = False
+            rescued = True
+        if stale:
             if entity_id not in self._frozen_sensors:
                 self._frozen_sensors.add(entity_id)
                 mins = int(age_s // 60)
@@ -3321,11 +4473,361 @@ class SensorReader:
         elif entity_id in self._frozen_sensors:
             # Fresh again — re-arm the warn-once, clear the Repair, note recovery.
             self._frozen_sensors.discard(entity_id)
+            self._stale_reconciled.add(entity_id)
             from . import repair_issues as _ri
             _ri.clear_sensor_stale(self.hass, entity_id)
             _LOGGER.info(
                 "Sensor %s (%s) is updating again (was frozen).", entity_id, name,
             )
+        elif (entity_id not in self._stale_reconciled
+              and (rescued or last_seen > first_report)):
+            # (#933) A Repair a predecessor raised: this reader has now SEEN
+            # the entity report — or its source report while it holds still
+            # (#912) — so the stall it named is over. Once.
+            self._stale_reconciled.add(entity_id)
+            from . import repair_issues as _ri
+            _ri.clear_sensor_stale(self.hass, entity_id)
+
+    # (#912) Helper/derived platforms whose entities write only when their
+    # rendered value changes — a Template inverting a Shelly plug, a
+    # utility_meter, a Riemann integral, a min/max group. They have no poll
+    # loop, so a flat ``last_reported`` is expected and is NEVER a stall; and a
+    # UI helper is the ONLY entity of its config entry, so the sibling rule can
+    # never vouch for it. Their liveness is their SOURCE's liveness. Over-
+    # inclusion is safe (a genuine derived sensor is always followed to its
+    # source, never fail-closed on its own flat value); under-inclusion only
+    # leaves a false positive, so the set is generous.
+    _DERIVED_PLATFORMS = frozenset({
+        "template", "utility_meter", "integration", "derivative",
+        "min_max", "group", "filter", "statistics", "threshold",
+        "trend", "history_stats", "compensation", "mold_indicator",
+        "average", "combine",
+    })
+    # Quoted / function-call form: ``states('sensor.x')``, a ``source`` key.
+    _ENTITY_ID_RE = re.compile(r"\b[a-z_][a-z0-9_]*\.[a-z0-9_]+\b")
+    # Object form: ``states.sensor.x.state`` — the plain regex would split this
+    # into ``states.sensor`` + ``x.state`` and resolve neither; capture the real
+    # ``sensor.x`` from the middle two segments (a very common template style).
+    _STATES_OBJ_RE = re.compile(r"\bstates\.([a-z_][a-z0-9_]*)\.([a-z0-9_]+)")
+    # (#912) The attribute keys under which HA's own helpers publish what they
+    # derive from: ``filter``/``group`` → ``entity_id``,
+    # ``derivative``/``integration``/``compensation`` → ``source``, ``min_max``
+    # → the winning entity (only for min/max/last; a mean publishes none).
+    # KEYS, not a scan of every attribute value: a Template's attributes are
+    # written by the USER, so an attribute that merely NAMES another entity
+    # ("mirrors sensor.nordpool_…") would be adopted as the thing that feeds
+    # it and the sensor declared frozen when that entity goes quiet — #912's
+    # own false positive, one layer down. Template is excluded outright for
+    # the same reason: it publishes prose, never a source.
+    _SOURCE_ATTR_KEYS = ("entity_id", "entity_ids", "source",
+                         "source_entity_id", "min_entity_id",
+                         "max_entity_id", "last_entity_id")
+
+    def _source_is_alive(self, entity_id: str) -> bool:
+        """(#912) True when whatever FEEDS ``entity_id`` is still live.
+
+        Completes bug class 63 for DERIVED inputs. The sibling rule below
+        answers "is the source alive?" for a directly-polled sensor: its source
+        is its own poll loop, so a live sibling of the same config entry
+        vouches. But bekovan's ``sensor.inverted_power_plugin_solar``
+        (2026-09-06) is a Template helper that negates a Shelly plug — and it
+        still false-warned on beta.7. A template writes only when its rendered
+        value changes, so a flat ``last_reported`` is expected, AND a UI helper
+        is the sole entity of its config entry, so no sibling can ever vouch.
+        The sibling rule cannot clear it; its liveness is its SOURCE's.
+
+        1. its own config-entry siblings vouch (the directly-polled case), else
+        2. if it is a derived/helper platform, follow the source entities it
+           derives from — honest if any source reported within the threshold or
+           any source's own integration is alive; the source is read from the
+           helper's config entry, else from the source attribute the helper
+           publishes, and if it publishes neither, a flat derived value is
+           still not stall evidence → honest;
+        3. otherwise (a real polled sensor with no live sibling) → frozen.
+
+        Round 3 (bekovan again, 2026-09-12, still warning on beta.17): WHICH
+        platform an entity belongs to is asked of ``_entity_owner``, not of
+        the entity registry alone — the same template declared in
+        ``configuration.yaml`` has no ``unique_id``, is in no registry, and
+        was falling through step 2 to the polled-sensor verdict.
+        """
+        if self._integration_is_reporting(entity_id):
+            return True
+        platform, cid = self._entity_owner(entity_id)
+        if platform not in self._DERIVED_PLATFORMS:
+            # A directly-polled sensor whose whole entry has gone quiet is the
+            # real stall the check exists for. Fail closed (missing information
+            # must not silence a warning) — unchanged from the shipped rule.
+            return False
+        sources = self._resolve_source_entities(entity_id, platform, cid)
+        if not sources:
+            # A helper that publishes no source anywhere — no config entry to
+            # read, no source attribute (a Template, a statistics mean): its
+            # ``last_reported`` is a change signal, not a poll signal, so a
+            # flat value is honest, not frozen.
+            return True
+        for src in sources:
+            if self._entity_reported_recently(src) or self._integration_is_reporting(src):
+                return True
+        return False
+
+    def _entity_reported_recently(self, entity_id: str) -> bool:
+        """True when ``entity_id`` reported within the freshness threshold."""
+        try:
+            st = self.hass.states.get(entity_id)
+        except Exception:  # noqa: BLE001 — never break a read over a source read
+            return False
+        if st is None:
+            return False
+        seen = getattr(st, "last_reported", None)
+        if seen is None:
+            seen = getattr(st, "last_updated", None)
+        if seen is None:
+            return False
+        try:
+            import homeassistant.util.dt as _dt
+            age = (_dt.utcnow() - seen).total_seconds()
+        except Exception:  # noqa: BLE001 — a mock / naive dt source
+            return False
+        return (
+            isinstance(age, (int, float)) and not isinstance(age, bool)
+            and age < self._STALE_THRESHOLD_S
+        )
+
+    def _entity_source_info(self, entity_id: str) -> Optional[dict]:
+        """(#912) HA's own record of which integration added ``entity_id``.
+
+        ``entity_sources()`` is written for EVERY entity an entity platform
+        adds — ``{"domain": "template", "custom_component": ..., optionally
+        "config_entry": ...}`` — registered or not. Anything that is not a
+        plain mapping (an older core, a test double) is "no answer".
+        """
+        try:
+            from homeassistant.helpers.entity import entity_sources
+            info = entity_sources(self.hass).get(entity_id)
+        except Exception as e:  # noqa: BLE001 — never break a read over the source map
+            # Logged ONCE, because silence here means falling back to the
+            # registry alone — exactly the blind spot this round fixed, and a
+            # round 4 should see it in a log dump instead of re-deriving it.
+            if not self._source_map_unavailable_logged:
+                self._source_map_unavailable_logged = True
+                _LOGGER.debug(
+                    "#912 entity source map unavailable (first time, for %s): %s",
+                    entity_id, e,
+                )
+            return None
+        return info if isinstance(info, dict) else None
+
+    def _entity_owner(self, entity_id: str) -> tuple[Optional[str], Optional[str]]:
+        """(#912 round 3) Which integration owns ``entity_id``, and under which
+        config entry — the entity registry first, then HA's per-entity source
+        map for what the registry cannot see.
+
+        The registry is a register of entities that have a ``unique_id``.
+        bekovan's ``sensor.inverted_power_plugin_solar`` (2026-09-12, still
+        false-warning on beta.17) is a Template sensor declared in
+        ``configuration.yaml``, so it has no ``unique_id`` and the registry has
+        NOTHING to say about it. Round 2 read that silence as an answer — no
+        platform, therefore not derived, therefore a polled sensor whose entry
+        has gone quiet — and raised the Repair for the third beta running. The
+        registry's silence about an ENTITY is not evidence about its
+        INTEGRATION; ``entity_sources()`` is where HA keeps that fact for
+        every entity it adds. Still ``(None, None)`` for an entity no platform
+        owns at all (a raw ``states.set``) — that is genuinely missing
+        information, and the caller stays fail-closed on it.
+        """
+        platform = cid = None
+        try:
+            entry = er.async_get(self.hass).async_get(entity_id)
+        except Exception:  # noqa: BLE001 — never break a read over the registry
+            entry = None
+        if entry is not None:
+            platform = getattr(entry, "platform", None)
+            cid = getattr(entry, "config_entry_id", None)
+        if platform and cid:
+            return platform, cid
+        info = self._entity_source_info(entity_id)
+        if info is not None:
+            if not platform:
+                dom = info.get("domain")
+                platform = dom if isinstance(dom, str) else None
+            if not cid:
+                ce = info.get("config_entry")
+                cid = ce if isinstance(ce, str) else None
+        return platform, cid
+
+    def _entry_entity_ids(self, cid: str, reg) -> list[str]:
+        """(#912) The registry's members of config entry ``cid`` — the
+        index-backed answer, and the complete one for every integration whose
+        entities carry a ``unique_id``."""
+        try:
+            return [e.entity_id for e in er.async_entries_for_config_entry(reg, cid)]
+        except Exception:  # noqa: BLE001 — never break a read over the registry
+            return []
+
+    def _unregistered_entry_entity_ids(self, cid: str) -> list[str]:
+        """(#912) The members of config entry ``cid`` the registry never
+        listed — the ones their integration added without a ``unique_id``.
+        Same unit (one config entry = one connection), just the rest of the
+        membership. Scanned only when no registered sibling already answered,
+        because this one walks the whole source map."""
+        try:
+            from homeassistant.helpers.entity import entity_sources
+            srcs = entity_sources(self.hass)
+        except Exception:  # noqa: BLE001 — never break a read over the source map
+            return []
+        if not isinstance(srcs, dict):
+            return []
+        return [eid for eid, info in srcs.items()
+                if isinstance(info, dict) and info.get("config_entry") == cid]
+
+    def _any_reported_recently(self, entity_ids, skip: str, now) -> bool:
+        """True when any of ``entity_ids`` (excluding ``skip``) reported within
+        the freshness threshold."""
+        for eid in entity_ids:
+            if eid == skip:
+                continue
+            try:
+                st = self.hass.states.get(eid)
+            except Exception:  # noqa: BLE001 — never break a read over a sibling
+                continue
+            if st is None:
+                continue
+            seen = getattr(st, "last_reported", None)
+            if seen is None:
+                seen = getattr(st, "last_updated", None)
+            if seen is None:
+                continue
+            try:
+                age = (now - seen).total_seconds()
+            except Exception:  # noqa: BLE001 — a mock / naive dt sibling
+                continue
+            if isinstance(age, (int, float)) and not isinstance(age, bool) \
+                    and age < self._STALE_THRESHOLD_S:
+                return True
+        return False
+
+    def _resolve_source_entities(self, entity_id: str, platform: Optional[str],
+                                 cid: Optional[str]) -> list[str]:
+        """(#912) The entity ids a derived sensor draws from, read from its
+        helper config entry's options/data.
+
+        A Template stores its source inside the template string
+        (``states('sensor.shelly_plug_power')``); utility_meter / derivative /
+        integration store it under ``source``; min_max / group under
+        ``entity_ids``; threshold / statistics under ``entity_id``. Rather than
+        special-case each helper's key, scan every string in options+data for
+        entity-id-shaped tokens and keep the ones that resolve to a real state
+        — one rule for every helper, present and future.
+
+        A YAML-declared helper has NO config entry to read, and simply calling
+        it untraceable would hand every such wrapper the honest verdict with
+        no evidence at all — a legacy ``filter`` smoothing a modbus meter would
+        never report the stall it exists to pass through. So when the config
+        entry says nothing, ask the entity itself: helpers publish what they
+        derive from in their own attributes, under the keys in
+        ``_SOURCE_ATTR_KEYS`` — read by key, never by scanning every attribute
+        value, and never at all for a Template (see that constant).
+
+        What stays untraceable, and therefore honest: a Template; a
+        ``statistics`` or a ``min_max`` mean, which publish no source; any
+        helper that keeps its source to itself. That is the standing
+        trade-off of this rule — a flat derived value is a change signal, not
+        a poll stall, and accusing it is the bug this issue is about.
+        """
+        found: set[str] = set()
+        if cid:
+            try:
+                ce = self.hass.config_entries.async_get_entry(cid)
+            except Exception:  # noqa: BLE001 — never break a read over config entries
+                ce = None
+            if ce is not None:
+                for blob in (getattr(ce, "options", None), getattr(ce, "data", None)):
+                    self._collect_entity_ids(blob, found)
+        if not found and platform != "template":
+            # Fallback only: a UI helper's options are the authoritative
+            # source list, so attributes are never allowed to add a second
+            # opinion to it — they answer only where it is silent.
+            try:
+                attrs = getattr(self.hass.states.get(entity_id), "attributes", None)
+            except Exception:  # noqa: BLE001 — never break a read over a state
+                attrs = None
+            if isinstance(attrs, dict):
+                for key in self._SOURCE_ATTR_KEYS:
+                    if key in attrs:
+                        self._collect_entity_ids(attrs[key], found)
+        found.discard(entity_id)
+        return list(found)
+
+    def _collect_entity_ids(self, blob, out: set, _depth: int = 0) -> None:
+        """Walk a config-entry options/data blob and add every entity-id-shaped
+        token that resolves to a real state. Validating against the state
+        machine drops false hits (``template_type: sensor`` has no dot; a stray
+        ``foo.bar`` that is not an entity is skipped). The depth cap is a
+        belt-and-braces guard — a config-entry blob is acyclic JSON — so a
+        pathological/self-referential mock can never spin."""
+        if _depth > 6:
+            return
+        if isinstance(blob, str):
+            cands = {m.group(0) for m in self._ENTITY_ID_RE.finditer(blob)}
+            cands |= {f"{m.group(1)}.{m.group(2)}"
+                      for m in self._STATES_OBJ_RE.finditer(blob)}
+            for cand in cands:
+                try:
+                    if self.hass.states.get(cand) is not None:
+                        out.add(cand)
+                except Exception:  # noqa: BLE001 — never break a read over a candidate
+                    continue
+        elif isinstance(blob, dict):
+            for v in blob.values():
+                self._collect_entity_ids(v, out, _depth + 1)
+        elif isinstance(blob, (list, tuple, set)):
+            for v in blob:
+                self._collect_entity_ids(v, out, _depth + 1)
+
+    def _integration_is_reporting(self, entity_id: str) -> bool:
+        """(#912) True when ANY sibling entity of ``entity_id``'s config entry
+        reported within the freshness threshold — the integration is alive.
+
+        One rule instead of a predicate per domain (#851 added solar+night;
+        the next would have been export+importing, then battery+idle, …): a
+        sensor is frozen only if its own integration has gone quiet. A
+        genuinely stalled modbus/cloud connection silences every entity of
+        the entry, so no sibling corroborates and the warning stands. Cached
+        per entry for a few seconds so the three fast-power reads of one
+        cycle scan the entry once. The entry comes from ``_entity_owner`` and
+        its membership from ``_entry_entity_ids`` plus (only when no
+        registered sibling answered) ``_unregistered_entry_entity_ids``, so an
+        entity the registry never saw — as a subject OR as a vouching sibling
+        — still has an owner and still has siblings. No owning config entry at all → False: missing information
+        must not silence a warning.
+        """
+        try:
+            reg = er.async_get(self.hass)
+        except Exception:  # noqa: BLE001 — never break a read over the registry
+            return False
+        cid = self._entity_owner(entity_id)[1]
+        if not cid:
+            return False
+        now_mono = time.monotonic()
+        cached = self._entry_alive_cache.get(cid)
+        if cached is not None and now_mono - cached[0] < self._ENTRY_ALIVE_CACHE_S:
+            return cached[1]
+        alive = False
+        try:
+            import homeassistant.util.dt as _dt
+            now = _dt.utcnow()
+            alive = self._any_reported_recently(
+                self._entry_entity_ids(cid, reg), entity_id, now)
+            if not alive:
+                # Only now pay for the source-map walk: the registered members
+                # answered "nobody", and an unregistered one may still vouch.
+                alive = self._any_reported_recently(
+                    self._unregistered_entry_entity_ids(cid), entity_id, now)
+        except Exception:  # noqa: BLE001 — never break a read over the registry
+            alive = False
+        self._entry_alive_cache[cid] = (now_mono, alive)
+        return alive
 
     def _read_binary_sensor(self, entity_id: Optional[str], name: str) -> bool:
         """Read a binary sensor or status sensor value.
@@ -3518,7 +5020,11 @@ class SensorReader:
             readings.ev_charging
             or readings.ev_power > EV_ACTIVE_CHARGE_FLOOR_W
         ):
-            _LOGGER.warning(
+            # (#1017) Once per episode, not once per cycle: a plug sensor
+            # that lies for a whole session used to write this line every
+            # 30 s. The DEBUG transition below re-arms it for the next one.
+            log_on_change(
+                _LOGGER, "ev_connected:physics", logging.WARNING,
                 "ev_connected inferred from physics: plug sensor reported off "
                 "but ev_power=%.0fW / ev_charging=%s. Treating as connected. "
                 "(Upstream charger-integration bug protection — see #285+1 "
@@ -3526,6 +5032,11 @@ class SensorReader:
                 readings.ev_power, readings.ev_charging,
             )
             readings.ev_connected = True
+        else:
+            log_on_change(
+                _LOGGER, "ev_connected:physics", logging.DEBUG,
+                "ev_connected: plug sensor and power agree (#285+1)",
+            )
 
     def _infer_per_charger_connection_from_physics(
         self, readings: PowerReadings,
@@ -3551,13 +5062,20 @@ class SensorReader:
             pc_power = readings.ev_power_per_charger.get(cid, 0.0) or 0.0
             pc_charging = readings.ev_charging_per_charger.get(cid, False)
             if pc_power > EV_ACTIVE_CHARGE_FLOOR_W or pc_charging:
-                _LOGGER.warning(
+                log_on_change(
+                    _LOGGER, f"ev_connected:physics:{cid}", logging.WARNING,
                     "ev_connected_per_charger[%s] inferred from physics: plug "
                     "sensor reported off but power=%.0fW / charging=%s. Treating "
                     "as connected. (#285+1 multi-charger protection.)",
                     cid, pc_power, pc_charging,
                 )
                 readings.ev_connected_per_charger[cid] = True
+            else:
+                log_on_change(
+                    _LOGGER, f"ev_connected:physics:{cid}", logging.DEBUG,
+                    "ev_connected_per_charger[%s]: plug sensor and power agree",
+                    cid,
+                )
 
     def detect_battery_cycles_sensor(self, battery_anchor_entity: Optional[str]) -> Optional[str]:
         """#593 — autodetect a battery lifetime-cycle sensor on the SAME device

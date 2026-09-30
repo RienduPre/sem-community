@@ -30,6 +30,7 @@ import math
 from datetime import datetime, timedelta
 
 from .energy_planner import LedgerSlot
+from .price_signal import is_cheap_name
 
 # Below this computed surplus a "free window" is forecast noise, not a
 # plannable window — mirrors the delta-guard instinct on the EV side.
@@ -108,7 +109,11 @@ def build_day_slots(*, start: datetime, end: datetime, day_kwh: float,
         if surplus_w >= surplus_margin_w:
             slots.append(LedgerSlot(
                 start=t, end=slot_end,
-                price=max(0.0, float(export_rate or 0.0)),
+                # (#871) NOT max(0.0, …). The clamp made a negative export rate
+                # — one you PAY — look identical to a free kWh, and a planner
+                # cannot prefer another sink over a cost it cannot see. ``or 0.0``
+                # still handles an absent rate, the only case the clamp covered.
+                price=float(export_rate or 0.0),
                 level_cheap=True, home_w=0.0,
                 cap_override_w=surplus_w,
                 solar_w=solar_w, home_gross_w=home_w,
@@ -148,7 +153,8 @@ def _merge_windows(slots) -> list:
 
 
 def tomorrow_preview(*, day_start, day_end, day_kwh, sunrise, sunset,
-                     home_w_at, price_at, level_cheap_at, stamps_at) -> dict:
+                     home_w_at, price_at, level_cheap_at, stamps_at,
+                     export_rate: float = 0.0) -> dict:
     """(#638 consolidation / #722) The NEXT energy day's books, previewed.
 
     tintinz's Today|Tomorrow idea (#722), adopted onto the one data path:
@@ -168,6 +174,11 @@ def tomorrow_preview(*, day_start, day_end, day_kwh, sunrise, sunset,
         start=day_start, end=day_end, day_kwh=day_kwh,
         sunrise=sunrise, sunset=sunset, home_w_at=home_w_at,
         price_at=price_at, level_cheap_at=level_cheap_at,
+        # (#924) This surface reads WINDOWS, never a price — but a builder
+        # that takes the rate and is not given it is how #755 was undone
+        # on a sibling path. Carry it, so a future reader is right by
+        # construction rather than by luck.
+        export_rate=export_rate,
     )
     probe = day_start + (day_end - day_start) / 2
     try:
@@ -210,8 +221,8 @@ def tariff_cheap_at(prov, ts):
             lvl = prov.get_price_level_at(ts)
         except Exception:  # noqa: BLE001 — no level is not cheap
             return False
-        name = str(getattr(lvl, "value", lvl) or "").lower()
-        return name in ("cheap", "very_cheap", "negative")
+        # (#994) one vocabulary; an unknown level is never cheap.
+        return is_cheap_name(lvl)
     return False
 
 

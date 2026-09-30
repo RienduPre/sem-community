@@ -38,6 +38,7 @@ from ..const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_MAX_CHARGING_CURRENT,
+    DEFAULT_LOAD_MANAGEMENT_ENABLED,
     ED_RESOLVE_MAX_ATTEMPTS,
     ChargingState,
     ENTITY_OBSERVER_MODE_SWITCH,
@@ -47,7 +48,8 @@ from ..const import (
     STATE_UNAVAILABLE,
 )
 from ..utils.time_manager import TimeManager
-from ..ha_energy_reader import read_energy_dashboard_config, EnergyDashboardConfig
+from ..ha_energy_reader import read_energy_dashboard_config_outcome, EnergyDashboardConfig
+from .install_modules import Module, Presence, module_reload_due, module_verdict, presence_of
 
 from .types import (
     SEMData, PowerReadings, PowerFlows, SystemStatus, LoadManagementData,
@@ -55,7 +57,9 @@ from .types import (
     HeatPumpSensorData, HotWaterSensorData, PVAnalyticsData, EnergyAssistantSensorData,
     SessionData, BatterySessionData,
 )
-from .health_check import HealthCheck
+from .health_check import (
+    home_member_evidence, home_member_totals, HealthCheck,
+)
 from .units import energy_state_to_kwh, power_state_to_watts
 from .distance_units import distance_to_km
 from .ev_availability import operational_ev_connected, operational_night_target
@@ -69,15 +73,16 @@ from .per_charger_context import PerChargerContext, PerChargerState
 from .storage import SEMStorage
 from .notifications import NotificationManager
 from .surplus_controller import (
-    SurplusController, solar_bounded_surplus, build_battery_tier_context,
-    effective_peak_state,
+    SurplusController, solar_bounded_surplus, solar_bounded_reclaim,
+    build_battery_tier_context, effective_peak_state,
 )
 from .cycle_trace import (
     TraceCollector, LayerRecord, LayerStatus, CrossCheck,
     ev_layer_match, battery_layer_match, device_layer_match, battery_list_role,
     heat_pump_layer_match,
+    commanded_per_charger, ev_match_per_charger,   # (#961)
 )
-from .energy_reclaim import reclaimable_battery_w
+from .energy_reclaim import reclaimable_battery_w, held_grid_import
 from .forecast_reader import ForecastReader
 from .forecast_tracker import ForecastTracker
 from .ev_control import EVControlMixin
@@ -87,11 +92,19 @@ from ..tariff.tariff_provider import _local_date as _tariff_local_date
 from ..analytics.pv_performance import PVPerformanceAnalyzer
 from ..analytics.consumption_predictor import ConsumptionPredictor
 from .ev_taper_detector import EVTaperDetector
-from .ev_soc_need import soc_remaining_need
+from .ev_soc_need import estimate_stop_step, soc_remaining_need
 from ..utils.log_gate import log_on_change
 from ..analytics.energy_assistant import EnergyAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _f_or_none(value):
+    """(#778) A float, or None — so "unconfigured" never reads as zero."""
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 # (#638 finding #3) How long the energy plan shadow waits for every battery
 # unit to report before planning on the ones that do. Long enough that a
@@ -474,6 +487,17 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # PerChargerContext's device; this assignment routes to the _default
         # backing via the setter.
         self._ev_device = None
+        # (#846) fire → check → adjust: what each command ACTUALLY bought.
+        from .watts_per_amp import WattsPerAmpLearner
+        self._wpa_learner = WattsPerAmpLearner()
+        self._wpa_replay_report: Dict[str, Any] = {}
+        self._wpa_replay_scheduled = False
+        self._wpa_replay_unsub = None
+        # (#967) True once Home Assistant has started. Every read of the
+        # recorder waits for it: setup waits for the first update cycle, and
+        # HA cancels a setup that overruns its start-up budget — the whole
+        # integration then fails to load, which is what @alexmc1510 saw.
+        self._recorder_seeds_ready = False
         self._ev_devices: Dict[str, Any] = {}  # All chargers keyed by charger_id (#112)
         # #589 Surface-A: these three are PROPERTIES backed by the current
         # PerChargerContext's durable state; the _default variants back them
@@ -523,6 +547,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
         # Energy Dashboard config
         self._energy_dashboard_config: Optional[EnergyDashboardConfig] = None
+        # (#923) The Energy Dashboard as the install-modules oracle sees it:
+        # the parsed config even when it is not "minimally configured", and
+        # whether the question got an answer at all (#925 — unread ≠ no).
+        self._ed_raw_config: Optional[EnergyDashboardConfig] = None
+        self._ed_answered: bool = False
+        # The verdict the platforms were built with — captured once in
+        # async_setup_entry, after the Energy Dashboard read and before any
+        # platform loads, so every platform gates on the SAME answer.
+        self.setup_presence: Optional[Dict[Module, Presence]] = None
         # Cold-start recovery (#274): re-derive ED power sensors each cycle while
         # they're unresolved (source integration registered after SEM), bounded.
         self._ed_resolve_pending: bool = False
@@ -595,7 +628,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 grid_import_surcharge=config.get("grid_import_surcharge", 0.0),
             )
         elif tariff_mode == "calendar":
-            schedule = {}  # Was config.get("tariff_schedule", {}) — never set via UI
+            # (#994) Read it after all. No UI writes `tariff_schedule` today,
+            # so this is usually still empty — but hardcoding {} meant the
+            # provider could never be told otherwise, and an empty rule set
+            # made it answer CHEAP unconditionally, forever, for every
+            # install that chose this mode. The provider now refuses to
+            # classify without a reachable HT rule; a YAML/storage-set
+            # schedule is honoured instead of discarded.
+            schedule = config.get("tariff_schedule", {}) or {}
             self._tariff_provider = CalendarTariffProvider(
                 hass,
                 peak_rate=config.get("electricity_import_rate", 0.35),
@@ -741,6 +781,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # (e.g. solar_only with surplus below the 3-phase 6 A floor —
         # the stall detector would otherwise falsely anchor SOC at 100 %).
         self._last_commanded_amps_fleet: int = 0
+        # (#1011) this cycle's DECIDED offer per charger — set even when the
+        # actuation is withheld (observer mode), unlike the actual setpoint.
+        # Keys the per-charger declined-start check: "SEM wanted to charge
+        # THIS charger and the car drew nothing."
+        self._last_commanded_amps_per_charger: Dict[str, int] = {}
         # (#638) Measured watts-per-amp EMA per charger. Nameplate
         # (phases × voltage) overstates cars that don't pull every phase to
         # the rail — PROD's Zoe draws ~485 W/A at 10 A against a 690 W/A
@@ -760,6 +805,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         self._session_data_per_charger: Dict[str, SessionData] = {}
         self._last_ev_connected = False
         self._last_ev_connected_per_charger: Dict[str, bool] = {}
+        # (#1011) per-charger "0 W while connected and offered" counter, so a
+        # declined start is recorded on THIS charger's detector — the one the
+        # per-charger card and sensor read.
+        self._decline_stall_count: Dict[str, int] = {}
         # (#638) the plug debounce's own state — see
         # ``_confirm_ev_connection``. Keyed by charger id; ``""`` is the
         # flat/legacy fleet sensor.
@@ -924,8 +973,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # the moment the event ends and the user's mode resumes. Routed here
         # (the single mode read-point, #277) so no second veto path exists.
         _vpp_ev = getattr(self, "_vpp_ev_override", None)
-        if _vpp_ev == "pause":
-            return "off"
+        # (#898) "pause" no longer borrows mode ``off`` — Off is hands-off
+        # and would stop nothing. The pause is applied to the DECISION by
+        # ``vpp_pause_override`` at every decide site instead.
         if _vpp_ev == "boost":
             return "always_max"
         from ..consts.ev_charge_modes import effective_charge_mode_for
@@ -1052,6 +1102,16 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _st = getattr(self, "_storage", None)
                 if _st is not None:
                     _st.set_ev_wpa_state(dict(self._ev_wpa_ema))
+        # (#846) the per-setpoint table first, at this charger's max amps —
+        # the setpoint the packer and the deadline floor size by. Then the
+        # #716 EMA this accessor used to be, then nameplate.
+        learner = getattr(self, "_wpa_learner", None)
+        phases, _ok = self._wpa_phases_for(cid, cfg)
+        if learner is not None and phases:
+            max_a = int(cfg.get("ev_max_current") or DEFAULT_MAX_CHARGING_CURRENT)
+            if learner.watts_per_amp(cid, phases, max_a) is not None:
+                return learner.watts_for_amps(
+                    cid, phases, max_a, phases * float(cfg.get("ev_voltage") or 230)) / max_a
         learned = self._ev_wpa_ema.get(cid)
         return float(learned) if learned else nameplate
 
@@ -1617,6 +1677,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         it is not balance-coupled, and a 5-minute-stale SOC would be worse
         than an honest one.
         """
+        # DARK-SOC: display — the card's snapshot; the entity holds its own grace.
         soc = None if getattr(power, "battery_soc_unavailable", False) \
             else getattr(power, "battery_soc", None)
         snap = {
@@ -1751,6 +1812,30 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 counters.append(fallback)
         return counters
 
+    def install_presence(self) -> Dict[Module, Presence]:
+        """(#923) What this install has right now — see install_modules.py."""
+        return module_verdict(self.config, self._ed_raw_config, self._ed_answered)
+
+    def _check_module_growth(self) -> None:
+        """(#923) Hardware SEM only DISCOVERS — a battery added to HA's Energy
+        Dashboard — changes no SEM option, so no options reload creates its
+        entities. When a module the platforms were built without is PRESENT
+        now, reload once (see install_modules.module_reload_due)."""
+        at_setup = self.setup_presence
+        if not isinstance(at_setup, dict) or self.config_entry is None:
+            return  # still setting up: the platforms read the fresh verdict
+        key = f"{DOMAIN}_module_reload_at"
+        now_ts = dt_util.utcnow().timestamp()
+        grown = module_reload_due(
+            at_setup, self.install_presence(), now_ts, self.hass.data.get(key))
+        if not grown:
+            return
+        self.hass.data[key] = now_ts
+        _LOGGER.info(
+            "#923 — %s appeared since setup; reloading once to create its entities",
+            ", ".join(m.value for m in grown))
+        self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
+
     async def async_initialize_energy_dashboard(self, quiet: bool = False) -> bool:
         """Initialize sensors from HA Energy Dashboard.
 
@@ -1760,7 +1845,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         """
         _info = _LOGGER.debug if quiet else _LOGGER.info
         try:
-            dashboard_config = await read_energy_dashboard_config(self.hass, quiet=quiet)
+            dashboard_config, answered = await read_energy_dashboard_config_outcome(
+                self.hass, quiet=quiet)
+            self._ed_raw_config = dashboard_config
+            self._ed_answered = answered
 
             # Activate whenever the dashboard is minimally configured (solar + grid),
             # not only when a stat_rate power sensor exists. ha_energy_reader already
@@ -1902,6 +1990,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             and self._energy_dashboard_config.power_resolution_incomplete()
         )
 
+        self._check_module_growth()
         return self._energy_dashboard_config is not None
 
     async def _retry_energy_dashboard_resolution(self) -> None:
@@ -1940,7 +2029,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
     async def async_initialize_load_management(self, config_entry: ConfigEntry) -> None:
         """Initialize load management after coordinator is set up."""
-        load_management_enabled = self.config.get("load_management_enabled", True)
+        # (#897) The constant, never a literal: a private fallback here kept
+        # building a shedder after the install default was lowered.
+        load_management_enabled = self.config.get(
+            "load_management_enabled", DEFAULT_LOAD_MANAGEMENT_ENABLED)
 
         _LOGGER.debug("async_initialize_load_management called: enabled=%s", load_management_enabled)
 
@@ -2279,13 +2371,44 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             mgmt["curtailment"] = dict(curtailment)
         st.management = LayerRecord(LayerStatus.OK, "policy inputs", mgmt)
 
-        amps = int(getattr(sem_data, "calculated_current", 0) or 0)
+        # (#961, from @RienduPre in #958) ``calculated_current`` is the FLEET canonical
+        # budget — one number for the house, computed from the primary
+        # charger's config — and it was published here under the name
+        # ``commanded_amps``, directly beside a per-charger mode reason. On a
+        # two-charger install those are about different things and nothing
+        # said so, which is how a budget following the sun came to be read as
+        # a control loop hunting. The budget keeps its own name; what SEM
+        # actually ASKED each charger for is each device's own setpoint, the
+        # same value ``sensor.sem_charger_<id>_commanded_current`` publishes.
+        budget_amps = int(getattr(sem_data, "calculated_current", 0) or 0)
         reason = str(getattr(sem_data, "charging_strategy_reason", "") or "")
         budget = round(float(getattr(sem_data, "available_power", 0.0) or 0.0))
-        p_status = LayerStatus.OK if amps > 0 else LayerStatus.IDLE
-        st.process = LayerRecord(
-            p_status, reason, {"commanded_amps": amps, "budget_w": budget},
-        )
+        per_charger = commanded_per_charger(getattr(self, "_ev_devices", None))
+        amps = sum(per_charger.values()) if per_charger else budget_amps
+        # (#961 review) Observer mode zeroes every setpoint on purpose
+        # (_zero_charger_setpoints), so ``commanded_amps`` is honestly 0 there
+        # — but the process layer must still say whether SEM WOULD charge, or
+        # the observer rig this project verifies on loses the one signal it is
+        # read for. The budget answers that when nothing is commanded.
+        p_status = (LayerStatus.OK if (amps > 0 or budget_amps > 0)
+                    else LayerStatus.IDLE)
+        data = {
+            "commanded_amps": amps,
+            "budget_amps": budget_amps,
+            "budget_w": budget,
+        }
+        fleet_ids = sorted(str(c) for c in (getattr(self, "_ev_devices", None) or {}))
+        if len(fleet_ids) > 1:
+            # Only a fleet needs the breakdown; a single charger's number is
+            # already the whole story and a dict would just be noise. Gated on
+            # the DEVICE count, not on how many parsed: a charger whose
+            # setpoint could not be read must be visible by its absence from
+            # the dict, not hidden by shrinking the fleet to one — and the
+            # roster is published beside it (#961 review) so "absent" is
+            # checkable without knowing the fleet from somewhere else.
+            data["per_charger_amps"] = per_charger
+            data["fleet_charger_ids"] = fleet_ids
+        st.process = LayerRecord(p_status, reason, data)
 
         observed = round(float(getattr(power, "ev_power", 0.0) or 0.0))
         # Observer mode (global): SEM decided but does NOT command anything, so
@@ -2302,17 +2425,43 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # aren't commanding or the car is disconnected.
         # real phases/voltage (M2 — a 1φ charger's nominal is far lower; a
         # hardcoded 3φ threshold false-mismatches every 1-phase install).
-        match = ev_layer_match(
-            amps, observed,
+        # (#961 review) A FLEET's match cannot be one sum against one
+        # phase/voltage pair. Amps do not add across chargers — a 1-phase box
+        # and a 3-phase box mean different watts per amp — and the threshold
+        # used ``self.config``'s single topology, necessarily the primary's.
+        # The reviewer's case: a 1-phase charger drawing correctly and a
+        # 3-phase charger STALLED at 0 W summed to a threshold the healthy one
+        # cleared on its own, so the stall read OK. That is precisely the flap
+        # this check exists to catch, so it is asked per charger, each against
+        # its OWN topology and its OWN draw, and the fleet is degraded if any
+        # charger is.
+        per_match = ev_match_per_charger(
+            getattr(self, "_ev_devices", None),
+            getattr(power, "ev_power_per_charger", None),
+            connected,
             int(self.config.get("ev_phases", 3) or 3),
             int(self.config.get("ev_voltage", 230) or 230),
-            connected,
         )
+        if per_match:
+            verdicts = [v for v in per_match.values() if v is not None]
+            match = (None if not verdicts else all(verdicts))
+            stalled = sorted(c for c, v in per_match.items() if v is False)
+        else:
+            match = ev_layer_match(
+                amps, observed,
+                int(self.config.get("ev_phases", 3) or 3),
+                int(self.config.get("ev_voltage", 230) or 230),
+                connected,
+            )
+            stalled = []
         i_status = LayerStatus.OK if match in (None, True) else LayerStatus.DEGRADED
-        st.integration = LayerRecord(
-            i_status, f"observed {observed:.0f}W",
-            {"observed_w": observed, "commanded_amps": amps, "match": match},
-        )
+        detail = f"observed {observed:.0f}W"
+        if stalled:
+            detail += f" — not drawing: {', '.join(stalled)}"
+        idata = {"observed_w": observed, "commanded_amps": amps, "match": match}
+        if len(per_match) > 1:
+            idata["per_charger_match"] = per_match
+        st.integration = LayerRecord(i_status, detail, idata)
 
     def _trace_battery(self, trace, sem_data, power) -> None:
         st = trace.subsystem("battery")
@@ -2334,7 +2483,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         st.management = LayerRecord(
             LayerStatus.OK, role,
             {"list_priority": bp, "reserve_soc": prio_soc,
-             "reclaim_yielded_w": cr.get("reclaim_w", 0)},
+             "reclaim_yielded_w": cr.get("reclaim_w", 0),
+             # (#938) the charge power BEFORE the sun/import ceilings — a
+             # night with 3000 here and 0 above reads "grid charge, not surplus".
+             "reclaim_raw_w": cr.get("reclaim_raw_w", 0)},
         )
         st.process = LayerRecord(LayerStatus.OK, reason, {"soc": soc})
         # match: an explicit force command must be observed (force_charge →
@@ -2370,11 +2522,16 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         p_status = LayerStatus.OK if active > 0 else LayerStatus.IDLE
         # (#576) show the battery-charge power the loads above the battery
         # reclaimed this cycle — the extra pool that let a pump run.
-        reclaim_w = int((getattr(self, "_cycle_reclaim", {}) or {}).get("reclaim_w", 0) or 0)
+        _cr = getattr(self, "_cycle_reclaim", {}) or {}
+        reclaim_w = int(_cr.get("reclaim_w", 0) or 0)
         st.process = LayerRecord(
             p_status, f"{active}/{total_dev} active",
             {"surplus_w": total_w, "distributable_w": dist_w,
-             "allocated_w": alloc_w, "reclaim_w": reclaim_w},
+             "allocated_w": alloc_w, "reclaim_w": reclaim_w,
+             # (#938) what the pack was charging at before the sun/import
+             # ceilings, and how long the import ceiling has been held.
+             "reclaim_raw_w": int(_cr.get("reclaim_raw_w", 0) or 0),
+             "import_held_s": int(_cr.get("import_held_s", 0) or 0)},
         )
         obs_mode = getattr(self, "_observer_mode", False)
         obs = "observer mode — not commanding" if obs_mode else f"{active} device(s) on"
@@ -2496,6 +2653,90 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         observer_state = self.hass.states.get(ENTITY_OBSERVER_MODE_SWITCH)
         if observer_state is not None and observer_state.state in ("on", "off"):
             self._observer_mode = observer_state.state == "on"
+        # getattr: `_sync_observer_mode_from_switch` is exercised on bare
+        # stubs in tests (and the sync must never depend on the push).
+        _push = getattr(self, "_push_observer_mode_to_devices", None)
+        if _push is not None:
+            _push()
+
+    def observer_withheld_commands(self) -> dict:
+        """(#855, audit F7) THIS cycle's withheld hardware commands, keyed by
+        device — the "exact service calls it withheld" half of the seam's
+        promise. Collected from both discovery shapes, deduped by identity;
+        devices with nothing withheld are dropped. Read by the observer
+        switch's attributes beside would_decisions."""
+        devs = list((getattr(self, "_ev_devices", None) or {}).values())
+        single = getattr(self, "_ev_device", None)
+        if single is not None and not any(d is single for d in devs):
+            devs.append(single)
+        out: dict = {}
+        for dev in devs:
+            cmds = getattr(dev, "withheld_commands", None)
+            if cmds:
+                out[getattr(dev, "device_id", "?")] = list(cmds)
+        # (#955) the meter's row, under the seam's own key — the exact
+        # huawei_solar / number / select call the export guard would make.
+        rows = getattr(self, "_export_withheld", None)
+        if rows:
+            out["export_guard"] = list(rows)
+        return out
+
+    def _push_observer_mode_to_devices(self) -> None:
+        """(#855) Hand the flag DOWN to the single hardware seam.
+
+        ``ControllableDevice.send`` is the one place a charger command
+        reaches HA, and it is where observer mode is now honoured — so the
+        devices have to know. Pushed every cycle rather than read at
+        registration, because the switch can flip at any time and a device
+        holding a stale ``False`` would actuate somebody's car.
+
+        The withheld log is cleared on the same beat: it describes THIS
+        cycle's suppressed commands, and a log that accumulates across
+        cycles stops being an answer to "what would SEM do now".
+        """
+        obs = bool(getattr(self, "_observer_mode", False))
+        # (coverage-audit F3) BOTH discovery shapes: the multi-charger dict
+        # AND the legacy ``_ev_device`` fallback that ``_retry_ev_device_setup``
+        # fills when a charger integration loads after SEM. The retry path
+        # never touches ``_ev_devices``, so iterating only the dict left a
+        # late-discovered charger holding observer_mode=False forever —
+        # masked today by actuate()'s older decision-level gate, which is
+        # exactly the gate #855 wants to retire. Dedupe by identity: on a
+        # normal install the fallback IS an entry of the dict.
+        devs = list((getattr(self, "_ev_devices", None) or {}).values())
+        single = getattr(self, "_ev_device", None)
+        if single is not None and not any(d is single for d in devs):
+            devs.append(single)
+        # (#944) The same both-shapes walk links each CHARGER back to this
+        # coordinator. The stand-down notification reaches the notifier
+        # through ``_coordinator``, and the per-charger loop was the only
+        # place that set it — so the late-discovered legacy ``_ev_device``
+        # was never linked, and its notification died in silence (the split
+        # F3 above closed for observer mode). Chargers only.
+        for dev in devs:
+            try:
+                dev._coordinator = self
+            except Exception:  # noqa: BLE001 — same contract as below
+                continue
+        # EVERY commandable device, not just the chargers. ``send()`` is the
+        # one seam and it withholds only when the DEVICE knows, so a device
+        # this push skips is a device that acts. Loads, climate and heat
+        # pumps are protected on the per-cycle path by
+        # ``reconcile_load(observer=...)`` one layer up — but the one-shot
+        # Mode→Off handler in features/device_registry.py calls
+        # ``deactivate()`` directly and lands straight on the seam. On .46 and
+        # .175 that means a REAL load switching off while the rig reports it
+        # is only watching, which is the single assumption those rigs rest on.
+        sc = getattr(self, "_surplus_controller", None)
+        for dev in list(getattr(sc, "_devices", {}).values() if sc else []):
+            if not any(d is dev for d in devs):
+                devs.append(dev)
+        for dev in devs:
+            try:
+                dev.observer_mode = obs
+                dev.withheld_commands = []
+            except Exception:  # noqa: BLE001 — a device that cannot be
+                continue       # told is left as it was, never crashed
 
     def _sync_vacation_mode_from_switch(self) -> None:
         """Backstop the vacation switch flag from the entity each cycle (#594).
@@ -2608,6 +2849,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # Restore EV session state (survives restarts)
             self._restore_ev_session_state()
 
+            # (#867) Restore the PV monthly history. Degradation compares a
+            # month against the same month a year earlier and needs 13 of
+            # them; a list that starts empty on every restart never gets
+            # there, which is why the verdict read 0.0 on installs with
+            # years of production.
+            self._pv_analyzer.restore_state(
+                self._storage.get_pv_performance_state())
+
             # Restore EV intelligence state (#106)
             ev_intel_state = self._storage.get_ev_intelligence_state()
             self._ev_taper_detector.restore_state(ev_intel_state)
@@ -2637,6 +2886,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # the car's next charge, and a deploy at 23:36 + a re-plan at
             # 23:46 yielded an EV demand the plan should have placed.
             self._restore_ev_wpa(self._storage.get_ev_wpa_state())
+            # (#846) the per-setpoint W/A table — learned state that gates
+            # behaviour is not allowed to die at boot; a charger it has never
+            # been fed for replays itself from SEM's own recorded series.
+            self._wpa_learner.restore(self._storage.get_wpa_learner_state())
+            self._schedule_wpa_replay()
             self._restore_energy_plan(
                 self._storage.get_energy_plan_state())
             # (#755) The night's outcome record restores beside the plan it
@@ -2687,42 +2941,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 except (AttributeError, ValueError, TypeError) as e:
                     _LOGGER.debug("Flow accumulator restore skipped: %s", e)
 
-            # Seed EV intelligence from recorder history (improves cold starts
-            # and upgrades from older versions without EV intelligence data)
-            ev_power_entity = (
-                self._sensor_reader.config.ev_power_sensor
-                or (self._energy_dashboard_config.ev_power if self._energy_dashboard_config else None)
-            )
-            # Only seed if the detector doesn't already have good state
-            # (anchored SOC with a recent full charge detection)
-            needs_seed = ev_power_entity and not (
-                self._ev_taper_detector._soc_anchored
-                and self._ev_taper_detector._last_full_timestamp
-            )
-            if needs_seed:
-                try:
-                    seed_result = await self._ev_taper_detector.async_seed_from_history(
-                        self.hass, ev_power_entity, days=60,
-                    )
-                    if seed_result:
-                        if seed_result.get("improved"):
-                            self._storage.set_ev_intelligence_state(
-                                self._ev_taper_detector.get_state()
-                            )
-                        # Feed weekday consumption to predictor
-                        weekday_totals = seed_result.get("weekday_totals", {})
-                        if weekday_totals and hasattr(self, '_predictor') and self._predictor:
-                            for dow, avg_kwh in weekday_totals.items():
-                                # Only seed if predictor has no data for this weekday
-                                existing = self._predictor._ev_profile.predict(dow, 12)
-                                if existing is None or existing == 0:
-                                    self._predictor._ev_profile.update(dow, 12, avg_kwh)
-                                    _LOGGER.info(
-                                        "EV predictor seeded from history: weekday %d → %.1f kWh/day",
-                                        dow, avg_kwh,
-                                    )
-                except Exception as e:
-                    _LOGGER.debug("EV history seeding skipped: %s", e)
+            # (#967) The EV-intelligence seed reads 60 days of recorder
+            # history. It used to run right here, inside the first update —
+            # which setup waits for. Home Assistant cancels a setup that
+            # overruns its start-up budget, and SEM then does not load at
+            # all. It now runs from ``async_seed_from_recorder``, after HA
+            # has started.
 
             # Ensure battery discharge limit is restored after restart
             # (protects against stale limit left by previous run)
@@ -2963,6 +3187,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             except (ValueError, TypeError):
                                 _LOGGER.debug("Vehicle SOC %s not numeric: %r (#259)", per_charger_soc_entity, soc_state.state)
                     self._ev_device = ev_dev
+                    # (#846) the device's way back to the coordinator, so the
+                    # adapter's amps↔watts conversions can consult the
+                    # measured-W/A learner and the phase BELIEF.
+                    try:
+                        ev_dev._coordinator = self
+                    except Exception:  # noqa: BLE001
+                        pass
                     self._session_data = self._session_data_per_charger[cid]
                     self._last_ev_connected = self._last_ev_connected_per_charger[cid]
                     # Per-charger plug/charging state (#193): power.ev_connected is
@@ -3047,6 +3278,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 self._vpp_battery_override = None
                 self._vpp_shed_loads = False
 
+            await self._ensure_export_guard()   # (#955) before anything reads it
             charging_context = self._build_charging_context(power, energy)
             charging_state = self._state_machine.update_state(charging_context)
 
@@ -3135,6 +3367,56 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # two solar_only chargers don't each think they can have ALL
                 # the surplus.
                 self._solar_committed_w_per_cycle = 0.0
+                # (#864) …and the peak slot's twin. One slot budget serves
+                # the whole house, so a second charger must see what the
+                # first was already offered — without this each charger
+                # claimed the entire allowance and two landed 69 % over
+                # target on review.
+                self._peak_committed_w_per_cycle = 0.0
+                # (#878) …and the pack's. One battery serves the fleet,
+                # so the assist a senior charger was offered must not be
+                # offered again to the next.
+                self._assist_committed_w_per_cycle = 0.0
+                # (#885) The pack's assist cap for this cycle, read once —
+                # the ceiling on what chargers AND Tier-1 loads may take
+                # between them, and the cap on any single reservation.
+                from .surplus_controller import (
+                    surplus_reserved_w as _surplus_reserved_w,
+                    tier1_battery_reserved_w as _tier1_reserved_w,
+                )
+                from ..consts.core import (
+                    DEFAULT_BATTERY_ASSIST_MAX_POWER as _DEF_ASSIST_MAX,
+                )
+                _assist_allowance_w = float(
+                    self.config.get("battery_assist_max_power")
+                    or self.config.get("super_charger_power")
+                    or _DEF_ASSIST_MAX
+                )
+                # Same ``getattr`` guard every other reader of the
+                # controller uses — a partially-built coordinator in a
+                # test must reserve nothing rather than raise.
+                _sc = getattr(self, "_surplus_controller", None)
+                _tier1_devices = (
+                    _sc.get_devices_sorted() if _sc is not None else ()
+                )
+                # (#885) Every charger id, so the reservation walk cannot
+                # count a CHARGER as a load. A charger's claim already
+                # cascades through solar_committed_w / assist_committed_w;
+                # reserving for it as well bills the same watts twice.
+                # get_devices_sorted() filters them via managed_externally
+                # and both registration sites set it — but that invariant
+                # lives in other files, so this does not rely on it.
+                _charger_ids = set((self._ev_devices or {}).keys())
+                _legacy_ev = getattr(self, "_ev_device", None)
+                if _legacy_ev is not None:
+                    _charger_ids.add(getattr(_legacy_ev, "device_id", None))
+                # (#885) The sun a senior load may still claim. Capped at the
+                # real headroom so a reservation can never exceed what the
+                # roof is producing; an active load is already inside
+                # ``home_consumption_power`` and so is already subtracted.
+                _solar_headroom_w = max(0.0, float(
+                    getattr(power, "solar_power", 0.0) or 0.0)
+                    - float(getattr(power, "home_consumption_power", 0.0) or 0.0))
                 # v1.6.9: per-charger effective states are captured below
                 # so the notification dispatch can fire per charger.
                 # Reset before the loop so a removed charger's stale
@@ -3324,6 +3606,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                                         min_amps=int(charger_cfg.get("ev_min_current") or 6),
                                         max_amps=int(charger_cfg.get("ev_max_current")
                                                        or DEFAULT_MAX_CHARGING_CURRENT),
+                                        # (#904) block watts → amps by the
+                                        # learned ladder, not one bucket.
+                                        wpa_table=self._wpa_table_for(cid),
+                                        nominal_wpa=(
+                                            float(charger_cfg.get("ev_phases") or 3)
+                                            * float(charger_cfg.get("ev_voltage") or 230)),
                                     )
                                     if _wait:
                                         plan.should_wait_for_cheap = True
@@ -3446,6 +3734,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             # #576 — this charger's slot in the one list (drag
                             # override wins immediately via the priority store).
                             ev_priority=self._ev_priority_for(cid),
+                            wpa_table=self._wpa_table_for(cid),
+                            # (#899) a redirect the meter contradicted stays
+                            # off for the rest of this plug-in.
+                            redirect_allowed=not bool(getattr(
+                                getattr(pcc, "state", None), "redirect_vetoed", False)),
                             charger_cfg=charger_cfg,
                             mode=per_mode,
                             daily_ev_kwh=self._charger_daily_kwh(cid, energy),
@@ -3464,13 +3757,54 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             # per-charger dict that never carries the key and
                             # falls back to 32 A, over-crediting the cascade.
                             hardware_max_a=getattr(adapter, "max_current_a", None),
-                            solar_committed_w=self._solar_committed_w_per_cycle,
+                            # (#885) Solar in the ONE device order too. The
+                            # accumulator carries what higher-priority
+                            # CHARGERS took; the reservation carries what
+                            # higher-ranked LOADS are about to take. Without
+                            # the second term the load pass simply ran later
+                            # in the cycle, so a junior charger spent the sun
+                            # before a senior load was ever asked.
+                            solar_committed_w=(
+                                float(self._solar_committed_w_per_cycle)
+                                + _surplus_reserved_w(
+                                    _tier1_devices,
+                                    below_priority=self._ev_priority_for(cid),
+                                    available_w=_solar_headroom_w,
+                                    exclude_ids=_charger_ids,
+                                )
+                            ),
+                            # (#885) One pack, spent in the ONE device
+                            # order. Two things are already claimed before
+                            # this charger may touch the battery: what
+                            # higher-priority CHARGERS took (the running
+                            # accumulator), and what Tier-1 LOADS ranked
+                            # above it in the same drag list are going to
+                            # want. Before this the loads were simply
+                            # evaluated later in the cycle, so every
+                            # charger drained the pack first regardless of
+                            # the slot the user dragged it to.
+                            # (#864/#885) the slot cascade, now per-charger
+                            # for the same reason as its two siblings.
+                            peak_committed_w=float(
+                                self._peak_committed_w_per_cycle),
+                            assist_committed_w=(
+                                float(self._assist_committed_w_per_cycle)
+                                + _tier1_reserved_w(
+                                    _tier1_devices,
+                                    below_priority=self._ev_priority_for(cid),
+                                    allowance_w=_assist_allowance_w,
+                                    exclude_ids=_charger_ids,
+                                )
+                            ),
                             night_deliverable_kwh=self._night_deliverable_kwh(charger_cfg),
                             # #548 — max-SOC ceiling (bound="max"); stops surplus
                             # charging at the car's max SOC, in every mode.
                             soc_ceiling_reached=per_target_reached,
                         )
                         decision = decide_v2(view)
+                        from .vpp_dispatch import vpp_pause_override
+                        decision = vpp_pause_override(
+                            decision, getattr(self, "_vpp_ev_override", None) == "pause")
                         # Hysteresis stability layer (#461 flapping):
                         # median smoothing + ramp limit + delta/debounce
                         # guards + enable/disable delays. Applied BEFORE
@@ -3487,7 +3821,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         # phase-guard stop.
                         from .active_phase_guard import filter_charger_decision
                         decision = filter_charger_decision(
-                            self, decision, adapter=adapter, power=view.power
+                            self, decision, adapter=adapter, power=view.power,
+                            # (#804 B4d) the live phase belief — a 3→1
+                            # switch tightens the per-phase clamp at once.
+                            believed_phases=getattr(
+                                self, "_phase_believed", {}).get(cid),
                         )
                         # (#804 Phase B/C) The phase sequencer may hold the
                         # decision at IDLE while a switch walks its
@@ -3500,6 +3838,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             setpoint_a=int(float(getattr(
                                 getattr(adapter, "_device", None),
                                 "_current_setpoint", 0) or 0)),
+                            # (#1008) never ask for three phases the meter
+                            # cannot pay for this quarter hour.
+                            peak_allowed_w=getattr(
+                                view.fleet, "peak_slot_allowed_w", None),
                         )
                         # Track the highest commanded current across the
                         # fleet so the stall-detection path (line ~3725)
@@ -3507,6 +3849,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         # from "SEM commanding, EV refused → really full".
                         if decision.commanded_amps > self._last_commanded_amps_fleet:
                             self._last_commanded_amps_fleet = decision.commanded_amps
+                        # (#1011) per charger, this cycle's decided offer (set,
+                        # not max) — the signal the declined-start check reads,
+                        # available in observer mode where the write is withheld.
+                        self._last_commanded_amps_per_charger[cid] = int(
+                            decision.commanded_amps or 0)
                         # (#762) transition-gated — 833 identical idle
                         # lines per day on .175.
                         log_on_change(
@@ -3552,7 +3899,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         )
                         if effective_state not in _NIGHT_STATES:
                             from .charger_types import ChargerIntent as _CI
-                            if decision.intent is _CI.DISABLE:
+                            if decision.intent in (_CI.DISABLE, _CI.RELEASE):
                                 effective_state = ChargingState.SOLAR_IDLE
                             elif decision.intent is _CI.IDLE:
                                 # #548 — an IDLE caused by the max-SOC ceiling
@@ -3593,6 +3940,35 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                                 _no_draw.pop(cid, None)
                         pcc.effective_state = effective_state
 
+                        # (#899) Commit-then-measure: the redirect counts only
+                        # while the meter agrees. Import above tolerance with
+                        # a redirect in the budget means the pack did not
+                        # yield; three strikes veto it for the session.
+                        _pstate = getattr(pcc, "state", None)
+                        if _pstate is not None:
+                            from .per_charger_context import note_redirect_outcome
+                            if not view.power.connected:
+                                _pstate.reset_session()
+                            elif self._observer_mode:
+                                # (#899 round 2) Observer writes nothing, so
+                                # the car is not drawing what this decision
+                                # offered and the meter is answering about
+                                # somebody else. Striking here would latch a
+                                # veto off a command SEM never gave, and the
+                                # user would find it waiting when they hand
+                                # control back.
+                                pass
+                            else:
+                                note_redirect_outcome(
+                                    _pstate,
+                                    redirect_w=float(getattr(decision, "redirect_w", 0.0) or 0.0),
+                                    grid_import_w=float(getattr(view.fleet, "grid_import_w", 0.0) or 0.0),
+                                    charging=bool(view.power.charging),
+                                    # (#925 audit) a dark meter is not
+                                    # agreement — hold, do not forgive
+                                    grid_import_known=bool(getattr(
+                                        view.fleet, "grid_import_known", True)),
+                                )
                         try:
                             await actuate(
                                 decision, adapter, view.power,
@@ -3642,6 +4018,34 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                                 voltage=adapter.voltage,
                                 max_current_a=adapter.max_current_a,
                             )
+                            # (#864) The peak slot's twin: what THIS charger
+                            # was offered is unavailable to the next one, and
+                            # it cannot show up in grid_import yet because the
+                            # car has not drawn it. Same accumulator, same
+                            # reset, same reason.
+                            from .charger_types import commanded_power_w as _cpw
+                            self._peak_committed_w_per_cycle += float(_cpw(
+                                decision,
+                                phases=adapter.phases,
+                                voltage=adapter.voltage,
+                                max_current_a=adapter.max_current_a,
+                            ) or 0.0)
+                            # (#878/#885) The share of that commitment the
+                            # BATTERY is funding, accumulated so the next
+                            # charger's potential — and the load pass that
+                            # runs later — are net of it. One pack, one
+                            # allowance, spent in device order.
+                            #
+                            # Read from the decision, NOT recomputed here.
+                            # This briefly subtracted a locally-reconstructed
+                            # "solar this charger could see" from the
+                            # commitment; ``decide`` had already computed the
+                            # same number with the real surplus in hand, and a
+                            # second implementation of one value is the #282
+                            # class that drifts. ``decide`` computes, ``decide``
+                            # reports.
+                            self._assist_committed_w_per_cycle += max(
+                                0.0, float(getattr(decision, "assist_w", 0.0) or 0.0))
                         except (HomeAssistantError, ServiceValidationError) as e:
                             _LOGGER.error("EV control service failed for %s: %s", cid, e)
                         except ValueError as e:
@@ -3692,6 +4096,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     charger_id=cid,
                     # #576 — this charger's slot in the one priority list.
                     ev_priority=self._ev_priority_for(cid),
+                    wpa_table=self._wpa_table_for(cid),
                     charger_cfg={},
                     mode=per_mode,
                     daily_ev_kwh=getattr(energy, "daily_ev", 0.0),
@@ -3725,7 +4130,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 )
                 from .active_phase_guard import filter_charger_decision
                 decision = filter_charger_decision(
-                    self, decision, adapter=adapter, power=view.power
+                    self, decision, adapter=adapter, power=view.power,
+                    # (#804 B4d) the legacy single-charger path never runs
+                    # phase switching, so the belief is always absent here —
+                    # passed for one uniform call shape, resolves to the
+                    # nameplate fallback.
+                    believed_phases=getattr(
+                        self, "_phase_believed", {}).get("ev_charger"),
                 )
                 try:
                     await actuate(
@@ -3782,6 +4193,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         monthly_peak,
                         ev_is_charging=False,
                         grid_import_w=power.grid_import_power,
+                        # (#925 audit) a dark meter must not read as 0 W
+                        # and idle the shed engine mid-emergency
+                        grid_import_known=not bool(getattr(
+                            power, "grid_power_unavailable", False)),
                         # FLEET-READ: load manager peak budget is a
                         # whole-house concept; fleet EV total is correct.
                         ev_power_w=power.ev_power,
@@ -3804,7 +4219,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 )
 
             # Step 9a2: Detect system install date from statistics (runs once)
-            if self._energy_calculator._install_year_decimal is None:
+            # (#967) Both seeds below query the recorder, and the first update
+            # cycle is one setup waits for. They start on the first cycle
+            # AFTER Home Assistant has started instead.
+            if (
+                self._recorder_seeds_ready
+                and self._energy_calculator._install_year_decimal is None
+            ):
                 try:
                     await self._energy_calculator.async_detect_install_date(self.hass)
                 except Exception as e:
@@ -3819,7 +4240,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # and would never call in again — the floor re-check that heals it
             # would be unreachable on exactly the system that needs it.
             if (
-                self._energy_dashboard_config
+                self._recorder_seeds_ready
+                and self._energy_dashboard_config
                 and self._energy_calculator.yearly_seed_pending
             ):
                 try:
@@ -3976,12 +4398,20 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # shortfall IS the baseload), and the sealed history feeds
                 # the drift check that asks whether the leftover still
                 # behaves like a house.
-                per_device_daily={
-                    d.device_id: float(
-                        getattr(d, "daily_energy_kwh", 0.0) or 0.0)
-                    for d in self._surplus_controller._devices.values()
-                    if getattr(d, "device_id", None)
-                },
+                # (#872) EV chargers are NOT members of the home row — the
+                # home balance subtracts EV energy, so counting a charger
+                # here compares it against a total it was removed from. Every
+                # install charging a car reported a permanent double-count
+                # that no amount of looking could resolve. One helper, so the
+                # rule lives beside the check that depends on it.
+                per_device_daily=home_member_totals(
+                    self._surplus_controller._devices.values()),
+                # (#979) …and where each member's number came from. A bucket
+                # alone names the symptom; its source sensor and raw reading
+                # name the fault, and the violation is usually gone by the
+                # time anyone goes looking.
+                per_device_evidence=home_member_evidence(
+                    self._surplus_controller._devices.values()),
                 baseload_history=getattr(
                     self._energy_calculator, "baseload_history", None,
                 ) if self._energy_calculator else None,
@@ -4010,6 +4440,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 self._storage._daily_data["predictor"] = self._predictor.get_state()
                 # Persist EV intelligence state (#106)
                 self._storage.set_ev_intelligence_state(self._ev_taper_detector.get_state())
+                # (#846) the W/A table rides the same throttled save
+                self._storage.set_wpa_learner_state(self._wpa_learner.as_state())
                 # (#635) per-charger detectors persist too — the restore has
                 # always read chargers.<cid>; without this every restart
                 # blanked the estimated SOC (not anchored → sensor None).
@@ -4070,7 +4502,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # (#800) The battery's night rides the same cycle: drain /
             # refill / clipping series for the #778 budget's learner.
             try:
-                await self._record_battery_night(power, power_flows)
+                await self._record_battery_night(power, power_flows, energy)
             except Exception:  # noqa: BLE001 — recording never costs a cycle
                 _LOGGER.debug("battery night record skipped", exc_info=True)
 
@@ -4082,6 +4514,30 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 result[f"charger_{cid}_power"] = round(charger_power, 0)
                 result[f"charger_{cid}_name"] = ev_dev.name
                 result[f"charger_{cid}_connected"] = self._last_ev_connected_per_charger.get(cid, False)
+                # (#846) fire → CHECK → adjust: THIS charger's setpoint against
+                # THIS charger's draw, offered to the W/A learner. Here and not
+                # in the fleet trace: on a two-charger install the trace holds
+                # the summed ``power.ev_power`` and whichever device was bound
+                # last (docs/MULTI_CHARGER.md — the class behind four
+                # hotfixes). The learner decides for itself whether the moment
+                # can teach; a failure here costs a debug line, never the cycle.
+                try:
+                    self._feed_wpa_learner(cid, ev_dev, charger_power,
+                                           result[f"charger_{cid}_connected"])
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("wpa learner feed skipped", exc_info=True)
+                # (#967) …and then ASK it. The learner's plausibility band is
+                # the only place in SEM that can see a wrong ``ev_phases``,
+                # and until now the sight went nowhere: @alexmc1510's car took
+                # a third of the watts SEM thought it had bought, all night,
+                # and the only trace was a counter no surface reads.
+                try:
+                    result[f"charger_{cid}_phase_verdict"] = (
+                        self._surface_phase_verdict(
+                            cid, ev_dev,
+                            connected=result[f"charger_{cid}_connected"]))
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("phase verdict skipped", exc_info=True)
                 # #351 M4 — surface per-charger effective state so the
                 # fleet ``sem_charging_state`` no longer hides per-charger
                 # disagreements (e.g. fleet says NIGHT_CHARGING_ACTIVE
@@ -4176,6 +4632,29 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 result[f"charger_{cid}_believed_phases"] = (
                     getattr(self, "_phase_believed", None) or {}
                 ).get(cid)
+                # (#940) The contactor's anti-cycle hold. SEM refusing to
+                # toggle a relay is a DECISION the user is entitled to see —
+                # #940's reporter watched his switch flip 60 s on / 20 s off
+                # while the card said CHARGING. Seconds remaining, 0 when
+                # nothing is held.
+                _rec = (getattr(self, "_charger_reconcilers", None) or {}).get(cid)
+                _ac = (_rec.anticycle_snapshot(time.monotonic())
+                       if _rec is not None else None)
+                result[f"charger_{cid}_anticycle_hold"] = (
+                    (_ac or {}).get("holding"))
+                result[f"charger_{cid}_anticycle_hold_s"] = float(
+                    (_ac or {}).get("remaining_s") or 0.0)
+                # (#944) SEM holding fire against a live draw — #763's
+                # ceasefire. Without it the tile passed for an ordinary charge
+                # while the house battery drained for an hour.
+                _sd = (_rec.stand_down_snapshot(time.monotonic())
+                       if _rec is not None else None) or {}
+                result[f"charger_{cid}_stop_war_stand_down"] = bool(
+                    _sd.get("standing_down"))
+                result[f"charger_{cid}_stop_war_stand_down_s"] = float(
+                    _sd.get("remaining_s") or 0.0)
+                result[f"charger_{cid}_stop_war_stand_down_w"] = float(
+                    _sd.get("power_w") or 0.0)
                 # Per-charger vehicle SOC (#193) — collected for the global
                 # vehicle_soc/range fallback below (no dedicated per-charger
                 # sensor consumes this, so don't write it into result; #245 review #2).
@@ -4291,6 +4770,143 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             result.update(getattr(self, "_vpp_publish", None)
                           or {"vpp_event": "idle", "vpp_event_observer": True})
 
+            # (#778) Planning evidence — measured, not assumed. Written out
+            # EXPLICITLY rather than looped: #657's guard cannot see keys
+            # published through a dynamic loop, and it is right not to — a
+            # phantom key hiding behind clever publishing reads to a user as
+            # "measured, and null", which is worse than an absent attribute.
+            _pe = getattr(self, "_planning_evidence", None) or {}
+            result["battery_measured_capacity_kwh"] = _pe.get("battery_measured_capacity_kwh")
+            result["battery_capacity_kwh_per_pct"] = _pe.get("battery_capacity_kwh_per_pct")
+            result["battery_capacity_samples"] = _pe.get("battery_capacity_samples")
+            result["battery_capacity_drift_pct"] = _pe.get("battery_capacity_drift_pct")
+            result["battery_capacity_reason"] = _pe.get("battery_capacity_reason")
+            # (#820) what pacing decided this cycle (None until first run)
+            # (#915) A report built at BOOT is unjudged (no live states yet),
+            # and one built seconds after boot can still miss a slow modbus
+            # integration's entities ("not loaded"). Heal it here rather
+            # than trusting the STARTED hook alone: rebuild once HA is up
+            # while it is unjudged, and up to five more times a minute
+            # apart while any proposal still reads not-loaded. Observed on
+            # the .46 rig: every Huawei proposal read "not loaded" for the
+            # first minute after a clean install.
+            try:
+                self._reheal_detection_report()
+            except Exception:  # noqa: BLE001
+                pass
+            # (#915) Did the last battery control write TAKE? A declared key
+            # cannot say whether the register accepts a write, expires it, or
+            # is a global setting the vendor says to leave alone — the answer
+            # only exists after the first write. Same three-strike shape as
+            # #824/#840, on the read-back side.
+            try:
+                _ad = self._primary_battery_adapter()
+                _verify = getattr(_ad, "verify_pending_write", None)
+                if callable(_verify):
+                    _v = _verify()
+                    result["battery_control_write_verified"] = _v
+                    result["battery_control_write_strikes"] = int(
+                        getattr(_ad, "write_not_taken_strikes", 0) or 0)
+                    self._raise_or_clear_battery_write_repair(_ad, _v)
+            except Exception:  # noqa: BLE001
+                pass
+            # (#827) a brand whose discharge rate SEM cannot set says so.
+            try:
+                _ad = self._primary_battery_adapter()
+                _cav = getattr(_ad, "discharge_rate_caveat", None)
+                if callable(_cav) and getattr(
+                        _ad, "_system_work_mode_control", False):
+                    result["battery_discharge_rate_caveat"] = _cav()
+            except Exception:  # noqa: BLE001
+                pass
+            # (#846) what SEM has learned each command really buys
+            try:
+                _wl = getattr(self, "_wpa_learner", None)
+                if _wl is not None:
+                    _v = float(self.config.get("ev_voltage", 230) or 230)
+                    _d = _wl.as_dict_with_nominal(lambda c, ph: ph * _v)
+                    if _d:
+                        result["ev_watts_per_amp"] = _d
+                    _rep = getattr(self, "_wpa_replay_report", None)
+                    if _rep:
+                        result["ev_watts_per_amp_replay"] = dict(_rep)
+            except Exception:  # noqa: BLE001
+                pass
+            _cp = getattr(self, "_charge_pacing_state", None)
+            if _cp:
+                result["charge_pacing"] = dict(_cp)
+                # scalar twin: the sensor's generic value path reads
+                # data[key] directly, and a dict is not a state.
+                result["battery_charge_pacing"] = _cp.get("action") or "idle"
+            _eg = getattr(self, "_export_guard_state", None)
+            if _eg:
+                result["export_guard"] = dict(_eg)
+                result["export_guard_state"] = _eg.get("state") or "idle"
+            _sv = getattr(self, "_sink_verdicts", None) or {}
+            result["sink_verdicts"] = {k: v.to_dict() for k, v in _sv.items()
+                                       if hasattr(v, "to_dict")}
+            # (#891) Both None when no house sensor is named, which is every
+            # install until somebody picks one. The sensors are not created
+            # then either, so nothing publishes a hole.
+            result["house_meter_power"] = getattr(self, "_house_meter_w", None)
+            result["house_meter_gap"] = getattr(self, "_house_meter_gap_w", None)
+            result["battery_last_night_surplus_kwh"] = _pe.get("battery_last_night_surplus_kwh")
+            result["battery_last_night_date"] = _pe.get("battery_last_night_date")
+            result["forecast_trust_d1"] = _pe.get("forecast_trust_d1")
+            result["forecast_trust_d2"] = _pe.get("forecast_trust_d2")
+            result["battery_overnight_need_kwh"] = _pe.get("battery_overnight_need_kwh")
+            result["battery_expected_refill_kwh"] = _pe.get("battery_expected_refill_kwh")
+            result["battery_refill_clipped_kwh"] = _pe.get("battery_refill_clipped_kwh")
+            result["battery_refill_reason"] = _pe.get("battery_refill_reason")
+            # (#925 audit) LEARNING IS NOT A MEASURED ZERO. The budget
+            # dataclass collapses both into 0.0 — "0.0 whenever anything is
+            # unknown" — which is right for the DECISION (spend nothing
+            # while you do not know) and wrong for the DISPLAY. Only the
+            # battery card read the `phase` attribute and rendered
+            # "Learning, n of 5 nights"; History, the Logbook, a generic
+            # entity card, an automation and a voice query all saw a
+            # confident `0.0 kWh` on a brand-new install for a week.
+            #
+            # `planning_phase` already separates the two states, so the
+            # sensor can too: unknown while learning, 0.0 once holding —
+            # which IS a measurement. Decisions are untouched; they read
+            # `_planning_evidence`, which still carries the number.
+            _spend = _pe.get("battery_spendable_kwh")
+            result["battery_spendable_kwh"] = (
+                None if _pe.get("planning_phase") == "learning" else _spend)
+            # (#925 audit, sibling of the spendable gate) a floor percentage
+            # beside a budget that reads "learning" is a number the card
+            # cannot explain — same rule, same phase, one line down.
+            result["battery_dynamic_floor_pct"] = (
+                None if _pe.get("planning_phase") == "learning"
+                else _pe.get("battery_dynamic_floor_pct"))
+            result["battery_spendable_reason"] = _pe.get("battery_spendable_reason")
+            result["planning_phase"] = _pe.get("planning_phase")
+            result["planning_nights_sealed"] = _pe.get("nights_sealed")
+            result["planning_nights_required"] = _pe.get("nights_required")
+            result["forecast_days_d1"] = _pe.get("forecast_days_d1")
+            result["forecast_days_d2"] = _pe.get("forecast_days_d2")
+            result["forecast_days_required"] = _pe.get("forecast_days_required")
+            result["forecast_d1_available"] = _pe.get("forecast_d1_available")
+            result["forecast_d2_available"] = _pe.get("forecast_d2_available")
+            # (#884) THIRD copy of the same value. A field computed in the
+            # ledger reaches a user only after being named in three separate
+            # allowlists — here, then sensor.py's attribute dict, then the
+            # card. Miss any one and it is silently None, which is how #867's
+            # *_path telemetry was built and never seen by anyone.
+            result["forecast_d1_state"] = _pe.get("forecast_d1_state")
+            result["forecast_d2_state"] = _pe.get("forecast_d2_state")
+            result["forecast_d2_path"] = _pe.get("forecast_d2_path")
+            # (#845) the watched operating mode; (#778) the spend status —
+            # exposed on the spendable sensor (assert the ENTITY, not the
+            # dict: the #846 lesson).
+            result["battery_operating_mode"] = getattr(
+                self, "_battery_operating_mode", None)
+            _fss = getattr(self, "_forecast_sell_status", None) or {}
+            result["battery_sell_state"] = _fss.get("state")
+            result["battery_sell_until"] = _fss.get("until")
+            result["battery_sell_rate_w"] = _fss.get("rate_w")
+
             # (#625 phase 3) Diagnostics summary for the System tab —
             # read-only assembly extracted to publish_diag.build_diagnostics.
             from .publish_diag import build_diagnostics
@@ -4309,6 +4925,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     _prices_for_diag = getattr(
                         self._tariff_provider, "_prices_cache", None,
                     ) or []
+                    _td_absence = getattr(
+                        self._tariff_provider.get_tariff_data(),
+                        "level_absence", "no_prices")
                     _today_for_diag = dt_util.now().date()
                     _today_prices = [
                         p for p in _prices_for_diag
@@ -4317,7 +4936,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     if _today_prices:
                         _level_counts: Dict[str, int] = {}
                         for p in _today_prices:
-                            k = p.level.value if hasattr(p.level, "value") else str(p.level)
+                            # (#994) a slot the classifier could not
+                            # compare carries no level — count it under the
+                            # absence the provider named, never as a
+                            # confident word.
+                            k = (p.level.value if hasattr(p.level, "value")
+                                 else ((getattr(p, "level_absence", None)
+                                        or _td_absence) if p.level is None
+                                       else str(p.level)))
                             _level_counts[k] = _level_counts.get(k, 0) + 1
                         result["tariff_today_prices_count"] = len(_today_prices)
                         result["tariff_today_level_counts"] = _level_counts
@@ -4347,7 +4973,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _td = self._tariff_provider.get_tariff_data()
                 result["tariff_upcoming"] = [
                     {"t": p.timestamp.isoformat(), "price": round(p.price, 4),
-                     "level": p.level.value}
+                     # (#994) None is a value the price card must render,
+                     # not an AttributeError that drops the whole curve.
+                     "level": (p.level.value if p.level is not None
+                               else (getattr(p, "level_absence", None)
+                                     or _td.level_absence))}
                     for p in (_td.upcoming_prices or [])[:48]
                 ]
                 result["tariff_currency"] = _td.currency
@@ -4432,6 +5062,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # same for both chargers?"). Compose one plan per charger;
                 # the fleet ``today_plan`` stays the primary's plan for
                 # sem-today-plan-card and as the card-side legacy fallback.
+                _gv = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
                 _shared_plan_kwargs = dict(
                     now=_now,
                     upcoming_prices=result.get("tariff_upcoming"),
@@ -4443,6 +5074,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     battery_empty_eta=_battery_empty_eta,
                     currency=result.get("tariff_currency", ""),
                     device_runs=self._device_run_rows(_now, _peak_t),
+                    # (arc #921) the grid verdict's until: next closing / reopening
+                    export_closes_at=(
+                        getattr(_gv, "until", None)
+                        if getattr(_gv, "state", "") == "open" else None),
+                    export_reopens_at=(
+                        getattr(_gv, "until", None)
+                        if getattr(_gv, "state", "") == "closed" else None),
                 )
                 _primary_cid = (_dl_pcfg or {}).get("id")
                 # Legacy flat-config installs have no ev_chargers list —
@@ -4467,6 +5105,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     _ev_remaining = _np_c.remaining_kwh if _np_c else None
                     _ev_deadline_dt = _np_c.deadline_dt if _np_c else None
                     _ev_rate_kw = None
+                    # (#967) the daytime preview's own three answers: what the
+                    # row is (estimate vs booking), and whether a cheap-hours
+                    # mode would hold through the window open.
+                    _ev_row_detail = None
+                    _ev_wait_preview = False
+                    _ev_next_cheap_preview = None
                     if _np_c and _np_c.hours_to_deadline and _np_c.hours_to_deadline > 0 and _np_c.remaining_kwh:
                         # The planner's reachable=True implies remaining/rate <= hours_left;
                         # this is the rough effective rate (peak-managed unless forcing).
@@ -4486,20 +5130,51 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                             _night_on = _cid and self._mode_allows_night_charging(_pcfg)
                             if not _night_on:
                                 raise ValueError("charge mode disables night charging — no EV preview")
-                            _target = (_pcfg.get("daily_ev_target")
-                                       or self.config.get("daily_ev_target", 10))
-                            _daily = (self._charger_daily_kwh(_cid, energy)
-                                      if _cid else (getattr(energy, "daily_ev", 0.0) or 0.0))
-                            _remain = max(0.0, float(_target) - float(_daily))
-                            if _remain > 0.1:
-                                _ev_remaining = _remain
+                            # (#967) ONE producer of the night need. This branch
+                            # used to re-derive it from ``daily_ev_target`` — a
+                            # per-DAY kWh knob that is not even the target type
+                            # of a SOC-target charger — at a literal 4.1 kW.
+                            # @alexmc1510's strip promised a 4.5 kWh / 4.1 kW bar
+                            # (20:36–21:41, inside his punta band) for a 19.8 kWh
+                            # need. ``build_night_target_map`` is the answer the
+                            # planner and the reactive layer both charge on.
+                            from .ev_control import amps_from_headroom
+                            from .ev_night_targets import build_night_target_map
+                            from .ev_tariff_planner import affordable_start
+                            from .today_plan import ev_preview_inputs
+                            _need = float(build_night_target_map(self, energy).get(_cid) or 0.0)
+                            if _need > 0.1:
+                                _wpa_p = self._ev_watts_per_amp(_cid, _pcfg)
+                                _min_a = int(_pcfg.get("ev_min_current") or 6)
+                                _max_a = int(_pcfg.get("ev_max_current")
+                                             or DEFAULT_MAX_CHARGING_CURRENT)
+                                # the rate the reactive night charge will actually
+                                # run at — the same headroom math as _compute_night_plan
+                                _pm_a = amps_from_headroom(
+                                    self._planning_peak_w()
+                                    - self._expected_night_home_w(energy),
+                                    _wpa_p, _min_a, _max_a)
+                                _ev_remaining, _ev_rate_kw, _ev_row_detail = ev_preview_inputs(
+                                    night_need_kwh=_need, peak_managed_amps=_pm_a,
+                                    watts_per_amp=_wpa_p, gate_covered=False)
                                 # Resolve deadline from charger config — same path the
                                 # planner uses, just without the full plan computation.
                                 _tt = self._charger_target_time(_pcfg)
                                 _ev_deadline_dt = resolve_deadline(_now, _tt)
-                                # Rate estimate at 3-phase peak floor; the strip is a
-                                # preview, not the truth — close enough for the visual.
-                                _ev_rate_kw = 4.1  # ~6A x 690 W/A
+                                # (#967) and the preview holds through an expensive
+                                # window open exactly as the night will (D3), so the
+                                # strip never promises a start in the peak band.
+                                _lvl = getattr(getattr(self, "_tariff_provider", None),
+                                               "get_price_level_at", None)
+                                if (self._tariff_optimized_for(_pcfg) and _lvl is not None
+                                        and _night_start and _ev_deadline_dt
+                                        and _ev_rate_kw > 0):
+                                    _afford = affordable_start(
+                                        _night_start, _ev_deadline_dt, _ev_remaining,
+                                        _ev_rate_kw, _lvl)
+                                    if _afford is not None and _afford > _night_start:
+                                        _ev_wait_preview = True
+                                        _ev_next_cheap_preview = _afford
                         except (ValueError, TypeError, AttributeError):
                             pass
                     # #298 — live target ETA while THIS charger's session is in
@@ -4550,17 +5225,20 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         ev_min_remaining_kwh=_ev_remaining,
                         ev_deadline=_ev_deadline_dt,
                         ev_tariff_optimized=self._tariff_optimized_for(_pcfg),
+                        # (#967) by day the preview's own hold stands in for the
+                        # night plan's — the same latest_affordable_start
                         ev_tariff_waiting=bool(
-                            _np_c.should_wait_for_cheap if _np_c else False
+                            _np_c.should_wait_for_cheap if _np_c else _ev_wait_preview
                         ),
                         ev_next_cheap_window=(
                             _np_c.next_cheap_start
-                            if _np_c and _np_c.next_cheap_start else None
+                            if _np_c and _np_c.next_cheap_start else _ev_next_cheap_preview
                         ),
                         # (#742) the joint plan's blocks drive the strip
                         # when covered; None = reactive fallback.
                         ev_plan_blocks=self._ev_blocks_for(_cid) if _cid else None,
                         ev_effective_rate_kw=_ev_rate_kw,
+                        ev_row_detail=_ev_row_detail,
                         ev_target_eta=_ev_target_eta,
                         ev_target_kwh=_ev_target_kwh,
                     )
@@ -4604,6 +5282,24 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     self._compose_tomorrow_preview(power))
             except Exception:  # noqa: BLE001 — a preview never costs a cycle
                 result["energy_plan_tomorrow"] = None
+            # (#820) Charge pacing on TODAY's remaining day, every cycle.
+            # (The first build hooked it to the tomorrow PREVIEW — a
+            # night-only ledger — so it had no input in daylight; caught on
+            # PROD the morning after.) Decision always computed+published;
+            # the write additionally needs the master switch, a named entity,
+            # and non-observer.
+            try:
+                await self._run_charge_pacing(power)
+            except Exception as _e:  # noqa: BLE001 — pacing never costs a cycle
+                # (#762 pattern) a feature that dies silently every cycle is
+                # a dead sensor with no explanation — warn ONCE per distinct
+                # error, then stay quiet. This is how the rig's 'unavailable'
+                # was run down on 26.08.
+                _sig = f"{type(_e).__name__}: {_e}"[:160]
+                if _sig != getattr(self, "_charge_pacing_last_error", None):
+                    self._charge_pacing_last_error = _sig
+                    _LOGGER.warning("charge pacing skipped this cycle: %s",
+                                    _sig, exc_info=True)
             # (#755 pillar 4) Last night's verdict, on its OWN key. It has to
             # outlive the plan: ``energy_plan`` empties out in daylight, which
             # is exactly when somebody reads what the night taught.
@@ -4621,6 +5317,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # in-memory tracker above — a restart re-initialises the tracker to
             # today and would swallow the rollover.
             self._run_due_daily_decay(now_time, today_date, power)
+            # (#867) …and seal the month that just ended, once. Idempotent,
+            # so running it every cycle costs a dict scan.
+            self._record_completed_month(today_date)
             # (#829) Retention for SEM's own statistics-less status entities.
             # Off by default; the user sets it on the Config tab. Runs at most
             # once a calendar day and never touches an entity that carries
@@ -4699,6 +5398,71 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         ("ev_start_stop_entity", "start and stop charging"),
     )
 
+    #: (#915) strikes before a not-reflected battery write becomes a Repair
+    BATTERY_WRITE_STRIKES: int = 3
+
+    def _raise_or_clear_battery_write_repair(self, adapter, verdict) -> None:
+        """(#915) Turn the adapter's read-back verdict into a Repair, once,
+        and clear it the moment a write is reflected again."""
+        from . import repair_issues as _ri
+        entity_id = str(getattr(adapter, "last_unverified_entity", "") or "")
+        raised = getattr(self, "_battery_write_repair_raised", None)
+        if raised is None:
+            raised = self._battery_write_repair_raised = set()
+        strikes = int(getattr(adapter, "write_not_taken_strikes", 0) or 0)
+        if verdict is True:
+            # (#933) …and the entity this write proved, once per lifetime:
+            # the Repair is persistent and ``raised`` is not, so one raised
+            # before a restart or an options reload was never cleared.
+            done = getattr(self, "_battery_write_reconciled", None)
+            if done is None:
+                done = self._battery_write_reconciled = set()
+            proved = str(getattr(adapter, "last_verified_entity", "") or "")
+            stale = set(raised)
+            if proved and proved not in done:
+                stale.add(proved)
+                done.add(proved)
+            for eid in sorted(stale):
+                _ri.clear_battery_control_write_not_taken(self.hass, eid)
+            raised.clear()
+            # (#945) A reflected write retires the silence clock below — for
+            # the entity it PROVED, not for every entity: a primary switch
+            # would otherwise re-arm another battery's hold from zero.
+            silent = getattr(self, "_battery_write_silent_since", None)
+            if silent and proved:
+                silent.pop(proved, None)
+        elif (verdict is False and entity_id
+              and strikes >= self.BATTERY_WRITE_STRIKES
+              and entity_id not in raised):
+            # (#945, bug class 86) A cycle count is not a clock.
+            # ``verify_pending_write`` reports a vanished entity as "reads
+            # missing" deliberately and that evidence stays — but silence is
+            # also what EVERY entity looks like while its integration loads,
+            # so on its own it must not file an ERROR Repair three cycles
+            # into a restart. Silence waits out the same wall-clock hold
+            # #824 gives the charger's control entities (#611's warm-up); a
+            # register that answered with the WRONG number is evidence and
+            # files at once.
+            silent_since = getattr(self, "_battery_write_silent_since", None)
+            if silent_since is None:
+                silent_since = self._battery_write_silent_since = {}
+            _st = self.hass.states.get(entity_id)
+            _sv = str(getattr(_st, "state", "") or "").strip().lower()
+            if _st is None or _sv in ("unavailable", "unknown", "none", ""):
+                import time as _time
+                _now = _time.monotonic()
+                if (_now - silent_since.setdefault(entity_id, _now)
+                        < _ri.UNAVAILABLE_REPAIR_THRESHOLD_S):
+                    return
+            else:
+                silent_since.pop(entity_id, None)
+            raised.add(entity_id)
+            _ri.raise_battery_control_write_not_taken(
+                self.hass, entity_id=entity_id,
+                wanted=getattr(adapter, "last_unverified_wanted", ""),
+                seen=getattr(adapter, "last_unverified_seen", ""),
+                strikes=strikes)
+
     def _check_charger_control_entities(self, cid, charger_cfg, result) -> None:
         """Pre-flight the entities SEM COMMANDS on this charger (#824).
 
@@ -4736,10 +5500,19 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
             if verdict.valid:
                 self._control_broken_since.pop((cid, entity_id), None)
-                if (cid, entity_id) in self._control_repair_raised:
+                # (#933) …and once on this coordinator's first valid
+                # verdict: the Repair is persistent and the raised-set is
+                # not, so one raised before a restart — or before the reload
+                # that fixing the helper caused — was never cleared.
+                done = getattr(self, "_control_repair_reconciled", None)
+                if done is None:
+                    done = self._control_repair_reconciled = set()
+                if ((cid, entity_id) in self._control_repair_raised
+                        or (cid, entity_id) not in done):
                     self._control_repair_raised.discard((cid, entity_id))
                     _ri.clear_charger_control_entity_broken(
                         self.hass, str(cid), entity_id)
+                done.add((cid, entity_id))
                 continue
 
             broken_now = broken_now or verdict.reason
@@ -4812,11 +5585,19 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             if forecast.available:
                 forecast_data.forecast_today_kwh = forecast.forecast_today_kwh
                 forecast_data.forecast_tomorrow_kwh = forecast.forecast_tomorrow_kwh
+                # (#884) The day-2 figure and WHY it is absent. Carried
+                # explicitly because ForecastSensorData is hand-copied from
+                # ForecastData field by field — a fourth place a new value
+                # must be named before it reaches anyone.
+                forecast_data.forecast_d2_kwh = forecast.forecast_d2_kwh
+                forecast_data.forecast_d2_path = forecast.forecast_d2_path
                 forecast_data.forecast_remaining_today_kwh = forecast.forecast_remaining_today_kwh
                 forecast_data.forecast_power_now_w = forecast.power_now_w
                 forecast_data.forecast_power_next_hour_w = forecast.power_next_hour_w
                 forecast_data.forecast_peak_power_today_w = forecast.peak_power_today_w
                 forecast_data.forecast_peak_time_today = forecast.peak_time_today or ""
+                forecast_data.forecast_peak_power_path = getattr(
+                    forecast, "peak_power_path", "unsupported_by_source")
                 forecast_data.forecast_source = forecast.source
                 # (#819) carry the install's available sources through to
                 # the dashboard picker
@@ -4859,6 +5640,26 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 )
             tracker_data = self._forecast_tracker.get_data()
             # (#544) forecast_corrected_tomorrow removed — dead sensor.
+
+            # (#778) The horizon ledger. The tracker above scores ONE horizon —
+            # what we said about today. This scores the others: what we said
+            # two days ago about today, and whether that deserved believing.
+            # Settling runs every cycle (idempotent, so the last value before
+            # midnight becomes the day's final); the forecasts are recorded
+            # once a day, which fixes the convention to "what we believed at
+            # the start of the day" for every horizon alike.
+            try:
+                self._record_forecast_horizons(forecast_data, energy, dt_util.now(), power)
+            except (AttributeError, TypeError, ValueError, KeyError) as _fe:
+                # Narrow deliberately. A broad `except Exception` here caught a
+                # NameError for two hours on .175 and reported it as a DEBUG
+                # line, so the suite stayed green while six sensors sat
+                # unavailable. A programming error must not be indistinguishable
+                # from a missing sensor reading.
+                _LOGGER.warning(
+                    "forecast ledger update skipped (%s): %s",
+                    type(_fe).__name__, _fe,
+                )
         except (ValueError, TypeError, AttributeError) as e:
             _LOGGER.debug("Forecast tracker update failed: %s", e)
 
@@ -4905,7 +5706,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             tariff = self._tariff_provider.get_tariff_data()
             tariff_data.tariff_current_import_rate = tariff.current_import_rate
             tariff_data.tariff_current_export_rate = tariff.current_export_rate
-            tariff_data.tariff_price_level = tariff.price_level.value
+            # (#994) ``price_level`` is tri-state now. ``.value`` on None
+            # raised AttributeError — caught by this block's own except — so
+            # a flat or not-yet-loaded tariff silently dropped the WHOLE
+            # payload (rates, min/max, windows) and published the dataclass
+            # defaults: a confident "normal" beside a classifier_path of
+            # "unknown". Found on the .175 rig within a minute of deploying.
+            tariff_data.tariff_price_level = (
+                tariff.price_level.value if tariff.price_level is not None
+                else tariff.level_absence)
             tariff_data.tariff_provider = tariff.provider
             tariff_data.tariff_is_dynamic = tariff.is_dynamic
             tariff_data.tariff_today_min_price = tariff.today_min_price
@@ -4948,17 +5757,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # arbitrage) is honored — no reclaim.
             # Same definition the EV reclaim gate uses — one source of truth.
             battery_commanded = self._battery_commanded()
-            reclaim_w = reclaimable_battery_w(
-                battery_charge_power=float(getattr(power, "battery_charge_power", 0.0) or 0.0),
-                soc=float(getattr(power, "battery_soc", 0.0) or 0.0),
-                priority_soc=float(self.config.get("battery_priority_soc", 30)),
-                battery_commanded=battery_commanded,
-            )
-            # #576 — pass the export surplus and the reclaimable battery-charge
-            # power SEPARATELY (plus the battery's slot in the priority walk).
-            # The controller offers the reclaim only to loads ABOVE the battery
-            # and hands it back at the battery's slot, so its drag position
-            # decides who charges before the battery.
             # (#620) Feedback-free SOLAR surplus, physically bounded by the live
             # solar production — one invariant ("surplus ≤ sun") that pins the
             # figure to 0 overnight and kills phantom surplus from the add-back,
@@ -4966,6 +5764,48 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             true_surplus_w = solar_bounded_surplus(
                 grid_export_w=float(getattr(power, "grid_export_power", 0.0) or 0.0),
                 active_draw_w=self._surplus_controller.active_surplus_draw_w(),
+                solar_w=getattr(power, "solar_power", None),
+            )
+            # #576 — pass the export surplus and the reclaimable battery-charge
+            # power SEPARATELY (plus the battery's slot in the priority walk).
+            # The controller offers the reclaim only to loads ABOVE the battery
+            # and hands it back at the battery's slot, so its drag position
+            # decides who charges before the battery.
+            # (#938) The reclaim is the pool's SECOND addend and the #620 bound
+            # covered only the first: a battery charging from the GRID at night
+            # (an inverter TOU window — nothing SEM commanded, so U6 did not
+            # apply) handed a Solar-only pump 3 kW of "surplus" with the sun at
+            # 0 W. Two independent ceilings, both physics: only the share of
+            # the charge the meter is not importing is solar-funded, and the
+            # pool as a whole never exceeds the sun (``surplus + reclaim ≤
+            # solar``). The sun ceiling fails closed (a dark solar sensor
+            # reads 0 W); the import ceiling rides on the last readable
+            # meter value through a dark cycle — the reader's 0.0 fallback
+            # would credit the whole charge for one blink (#925: a dark
+            # meter is no evidence either way) — and is blind only until
+            # the meter has been read once this lifetime.
+            _grid_known = not bool(getattr(power, "grid_power_unavailable", False))
+            reclaim_import_w = held_grid_import(
+                getattr(self, "_reclaim_import_w", None),
+                grid_import_w=float(getattr(power, "grid_import_power", 0.0) or 0.0),
+                grid_import_known=_grid_known,
+            )
+            self._reclaim_import_w = reclaim_import_w
+            _now_mono = time.monotonic()
+            if _grid_known:
+                self._reclaim_import_seen_mono = _now_mono
+            _seen = getattr(self, "_reclaim_import_seen_mono", None)
+            import_held_s = 0.0 if (_grid_known or _seen is None) else _now_mono - _seen
+            reclaim_raw_w = reclaimable_battery_w(
+                battery_charge_power=float(getattr(power, "battery_charge_power", 0.0) or 0.0),
+                soc=float(getattr(power, "battery_soc", 0.0) or 0.0),
+                priority_soc=float(self.config.get("battery_priority_soc", 30)),
+                battery_commanded=battery_commanded,
+                grid_import_w=reclaim_import_w,
+            )
+            reclaim_w = solar_bounded_reclaim(
+                reclaim_raw_w,
+                surplus_w=true_surplus_w,
                 solar_w=getattr(power, "solar_power", None),
             )
             # (#625) per-cycle registry priority sync + peak posture — both
@@ -4987,6 +5827,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # slot, how much charge power it yielded, and whether it's commanded.
             self._cycle_reclaim = {
                 "reclaim_w": round(float(reclaim_w)),
+                # (#938) what the pack was charging at before the solar/import
+                # ceilings — a night with reclaim_w 0 and reclaim_raw_w 3000
+                # reads as "grid charge, not surplus" in the trace.
+                "reclaim_raw_w": round(float(reclaim_raw_w)),
+                # (#938) how long the import ceiling has been riding on a
+                # held value — 0 while the meter is readable (class 79: a
+                # held value's consumer can read how long it has been held).
+                "import_held_s": round(float(import_held_s)),
                 "battery_priority": battery_priority,
                 "battery_commanded": battery_commanded,
             }
@@ -5001,6 +5849,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # pure computation extracted to build_battery_tier_context.
             btc = build_battery_tier_context(
                 self.config, getattr(power, "battery_soc", None), true_surplus_w,
+                # (#885) The charger loop ran earlier this cycle and has
+                # already been offered its share of the pack; the loads see
+                # what is left, and the same floor the EV side respects.
+                assist_committed_w=float(
+                    getattr(self, "_assist_committed_w_per_cycle", 0.0) or 0.0),
+                dynamic_floor_pct=(
+                    (getattr(self, "_planning_evidence", None) or {})
+                    .get("battery_dynamic_floor_pct")),
             )
             # (#653) Tick the appliance scheduler BEFORE allocation.
             #
@@ -5023,7 +5879,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 reclaim_w=reclaim_w,
                 battery_priority=battery_priority,
                 battery_soc=btc.soc,
-                battery_buffer_soc=btc.buffer_soc,
+                # (#885) the EFFECTIVE floor, not the raw buffer: each
+                # load stops where the house's overnight need begins.
+                battery_buffer_soc=btc.effective_floor_soc,
                 battery_reserve_soc=btc.reserve_soc,
                 battery_assist_budget_w=btc.assist_budget_w,
                 observer=self._observer_mode,
@@ -5033,6 +5891,20 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # actuation switch is on AND tonight's plan covers the load.
                 plan_windows=self._energy_plan_load_windows(
                     self._surplus_controller.get_devices_sorted()),
+                # (#864) the security layer's live slot allowance.
+                peak_slot_allowed_w=getattr(self, "_peak_slot_allowed_w", None),
+                grid_import_w=float(getattr(
+                    power, "grid_import_power", 0.0) or 0.0),
+                # (#925 audit) the twin flag travels with the watts
+                grid_import_known=not bool(getattr(
+                    power, "grid_power_unavailable", False)),
+                # (#953) how long the FREE window still has to run — the
+                # "finish" gate on the cheap-hours grid top-up.
+                daylight_remaining_s=self._daylight_remaining_s_now(),
+                # (#871, arc #921) the loads absorb before anything is clipped
+                grid_closed=bool(getattr(
+                    (getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
+                    "state", "open") == "closed"),
             )
             surplus_data.surplus_total_w = allocation.total_surplus_w
             surplus_data.surplus_distributable_w = allocation.distributable_surplus_w
@@ -5125,6 +5997,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             pv_data.pv_performance_vs_forecast = pv.performance_vs_forecast
             pv_data.pv_estimated_annual_degradation = pv.estimated_annual_degradation
             pv_data.pv_degradation_trend = pv.degradation_trend
+            # (#422) Carry the attribution across too. Copying four of the
+            # analyzer's thirteen fields is what left "why is degradation
+            # blank?" unanswerable from a diagnostics dump.
+            pv_data.pv_yield_path = pv.yield_path
+            pv_data.pv_performance_path = pv.performance_path
+            pv_data.pv_degradation_path = pv.degradation_path
+            pv_data.pv_system_age_path = pv.system_age_path
         except (ValueError, TypeError, AttributeError) as e:
             _LOGGER.debug("PV analytics update failed: %s", e)
 
@@ -5483,6 +6362,27 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 _ri.raise_heat_pump_partial_sg_ready(self.hass)
             else:
                 _ri.clear_heat_pump_partial_sg_ready(self.hass)
+            # (#801) A contact pointing at a text/number/select entity needs
+            # BOTH values SEM must write. The config flow refuses to save one
+            # of them empty, but the dashboard Config card writes each field
+            # through set_option on its own — so the rule is enforced HERE,
+            # against the live config, where both surfaces meet. Idempotent,
+            # same as its siblings above.
+            from ..consts.devices import CONTACT_VALUE_SERVICES as _CVS
+            for _slot, _eid in (("relay1", hp_relay1), ("relay2", hp_relay2)):
+                _missing = []
+                if _eid and str(_eid).split(".", 1)[0] in _CVS:
+                    for _kind in ("on", "off"):
+                        if not str(self.config.get(
+                                f"heat_pump_{_slot}_{_kind}_value") or "").strip():
+                            _missing.append(_kind.upper())
+                if _missing:
+                    _ri.raise_heat_pump_contact_values_missing(
+                        self.hass, contact=_slot, entity_id=_eid,
+                        missing=" and ".join(_missing))
+                else:
+                    _ri.clear_heat_pump_contact_values_missing(
+                        self.hass, contact=_slot)
         except Exception as e:  # noqa: BLE001 — never fail a cycle over a repair
             _LOGGER.debug("Heat-pump repair tracking failed: %s", e)
 
@@ -5881,6 +6781,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
         now = dt_util.now()
         soc = getattr(power, "battery_soc", None)
+        # The event stays open on a dark cycle; only the force op pauses.
+        # DARK-SOC: action — a VPP discharge may not ride a held SOC (#932)
         if getattr(power, "battery_soc_unavailable", False):
             soc = None
         decision = evaluate_vpp(
@@ -5965,6 +6867,697 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
         self._vpp_publish = self._vpp_dispatcher.publish_state(decision)
 
+    def _ev_wants_pack(self, power) -> bool:
+        """(03.09) Is any CONNECTED charger in *Solar + battery* mode?
+
+        That mode is the user's consent for the pack to feed the car — the
+        same consent ``_battery_assist_split`` acts on — so the battery-side
+        discharge clamp (``decide_battery``) reads it here instead of
+        requiring the forecast-spending master switch as well. Connection is
+        per charger (#315 class: never the fleet OR for a per-charger
+        question); a single-charger install falls back to the fleet flag.
+        """
+        per = getattr(power, "ev_connected_per_charger", None) or {}
+        for cfg in (self.config.get("ev_chargers") or []):
+            cid = str(cfg.get("id") or "")
+            if not cid:
+                continue
+            try:
+                mode = self._effective_charge_mode_for(cfg)
+            except Exception:  # noqa: BLE001 — an unresolvable mode is no consent
+                continue
+            if mode != "solar_plus_battery":
+                continue
+            connected = per.get(cid) if cid in per else getattr(power, "ev_connected", False)
+            if bool(connected):
+                return True
+        return False
+
+    def _day_home_w_at(self, now, energy=None):
+        """(#820) The house draw a DAY ledger prices its surplus against.
+
+        ``build_day_slots`` computes ``surplus = solar - home_w_at(t)`` and
+        its docstring names the input *"the predictor's hourly profile with
+        the flat fallback"*. The night packer built exactly that inline; the
+        pacing ledger and the tomorrow previews passed the average OVERNIGHT
+        draw held flat across the whole day, so a busy evening was modelled
+        as a sleeping house. @ArneGollin1987 (02.09): SEM paced 800 W to
+        land full at 20:00, the kitchen ate the last two hours of sun, the
+        pack stopped at 88 %. One accessor, every day-ledger consumer.
+
+        A predicted 0 W hour is a data gap (``trained_with_fallback`` pads
+        with zeros), not a house that switched off — it falls through to the
+        flat estimate, same rule the night packer already used.
+        """
+        hourly = None
+        predictor = getattr(self, "_predictor", None)
+        if predictor is not None:
+            try:
+                hourly = predictor.predict_consumption_24h(now) or None
+            except Exception:  # noqa: BLE001 — untrained is not an error
+                hourly = None
+        try:
+            flat_w = float(self._expected_night_home_w(energy))
+        except Exception:  # noqa: BLE001
+            flat_w = 300.0
+
+        def _at(t):
+            if hourly:
+                i = int((t - now).total_seconds() // 3600)
+                if (0 <= i < len(hourly)
+                        and hourly[i] is not None
+                        and float(hourly[i]) > 0):
+                    return float(hourly[i])
+            return flat_w
+
+        return _at
+
+    def _configured_export_rate(self) -> float:
+        """(#755/#924) What a kWh earns if it leaves the property, and
+        therefore what consuming it here costs.
+
+        Every day-slot builder in SEM prices its surplus slots with this.
+        At 0 the packer prefers the sun BY FIAT and a night hour cheaper
+        than the feed-in can never win; priced, the preference is economic
+        and can correctly lose.
+
+        It is one method because #755 passed the rate at the one call site
+        it was written for and three siblings kept the free sun for a
+        month — including one that packs (#924). A single reader makes
+        "which sites are priced?" a question with one answer.
+        """
+        return float(self.config.get("electricity_export_rate", 0.075) or 0.0)
+
+    def _daylight_remaining_s_now(self) -> "Optional[float]":
+        """(#953) Seconds of daylight left today, or None if we cannot tell.
+
+        The free window's remaining LENGTH — what the cheap-hours grid
+        top-up is gated on, so "Finish overnight from: Grid" finishes
+        instead of pre-empting. Built from the same TimeManager sun frame
+        ``is_night_mode()`` builds the night window from (one class, one
+        day boundary — the #704 rule).
+
+        Measured from ``max(now, sunrise)``, not from ``now``. Before
+        sunrise ALL of today's daylight is still ahead, and the difference
+        is not academic: the night window ends at ``min(sunrise, 07:00)``,
+        so on a winter morning there is a real gap — 07:00 to an 08:03
+        sunrise — where the clock says day and the sky says nothing. Ending
+        it at ``now`` would have counted that dark hour as sun.
+
+        **None means the sun integration did not answer.** That matters
+        because ``get_sunset_plus_10_time()`` FABRICATES 20:30 on any
+        failure and returns it like a reading (bug class 40); a gate on
+        SPENDING must not defer the user's target to a sunset nobody
+        measured, so the source is checked and an unmeasured one yields
+        None — the gate then keeps its pre-#953 behaviour rather than
+        guessing at the sun. It also makes the blink harmless: a cycle
+        where ``sun.sun`` is briefly absent returns None, not a four-hour
+        jump in believed daylight that would stop a running top-up.
+
+        The 10 minutes in ``sunset_plus_10``'s name are left in: ten more
+        minutes of believed daylight means ten more minutes before the
+        meter pays, which is the safe direction for this gate.
+        """
+        try:
+            now = dt_util.now()
+            hhmm = self.time_manager.get_sunset_plus_10_time()
+            if getattr(self.time_manager, "_last_sunset_source",
+                       None) != "sun_integration":
+                return None            # fabricated default, not a reading
+            h, m = (int(x) for x in hhmm.split(":"))
+            sunset = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            start = now
+            sunrise = self.time_manager.get_sunrise_datetime()
+            if sunrise is not None and sunrise > start:
+                start = sunrise
+            return max(0.0, (sunset - start).total_seconds())
+        except Exception:  # noqa: BLE001 — no sun frame, no claim
+            return None
+
+    # ── arc #921 inputs to the sink verdicts ───────────────────────────
+    def _ev_departure_dt(self):
+        """(#892) The configured departure as a datetime — today, or tomorrow
+        once it has passed — or None when no departure entity is set/readable."""
+        ent = self.config.get("ev_departure_time_entity", "")
+        st = self.hass.states.get(ent) if ent else None
+        if not st or str(getattr(st, "state", "")) in ("unknown", "unavailable", ""):
+            return None
+        try:
+            h, m = (int(x) for x in str(st.state).split(":")[:2])
+        except (TypeError, ValueError):
+            return None
+        now = dt_util.now()
+        dep = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        return dep if dep > now else dep + timedelta(days=1)
+
+    def _forecast_refills_pack(self) -> bool:
+        """(#892) Will today's remaining forecast put back what a morning window
+        takes? Conservative on purpose: an unknown forecast is False."""
+        _fd = getattr(getattr(self, "_forecast_reader", None), "forecast_data", None)
+        remaining = getattr(_fd, "forecast_remaining_today_kwh", None)
+        cap = float(getattr(self, "battery_capacity_kwh", 0.0) or 0.0)
+        if remaining is None or cap <= 0:
+            return False
+        floor = float(self.config.get("battery_morning_drain_floor_soc", 50.0) or 50.0)
+        return float(remaining) >= cap * (1.0 - floor / 100.0)
+
+    def _pacing_horizon_end(self):
+        """(#926) Sunset+10 today as a datetime — the pacer's own horizon."""
+        try:
+            h, m = (int(x) for x in self.time_manager.get_sunset_plus_10_time().split(":"))
+            return dt_util.now().replace(hour=h, minute=m, second=0, microsecond=0)
+        except Exception:  # noqa: BLE001 — no frame, no horizon
+            return None
+
+    def _today_pacing_ledger(self) -> list:
+        """(#820) Today's remaining-day slots, or [] outside daylight /
+        without a forecast. Same sun frame and home-draw fallback the
+        tomorrow preview uses, same day builder the planner uses."""
+        from .charge_pacing import today_remaining_slots
+        from .day_ledger import build_day_slots, tariff_cheap_at, tariff_price_at
+        try:
+            now = dt_util.now()
+            sr_s = self.time_manager.get_sunrise_time()
+            ss_s = self.time_manager.get_sunset_plus_10_time()
+
+            def _at(hhmm):
+                h, m = (int(x) for x in hhmm.split(":"))
+                return now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+            sunrise, sunset = _at(sr_s), _at(ss_s)
+            # (#926) Land full by the EARLIER of sunset and the next closed
+            # meter: every kWh of headroom the pack still has when the export
+            # price turns negative is a kWh the guard does not have to
+            # destroy. The verdict carries the closing time; no price here.
+            _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
+            _until = getattr(_bv, "until", None)
+            if (getattr(_bv, "state", "open") == "held" and _until is not None
+                    and now < _until < sunset):
+                sunset = _until
+            _fd = getattr(getattr(self, "_forecast_reader", None),
+                          "forecast_data", None)
+            day_kwh = getattr(_fd, "forecast_today_kwh", None)
+            if day_kwh is None:
+                day_kwh = getattr(_fd, "forecast_remaining_today_kwh", None)
+            prov = self._tariff_provider
+            return today_remaining_slots(
+                now=now, sunrise=sunrise, sunset=sunset, day_kwh=day_kwh,
+                # (#820) the day's own house profile, not the night average
+                home_w_at=self._day_home_w_at(now), builder=build_day_slots,
+                price_at=lambda ts: tariff_price_at(prov, ts),
+                level_cheap_at=lambda ts: tariff_cheap_at(prov, ts),
+                export_rate=self._configured_export_rate(),   # (#924)
+            )
+        except Exception:  # noqa: BLE001 — no frame, no pacing
+            return []
+
+    def _ev_charger_cfg(self, cid: str) -> dict:
+        """This charger's row in the multi-charger config, or {}."""
+        for c in self.config.get("ev_chargers") or []:
+            if str(c.get("id")) == str(cid):
+                return c
+        return {}
+
+    def _wpa_phases_for(self, cid: str, cfg: Optional[dict] = None):
+        """(#846) ``(phases, ok)`` — the phase count the learner files this
+        charger's samples under, and whether that belief is fit to learn
+        from.
+
+        Without phase switching the CONFIGURED count is the belief: there is
+        no machinery to dispute it, and the learner's own band is the honest
+        check — a wrong config shows up as refusals named ``phase_belief``,
+        never as a learned number. (The first wiring required the #804
+        estimator's belief here, which is empty after every restart until
+        the car charges and reads "2" for a Zoe at 8 A — PROD could never
+        have learned its 8 A bucket.)
+
+        With phase switching the sequencer's belief anchors the bucket — the
+        physical phase count can change under SEM's own hand — and it must
+        be undisputed: ``_phase_contradictions`` is the counter
+        PHASE_NOT_TAKING_AFTER reads (not the plug memory, which only
+        remembers whether the car was connected).
+        """
+        cfg = cfg if cfg is not None else self._ev_charger_cfg(cid)
+        if not cfg.get("ev_phase_switching_enabled", False):
+            ph = int(cfg.get("ev_phases") or self.config.get("ev_phases") or 3)
+            return (ph if ph in (1, 3) else 3), True
+        believed = (getattr(self, "_phase_believed", {}) or {}).get(cid)
+        contra = (getattr(self, "_phase_contradictions", {}) or {}).get(cid) or {}
+        if believed in (1, 3) and not contra.get("count"):
+            return int(believed), True
+        return None, False
+
+    def _feed_wpa_learner(self, cid, ev_dev, observed_w, connected) -> None:
+        """(#846) Offer this cycle's (setpoint, draw) pair for ONE charger.
+
+        Gating lives here because this is where the cycle's context is: the
+        phase belief, whether a phase switch is mid-sequence, whether the
+        setpoint has been steady, and whether the car is tapering. The
+        learner refuses anything implausible on top. Observer mode never
+        learns: SEM is not commanding, so there is nothing to check."""
+        learner = getattr(self, "_wpa_learner", None)
+        if learner is None or not connected or self._observer_mode:
+            return
+        cid = str(cid)
+        amps = float(getattr(ev_dev, "_current_setpoint", 0.0) or 0.0)
+        prev = getattr(self, "_wpa_last_cmd", {}) or {}
+        if amps < 1:
+            self._wpa_last_cmd = {**prev, cid: 0}
+            return
+        cfg = self._ev_charger_cfg(cid)
+        phases, belief_ok = self._wpa_phases_for(cid, cfg)
+        voltage = float(cfg.get("ev_voltage") or self.config.get("ev_voltage", 230) or 230)
+
+        # steady = the same commanded amps for two consecutive cycles. A
+        # ramping setpoint measures the ramp, not the car.
+        bucket = int(round(amps))
+        steady = prev.get(cid) == bucket
+        self._wpa_last_cmd = {**prev, cid: bucket}
+
+        seq = (getattr(self, "_phase_sequencers", None) or {}).get(cid)
+        in_flight = bool(getattr(seq, "in_flight", False)) if seq else False
+
+        # A car on a full battery reduces its own draw — evidence about the
+        # battery, not about what the setpoint buys. ``full_detected`` on
+        # THIS charger's taper detector is the question SEM already asks
+        # (published as ``taper_detected``).
+        det = ((getattr(self, "_ev_taper_detectors", None) or {}).get(cid)
+               or getattr(self, "_ev_taper_detector", None))
+        try:
+            tapering = bool(det.full_detected) if det is not None else False
+        except Exception:  # noqa: BLE001
+            tapering = False
+
+        learner.record(
+            cid, phases=int(phases or 3), commanded_amps=amps,
+            observed_w=float(observed_w), nominal_wpa=int(phases or 3) * voltage,
+            belief_confirmed=belief_ok, setpoint_steady=steady,
+            switch_in_flight=in_flight, tapering=tapering,
+        )
+
+    def _surface_phase_verdict(self, cid, ev_dev, *, connected=True):
+        """(#967) Raise or clear this charger's phase-count Repair, and return
+        the verdict for the coordinator surface.
+
+        The verdict follows the CONDITION, like #944's stand-down: raised
+        while the measurements contradict the belief, deleted the cycle they
+        stop doing so — correcting ``ev_phases`` moves the learner to a fresh
+        (charger, phases) bucket, so the fix clears the notice by itself.
+
+        Four things it will NOT do:
+
+        * **accuse in observer mode** — SEM is not commanding the setpoint, so
+          the amps the draw is divided by are not SEM's number to defend;
+        * **accuse a phase-SWITCHING charger** — there the belief is the
+          sequencer's, not ``ev_phases``, so the Repair would name a field
+          that changes nothing; a mismatch under SEM's own commanded count is
+          #804's not-taking question and wants a different notice;
+        * **touch the registry with no car on the plug** — an idle box has
+          nothing to be wrong about this cycle (#708's rule), so a standing
+          notice is held rather than re-argued or retracted;
+        * **re-file an unchanged accusation** — ``async_create_issue`` fires a
+          registry event whenever a placeholder moves, and ``samples`` moves
+          every cycle. Once per (believed, measured) pair, like #944's
+          once-per-ceasefire serial.
+        """
+        from .repair_issues import (
+            clear_charger_phase_count_mismatch,
+            raise_charger_phase_count_mismatch,
+        )
+        learner = getattr(self, "_wpa_learner", None)
+        cfg = self._ev_charger_cfg(str(cid))
+        phases, belief_ok = self._wpa_phases_for(str(cid), cfg)
+        switching = bool(cfg.get("ev_phase_switching_enabled", False))
+        observer = getattr(self, "_observer_mode", False)
+        verdict = None
+        if (learner is not None and phases and belief_ok
+                and not observer and not switching):
+            verdict = learner.phase_verdict(str(cid), int(phases))
+        shown = getattr(self, "_phase_repair_shown", None)
+        if shown is None:
+            shown = self._phase_repair_shown = {}
+        if not verdict:
+            if shown.pop(str(cid), None) is not None or connected:
+                clear_charger_phase_count_mismatch(self.hass, str(cid))
+            return None
+        if not connected:
+            return dict(verdict)
+        stamp = (int(verdict["believed"]), int(verdict["measured"]))
+        if shown.get(str(cid)) != stamp:
+            shown[str(cid)] = stamp
+            raise_charger_phase_count_mismatch(
+                self.hass, str(cid),
+                name=getattr(ev_dev, "name", None) or str(cid),
+                believed=stamp[0],
+                measured=stamp[1],
+                watts_per_amp=float(verdict["watts_per_amp"]),
+                nominal_wpa=float(verdict["nominal_wpa"]),
+                samples=int(verdict["samples"]),
+            )
+        return dict(verdict)
+
+    async def async_seed_from_recorder(self) -> None:
+        """(#967) Everything SEM wants from the recorder at a cold start.
+
+        Called once Home Assistant has started, never from setup. A read of
+        the recorder can take minutes on a big database, and a setup that
+        takes too long is cancelled by Home Assistant — the integration then
+        does not load at all.
+        """
+        self._recorder_seeds_ready = True
+        await self._seed_ev_intelligence_from_history()
+
+    async def _seed_ev_intelligence_from_history(self) -> None:
+        """(#232/#967) Teach the taper detector what the car did before SEM
+        was watching — sessions, the last full charge, the weekday pattern.
+
+        Improves a cold start and an upgrade from a version without EV
+        intelligence. Skipped when the detector already holds an anchored
+        SOC with a full charge behind it.
+        """
+        if self._storage is None:
+            _LOGGER.debug("EV history seeding skipped: no storage yet")
+            return
+        ev_power_entity = (
+            self._sensor_reader.config.ev_power_sensor
+            or (self._energy_dashboard_config.ev_power
+                if self._energy_dashboard_config else None)
+        )
+        if not ev_power_entity:
+            return
+        if (self._ev_taper_detector._soc_anchored
+                and self._ev_taper_detector._last_full_timestamp):
+            return
+        try:
+            seed_result = await self._ev_taper_detector.async_seed_from_history(
+                self.hass, ev_power_entity, days=60,
+            )
+            if not seed_result:
+                return
+            if seed_result.get("improved"):
+                self._storage.set_ev_intelligence_state(
+                    self._ev_taper_detector.get_state()
+                )
+            # Feed weekday consumption to predictor
+            weekday_totals = seed_result.get("weekday_totals", {})
+            if weekday_totals and getattr(self, "_predictor", None):
+                for dow, avg_kwh in weekday_totals.items():
+                    # Only seed if predictor has no data for this weekday
+                    existing = self._predictor._ev_profile.predict(dow, 12)
+                    if existing is None or existing == 0:
+                        self._predictor._ev_profile.update(dow, 12, avg_kwh)
+                        _LOGGER.info(
+                            "EV predictor seeded from history: weekday %d → %.1f kWh/day",
+                            dow, avg_kwh,
+                        )
+        except Exception as e:  # noqa: BLE001 — a cold start, not a crash
+            _LOGGER.debug("EV history seeding skipped: %s", e)
+
+    def _schedule_wpa_replay(self) -> None:
+        """(#846) Once per boot: a charger the learner has never been fed
+        for replays itself from SEM's own recorded series, in the
+        background — the first cycle does not wait on the recorder."""
+        if getattr(self, "_wpa_replay_scheduled", False):
+            return
+        learner = getattr(self, "_wpa_learner", None)
+        chargers = [c for c in (self.config.get("ev_chargers") or []) if c.get("id")]
+        if learner is None:
+            return
+        cold = False
+        for c in chargers:
+            phases, _ok = self._wpa_phases_for(str(c["id"]), c)
+            if phases and learner.is_cold(str(c["id"]), phases):
+                cold = True
+        if not cold:
+            return
+        self._wpa_replay_scheduled = True
+        # (#967) After Home Assistant has started, not during. The task is
+        # not awaited either way, but a long replay competing with the boot
+        # slows every other integration down with it.
+        from .recorder_history import run_after_start
+        self._wpa_replay_unsub = run_after_start(
+            self.hass, self._replay_wpa_from_history, name="sem wpa replay",
+        )
+
+    def cancel_pending_recorder_work(self) -> None:
+        """(#967) Forget the replay if the entry goes away before HA starts.
+
+        SEM reloads itself during the boot on a fresh install (the welcome
+        notification writes an option). Without this, the coordinator being
+        torn down stays on the start event, and two of them replay — the
+        second one writing through a storage nobody owns any more.
+        """
+        unsub, self._wpa_replay_unsub = self._wpa_replay_unsub, None
+        if unsub is not None:
+            try:
+                unsub()
+            except Exception:  # noqa: BLE001 — teardown must finish
+                _LOGGER.debug("could not cancel the pending replay")
+
+    async def _replay_wpa_from_history(self) -> None:
+        from .wpa_replay import DEFAULT_LOOKBACK_DAYS, run_replay
+        days = DEFAULT_LOOKBACK_DAYS
+        try:
+            from homeassistant.components.recorder import get_instance
+            days = max(1, min(days, int(get_instance(self.hass).keep_days)))
+        except Exception:  # noqa: BLE001 — no recorder, the default stands
+            pass
+        try:
+            report = await run_replay(
+                self.hass, self._wpa_learner, self.config.get("ev_chargers") or [],
+                days=days,
+                default_voltage=float(self.config.get("ev_voltage", 230) or 230))
+        except Exception as err:  # noqa: BLE001 — a cold learner, not a crash
+            _LOGGER.warning("#846 W/A replay from history failed: %s", err)
+            return
+        self._wpa_replay_report = report
+        for cid, row in report.items():
+            _LOGGER.info(
+                "#846 %s: replayed %d day(s) of history — %d rows, %d samples, "
+                "%d accepted, %d refused%s", cid, row["days"], row["rows"],
+                row["samples"], row["accepted"], row["refused"],
+                f" ({row['reason']})" if row.get("reason") else "")
+        st = getattr(self, "_storage", None)
+        if st is not None:
+            try:
+                st.set_wpa_learner_state(self._wpa_learner.as_state())
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _wpa_table_for(self, cid: str) -> dict:
+        """(#846) The measured ``{amps: W/A}`` table for the phase count SEM
+        believes on this charger — what ``decide()`` converts with. Empty
+        (→ nameplate) while nothing is earned or the belief is disputed:
+        never a guess."""
+        learner = getattr(self, "_wpa_learner", None)
+        if learner is None:
+            return {}
+        phases, ok = self._wpa_phases_for(cid)
+        if not ok or not phases:
+            return {}
+        return learner.measured(cid, phases)
+
+    def _ev_watts_for_amps(self, cid: str, cfg: dict, amps: float) -> float:
+        """(#846) What ``amps`` really buys on this charger: the measured
+        table where one exists (bridged between measured setpoints), else
+        ``amps`` × the scalar ``_ev_watts_per_amp`` (EMA, then nameplate).
+        Never more than nameplate."""
+        learner = getattr(self, "_wpa_learner", None)
+        phases, _ok = self._wpa_phases_for(cid, cfg)
+        if learner is not None and phases and learner.measured(cid, phases):
+            nominal = phases * float(cfg.get("ev_voltage") or self.config.get("ev_voltage") or 230)
+            return learner.watts_for_amps(cid, phases, amps, nominal)
+        return float(amps) * self._ev_watts_per_amp(cid, cfg)
+
+    def _charge_pacing_store(self):
+        """(#949) Where the pacer's engagement outlives this lifetime.
+
+        The captured max-charge-power is SEM's only record of what the
+        register held before it touched it, and an HA restart never unloads
+        the entry — so keeping that record in memory meant losing it exactly
+        when it was needed. Scoped to the config entry, like every other
+        SEM store: two entries must never adopt each other's cap.
+        """
+        entry_id = str(getattr(
+            getattr(self, "config_entry", None), "entry_id", "") or "")
+        if not entry_id:
+            # A degenerate scope would be shared by every entry. No record is
+            # better than the wrong one — the writer then behaves as before.
+            return None
+        try:
+            from homeassistant.helpers.storage import Store
+            return Store(self.hass, 1, f"sem.pacing.{entry_id}")
+        except Exception:  # noqa: BLE001 — a store never costs a cycle
+            return None
+
+    async def _run_charge_pacing(self, power=None) -> None:
+        """(#820) One cycle of charge pacing: decide, maybe write, publish."""
+        from .charge_pacing import ChargePacingWriter, paced_charge_cap_w
+        if getattr(self, "_charge_pacing_writer", None) is None:
+            # (#949) A rig-shaped stand-in carries no store; the writer then
+            # behaves exactly as it did before the engagement was persisted.
+            _make_store = getattr(self, "_charge_pacing_store", None)
+            self._charge_pacing_writer = ChargePacingWriter(
+                store=_make_store() if callable(_make_store) else None)
+        ledger = self._today_pacing_ledger()
+        capacity_kwh = float(getattr(self, "battery_capacity_kwh", 0.0) or 0.0)
+        # (#762 pattern) one INFO line when the tick's shape CHANGES — never
+        # per cycle. This is how the PROD-morning "unavailable" was run down.
+        _shape = (len(ledger), round(capacity_kwh, 1))
+        if _shape != getattr(self, "_charge_pacing_last_shape", None):
+            self._charge_pacing_last_shape = _shape
+            _LOGGER.info("charge pacing tick: %d day slot(s), capacity %.1f kWh",
+                         *_shape)
+        # THIS cycle's reading. ``self.data`` is HA's DataUpdateCoordinator
+        # attribute and is reassigned only AFTER _async_update_data returns,
+        # while this runs inside it — so reading it sized the day from the
+        # PREVIOUS cycle, and from the initial dataclass's 0.0 on the first
+        # cycle after every restart. 0 % reads as "empty, fill fast", the
+        # exact opposite of pacing (#820, found on review).
+        soc = None
+        soc_stale_s = None
+        soc_expired = False
+        if power is not None:
+            # ``battery_soc`` is 0.0 before the SOC sensor has EVER reported
+            # — the dataclass carries no sentinel; ``battery_soc_known`` is
+            # the "never measured" fact (#875). Reading the number without
+            # it would reintroduce, one layer along, the very fault this
+            # argument was added to remove: a dark sensor reading as
+            # "empty, fill fast". None means "unknown", and
+            # paced_charge_cap_w declines to pace on unknown.
+            #
+            # (#934) A dark cycle AFTER a read is a different thing: the
+            # reader holds the last accepted value and raises
+            # ``battery_soc_unavailable`` on every such cycle. Reading THAT
+            # flag as "no SOC" made every modbus blink a restore + a
+            # re-engage write on the charge-limit register (~250 blinks a
+            # day on PROD). A cap is a LIMIT, not an action — holding it
+            # through a blink is safe, the opposite of the #932 sell gate —
+            # so the decision runs on the held SOC while the hold is inside
+            # the dark-read grace, and the pacer lets go (restoring once)
+            # only when the outage is sustained past it. The rule lives in
+            # soc_grace, once, for every limit that reads a SOC.
+            from .soc_grace import (
+                soc_for_a_limit, soc_hold_age_s, soc_hold_expired,
+            )
+            soc = soc_for_a_limit(power)
+            soc_stale_s = soc_hold_age_s(power)
+            soc_expired = soc_hold_expired(power)
+        elif self.data:
+            # Bare callers (older paths, tests) keep the published value.
+            try:
+                soc = float(self.data.get("battery_soc"))
+            except (TypeError, ValueError):
+                soc = None
+        pe = getattr(self, "_planning_evidence", {}) or {}
+        trusted = pe.get("forecast_trust_d1") is not None
+        enabled = bool(self.config.get("battery_charge_pacing_enabled", False))
+        entity = str(self.config.get(
+            "battery_charge_power_limit_entity") or "")
+        if soc is None or capacity_kwh <= 0:
+            decision = None
+            # Constant prose (the age lives in ``soc_stale_s`` below): a
+            # counter in the reason would churn the entity's attributes
+            # every cycle of an outage — the #762 rule, attribute-side.
+            _why = (("battery SOC held past the dark-read grace — held "
+                     "value expired, cap released" if soc_expired
+                     else "battery SOC unknown")
+                    if soc is None else "no battery capacity")
+        else:
+            decision = paced_charge_cap_w(
+                ledger=ledger, capacity_kwh=capacity_kwh, soc_pct=soc,
+                target_soc_pct=float(self.config.get(
+                    "battery_max_target_soc", 95.0) or 95.0),
+                forecast_trusted=trusted,
+                inverter_ac_limit_w=float(self.config.get(
+                    "inverter_ac_limit_w", 0.0) or 0.0),
+                hw_max_charge_w=float(self.config.get(
+                    "battery_max_charge_power_w", 5000.0) or 5000.0),
+            )
+        cap = decision.cap_w if (decision and enabled) else None
+        code = (decision.code if decision else
+                ("night" if not ledger else
+                 (("soc_expired" if soc_expired else "soc_unknown")
+                  if soc is None else "none")))
+        action = await self._charge_pacing_writer.apply(
+            self.hass, entity, cap, observer=self._observer_mode)
+        _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
+        self._charge_pacing_state = {
+            "enabled": enabled,
+            # (#926) True while the pacer is landing the pack early for a
+            # closing meter — the card can say WHY the cap is tighter.
+            "headroom_for_closed_meter": bool(getattr(_bv, "state", "open") == "held"),
+            "lands_by": (getattr(_bv, "until", None).isoformat()
+                         if getattr(_bv, "state", "open") == "held"
+                         and getattr(_bv, "until", None) is not None else None),
+            # The SOC this decision was actually taken on. Published because
+            # it is the input that determines the cap, and because it is the
+            # value that used to be a cycle stale (and 0.0 on the first cycle
+            # after a restart) with nothing on the surface to show it (#820).
+            "soc": soc,
+            # (#934) seconds the reader has held the SOC through a dark
+            # sensor (None = read this cycle, or never read). A blink shows
+            # here as a small number under an unchanged cap, instead of as
+            # a restore; past the grace it keeps counting beside the
+            # ``soc_expired`` token, so a sustained outage is never
+            # confused with a restart's never-read window.
+            "soc_stale_s": soc_stale_s,
+            "cap_w": decision.cap_w if decision else None,
+            # (#949) A cap with nowhere to go must not read like a cap that
+            # is being applied. The decision's own prose stays true of the
+            # DECISION; what the user needs here is the missing setting.
+            "reason": (
+                "pacing has nowhere to write — no battery charge-power limit "
+                "entity is set (SEM's detected hardware proposes one)"
+                if action == "no_limit_entity" else
+                # (#949 review) A register whose current value cannot be read
+                # is one SEM must not write: the capture is the only way back.
+                "the charge-power limit entity cannot be read — SEM will not "
+                "write a value it could not put back"
+                if action == "limit_unreadable" else
+                decision.reason if decision else (
+                    "pacing idle — outside daylight or no forecast"
+                    if not ledger else f"pacing idle — {_why}")),
+            "full_at": getattr(decision, "full_at", None) if decision else None,
+            "reason_code": code,
+            "action": action,
+            "entity": entity or None,
+            # (#820 diag) the two numbers a "weak day" is judged on, and the
+            # day model itself — solar, house and the surplus SEM can pace
+            # into, per remaining slot. Without these a verdict on a bright
+            # forecast cannot be argued with.
+            "need_kwh": getattr(decision, "need_kwh", None) if decision else None,
+            # (#820) the two numbers a short evening is argued with
+            "drain_kwh": getattr(decision, "drain_kwh", None) if decision else None,
+            "headroom_pct": getattr(decision, "headroom_pct", None) if decision else None,
+            "fill_kwh_at_max": getattr(decision, "fill_kwh", None) if decision else None,
+            "hw_max_charge_w": float(self.config.get(
+                "battery_max_charge_power_w", 5000.0) or 5000.0),
+            "slots": [
+                {
+                    "start": getattr(s, "start", None).strftime("%H:%M")
+                    if getattr(s, "start", None) else None,
+                    "solar_w": round(float(getattr(s, "solar_w", 0.0) or 0.0)),
+                    "home_w": round(float(getattr(s, "home_gross_w", 0.0) or 0.0)),
+                    "surplus_w": (round(float(s.cap_override_w))
+                                  if getattr(s, "cap_override_w", None) is not None
+                                  else 0),
+                }
+                for s in (ledger or [])
+            ][:16],
+        }
+        if decision is not None and decision.code == "weak_day":
+            log_on_change(
+                _LOGGER, "charge_pacing:weak_day", logging.INFO,
+                "charge pacing: weak day — need %.2f kWh, the day model fills "
+                "%.2f kWh uncapped (hw max %.0f W); slots %s",
+                float(decision.need_kwh or 0.0), float(decision.fill_kwh or 0.0),
+                float(self.config.get("battery_max_charge_power_w", 5000.0) or 5000.0),
+                [(getattr(s, "start", None).strftime("%H:%M") if getattr(s, "start", None) else "?",
+                  round(float(getattr(s, "solar_w", 0.0) or 0.0)),
+                  round(float(getattr(s, "home_gross_w", 0.0) or 0.0))) for s in (ledger or [])][:12],
+            )
+
     async def _run_battery_pipeline(self, power, energy, charging_state) -> None:
         """Per-cycle battery control via decide_battery + actuate_battery.
 
@@ -5996,6 +7589,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         the only difference is the adapter cache is now a dict-of-one
         keyed by ``"primary"``.
         """
+        # (#923) No battery module, no battery control. With the battery
+        # ABSENT SEM reads no SOC and no power, and a brand adapter
+        # auto-detected from a loaded inverter integration would act blind —
+        # "limit discharge 0 W, SoC unknown", seen live on .175 with the
+        # battery removed. PRESENT and UNKNOWN run exactly as before.
+        if presence_of(self).get(Module.BATTERY) is Presence.ABSENT:
+            self._last_battery_decisions = {}
+            return
         from .actuate_battery import actuate_battery
         from .battery_adapters import adapter_for, _integration_loaded
         from .charger_types import (
@@ -6034,6 +7635,56 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # decide_battery actuates it as FORCE_DISCHARGE. The signed export
         # price + cheapest upcoming import price (recharge cost basis) are
         # only looked up when arbitrage is on.
+        # (#845) The inverter's operating-policy selector, WATCHED never
+        # written. Publishes the mode beside the battery evidence and warns
+        # once (a Repair) when it is a mode SEM's model does not expect —
+        # after the reading has held steadily, because this feed is blind
+        # 5 % of wall time on the reference install and a dropout is not a
+        # mode change. A deliberate other mode is the user's choice; the
+        # Repair names the disagreement and nothing fights it.
+        try:
+            _mode_ent = str(self.config.get(
+                "battery_operating_mode_entity") or "")
+            if _mode_ent:
+                _watch = getattr(self, "_battery_mode_watch", None)
+                if _watch is None:
+                    from .battery_mode_watch import BatteryModeWatch
+                    _exp = None
+                    _ad0 = self._primary_battery_adapter()
+                    if _ad0 is not None:
+                        _exp = type(_ad0).expected_operating_modes()
+                    elif str(self.config.get(
+                            "battery_charge_platform") or "").lower() == "huawei":
+                        _exp = {"maximise_self_consumption"}
+                    _watch = self._battery_mode_watch = BatteryModeWatch(_exp)
+                _mst = self.hass.states.get(_mode_ent)
+                _watch.feed(getattr(_mst, "state", None))
+                self._battery_operating_mode = _watch.last_mode
+                if _watch.changed:
+                    from .repair_issues import (
+                        clear_battery_operating_mode_unexpected,
+                        raise_battery_operating_mode_unexpected,
+                    )
+                    if _watch.raised:
+                        raise_battery_operating_mode_unexpected(
+                            self.hass, _mode_ent,
+                            mode=str(_watch.last_mode),
+                            expected=", ".join(sorted(_watch.expected or [])))
+                        _LOGGER.warning(
+                            "#845 battery operating mode '%s' is not the "
+                            "expected %s — SEM's plans assume "
+                            "self-consumption; observing only",
+                            _watch.last_mode, sorted(_watch.expected or []))
+                    else:
+                        clear_battery_operating_mode_unexpected(
+                            self.hass, _mode_ent)
+                        if _watch.recovered:    # (#933) not a first verdict
+                            _LOGGER.info(
+                                "#845 battery operating mode back to '%s' — "
+                                "repair cleared", _watch.last_mode)
+        except Exception:  # noqa: BLE001 — a watch never costs a cycle
+            _LOGGER.debug("battery mode watch skipped", exc_info=True)
+
         _charge_active = (
             scheduler_decision is not None and scheduler_decision.should_charge
         )
@@ -6123,11 +7774,93 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 getattr(self, "_energy_plan_shadow", None), dt_util.now())
         _arb_sell = (_sell_in, _sell_total_w / max(1, _eff_battery_count))
 
+        # (#778) The forecast-led SPEND — same discipline, own switch, own
+        # gate. Behind the SAME #758 kill switch: a kill switch some
+        # callers ask is not a kill switch.
+        _fsell_in, _fsell_total_w = False, 0.0
+        _spend_on = bool(self.config.get("forecast_spending_enabled", False))
+        if _spend_on and getattr(self, "_energy_plan_actuation", False):
+            from .energy_plan_actuation import forecast_sell_gate
+            _fsell_in, _fsell_total_w = forecast_sell_gate(
+                getattr(self, "_energy_plan_shadow", None), dt_util.now())
+        _fsell = (_fsell_in, _fsell_total_w / max(1, _eff_battery_count))
+        _sell_status = None
+        if _spend_on:
+            _arb_fired = (
+                scheduler_decision is not None
+                and getattr(getattr(scheduler_decision, "state", None),
+                            "value", None) == "discharging_arbitrage")
+            if not _charge_active and not _arb_fired:
+                from .forecast_sell import evaluate_forecast_sell
+                _pe0 = getattr(self, "_planning_evidence", {}) or {}
+                # (#931) the CURRENT export price, three-state. A dynamic
+                # provider answers from its entity; the static one answers
+                # the configured feed-in — the same number the budget priced
+                # with, so a fixed-tariff install is unchanged. A provider
+                # that raises, or none at all with no configured rate, is
+                # UNKNOWN, and the sell refuses rather than guess.
+                _xr, _xr_known = None, False
+                try:
+                    _prov = getattr(self, "_tariff_provider", None)
+                    if _prov is not None and hasattr(_prov, "get_current_export_rate"):
+                        _xr = float(_prov.get_current_export_rate())
+                        _xr_known = True
+                    else:
+                        _xr = float(self._configured_export_rate())
+                        _xr_known = True
+                except Exception:  # noqa: BLE001 — unreadable is a state, not 0
+                    _xr, _xr_known = None, False
+                _fs = evaluate_forecast_sell(
+                    dt_util.now(), enabled=True, in_block=_fsell_in,
+                    block_w=_fsell[1],
+                    spendable_kwh=float(
+                        _pe0.get("battery_spendable_kwh") or 0.0),
+                    max_discharge_w=float(self.config.get(
+                        "battery_max_discharge_power", 5000.0) or 5000.0),
+                    dynamic_floor_pct=_pe0.get("battery_dynamic_floor_pct"),
+                    reserve_pct=float(self.config.get(
+                        "battery_reserve_soc", 20.0) or 20.0),
+                    export_rate=_xr, export_rate_known=_xr_known,
+                )
+                if _fs.state.value == "discharging_arbitrage":
+                    scheduler_decision = _fs
+                    if not getattr(self, "_forecast_sell_active", False):
+                        _LOGGER.info("#778 forecast spend OPEN: %s", _fs.reason)
+                    self._forecast_sell_active = True
+                    _sell_status = "selling"
+                elif getattr(self, "_forecast_sell_active", False):
+                    # The window closed or the budget emptied — propagate the
+                    # stop ONCE (never over a planned/active night charge,
+                    # which owns this channel while it runs).
+                    _night = scheduler_decision
+                    _night_charging = _night is not None and (
+                        bool(getattr(_night, "should_charge", False))
+                        or getattr(getattr(_night, "state", None),
+                                   "value", None) == "scheduled")
+                    if not _night_charging:
+                        scheduler_decision = _fs
+                    self._forecast_sell_active = False
+                    _LOGGER.info("#778 forecast spend CLOSED: %s", _fs.reason)
+            _fs_blocks = ((getattr(self, "_energy_plan_shadow", None) or {})
+                          .get("forecast_sell") or {}).get("blocks") or []
+            if _sell_status is None and _fs_blocks:
+                _sell_status = "scheduled"
+            self._forecast_sell_status = {
+                "state": _sell_status,
+                "until": (_fs_blocks[0].get("end") if _fs_blocks else None),
+                "rate_w": round(_fsell[1], 0) if _fsell_in else None,
+            }
+        else:
+            self._forecast_sell_status = None
+
         # Shared fleet context — same for every battery this cycle.
+        _fs = getattr(self, "_cycle_fleet_state", None)   # Step 6's answer (#955)
         fleet = FleetContext(
             solar_w=float(getattr(power, "solar_power", 0.0) or 0.0),
             home_w=float(getattr(power, "home_consumption_power", 0.0) or 0.0),
             battery_soc=float(getattr(power, "battery_soc", 0.0) or 0.0),
+            # (#875) a never-read SOC is not a 0 % pack.
+            battery_soc_known=bool(getattr(power, "battery_soc_known", True)),
             is_night=self.time_manager.is_night_mode(),
             # #531: split per-battery LIMIT_DISCHARGE across the real fleet
             # (#691: effective consumers, not configured rows).
@@ -6146,6 +7879,40 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # #533: arbitrage market signals, computed once above (None unless
             # arbitrage is being evaluated → dormant until v1.7.4).
             arbitrage=arb_signals,
+            # (#955, found LIVE on .175, 17.09 21:00) The export axis rides the
+            # ONE fleet-state Step 6 computed (`_cycle_fleet_state`, built at
+            # 3288, before this pipeline at 4157). This context is the fleet
+            # `_apply_export_decision` reads, and it carried NEITHER field: the
+            # arc threaded them through build_view's FleetContext — the
+            # charger view — and pinned that site, while this second producer
+            # went on saying "guard off" to decide_export on every cycle. The
+            # seam then only ever re-published the STANDING row, which is
+            # indistinguishable from a command on the observer surface — so
+            # an engaged guard that had written nothing looked proven on two
+            # rigs since 15.09. With observer OFF the log had no "WOULD" line
+            # and no service call, the store no row, the inverter no change.
+            # Bug class: two producers of one context.
+            export_command=getattr(_fs, "export_command", None),
+            export_guard_enabled=bool(getattr(_fs, "export_guard_enabled", False)),
+            sink_verdicts=dict(getattr(_fs, "sink_verdicts", None) or {}),
+            ev_morning_window_open=bool(getattr(_fs, "morning_window_open", False)),
+            # (#1003) The ceiling, and whether this cycle could see. Same
+            # class as the export axis above and found the same way: the
+            # battery decider hands part of the house's draw to the meter (the
+            # #879 hold, the #620 clamp) and could not see the limit it has to
+            # stay under, because these rode build_view's charger context from
+            # #864/#818 on and never this second producer. Bug class: two
+            # producers of one context, a field threaded through one of them.
+            peak_slot_allowed_w=getattr(_fs, "peak_slot_allowed_w", None),
+            # (#818) any dark steering read moves the energy balance, and
+            # ``home_consumption_power`` IS that balance's residual — so the
+            # floor that reads it must know when it is not a measurement.
+            inputs_degraded=bool(getattr(power, "inputs_degraded", False)),
+            dark_inputs=tuple(getattr(power, "dark_inputs", ()) or ()),
+            # (#660/#1003) …and a balance that did not close, which is the
+            # other way that number stops being a measurement.
+            home_residual_clamped_w=float(
+                getattr(power, "home_residual_clamped_w", 0.0) or 0.0),
         )
 
         # 2. Source per-battery iteration. Multi-battery installs
@@ -6165,7 +7932,16 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         bp.capacity_kwh
                         or self.config.get("battery_capacity_kwh", 0.0)
                     ),
-                    available=True,  # populated → it reported this cycle
+                    # (#932) "populated → it reported this cycle" was false:
+                    # a HELD reading is populated too. Per-unit flag when the
+                    # reading carries one, else the fleet's — never a bare
+                    # True, which is what let a multi-battery install sell
+                    # through a dark SOC. decide_battery gates the sell on it.
+                    available=not bool(
+                        getattr(bp, "soc_unavailable", False)
+                        or getattr(bp, "unavailable", False)
+                        or getattr(power, "battery_soc_unavailable", False)  # DARK-SOC: action — the sell gates ask this (#932)
+                    ),
                     name=bp.name or battery_id,
                 )))
         else:
@@ -6176,7 +7952,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 last_known_w=float(getattr(power, "battery_power", 0.0) or 0.0),
                 capacity_kwh=float(self.config.get("battery_capacity_kwh", 0.0)),
                 available=not bool(
-                    getattr(power, "battery_soc_unavailable", False)
+                    getattr(power, "battery_soc_unavailable", False)  # DARK-SOC: action — the sell gates ask this (#932)
                 ),
             )))
 
@@ -6193,6 +7969,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # entities when configured (#523 multi-battery — RienduPre's
             # 2-battery setup), so both units can sell to grid / be limited
             # independently. Falls back to the global single-entity keys.
+            self._check_battery_platform_pin(battery_id, batt_idx, _bat_count)
+            self._check_soc_zone_order()      # (#870)
             adapter = self._battery_adapters.get(battery_id)
             if adapter is None:
                 # #709: runtime context — injects the persistent Deye snapshot
@@ -6268,6 +8046,27 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 fleet=fleet,
                 charging_state=getattr(charging_state, "value", str(charging_state)),
                 ev_charging=bool(getattr(power, "ev_charging", False)),
+                # (#778) The forecast budget and its dynamic floor. Both
+                # come from the single published computation, so the export
+                # decision cannot drift from the number the user was shown.
+                battery_spendable_kwh=float(
+                    (getattr(self, "_planning_evidence", None) or {})
+                    .get("battery_spendable_kwh") or 0.0),
+                forecast_spending_enabled=bool(
+                    self.config.get("forecast_spending_enabled", False)),
+                # (03.09) the charger-side consent: a connected car whose
+                # mode is Solar + battery — the clamp reads it too.
+                ev_wants_pack=self._ev_wants_pack(power),
+                # (#778) The permission axis, resolved from the per-battery
+                # config so a multi-battery install can grant export on one
+                # pack and withhold it on another.
+                battery_permissions=(
+                    self._per_battery_config(batt_idx, _bat_count).get(
+                        "battery_permissions")
+                    or self.config.get("battery_permissions")),
+                dynamic_floor_pct=(
+                    getattr(self, "_planning_evidence", None) or {}
+                ).get("battery_dynamic_floor_pct"),
                 # Same operational gate as the charging context: a legacy flat
                 # sensor with no registered charger must not make the battery
                 # hold discharge protection for a phantom EV.
@@ -6284,6 +8083,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 plan_gate=self._energy_plan_gate("battery"),
                 # (#638 one-gate C6) the plan's WHEN for the sell, pre-split.
                 arbitrage_sell=_arb_sell,
+                # (arc #921) the cycle's sink verdicts, computed once in the fleet state
+                sink_verdicts=getattr(self, "_sink_verdicts", None) or {},
+                # (#892) pre-gated: the switch AND the verdict, never the raw state
+                morning_window_open=bool(
+                    getattr((getattr(self, "_sink_verdicts", None) or {}).get("ev"),
+                            "state", "") == "open"
+                    and self.config.get("ev_morning_window_enabled", False)),
+                forecast_sell=_fsell,
             )
 
             # 3. Decide
@@ -6327,6 +8134,21 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 and not self.time_manager.is_night_mode()
                 and scheduler.state.value not in ("idle", "not_needed", "not_profitable")):
             scheduler.reset()
+        # (#955) The house's meter limit, after every battery had its say:
+        # ONE decision, ONE seam, ONE adapter — the one that can actually cut,
+        # not whichever was inserted first. Never costs a cycle: a guard that
+        # dies must say so loudly, not vanish (the peak guard's lesson, #864).
+        try:
+            await self._apply_export_decision(fleet)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Export guard FAILED this cycle — no export cap is being "
+                            "applied (#955)", exc_info=True)
+        finally:
+            # The card reads the TRACKER, so it must be refreshed even when the
+            # dispatch blew up — otherwise a failed store write leaves the rig
+            # reading "engaged" while the axis is broken, and silence looks
+            # like health (#925).
+            self._publish_export_guard_state()
 
     async def _maybe_run_scheduler_evaluation(self, power, energy=None) -> None:
         """Trigger the scheduler's ``evaluate()`` at the daily time.
@@ -6560,8 +8382,33 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         Two readings, one question: the taper detector's anchor and THIS
         charger's draw (``_charger_power_w``, the canonical per-charger
         read) against the charger's own handshake threshold.
+
+        (#939) Not asked at all for a SOC-target charger. Its night need is
+        already car-derived — ``target −`` the car's own reading, or, while
+        the sensor is dark, the anchored virtual SOC the anchor itself pins
+        (``_resolve_charger_soc``) — and a car at its target is skipped
+        there (``kwh <= 0.05``). So the anchor adds nothing but a chance to
+        disagree, and when it did the layers fought: live, a false taper
+        anchor said "full" over a Tesla reading 71 %, the plan dropped the
+        car, the reactive layer started it for the deadline, the draw
+        un-fulled it (the N2 meter rule), the plan covered it again and
+        stopped it outside the window — 60 s on, 20 s off, all evening.
+        Keyed on the target TYPE, not on whether the sensor reads this
+        cycle: a gate that changed hands with sensor availability would
+        restamp the night on every blink. A kWh target — the calendar
+        counter #756 was built for — still asks the anchor.
         """
         from .ev_availability import plan_car_fullness
+        from .ev_night_targets import charger_target_type
+        try:
+            config = getattr(self, "config", None) or {}
+            cfg = next((c for c in (config.get("ev_chargers") or [])
+                        if isinstance(c, dict)
+                        and str(c.get("id") or "") == str(cid)), None) or {}
+            if charger_target_type(config, cfg) == "soc":
+                return None
+        except Exception:  # noqa: BLE001 — unevaluable: the anchor answers, as before
+            pass
         detector = (getattr(self, "_ev_taper_detectors", None) or {}).get(cid)
         if detector is None:
             return None
@@ -7020,7 +8867,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             _LOGGER.debug("demand review skipped", exc_info=True)
             self._demand_review = None
 
-    async def _record_battery_night(self, power, power_flows) -> None:
+    async def _record_battery_night(self, power, power_flows,
+                                    energy=None) -> None:
         """(#800) One tick of the battery-night recorder.
 
         Flow-attributed on purpose: a SOC delta would conflate the house
@@ -7037,6 +8885,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             tr = self._battery_night = BatteryNightTracker(
                 reserve_soc=float(
                     self.config.get("battery_reserve_soc", 20) or 20),
+                # (#800) The pack size, so a restart's sampling hole can be
+                # bridged from the battery's own SOC instead of writing the
+                # interval off. Users restart; a night must survive it.
+                capacity_kwh=self.config.get("battery_capacity_kwh"),
             )
             store = getattr(self, "_storage", None)
             if store is not None:
@@ -7078,13 +8930,22 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     getattr(power_flows, "battery_to_ev", 0.0) or 0.0),
                 battery_to_grid_w=float(
                     getattr(power_flows, "battery_to_grid", 0.0) or 0.0),
+                # (#778) The pack's own discharge POWER, so the recorder can
+                # check its attributed flows against it per sample. Explicitly
+                # NOT the daily energy counter: that resets at midnight while
+                # a night does not, so comparing the two condemned ordinary
+                # nights and silently starved the #778 learner.
+                battery_discharge_w=(
+                    max(0.0, -float(getattr(power, "battery_power", 0.0) or 0.0))
+                    if getattr(power, "battery_power", None) is not None
+                    else None),
                 grid_to_home_w=float(
                     getattr(power_flows, "grid_to_home", 0.0) or 0.0),
                 home_w=float(
                     getattr(power, "home_consumption_power", 0.0) or 0.0),
                 soc=getattr(power, "battery_soc", None),
                 soc_available=not bool(
-                    getattr(power, "battery_soc_unavailable", False)),
+                    getattr(power, "battery_soc_unavailable", False)),  # DARK-SOC: record — marks the sample; nothing is written
                 export_w=float(
                     getattr(power, "grid_export_power", 0.0) or 0.0),
                 measured=not bool(
@@ -7231,19 +9092,18 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             day_kwh = float(getattr(_fd, "forecast_tomorrow_kwh", 0.0) or 0.0)
         except Exception:  # noqa: BLE001 — no forecast, dark preview
             day_kwh = 0.0
-        try:
-            flat_home = float(self._expected_night_home_w(None))
-        except Exception:  # noqa: BLE001
-            flat_home = 300.0
         from .day_ledger import tariff_cheap_at, tariff_price_at
         prov = self._tariff_provider
+        # (#820) tomorrow's hours, read off the weekday profile
+        _home_at_day = self._day_home_w_at(day_start)
         preview = tomorrow_preview(
             day_start=day_start, day_end=day_end, day_kwh=day_kwh,
             sunrise=sunrise, sunset=sunset,
-            home_w_at=lambda t: flat_home,
+            home_w_at=_home_at_day,
             price_at=lambda ts: tariff_price_at(prov, ts),
             level_cheap_at=lambda ts: tariff_cheap_at(prov, ts),
             stamps_at=stamps_at,
+            export_rate=self._configured_export_rate(),   # (#924)
         )
         # (Guido, 08-08: "forecast and home consumption is something we
         # already know") — the preview's real content is what tomorrow
@@ -7332,9 +9192,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 slots2 = build_day_slots(
                     start=day_start, end=day_end, day_kwh=day_kwh,
                     sunrise=sunrise, sunset=sunset,
-                    home_w_at=lambda t: flat_home,
+                    home_w_at=self._day_home_w_at(day_start),   # (#820)
                     price_at=lambda ts: tariff_price_at(prov, ts),
                     level_cheap_at=lambda ts: tariff_cheap_at(prov, ts),
+                    # (#924) These slots go to build_night_ledger and the
+                    # REAL pack_night below — this is a packing site, and
+                    # unpriced it preferred the sun by fiat while the
+                    # stamped plan priced it. One forecast, one tariff,
+                    # two different answers; the preview was the wrong one.
+                    export_rate=self._configured_export_rate(),
                 )
                 labels2 = {}
                 demands2 = []
@@ -7372,6 +9238,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     ledger2, capacity_kwh=cap_kwh2,
                     max_charge_w=float(self.config.get(
                         "battery_max_charge_power_w", 5000.0) or 5000.0))
+
                 # Compress for the recorder budget: ≤ 5 waypoints + end.
                 if len(curve) > 6:
                     step = max(1, (len(curve) - 1) // 5)
@@ -7521,7 +9388,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # no-battery install shape (capacity 0) stamps normally.
                 _batt_ready = (
                     float(self.config.get("battery_capacity_kwh", 0) or 0) <= 0
-                    or not getattr(power, "battery_soc_unavailable", False)
+                    or not getattr(power, "battery_soc_unavailable", False)  # DARK-SOC: plan — a skipped rebuild retries next cycle
                 )
                 if _batt_ready and self._shadow_energy_plan(
                         _sched, energy, power,
@@ -7675,7 +9542,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # packer sized the floor at nameplate 6.9 kW, found no slot
                 # under the 6.0 kW peak, and yielded a car that then charged
                 # at 4.85 kW below the threshold all night.
-                wpa = self._ev_watts_per_amp(cid, cfg, power)
+                # (#716) still called WITH power: this is the live feed of the
+                # EMA fallback (it learns on the call); the block sizes below
+                # read the #846 table first.
+                self._ev_watts_per_amp(cid, cfg, power)
                 deadline = resolve_deadline(now, cfg.get("ev_target_time"))
                 try:
                     # The canonical one-list slot (#576): a drag override wins
@@ -7686,9 +9556,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 labels[f"ev:{cid}"] = str(cfg.get("name") or "").strip() or None
                 demands.append(Demand(
                     id=f"ev:{cid}", kind="ev", energy_kwh=float(kwh),
-                    max_power_w=float(cfg.get("ev_max_current")
-                                      or DEFAULT_MAX_CHARGING_CURRENT) * wpa,
-                    min_power_w=float(cfg.get("ev_min_current") or 6) * wpa,
+                    # (#846) sized from the measured table per setpoint —
+                    # on the PROD Zoe the 8 A floor is 3.3 kW, not 8 × W/A
+                    max_power_w=self._ev_watts_for_amps(
+                        cid, cfg, float(cfg.get("ev_max_current")
+                                        or DEFAULT_MAX_CHARGING_CURRENT)),
+                    min_power_w=self._ev_watts_for_amps(
+                        cid, cfg, float(cfg.get("ev_min_current") or 6)),
                     deadline=min(deadline, night_end) if deadline else night_end,
                     # The one list counts 1 = HIGHEST (get_devices_sorted)
                     # and the packer packs LOWEST first — the directions
@@ -7959,13 +9833,16 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     "home_grid_w": round(s.home_grid_w, 1),
                 } for s in rows]
 
-            def _quiet_answer(arb=None, ledger_rows=(), self_cons=None):
+            def _quiet_answer(arb=None, fsell=None, ledger_rows=(), self_cons=None):
                 # "Nothing needs the night" IS a valid 22:00 answer — say it,
                 # WITH the why (a silent shadow is indistinguishable from a
                 # broken one; burned three placement bugs learning that).
                 why = (f"ev_targets={ {k: round(v, 2) for k, v in targets.items()} }, "
                        f"mode_opted_out={mode_opted_out}, "
                        f"disconnected={disconnected}, "
+                       # (#939) the fourth gate the collector skips on — its
+                       # absence here left a false anchor invisible in the log.
+                       f"car_full={car_full}, "
                        f"loads_seen={loads_seen}, loads_eligible={loads_eligible}, "
                        f"battery_deficit={deficit:.2f} kWh")
                 _LOGGER.info(
@@ -8010,6 +9887,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     "slots": list(ledger_rows),
                     "blocks": [],
                     "arbitrage": arb,
+                    "forecast_sell": fsell,
                     "self_consumption": self_cons,
                     "battery_fleet_partial": partial_note,
                     # (night 3, finding 3) a re-stamped night must be
@@ -8044,30 +9922,16 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
             # Home per slot: the weekday-aware hourly profile when trained,
             # else the flat night estimate (same fallback chain as the EV
-            # peak-managed rate).
-            hourly_home = None
-            predictor = getattr(self, "_predictor", None)
-            if predictor is not None:
-                try:
-                    hourly_home = predictor.predict_consumption_24h(now) or None
-                except Exception:  # noqa: BLE001
-                    hourly_home = None
+            # peak-managed rate). (#820) This closure was the original; it
+            # now lives on the coordinator so the pacing ledger and both
+            # tomorrow previews read the same house instead of a flat night.
+            _home_at = self._day_home_w_at(now, energy)
+            # The advisor below prices tomorrow's free sun against a FLAT
+            # daytime house (12 h of it), so it keeps its own scalar.
             try:
                 flat_home_w = float(self._expected_night_home_w(energy))
             except Exception:  # noqa: BLE001
                 flat_home_w = 300.0
-
-            def _home_at(t):
-                if hourly_home:
-                    i = int((t - now).total_seconds() // 3600)
-                    # The profile appends 0.0 for hours it could not predict
-                    # (trained_with_fallback) — a 0 W house is a data gap,
-                    # not a forecast; fall through to the flat estimate.
-                    if (0 <= i < len(hourly_home)
-                            and hourly_home[i] is not None
-                            and float(hourly_home[i]) > 0):
-                        return float(hourly_home[i])
-                return flat_home_w
 
             # Slots follow the market: honest None price when the day-ahead
             # has no data (the fingerprint replan re-derives later); the
@@ -8145,8 +10009,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     # forgo. At 0 the packer preferred solar by fiat and a
                     # night hour cheaper than the export rate could never
                     # win; priced, the preference is economic and can lose.
-                    export_rate=float(self.config.get(
-                        "electricity_export_rate", 0.075) or 0.0),
+                    export_rate=self._configured_export_rate(),
                     step_s=_step_s,
                 ))
                 t = day_end
@@ -8261,6 +10124,41 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     ))
             except Exception:  # noqa: BLE001 — advice must never cost a plan
                 arb = None
+            # (#778) The forecast-led SPEND's plan block — the WHEN the
+            # budget never had. One just-in-time block ending at the night
+            # window's start: latest-possible selling lands after the solar
+            # tail by construction and is done the minute the night takes
+            # over. Exists only while the arc's master switch is on;
+            # everything downstream (gate, verdict, decide) is inert
+            # without it.
+            fsell = None
+            try:
+                if bool(self.config.get("forecast_spending_enabled", False)):
+                    from .forecast_sell import forecast_sell_blocks
+                    _pe0 = getattr(self, "_planning_evidence", {}) or {}
+                    _ns_hhmm, _ = self.time_manager.get_night_window()
+                    _night_start0 = self.time_manager.get_offset_time(_ns_hhmm)
+                    _blocks = forecast_sell_blocks(
+                        dt_util.now(), _night_start0,
+                        float(_pe0.get("battery_spendable_kwh") or 0.0),
+                        max_discharge_w)
+                    if _blocks:
+                        fsell = {
+                            "enabled": True,
+                            "kwh": _blocks[0]["kwh"],
+                            "blocks": [
+                                {**b, "start": b["start"].isoformat(),
+                                 "end": b["end"].isoformat()}
+                                for b in _blocks],
+                        }
+                        _LOGGER.info(
+                            "ENERGY-PLAN (%s) forecast spend: %.1f kWh "
+                            "before the night (%s–%s)", tag,
+                            _blocks[0]["kwh"],
+                            _blocks[0]["start"].strftime("%H:%M"),
+                            _blocks[0]["end"].strftime("%H:%M"))
+            except Exception:  # noqa: BLE001 — a spend block never costs a plan
+                fsell = None
             from .self_consumption import predict_self_consumption
             if quiet_night and not demands:
                 # Nothing to pack — but the books are open now, so the quiet
@@ -8269,7 +10167,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # on, the shadow cycle IS tonight's plan and gets packed like
                 # any other demand — that branch used to be unreachable.)
                 self._energy_plan_shadow = _quiet_answer(
-                    arb, _slot_rows(ledger),
+                    arb, fsell, _slot_rows(ledger),
                     predict_self_consumption(ledger, []).as_dict())
                 return True
             plan = pack_night(demands, ledger, floor_kwh=floor_kwh,
@@ -8370,6 +10268,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # numbers — always present on a full plan, None only when
                 # the advisor itself failed (never costs a plan).
                 "arbitrage": arb,
+                "forecast_sell": fsell,
                 # (#755 pillar 2) The share of the horizon's solar this
                 # schedule expects to keep, and how much of the keeping is
                 # the plan's own doing rather than the house being awake.
@@ -8405,12 +10304,29 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         fall back to the fleet-level call — identical behaviour to
         v1.6.8.
         """
+        def _clamp_state(text, limit=255):
+            """State values only — attributes are unlimited and keep the
+            full reason."""
+            t = str(text) if text is not None else None
+            if t is None or len(t) <= limit:
+                return t
+            return t[: limit - 1] + "\u2026"
+
         common_data = {
             "battery_soc": power.battery_soc,
             "calculated_current": calculated_current,
             "available_power": available_power,
             "daily_ev_energy": energy.daily_ev,
-            "charging_strategy": charging_context.charging_strategy,
+            # HA rejects any state longer than 255 chars OUTRIGHT — the
+            # sensor falls back to "unknown" and homeassistant.core logs an
+            # ERROR every cycle. The composed strategy (stability prefix +
+            # mode reason + structural suffix) crossed that line live on
+            # .175 the first time real hardware stacked all three. The STATE
+            # is a display string, so clamp it here at its single writer;
+            # the FULL text rides charging_strategy_reason, which becomes an
+            # attribute and has no such limit.
+            "charging_strategy": _clamp_state(
+                charging_context.charging_strategy),
             "charging_strategy_reason": charging_context.charging_strategy_reason,
             "canonical_strategy": charging_context.canonical_strategy,
             "discharge_limit": discharge_limit,
@@ -8508,60 +10424,73 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         mins_to_full, charger_name=charger_name
                     )
 
-                # #708 — estimate-stop / auto-resume announcements. The
-                # decision itself lives in _calculate_remaining_need
-                # (effective SOC = max(sensor, energy-accounted)); this
-                # block only detects the two user-visible transitions:
-                # the estimate ends a charge the stale sensor would have
-                # kept running, and a fresh reading below target makes
-                # SEM resume. Latch lives on the per-charger detector
-                # (session-scoped, cleared on disconnect).
-                det_708 = self._ev_taper_detectors.get(cid)
-                cfg_708 = chargers_cfg_by_id.get(cid) or {}
-                type_708 = (
-                    cfg_708.get("ev_target_type") or cfg_708.get("ev_target_mode")
-                    or self.config.get("ev_target_type")
-                    or self.config.get("ev_target_mode", "kwh")
+                # #708 — estimate-stop / auto-resume announcements (#939:
+                # one method, so the latch can be driven and pinned alone).
+                await self._announce_estimate_stop(
+                    cid, intel, chargers_cfg_by_id.get(cid) or {},
+                    charger_name, charger_connected,
                 )
-                ea_708 = intel.get("energy_accounted_soc")
-                soc_708 = intel.get("vehicle_soc")
-                if (det_708 is not None and charger_connected
-                        and type_708 == "soc"
-                        and ea_708 is not None and soc_708 is not None):
-                    cap_708 = (
-                        cfg_708.get("ev_battery_capacity_kwh")
-                        or self.config.get("ev_battery_capacity_kwh", 40)
-                    )
-                    for bound_708 in ("min", "max"):
-                        tgt = self._resolve_target(
-                            cfg_708, "ev_target_soc", bound_708, 80, 100
-                        )
-                        # (#708) same helper as the decision — see SITE 1.
-                        need_708 = soc_remaining_need(
-                            tgt, soc_708, ea_708, cap_708)
-                        sensor_rem = need_708.sensor_kwh or 0.0
-                        eff_rem = need_708.effective_kwh or 0.0
-                        if (not det_708._estimate_stop_active
-                                and sensor_rem > 0.1 and eff_rem <= 0.1):
-                            det_708._estimate_stop_active = True
-                            await self._notification_manager.notify_ev_estimate_stop(
-                                target_soc=tgt, sensor_soc=soc_708,
-                                sensor_age_min=intel.get("vehicle_soc_age_min") or 0,
-                                charger_name=charger_name, flag_key=cid,
-                            )
-                            break
-                        if det_708._estimate_stop_active and eff_rem > 0.1:
-                            det_708._estimate_stop_active = False
-                            await self._notification_manager.notify_ev_estimate_resume(
-                                sensor_soc=soc_708, target_soc=tgt,
-                                charger_name=charger_name, flag_key=cid,
-                            )
-                            break
 
         except (ValueError, TypeError) as e:
             _LOGGER.debug("Event notification failed: %s", e)
         except HomeAssistantError as e:
             _LOGGER.warning("Notification service call failed: %s", e)
+
+    async def _announce_estimate_stop(
+        self, cid: str, intel: dict, cfg_708: dict, charger_name: str,
+        charger_connected: bool,
+    ) -> None:
+        """#708 — the estimate-stop / auto-resume announcements, ONE charger.
+
+        The decision itself lives in ``_calculate_remaining_need`` (effective
+        SOC = max(sensor, energy-accounted)); this only announces its two
+        user-visible transitions: the estimate ends a charge the stale sensor
+        would have kept running, and a fresh reading below target makes SEM
+        resume. The latch lives on the per-charger detector (session-scoped,
+        cleared on disconnect) and holds the BOUND it was set at (#939) —
+        ``estimate_stop_step`` is the whole rule.
+        """
+        det_708 = self._ev_taper_detectors.get(cid)
+        type_708 = (
+            cfg_708.get("ev_target_type") or cfg_708.get("ev_target_mode")
+            or self.config.get("ev_target_type")
+            or self.config.get("ev_target_mode", "kwh")
+        )
+        ea_708 = intel.get("energy_accounted_soc")
+        soc_708 = intel.get("vehicle_soc")
+        if not (det_708 is not None and charger_connected
+                and type_708 == "soc"
+                and ea_708 is not None and soc_708 is not None):
+            return
+        cap_708 = (
+            cfg_708.get("ev_battery_capacity_kwh")
+            or self.config.get("ev_battery_capacity_kwh", 40)
+        )
+        # (#708) same helper as the decision — see SITE 1.
+        bounds_708 = [
+            (b, self._resolve_target(cfg_708, "ev_target_soc", b, 80, 100))
+            for b in ("min", "max")
+        ]
+        latched, event, tgt = estimate_stop_step(
+            det_708._estimate_stop_bound, bounds_708, soc_708, ea_708, cap_708)
+        det_708._estimate_stop_bound = latched
+        if event == "stop":
+            await self._notification_manager.notify_ev_estimate_stop(
+                target_soc=tgt, sensor_soc=soc_708,
+                sensor_age_min=intel.get("vehicle_soc_age_min") or 0,
+                charger_name=charger_name, flag_key=cid,
+            )
+        elif event == "resume":
+            await self._notification_manager.notify_ev_estimate_resume(
+                sensor_soc=soc_708, target_soc=tgt,
+                charger_name=charger_name, flag_key=cid,
+            )
+        elif event == "release":
+            # The sensor caught up with the stop: nothing to say, but the
+            # next estimate stop this session must be able to announce.
+            self._notification_manager.release_ev_estimate_stop(
+                charger_name=charger_name, flag_key=cid,
+            )
 
     async def _retry_ev_device_with_backoff(self) -> None:
         """Retry EV device setup with exponential backoff (#27).
@@ -8606,6 +10535,212 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     self._ev_retry_count,
                 )
 
+    def _configured_entity_ids(self) -> set:
+        """(#915) Every entity id this install already points SEM at.
+
+        A proposal about one of them is not information — the Config card
+        would be telling a working Huawei install about controls it is
+        already driving.
+        """
+        out = set()
+        try:
+            for value in (self.config or {}).values():
+                if isinstance(value, str) and "." in value and " " not in value:
+                    out.add(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            out |= {v for v in item.values()
+                                    if isinstance(v, str) and "." in v
+                                    and " " not in v}
+                        elif isinstance(item, str) and "." in item:
+                            out.add(item)
+        except Exception:  # noqa: BLE001 — a filter never costs the report
+            return set()
+        # The RESOLVED reads too, from BOTH places they can live.
+        #
+        # ``sensor_reader.config`` is the legacy/manual surface — empty on an
+        # install whose sources come from the Energy Dashboard. Those live on
+        # the reader's dashboard config instead, and reading only the first
+        # one told PROD's owner about `sensor.inverter_eingangsleistung` and
+        # `sensor.power_meter_wirkleistung`: the two entities SEM reads every
+        # ten seconds. A proposal about an entity already in use is noise, and
+        # noise on this card is what the whole near-miss cleanup was for.
+        try:
+            cfg = getattr(self._sensor_reader, "config", None)
+            for name in ("solar_power_sensor", "grid_power_sensor",
+                         "battery_power_sensor", "battery_soc_sensor",
+                         "ev_power_sensor"):
+                val = getattr(cfg, name, None)
+                if isinstance(val, str) and "." in val:
+                    out.add(val)
+            ed = getattr(self._sensor_reader, "_energy_dashboard_config", None)
+            for name in ("solar_power", "grid_import_power", "grid_export_power",
+                         "battery_power", "ev_power", "battery_soc"):
+                val = getattr(ed, name, None)
+                if isinstance(val, str) and "." in val:
+                    out.add(val)
+            for name in ("solar_power_list", "battery_power_list"):
+                for val in (getattr(ed, name, None) or []):
+                    if isinstance(val, str) and "." in val:
+                        out.add(val)
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    def _check_soc_zone_order(self) -> None:
+        """(#870) Are the three battery SOC zones in ascending order?
+
+        Since #870 all three are settable anywhere in 5..100 — the old
+        minimums (buffer 50, auto-start 70) were enforcing the ordering by
+        accident and made coppe218's 20/30/50 layout impossible. `soc_zone`
+        sorts them so no zone is ever SKIPPED, but a user who wrote them
+        out of order made a mistake and should hear about it.
+
+        Asked every cycle, acted on only when the verdict CHANGES, and
+        never before HA is running — the shape #919 taught: a question
+        asked before the thing it asks about exists answers 'no' forever.
+        """
+        if not getattr(self.hass, "is_running", False):
+            return
+        from . import repair_issues as _ri_soc
+        try:
+            p = float(self.config.get("battery_priority_soc", 30) or 0)
+            b = float(self.config.get("battery_buffer_soc", 70) or 0)
+            a = float(self.config.get("battery_auto_start_soc", 90) or 0)
+        except (TypeError, ValueError):
+            return                      # unreadable is not out-of-order
+        bad = not (p <= b <= a)
+        if bad == getattr(self, "_soc_zone_order_bad", None):
+            return                      # no change, no churn
+        self._soc_zone_order_bad = bad
+        if bad:
+            _ri_soc.raise_soc_zones_out_of_order(
+                self.hass, priority=p, buffer=b, auto_start=a)
+            _LOGGER.warning(
+                "battery SOC zones are out of order (priority %g, buffer %g, "
+                "auto-start %g) — using %g/%g/%g as the boundaries",
+                p, b, a, *sorted((p, b, a)))
+        else:
+            _ri_soc.clear_soc_zones_out_of_order(self.hass)
+
+    def _check_battery_platform_pin(self, battery_id, batt_idx, bat_count) -> None:
+        """(#900, fixed 07.09 for #919) Is this battery pinned to `generic`
+        on an install whose brand integration is loaded?
+
+        This used to be asked ONCE, inside the branch that builds the adapter
+        — which runs during SEM's first refresh, while `huawei_solar` is
+        still loading. `_integration_loaded` was therefore False, the check
+        took its `else` branch and CLEARED the Repair, and never ran again:
+        the one Repair that would have told PROD's owner why the #778 sell
+        block was dropped every evening could not fire on any install, ever.
+        Same shape as #166 and as the detection report's re-heal — a question
+        asked before the thing it asks about exists.
+
+        Asked every cycle now, acted on only when the verdict CHANGES, and
+        never before HA is running (an unloaded integration is "not yet",
+        not "no").
+
+        (#933) "Changes" is measured from UNSEEN, not from None. The memo
+        started empty and "not pinned" is None, so the first verdict of a
+        fresh coordinator matched the empty memo and was dropped — and a
+        fresh coordinator is exactly what the remedy produces (the options
+        write reloads the entry) and what every restart produces, while the
+        Repair is persistent and outlives them all. On PROD the remedy was
+        applied as the Repair says, and the Repair stayed.
+
+        The Repair has ONE id for the install, so the verdict is the
+        install's: the first pinned battery's brand, or None when none is.
+        It is not a verdict until every battery has answered in this cycle —
+        or a healthy second battery's first answer would clear the first's —
+        and "not pinned" is no answer while a Huawei/GoodWe entry is still
+        loading: ``is_running`` holds from HA's ``starting`` state on, and an
+        entry in SETUP_RETRY is not loaded. Acting on that None deleted the
+        Repair (and the user's "ignore") only to re-raise it a minute later.
+        """
+        if not getattr(self.hass, "is_running", False):
+            return
+        from .battery_adapters import pinned_generic_brand, pinned_generic_pending
+        from . import repair_issues as _ri_pin
+        try:
+            _pbc = self._battery_adapter_context(battery_id, batt_idx, bat_count)
+            pinned = pinned_generic_brand(self.hass, _pbc)
+            pending = pinned is None and pinned_generic_pending(self.hass, _pbc)
+        except Exception:  # noqa: BLE001 — a Repair never costs a cycle
+            return
+        # This cycle's answers only: a battery that leaves the install takes
+        # its answer with it.
+        seen = getattr(self, "_pinned_verdicts", None)
+        if seen is None or batt_idx == 0:
+            seen = self._pinned_verdicts = {}
+        seen[battery_id] = (pinned, pending)
+        if batt_idx < bat_count - 1 or len(seen) < bat_count:
+            return                      # not every battery has answered yet
+        first_id, verdict = next(
+            ((bid, b) for bid, (b, _p) in seen.items() if b), (None, None))
+        if verdict is None and any(p for _b, p in seen.values()):
+            return                      # a brand is still loading: "not yet"
+        if (hasattr(self, "_pinned_repair_verdict")
+                and self._pinned_repair_verdict == verdict):
+            return
+        self._pinned_repair_verdict = verdict
+        if verdict:
+            _ri_pin.raise_battery_platform_pinned_generic(self.hass, brand=verdict)
+            _LOGGER.warning(
+                "battery %s: platform is 'generic' but the %s integration is "
+                "loaded — set Battery charge platform to Auto-detect (#900)",
+                first_id, verdict)
+        else:
+            _ri_pin.clear_battery_platform_pinned_generic(self.hass)
+
+    def _primary_battery_adapter(self):
+        """The adapter for the primary battery, or None before the first
+        cycle has built one.
+
+        (07.09 re-audit) THREE call sites read ``self._battery_adapter`` —
+        singular — a name nothing has ever assigned: the per-battery loop
+        has cached adapters in ``self._battery_adapters`` (plural, keyed by
+        battery_id, ``"primary"`` on a single-battery install) since #375.
+        ``getattr(..., None)`` turned each into a silent no-op, so #827's
+        discharge-rate caveat, #845's expected-operating-mode seed and
+        #915's write read-back were all dead code that raised nothing and
+        published nothing. One accessor now, and it is the only way in.
+        """
+        adapters = getattr(self, "_battery_adapters", None) or {}
+        if not adapters:
+            return None
+        return adapters.get("primary") or next(iter(adapters.values()), None)
+
+    #: (#915) how many post-boot rebuilds a not-loaded proposal may buy
+    REPORT_REHEAL_BUDGET: int = 5
+    #: …and how many cycles apart (10 s cycles → about a minute)
+    REPORT_REHEAL_EVERY: int = 6
+
+    def _reheal_detection_report(self) -> bool:
+        """Rebuild the detection report when the last one could not judge
+        its proposals (built before HA was running) or judged some as not
+        loaded while integrations were still coming up. Returns True when a
+        rebuild happened. Bounded: unjudged → once; not-loaded → at most
+        ``REPORT_REHEAL_BUDGET`` times, ``REPORT_REHEAL_EVERY`` cycles apart."""
+        rep = getattr(self, "_detection_report", None)
+        if not isinstance(rep, dict) or not getattr(self.hass, "is_running", False):
+            return False
+        cycles = int(getattr(self, "_reheal_cycles", 0)) + 1
+        self._reheal_cycles = cycles
+        if not rep.get("judged"):
+            self.refresh_detection_report()
+            self._reheal_last = cycles
+            return True
+        if not rep.get("not_loaded"):
+            return False
+        budget = int(getattr(self, "_reheal_budget", self.REPORT_REHEAL_BUDGET))
+        if budget <= 0 or cycles - int(getattr(self, "_reheal_last", 0)) < self.REPORT_REHEAL_EVERY:
+            return False
+        self._reheal_budget = budget - 1
+        self._reheal_last = cycles
+        self.refresh_detection_report()
+        return True
+
     def refresh_detection_report(self) -> None:
         """(#814 Pillar B) Rebuild the detection evidence report from the
         entity registry. Called at setup and after a late discovery; the
@@ -8614,14 +10749,23 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         the Config tab's Detected-hardware section). Read-only, cheap."""
         try:
             from ..hardware_detection import build_detection_report
-            self._detection_report = build_detection_report(self.hass)
+            _sv = {k: (self.config or {}).get(k)
+                   for k in ("battery_strategy_active_value",
+                             "battery_strategy_idle_value",
+                             "battery_strategy_self_consume_value",
+                             "battery_strategy_off_value")}
+            self._detection_report = build_detection_report(
+                self.hass, configured_entities=self._configured_entity_ids(),
+                strategy_values=_sv)
         except Exception:  # noqa: BLE001 — evidence must never cost setup
             _LOGGER.debug("detection report skipped", exc_info=True)
             self._detection_report = None
 
     async def _retry_ev_device_setup(self) -> None:
         """Retry EV device setup if KEBA wasn't available at startup."""
-        from ..hardware_detection import discover_ev_charger_from_registry
+        from ..hardware_detection import (
+            discover_ev_charger_from_registry, wire_current_entity,
+        )
         from ..devices.base import CurrentControlDevice, resolve_max_current
 
         ev_auto = discover_ev_charger_from_registry(self.hass)
@@ -8653,6 +10797,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             ev_device.service_device_id = ev_auto["ev_service_device_id"]
         if ev_auto.get("ev_start_stop_entity"):
             ev_device.start_stop_entity = ev_auto["ev_start_stop_entity"]
+        # (#976) what the current entity's platform implies for control —
+        # the same producer the setup-time builder calls, so a late-built
+        # device carries the 0 A refusal flag and the adopted switch too.
+        wire_current_entity(self.hass, ev_device, "ev_charger",
+                            ev_auto.get("ev_current_control_entity"))
         if ev_auto.get("ev_charge_mode_entity"):
             ev_device.charge_mode_entity = ev_auto["ev_charge_mode_entity"]
             ev_device.charge_mode_start = ev_auto.get("ev_charge_mode_start")
@@ -8874,6 +11023,386 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         )
         return max(0, daily_target - consumed)
 
+    def _export_guard_store(self):
+        """(#955) Where an engaged export cut outlives this lifetime — an HA
+        restart never unloads the entry, and a cut nobody remembers is an
+        inverter stuck at zero feed-in with nothing left that knows why.
+        Scoped to the config entry like every SEM store (cleanup inventories
+        ``sem.export_guard.{entry_id}``)."""
+        entry_id = str(getattr(getattr(self, "config_entry", None), "entry_id", "") or "")
+        if not entry_id:
+            return None
+        try:
+            from homeassistant.helpers.storage import Store
+            return Store(self.hass, 1, f"sem.export_guard.{entry_id}")
+        except Exception:  # noqa: BLE001 — a store never costs a cycle
+            return None
+
+    def export_release_recipes(self) -> dict:
+        """(#955) Per battery, how to undo the cut WITHOUT the adapters —
+        what unload stashes for a removal and what the store carries across
+        a restart. Empty when nothing is engaged or nothing was written."""
+        guard = getattr(self, "_export_guard", None)
+        if (guard is None or not getattr(guard, "_applied", False)
+                or bool(getattr(self, "_observer_mode", False))):
+            return {}
+        out = {}
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                if not adapter.holds_export_cut():
+                    continue   # (#908) SEM never cut this one — nothing of ours to undo
+                rec = adapter.export_release_recipe()
+            except Exception:  # noqa: BLE001
+                rec = None
+            if rec:
+                out[str(bid)] = rec
+        return out
+
+    async def _export_guard_persist(self, engaged: bool) -> None:
+        """Write the cut's existence (and the release recipes) to the store."""
+        store = self._export_guard_store()
+        if store is None:
+            return
+        try:
+            if engaged:
+                await store.async_save({"engaged": True, "since": dt_util.now().isoformat(),
+                                        "recipes": self.export_release_recipes()})
+            else:
+                await store.async_save({"engaged": False})
+        except Exception as exc:  # noqa: BLE001 — a store never costs a cycle
+            _LOGGER.debug("export guard store write failed: %s", exc)
+
+    async def _export_guard_adopt(self, guard) -> None:
+        """First tick of a lifetime: if a previous lifetime engaged the cut,
+        take it over — the guard starts ENGAGED and the adapters get their
+        priors back — so the cut is released when the meter reopens instead
+        of being forgotten."""
+        store = self._export_guard_store()
+        if store is None:
+            return
+        try:
+            rec = await store.async_load() or {}
+        except Exception:  # noqa: BLE001
+            rec = {}
+        if not isinstance(rec, dict) or not rec.get("engaged"):
+            return
+        guard.state = "engaged"
+        # an adopted cut WAS applied — by the previous lifetime — so the
+        # release gate must see it, or the cut could never be handed back.
+        guard._applied = True
+        guard.reason = f"adopted an export cut from a previous lifetime (since {rec.get('since')})"
+        recipes = rec.get("recipes") or {}
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            prior = recipes.get(str(bid))
+            if not prior:
+                continue   # the previous lifetime held nothing on this one
+            try:
+                adapter.adopt_export_prior(prior)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def async_release_export_guard(self, *, reason: str):
+        """(#955, the #908 rule) Put the inverter's feed-in back if — and only
+        if — SEM is the one holding it. Never raises: a teardown that fails
+        half way must still let HA remove the entry. Returns a sentence for
+        the log, or None when there was nothing to release."""
+        guard = getattr(self, "_export_guard", None)
+        if guard is None or not getattr(guard, "_applied", False):
+            # #908 again: a guard that only ever HELD wrote nothing, so a
+            # teardown has nothing to hand back.
+            return None
+        if bool(getattr(self, "_observer_mode", False)):
+            # Observer mode recorded WOULDs and wrote nothing (#936: the rig's
+            # batteries are left exactly as found) — releasing would be the
+            # first real write of the lifetime, on hardware SEM never touched.
+            guard.state = "idle"
+            guard.reason = f"observer — nothing was written, nothing to release ({reason})"
+            return None
+        released = []
+        for bid, adapter in (getattr(self, "_battery_adapters", None) or {}).items():
+            try:
+                if not adapter.holds_export_cut():
+                    # (#908/#936) The cut was made through ONE adapter. On a
+                    # mixed fleet (#531) a blanket release would reset a
+                    # feed-in limit its owner set and SEM never touched —
+                    # Huawei's reset needs no prior, so it would have gone
+                    # through silently.
+                    continue
+                await adapter.command_release_export()
+                released.append(str(bid))
+            except Exception as exc:  # noqa: BLE001 — teardown must finish
+                _LOGGER.warning("export guard: could not release %s on %s: %s",
+                                bid, reason, exc)
+        guard.state = "idle"
+        guard.reason = f"released on {reason}"
+        _persist = getattr(self, "_export_guard_persist", None)
+        if callable(_persist):
+            await _persist(False)
+        return (f"export guard released on {reason}: "
+                f"{', '.join(released) or 'nothing to release'}")
+
+    async def _apply_export_decision(self, fleet) -> None:
+        """(#955) Decide the export axis and write it — the whole dispatch.
+
+        Deliberately thin, and deliberately a METHOD: the decision is made by
+        the pure ``decide_export`` and the write by the one ``actuate_export``
+        seam, so all this owns is the order. Inline in the cycle it could not
+        be exercised without a whole coordinator, which is how the first build
+        shipped a guard that released a cut it never made.
+        """
+        from .actuate_export import actuate_export
+        from .charger_types import ExportIntent
+        from .decide_export import decide_export
+        decision = decide_export(fleet)
+        guard = getattr(self, "_export_guard", None)
+        # (#855, the meter) THIS cycle's dry-run rows — a fresh list every
+        # cycle, like the chargers' withheld log: it answers "what would SEM
+        # send NOW", never what it once considered.
+        _rows: list = []
+        refused = await actuate_export(
+            decision, self._export_control_adapter(),
+            observer=self._observer_mode,
+            controller=getattr(self, "_surplus_controller", None),
+            # (#764) the roster is swept every cycle; a held cut has to keep
+            # saying so or it is retired while it is still being held.
+            standing=getattr(guard, "state", None),
+            withheld=_rows)
+        self._export_withheld = _rows
+        if refused and guard is not None:
+            guard.report_refused(refused)   # a refusal is a state (#925)
+        elif decision.intent is not ExportIntent.NONE and not self._observer_mode:
+            # The store remembers the cut across a restart; only a REAL write
+            # may claim it (#936: observer leaves the house exactly as found).
+            persist = getattr(self, "_export_guard_persist", None)
+            if callable(persist):
+                await persist(decision.intent is ExportIntent.LIMIT)
+
+    async def _ensure_export_guard(self) -> None:
+        """(#955) Build the tracker and adopt a prior lifetime's cut, ONCE.
+
+        Awaited by the cycle before anything reads the guard, because a cut
+        restored from the store has to be in place BEFORE the first
+        ``update()`` — the previous build scheduled the adopt as a task from
+        inside the tick, which lands a cycle late and loses the restored cut
+        (#949's lesson: hand back only what SEM commanded — it must first
+        remember that it commanded it).
+        """
+        if getattr(self, "_export_guard_adopted", False):
+            return
+        self._export_guard_adopted = True
+        from .export_guard import ExportGuard
+        if getattr(self, "_export_guard", None) is None:
+            self._export_guard = ExportGuard(
+                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
+                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
+        _adopt = getattr(self, "_export_guard_adopt", None)
+        if callable(_adopt):
+            try:
+                await _adopt(self._export_guard)
+            except Exception:  # noqa: BLE001 — a store that cannot be read is
+                _LOGGER.debug("export guard: no prior cut adopted", exc_info=True)
+
+    def _compute_export_command(self, power, *, now=None) -> None:
+        """(#955) Tick the export tracker and leave its command on the cycle.
+
+        The peak guard's shape (``_compute_peak_slot_allowance`` →
+        ``peak_slot_allowed_w``): no decision here and no write. The pure
+        ``decide_export`` reads the command off the fleet and one seam —
+        ``actuate_export`` — writes it, once, after the battery loop.
+
+        On "last, not first": ``power`` is a fixed per-cycle snapshot and the
+        dispatch still runs after the battery loop, so ticking here changes no
+        input. The guard clips only export the sinks did not absorb in the
+        previous cycle, which under 120 s / 300 s holds is the same statement.
+        """
+        import time as _time
+        from .export_guard import ExportGuard
+        from .sink_verdicts import OPEN
+        if getattr(self, "_export_guard", None) is None:
+            # Only a rig-shaped stand-in reaches here un-adopted: on a real
+            # install ``_ensure_export_guard`` has already run, awaited, this
+            # cycle. Never adopt from inside the tick — a task scheduled here
+            # lands AFTER the update it was supposed to precede, so a restored
+            # cut would be overwritten by an idle first tick.
+            self._export_guard = ExportGuard(
+                engage_hold_s=float(self.config.get("export_guard_engage_s", 120) or 120),
+                release_hold_s=float(self.config.get("export_guard_release_s", 300) or 300))
+        enabled = bool(self.config.get("export_guard_enabled", False))
+        verdict = (getattr(self, "_sink_verdicts", None) or {}).get("grid_export")
+        state = getattr(verdict, "state", OPEN) if enabled else OPEN
+        # (#906) an unreadable meter is a BLIND sample (None), never a 0.
+        export_w = (None if getattr(power, "grid_power_unavailable", False)
+                    else float(getattr(power, "grid_export_power", 0.0) or 0.0))
+        self._export_command = self._export_guard.update(
+            _time.monotonic() if now is None else now, state, export_w)
+
+    def _publish_export_guard_state(self) -> None:
+        """(#955) What the card and ``sensor.sem_export_guard_state`` read.
+
+        A different surface from the observer map, not a second mechanism for
+        the same one: ``actuate_export`` publishes the COMMAND under its own
+        key (and ``observer_decisions`` keeps the current would-state until
+        something overwrites it), while this is the guard's LIVE state,
+        refreshed every cycle — which is what makes "it is holding the meter
+        shut right now" readable rather than a one-cycle flash (.175, 16.09).
+        """
+        g = getattr(self, "_export_guard", None)
+        if g is None:
+            return
+        self._export_guard_state = {
+            "enabled": bool(self.config.get("export_guard_enabled", False)),
+            "state": g.state,
+            "reason": g.reason,
+            "would": (g.state if self._observer_mode
+                      and g.state in ("engaged", "releasing", "refused") else None),
+            "repair_wanted": g.repair_wanted,
+            "verdict": getattr(
+                (getattr(self, "_sink_verdicts", None) or {}).get("grid_export"),
+                "reason", "no verdict"),
+        }
+
+    def _export_control_adapter(self):
+        """(#955) The adapter that can actually cut this house's export.
+
+        NOT ``_primary_battery_adapter()``: that one is positional
+        (``next(iter(adapters.values()))``) and says nothing about who owns the
+        grid tie. On a #531 mixed fleet — a Sessy AC battery beside a Huawei
+        inverter — the first-inserted adapter may have no export control at
+        all, and offering it the cut would leave the guard ``refused`` forever
+        while the inverter that CAN cut is never asked (#874's shape, for
+        batteries).
+
+        Continuity first: if one adapter is already holding SEM's cut, that
+        is the one — you release what you cut. Then capability: any adapter
+        that OVERRIDES the base's refusing verb. The primary last, so a
+        single-battery install behaves exactly as before and a house whose
+        brand has no export control still gets a REFUSAL with a brand in it
+        rather than "no adapter".
+
+        Not "has a release recipe": Huawei can always produce one (the
+        integration owns the reset), so that test named an inverter SEM had
+        never cut.
+        """
+        adapters = getattr(self, "_battery_adapters", None) or {}
+        if not adapters:
+            return None
+        for adapter in adapters.values():
+            try:
+                if adapter.holds_export_cut():
+                    return adapter
+            except Exception:  # noqa: BLE001 — a brand that cannot answer is not the one
+                continue
+        for adapter in adapters.values():
+            fn = getattr(type(adapter), "command_limit_export", None)
+            owner = getattr(fn, "__qualname__", "").split(".")[0] if fn else ""
+            if owner and owner != "BatteryControlAdapter":
+                return adapter
+        return self._primary_battery_adapter()
+
+    def _resume_expired_pauses(self) -> None:
+        """(#980) Put the charge mode back when a timed pause runs out.
+
+        The ONE place a pause ends. It is a mode write, not a command — the
+        charger goes back to doing what it was doing before the user pressed
+        Pause, and today's control path takes it from there.
+
+        Runs every cycle, and the whole decision is ``charge_pause.tick``.
+        It answers three ways: nothing to do, give the mode back, or —
+        because there is no Resume button, only the charge-mode select —
+        forget a pause the user ended by hand. That third one is the reason
+        this writes a dict rather than returning a mode: a cancelled pause
+        whose record survived would fire the next time someone chose Off
+        deliberately, and put the pre-pause mode back over it.
+
+        A pause is a convenience, never a claim on the knob.
+        """
+        from .charge_pause import tick
+        import homeassistant.util.dt as _dt
+        if self.config_entry is None:
+            return          # too early to persist anything
+        _now = _dt.now()
+        for cfg in (self.config.get("ev_chargers") or []):
+            if not isinstance(cfg, dict):
+                continue
+            writes = tick(cfg, _now)
+            if not writes:
+                continue
+            cid = cfg.get("id") or "ev_charger"
+            from .. import persist_per_charger_option
+            for key, value in writes.items():
+                persist_per_charger_option(
+                    self.hass, self.config_entry, self, cid, key, value)
+            mode = writes.get("charge_mode")
+            _LOGGER.info(
+                "Charger %s: %s (#980)", cid,
+                f"pause finished — charge mode restored to {mode}" if mode
+                else "pause record cleared — the mode was set back by hand",
+            )
+
+    def _compute_peak_slot_allowance(self, power) -> None:
+        """(#864) The slot-budget allowance — the PREVENTIVE peak bound.
+
+        The tracker integrates grid import over the current 15-minute clock
+        slot; the allowance is what the rest of the slot may average so the
+        slot lands on target. ``None`` means "no cap", which ``decide`` reads
+        as no cap at all.
+
+        That is why this cannot fail quietly. ``None`` is ALSO what an
+        unlimited install publishes when the Control-tab slider sits at MAX
+        (#717/#830 — one off-switch, no second toggle), so a bug in
+        ``slot_allowed_import_w`` or ``PeakSlotTracker`` produced a state
+        byte-for-byte identical to the user having switched the guard off:
+        a live control decision, on the feature framed as a security layer
+        above every device, with no log line at any level. Found by an audit
+        of the decision path's broad handlers, the day after the guard
+        shipped.
+
+        The old handler was half right — the guard must not kill a cycle, and
+        it still doesn't. What it may not do is VANISH without saying so, so
+        the failure is now loud and attributable, the way the #5090 NameError
+        incident taught this file to treat its own bugs.
+
+        The exception list is the shape of a CODING error (a wrong attribute,
+        a bad conversion, a division by an empty slot). Anything outside it
+        is not something this guard knows how to survive and belongs to the
+        cycle's own circuit breaker.
+        """
+        allowed = None
+        try:
+            from .peak_guard import PeakSlotTracker, slot_allowed_import_w
+            if getattr(self, "_peak_slot_tracker", None) is None:
+                self._peak_slot_tracker = PeakSlotTracker()
+            import homeassistant.util.dt as _dt
+            # (#906) an unreadable meter is a BLIND sample (None), never 0.
+            _grid_w = (
+                None if getattr(power, "grid_power_unavailable", False)
+                else float(getattr(power, "grid_import_power", 0.0) or 0.0))
+            self._peak_slot_tracker.update(_dt.now(), _grid_w)
+            _lm = self._load_manager
+            # The off-switch is the EXISTING one: the Control-tab slider's
+            # MAX notch sets peak_limit_unlimited atomically (#717), and an
+            # unlimited install computes no allowance — one mechanism, no
+            # second toggle (#830: options are outsourced thinking).
+            if (_lm is not None
+                    and not getattr(_lm, "_peak_unlimited", True)):
+                allowed = slot_allowed_import_w(
+                    float(getattr(_lm, "_target_peak_limit", 0.0) or 0.0),
+                    self._peak_slot_tracker.imported_kwh,
+                    self._peak_slot_tracker.elapsed_s,
+                    blind=bool(getattr(self._peak_slot_tracker, "blind", False)),
+                )
+        except (AttributeError, TypeError, ValueError,
+                ZeroDivisionError, ImportError):
+            _LOGGER.warning(
+                "Peak slot guard FAILED this cycle — the 15-minute peak cap "
+                "is not being applied, and this is NOT the slider's MAX "
+                "off-switch. Charging offers are uncapped until it recovers, "
+                "and the battery holds that give the house to the meter stop "
+                "covering it (#864/#1003).", exc_info=True,
+            )
+            allowed = None
+        self._peak_slot_allowed_w = allowed
+
     def _build_fleet_cycle_state(
         self, power: PowerReadings, energy: Any,
     ) -> "FleetCycleState":
@@ -8920,10 +11449,24 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         try:
             provider = getattr(self, "_tariff_provider", None)
             if provider is not None and getattr(provider, "available", True):
-                level = provider.get_price_level()
+                # (#994) through the one vocabulary: a level only exists
+                # when a comparison stands behind it, so a flat tariff
+                # threads None and every comparative consumer sees "unknown"
+                # rather than "cheap".
+                from .price_signal import comparative_level
+                level = comparative_level(provider)
                 level = getattr(level, "value", level)  # PriceLevel enum → str
                 if isinstance(level, str):
                     tariff_level = level
+                else:
+                    # (#994) …and when there is none, thread the SAME word
+                    # the sensor publishes. Leaving it None made every
+                    # verdict reason say "no prices to compare" beside a
+                    # sensor reading `flat` — one situation, two stories.
+                    # Neither word is in the cheap or expensive set, so no
+                    # decision changes.
+                    from .price_signal import absence_word
+                    tariff_level = absence_word(provider)
         except Exception:
             tariff_level = None
 
@@ -8958,16 +11501,98 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         _peak_state = str(getattr(_peak_state, "value", _peak_state)
                           or "normal").lower()
 
+        # (#891) The house as the inverter measures it, beside SEM's own
+        # figure, and the difference. PUBLISHED ONLY — nothing below reads
+        # these, and ``home_consumption_power`` is untouched. Two dashboards
+        # showing the same house disagreed; that was the complaint.
+        from .house_meter import house_gap_w, read_house_meter
+        _meter = read_house_meter(
+            self.hass, self.config.get("house_power_sensor"))
+        self._house_meter_w = _meter
+        self._house_meter_gap_w = house_gap_w(
+            float(getattr(power, "home_consumption_power", 0.0) or 0.0), _meter)
+
+        # (#864) The slot-budget allowance — the PREVENTIVE peak bound.
+        self._compute_peak_slot_allowance(power)
+
+        # (#980) A timed pause that has run out hands the charge mode back
+        # BEFORE this cycle's charger decisions read it.
+        try:
+            self._resume_expired_pauses()
+        except Exception:  # noqa: BLE001 — a pause must not end a cycle
+            _LOGGER.warning("resuming an expired charge pause failed (#980)",
+                            exc_info=True)
+
+        # (arc #921) one verdict per sink, computed here and nowhere else. The
+        # export price is read with the SAME tri-state the forecast sell uses:
+        # unreadable is a state, never 0, and never a closed meter.
+        from .sink_verdicts import sink_verdicts
+        _xr, _xr_known = None, False
+        _prov = getattr(self, "_tariff_provider", None)
+        try:
+            if _prov is not None and hasattr(_prov, "get_current_export_rate"):
+                _xr = float(_prov.get_current_export_rate())
+                _xr_known = True
+        except Exception:  # noqa: BLE001 — unreadable is a state, not 0
+            _xr, _xr_known = None, False
+        try:
+            _ups = (getattr(_prov.get_tariff_data(), "upcoming_prices", None)
+                    if _prov is not None else None)
+        except Exception:  # noqa: BLE001
+            _ups = None
+        try:
+            _verdicts = sink_verdicts(
+                now=dt_util.now(), tariff_level=tariff_level, upcoming=_ups,
+                export_rate=_xr, export_rate_known=_xr_known,
+                export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
+                house_sink_enabled=bool(self.config.get("battery_house_sink_enabled", False)),
+                morning_window_enabled=bool(self.config.get("ev_morning_window_enabled", False)),
+                departure=self._ev_departure_dt(),
+                morning_hours=float(self.config.get("ev_morning_window_hours", 2.0) or 2.0),
+                forecast_refills_pack=self._forecast_refills_pack(),
+                pacing_horizon_end=self._pacing_horizon_end(),
+            )
+        except Exception:  # noqa: BLE001 — a verdict bug must not kill a cycle
+            _LOGGER.warning("sink verdicts FAILED this cycle — every sink reads "
+                            "OPEN until it recovers (arc #921)", exc_info=True)
+            _verdicts = {}
+        self._sink_verdicts = _verdicts
+        # (#955) The guard reads THIS cycle's grid verdict, so it ticks after
+        # the verdicts exist — not beside `_compute_peak_slot_allowance`,
+        # where symmetry with the peak guard would have fed it yesterday's
+        # answer. Still only a tick: no decision, no write.
+        self._compute_export_command(power)
         return FleetCycleState(
             power=power,
             config=self.config,
             peak_state=_peak_state,
+            peak_slot_allowed_w=self._peak_slot_allowed_w,
             is_night=self.time_manager.is_night_mode(),
             tariff_level=tariff_level,
             forecast_remaining_kwh=float(forecast_remaining),
+            # (#778) Tonight's budget, computed a step earlier from measured
+            # inputs. 0.0 until the evidence exists — never a guess.
+            battery_spendable_kwh=float(
+                (getattr(self, "_planning_evidence", None) or {})
+                .get("battery_spendable_kwh") or 0.0),
+            # (#878) The ceiling that rides beside that budget. Deliberately
+            # NOT `or 0.0` like its neighbour: None means "no budget was
+            # computed" and must fall back to the configured buffer, whereas
+            # 0.0 would read as a floor of zero and license draining the pack
+            # to empty. The sibling can safely coerce because 0 kWh spendable
+            # is a real answer; here it is the dangerous one.
+            dynamic_floor_pct=(
+                (getattr(self, "_planning_evidence", None) or {})
+                .get("battery_dynamic_floor_pct")),
             battery_priority=battery_priority,
             battery_commanded=self._battery_commanded(),
             curtailment_grant_w=self._curtailment_grant_w(power),
+            sink_verdicts=_verdicts,
+            export_command=getattr(self, "_export_command", None),
+            export_guard_enabled=bool(self.config.get("export_guard_enabled", False)),
+            morning_window_open=bool(
+                getattr(_verdicts.get("ev"), "state", "") == "open"
+                and self.config.get("ev_morning_window_enabled", False)),
         )
 
     def _curtailment_grant_w(self, power) -> float:
@@ -8984,6 +11609,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             if probe is None:
                 probe = CurtailmentProbe()
                 self._curtailment_probe = probe
+            # (#955) While SEM itself limits export, the #743 probe must not go
+            # looking for an inverter "someone else" is limiting: it would
+            # harvest the very energy the guard is deliberately clipping.
+            _eg = getattr(self, "_export_guard", None)
+            if _eg is not None and getattr(_eg, "state", "idle") == "engaged":
+                self._curtailment_last = {"state": "held_by_export_guard", "grant_w": 0.0}
+                return 0.0
             enabled = bool(self.config.get("curtailment_probe_enabled", False))
             if not enabled:
                 # Cheap early-out, but tick once so the state reads 'off'.
@@ -9022,7 +11654,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             from ..consts.ev_charge_modes import effective_charge_mode_for
             from .sensor_reader import parse_export_limited
 
-            solar_modes = ("solar_only", "min_plus_solar", "solar_plus_cheap")
+            solar_modes = ("solar_only", "solar_plus_battery",
+                           "min_plus_solar", "solar_plus_cheap")
             chargers = [
                 c for c in (self.config.get("ev_chargers") or [])
                 if isinstance(c, dict)
@@ -9253,6 +11886,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     reachable=night_plan.reachable,
                     deadline_active=night_plan.deadline_active,
                     watts_per_amp=_wpa,
+                    wpa_table=self._wpa_table_for(_pcid),   # (#904)
+                    nominal_wpa=(float(_primary_cfg.get("ev_phases") or 3)
+                                 * float(_primary_cfg.get("ev_voltage") or 230)),
                     min_amps=int(_primary_cfg.get("ev_min_current") or 6),
                     max_amps=int(_primary_cfg.get("ev_max_current")
                                    or DEFAULT_MAX_CHARGING_CURRENT),
@@ -9300,6 +11936,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             charger_id=(_primary_cfg.get("id") or "ev_charger"),
             # #576 — the primary charger's slot in the one priority list.
             ev_priority=self._ev_priority_for(_primary_cfg.get("id") or "ev_charger"),
+            wpa_table=self._wpa_table_for(_primary_cfg.get("id") or "ev_charger"),
             charger_cfg=_primary_cfg,
             mode=self._effective_charge_mode_for(_primary_cfg),
             daily_ev_kwh=self._charger_daily_kwh(
@@ -9322,6 +11959,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             hardware_max_a=self._primary_hardware_max_a(_primary_cfg),
         )
         _primary_decision = _decide(_primary_view)
+        from .vpp_dispatch import vpp_pause_override as _vpp_pause
+        _primary_decision = _vpp_pause(
+            _primary_decision, getattr(self, "_vpp_ev_override", None) == "pause")
         strategy = _primary_decision.intent.value
         reason = _primary_decision.reason
 
@@ -9345,14 +11985,25 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
         # Map ChargerIntent → EVBudgetStrategy for the canonical budget
         # consumer (sem_available_power, sem_calculated_current).
-        if _primary_decision.intent is _CI.DISABLE:
+        if _primary_decision.intent in (_CI.DISABLE, _CI.RELEASE):
             canonical_strategy = EVBudgetStrategy.IDLE
         elif _primary_decision.intent is _CI.IDLE:
             canonical_strategy = EVBudgetStrategy.IDLE
         elif _primary_decision.intent is _CI.CHARGE_MAX:
             canonical_strategy = EVBudgetStrategy.NOW
-        elif _primary_view.fleet.is_night and _primary_view.mode != "solar_only":
+        elif (_primary_view.fleet.is_night
+              and _primary_view.mode not in (
+                  # (#885) solar_plus_battery shares solar_only's night
+                  # contract — its night decision is the same floor
+                  # top-up or idle, never the MIN_PV night lane.
+                  "solar_only", "solar_plus_battery")):
             # min_plus_solar / solar_plus_cheap night top-up uses MIN_PV
+            canonical_strategy = EVBudgetStrategy.MIN_PV
+        elif (_primary_view.mode == "solar_plus_cheap"
+              and "day (cheap tariff)" in str(_primary_decision.reason)):
+            # (#856) a cheap DAYTIME hour tops the Min floor up from grid
+            # through the same seam as the night window — it is a grid
+            # top-up, not solar, and the budget sensors must say so.
             canonical_strategy = EVBudgetStrategy.MIN_PV
         elif _primary_view.mode == "solar_only":
             canonical_strategy = EVBudgetStrategy.SOLAR_ONLY
@@ -9931,6 +12582,30 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     cid, charger_power, interval_hours,
                 )
 
+                # (#1011) A start THIS charger did not take is recorded on THIS
+                # charger's detector — connected, a real offer, no draw for
+                # ~3 min. Never a full charge (only a taper or a sensor says
+                # full); a real draw clears it via update_energy above, an
+                # unplug via reset_session. This is the per-charger home of the
+                # decline; the global block below is a deviceless fallback.
+                _offered = max(int(charger_setpoint or 0),
+                               self._last_commanded_amps_per_charger.get(cid, 0))
+                if charger_connected and charger_power < 50 and _offered >= 6:
+                    _dc = self._decline_stall_count.get(cid, 0) + 1
+                    self._decline_stall_count[cid] = _dc
+                    if _dc >= 18:  # ~3 min of 0 W while connected and offered
+                        _pcdet = self._ev_taper_detectors[cid]
+                        if not _pcdet.declined_start:
+                            _LOGGER.info(
+                                "Charger %s: start declined — connected, %d A "
+                                "offered, 0 W for 3+ min; recorded as declined, "
+                                "not full (#1011)", cid, int(charger_setpoint),
+                            )
+                        _pcdet.note_declined_start(now.isoformat())
+                        self._decline_stall_count[cid] = 0
+                else:
+                    self._decline_stall_count[cid] = 0
+
         # #589 Surface-B retirement: the primary charger's detector is now
         # resolved by the _ev_taper_detector property (computed from
         # _ev_taper_detectors[primary_id]) — no per-cycle swap. The former
@@ -10022,24 +12697,32 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # ``_ev_stalled_since_per_charger``). Demo of the v1.6.16
         # ``.as_fleet_total(reason)`` form — the reason rides in the
         # bytecode rather than a comment line above the read.
-        if (power.ev_connected and not power.ev_charging
+        if (not self._ev_devices                    # (#1011) per-charger loop owns it otherwise
+                and power.ev_connected and not power.ev_charging
                 and power.ev_power.as_fleet_total("legacy single-detector stall path") < 50
-                and self._last_commanded_amps_fleet >= 6
-                and not self._ev_taper_detector._full_detected):
+                and self._last_commanded_amps_fleet >= 6):
             stall_count = getattr(self, '_full_stall_count', 0) + 1
             self._full_stall_count = stall_count
             if stall_count >= 18:  # ~3 minutes of 0W while connected
-                self._ev_taper_detector._full_detected = True
-                self._ev_taper_detector._last_full_timestamp = dt_util.now().isoformat()
-                self._ev_taper_detector._energy_since_full = 0.0
-                self._ev_taper_detector._estimated_soc = 100.0
-                self._ev_taper_detector._soc_anchored = True
-                if self._ev_taper_detector._hw_total_last is not None:
-                    self._ev_taper_detector._hw_total_at_full = self._ev_taper_detector._hw_total_last
+                # (#1011) A start the car did not take is recorded as exactly
+                # that — never as a full charge. This used to pin the
+                # estimate to 100 %, stamp "last full charge" and zero the
+                # deficit: on PROD 27.09.2026 it stamped a full charge on a
+                # day nothing charged (the box's total was unchanged since
+                # the real full the evening before), and on #983's install it
+                # called a 54 % pack full. A refusal has other causes; only a
+                # taper or a sensor may say full. The night plan still treats
+                # a declining car as no sink (ev_availability), under its own
+                # name.
+                det = self._ev_taper_detector
+                if not det.declined_start:
+                    _LOGGER.info(
+                        "EV start declined: car connected, %d A offered, 0 W "
+                        "for 3+ min — recorded as declined, not as full (#1011)",
+                        int(self._last_commanded_amps_fleet),
+                    )
+                det.note_declined_start(dt_util.now().isoformat())
                 self._full_stall_count = 0
-                _LOGGER.info(
-                    "EV full charge detected from stall: car connected, 0W for 3+ min → SOC 100%%"
-                )
         else:
             self._full_stall_count = 0
 
@@ -10059,6 +12742,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # the moving-but-wrong value it replaced. The stall→full anchor
             # below sets this for the same reason.
             self._ev_taper_detector._soc_anchored = True
+            self._ev_taper_detector.set_anchor("session", dt_util.now().isoformat())  # (#1011)
             estimated_soc = session_soc
             _LOGGER.warning(
                 "SOC self-healed: was 0%% after %.1f kWh session → %.0f%%",
@@ -10160,6 +12844,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
             result[cid] = {
                 "estimated_soc": round(soc, 1) if soc is not None else None,
+                # (#1011) provenance of the estimate + a refusal as its own
+                # fact — attributes of the estimated_soc sensor, no entities.
+                "estimated_soc_anchor": getattr(detector, "anchor_kind", None),
+                "estimated_soc_anchor_at": getattr(detector, "anchor_at", None),
+                "start_declined_since": getattr(detector, "_start_declined_at", None),
+                "start_declined_last": getattr(detector, "_start_declined_last_at", None),
                 # #383: surface the real per-charger vehicle SOC reading
                 # so each charger card can display its own car's SOC
                 # instead of falling back to the global ``sem_vehicle_soc``
@@ -10198,6 +12888,465 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
     # is already clamped at battery capacity (``apply_daily_decay`` caps
     # ``energy_since_full``), so this only bounds the loop and the log noise.
     MAX_DECAY_CATCHUP_DAYS = 7
+
+    def _record_source_ledgers(self, now_time, energy, today_s, today) -> None:
+        """(#822) Score every installed forecast source against reality.
+
+        One ``ForecastLedger`` per source, settled from the same actual as the
+        active one, so ``trust()`` answers "how good is THIS source on THIS
+        roof" with the maths #778 already proved out. No new statistics, no
+        normalisation, and nothing here re-points the reader — comparing a
+        source must not change which one is in use.
+        """
+        from datetime import timedelta
+
+        from .forecast_ledger import ForecastLedger
+
+        reader = getattr(self, "_forecast_reader", None)
+        if reader is None or not hasattr(reader, "peek_sources"):
+            return
+
+        ledgers = getattr(self, "_source_ledgers", None)
+        if ledgers is None:
+            raw = {}
+            if self._storage is not None:
+                try:
+                    raw = self._storage.get_source_ledgers_state() or {}
+                except Exception:  # noqa: BLE001
+                    raw = {}
+            ledgers = {name: ForecastLedger.from_dict(state or {})
+                       for name, state in raw.items()}
+            self._source_ledgers = ledgers
+
+        actual = getattr(energy, "daily_solar", None)
+
+        seen = reader.peek_sources()
+        for name in seen:
+            led = ledgers.get(name)
+            if led is None:
+                led = ledgers[name] = ForecastLedger()
+            if actual is not None:
+                led.settle(today_s, actual)
+
+        # Record the horizons once a day, and only once SUCCESSFULLY — the
+        # same rule the active ledger learned the hard way (#778): marking the
+        # day done before anything was written burns it permanently.
+        if getattr(self, "_source_ledger_day", None) == today_s:
+            return
+        recorded = 0
+        for name, values in seen.items():
+            led = ledgers[name]
+            for horizon, key in ((0, "today_kwh"), (1, "tomorrow_kwh")):
+                value = values.get(key)
+                # 0.0 means "this source does not publish that far"; recording
+                # it would teach the ledger a lie.
+                if value:
+                    led.record(str(today + timedelta(days=horizon)),
+                               horizon, value)
+                    recorded += 1
+        if not recorded:
+            return
+        self._source_ledger_day = today_s
+        if self._storage is not None:
+            try:
+                self._storage.set_source_ledgers_state(
+                    {n: l.to_dict() for n, l in ledgers.items()})
+            except (AttributeError, TypeError, ValueError) as err:
+                _LOGGER.warning("source ledgers not persisted: %s", err)
+        _LOGGER.info(
+            "#822 source ledgers: recorded %d horizon(s) across %d source(s) "
+            "for %s — %s",
+            recorded, len(seen), today_s,
+            {n: v.get("today_kwh") for n, v in seen.items()},
+        )
+
+    def source_accuracy(self) -> dict:
+        """(#822) Per-source trust, for the card and the diagnostics.
+
+        ``None`` for a source with too few settled days — the ledger refuses
+        to score on thin evidence and that refusal must reach the user rather
+        than being rendered as a confident number.
+        """
+        out = {}
+        for name, led in (getattr(self, "_source_ledgers", None) or {}).items():
+            try:
+                out[name] = {
+                    "trust_today": led.trust(0),
+                    "trust_tomorrow": led.trust(1),
+                    "settled_days": len(getattr(led, "_days", {}) or {}),
+                }
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    def _record_forecast_horizons(
+        self, forecast_data, energy, now_time, power=None,
+    ) -> None:
+        """(#778) Keep the per-horizon forecast ledger up to date.
+
+        Records what we believe today about today, tomorrow and the day after,
+        and settles today with what the sun has actually delivered so far. The
+        settle is deliberately every-cycle and idempotent: the last value
+        written before midnight is the day's final figure, which needs no
+        rollover hook and cannot be lost to a restart at 23:59.
+        """
+        from datetime import timedelta
+
+        from .forecast_ledger import ForecastLedger
+
+        led = getattr(self, "_forecast_ledger", None)
+        if led is None:
+            raw = {}
+            if self._storage is not None:
+                try:
+                    raw = self._storage.get_forecast_ledger_state() or {}
+                except Exception:  # noqa: BLE001
+                    raw = {}
+            led = ForecastLedger.from_dict(raw)
+            self._forecast_ledger = led
+
+        today = now_time.date()
+        today_s = str(today)
+
+        # Settle today with what has actually arrived (idempotent).
+        actual = getattr(energy, "daily_solar", None)
+        if actual is not None:
+            led.settle(today_s, actual)
+
+        # Record the horizons once a day — once SUCCESSFULLY, which is not the
+        # same thing. The first version marked the day done before knowing
+        # whether anything had been recorded, so a restart on a cycle where the
+        # forecast was not yet populated burned that day permanently: the rig
+        # showed `horizons=[]` against a settled actual, for a day whose
+        # forecast was sitting right there.
+        if getattr(self, "_forecast_ledger_day", None) != today_s:
+            recorded = 0
+            for horizon, value in (
+                (0, getattr(forecast_data, "forecast_today_kwh", None)),
+                (1, getattr(forecast_data, "forecast_tomorrow_kwh", None)),
+                (2, getattr(forecast_data, "forecast_d2_kwh", None)),
+            ):
+                # 0.0 means "this source does not publish that far" — recording
+                # it as a forecast of nothing would teach the ledger a lie.
+                if value:
+                    led.record(str(today + timedelta(days=horizon)), horizon, value)
+                    recorded += 1
+            if recorded:
+                self._forecast_ledger_day = today_s
+                _LOGGER.info(
+                    "#778 ledger: recorded %d horizon(s) for %s "
+                    "(today=%s tomorrow=%s d2=%s)",
+                    recorded, today_s,
+                    getattr(forecast_data, "forecast_today_kwh", None),
+                    getattr(forecast_data, "forecast_tomorrow_kwh", None),
+                    getattr(forecast_data, "forecast_d2_kwh", None),
+                )
+            else:
+                _LOGGER.warning(
+                    "#778 ledger: nothing recorded for %s — forecast reads "
+                    "today=%r tomorrow=%r d2=%r",
+                    today_s,
+                    getattr(forecast_data, "forecast_today_kwh", None),
+                    getattr(forecast_data, "forecast_tomorrow_kwh", None),
+                    getattr(forecast_data, "forecast_d2_kwh", None),
+                )
+            if recorded and self._storage is not None:
+                try:
+                    self._storage.set_forecast_ledger_state(led.to_dict())
+                except (AttributeError, TypeError, ValueError) as _se:
+                    _LOGGER.warning("forecast ledger not persisted: %s", _se)
+
+        # (#822) The same question, asked of every installed source.
+        #
+        # Users install two or three forecast integrations to find out which
+        # one is right for their roof, and SEM has been picking one and
+        # ignoring the rest. The obvious comparison — put their numbers side
+        # by side — is worthless: on the dev rig they read 125.6 / 47.2 / 20.0
+        # kWh for one day, and that 6x spread was three DIFFERENT CONFIGURED
+        # ARRAYS, not three opinions. SEM cannot see how a third-party
+        # integration was configured, so it cannot normalise them.
+        #
+        # What it can do is score each against what the roof actually
+        # produced — exactly what the ledger above already does for the active
+        # source. One ledger per source, same settle, same trust maths: a
+        # source configured for the wrong array scores badly and says so, and
+        # the answer is measured rather than assumed.
+        try:
+            self._record_source_ledgers(now_time, energy, today_s, today)
+        except Exception:  # noqa: BLE001 — comparison never costs a cycle
+            _LOGGER.debug("source ledgers skipped", exc_info=True)
+
+        # (#778 phase 1) Publish the evidence, act on none of it. These are the
+        # quantities honestly computable today; the spendable budget itself
+        # waits for the day ledger's refill term (phase 3), because publishing
+        # it from a raw forecast would systematically over-promise.
+        def _round_or_none(value, digits):
+            """Round for publication, preserving an honest None."""
+            return None if value is None else round(float(value), digits)
+
+        from .measured_capacity import measured_capacity, capacity_progress
+
+        tracker = getattr(self, "_battery_night", None)
+        cap = None
+        try:
+            # `sealed` is a METHOD, not a property (the sibling reader 25
+            # lines below says so, having been bitten once already). Passing
+            # it uncalled handed measured_capacity a bound method, which
+            # raises on iteration — and the blanket except below turned that
+            # into "no verdict yet", so the card read "Learning · 7 / 5
+            # Nights" forever: progress counted the real records, the verdict
+            # never saw them. Spotted from the dashboard, 30.08.
+            _recs = None
+            if tracker is not None:
+                _recs = (tracker.sealed() if callable(tracker.sealed)
+                         else tracker.sealed)
+            cap = measured_capacity(_recs)
+        except (AttributeError, TypeError, ValueError) as err:
+            # NARROWED and LOUD (audit, 30.08). The bug above was caught by
+            # a bare ``except Exception`` that turned it into "no verdict
+            # yet", and the card read "Learning · 7 / 5 Nights" for months
+            # while the verdict silently never resolved. Leaving the same
+            # handler in place ten lines under its own postmortem would keep
+            # the next instance just as quiet — and a recurrence is not
+            # cosmetic: ``usable_kwh`` falls back to the NAMEPLATE, which
+            # spendable_budget's docstring calls failing in the dangerous
+            # direction, selling energy the pack does not have.
+            _LOGGER.warning(
+                "Battery capacity verdict FAILED — falling back to the "
+                "configured nameplate, which sizes every budget against a "
+                "pack that may not exist (#778/#873): %s", err, exc_info=True,
+            )
+            cap = None
+
+        nameplate = self.config.get("battery_capacity_kwh")
+        drift = None if cap is None else cap.drift_vs(nameplate)
+
+        # (#778 phases 3-4) Assemble the budget from measured inputs. Every
+        # term prefers evidence over configuration and falls back honestly:
+        #   capacity  — measured kWh/% if enough qualifying nights, else the
+        #               configured nameplate;
+        #   need      — the high-percentile observed drain (the learner-safe
+        #               envelope), else None, which spends nothing;
+        #   refill    — tomorrow's forecast AFTER the house and committed
+        #               demands, trust-scaled per horizon, never the raw scalar.
+        from .measured_capacity import expected_overnight_need
+        from .refill_estimate import (
+            committed_ev_demand_kwh,
+            estimate_refill,
+        )
+        from .spendable_budget import spendable_budget
+
+        # `sealed` is a METHOD on BatteryNightTracker, not a property — reading
+        # it without calling handed measured_capacity a bound method and every
+        # sensor went unavailable. Caught on .175 only because the handler above
+        # was narrowed to WARNING; as a DEBUG line it was invisible.
+        sealed = []
+        try:
+            if tracker is not None:
+                sealed = tracker.sealed() if callable(tracker.sealed) else tracker.sealed
+        except (AttributeError, TypeError):
+            sealed = []
+
+        usable_kwh = cap.usable_kwh if cap is not None else _f_or_none(nameplate)
+        need_kwh = expected_overnight_need(sealed)
+        # (#925 audit, then SEEN on .175 07.09) `battery_soc` is 0.0 by
+        # dataclass default and never None — the twin flag is the only way
+        # to know it was read. Ungated, a dark SOC computed the whole
+        # budget against a literal 0 %, and the rig showed exactly that:
+        # `sensor.sem_battery_soc` unavailable, and the published reason
+        # reading "nothing spendable — tonight's own load needs all 0.0 kWh
+        # stored" with a confident dynamic_floor_pct beside it. Both
+        # dawn_headroom_kwh() and spendable_budget() HAVE an honest
+        # "SOC unknown" branch; neither could ever be reached.
+        #
+        # It fails safe numerically — the reserve always exceeds a stored
+        # zero, so the answer is 0.0 either way — but a number a user
+        # cannot explain is one they will not trust, which is the module's
+        # own rule 5. `_run_charge_pacing` sixty lines away already asks
+        # this question correctly.
+        soc_now = (
+            None if getattr(power, "battery_soc_unavailable", False)  # DARK-SOC: action — spendable rule 4, an unknown input spends nothing; a blink costs one cycle's budget (#934, Guido's call)
+            else getattr(power, "battery_soc", None))
+
+        # (#778, found live on .175 30.08) The room that answers "will
+        # tomorrow put the spend back" is the room at DAWN, after the
+        # overnight draw — not the room at sunset. Measuring it now zeroed
+        # the refill for a FULL pack, which is the one case where spending
+        # is provably free, and made spendable non-monotonic in SOC (95 %
+        # spent 0.75 kWh, 100 % spent 0.00). One expression, in one place,
+        # with its own tests: see refill_estimate.dawn_headroom_kwh.
+        from .refill_estimate import dawn_headroom_kwh
+        headroom = dawn_headroom_kwh(usable_kwh, soc_now, need_kwh)
+
+        refill = estimate_refill(
+            getattr(forecast_data, "forecast_tomorrow_kwh", None),
+            house_tomorrow_kwh=need_kwh,
+            # (#778) The FLEET's claim, not one global key — see
+            # committed_ev_demand_kwh. A multi-charger install used to commit
+            # one car's worth of demand for the whole fleet, overstating what
+            # tomorrow refills and therefore what tonight may spend.
+            committed_demand_kwh=committed_ev_demand_kwh(self.config),
+            pack_headroom_kwh=headroom,
+            trust=led.trust(1),
+        )
+
+        budget = spendable_budget(
+            soc_pct=soc_now,
+            usable_capacity_kwh=usable_kwh,
+            overnight_need_kwh=need_kwh,
+            expected_refill_kwh=refill.refill_kwh,
+            # A dict default does NOT fire when the key is present holding
+            # null, which is how an install that never set a reserve looks.
+            # Pass the absence through and let spendable_budget name what
+            # silence means, in one place.
+            static_floor_pct=self.config.get("battery_reserve_soc"),
+            # Absences pass through; spendable_budget names what silence
+            # means, in one place, for all three tunables.
+            pessimism=self.config.get("forecast_pessimism"),
+            discharge_efficiency=self.config.get("battery_discharge_efficiency"),
+            # (Build 0) measured trust on the refill relaxes the default
+            # pessimism to 1.0 — the p20 measurement does that job now.
+            refill_trusted=bool(getattr(refill, "trusted", False)),
+        )
+
+        # (#778 phase 6) The state a card renders, published rather than
+        # inferred. See planning_phase for why the reason strings must not be
+        # matched on.
+        from .measured_capacity import MIN_NEED_SAMPLES, usable_nights
+        # (2.1 audit, item 3) The reason to wait, shown while waiting: with
+        # hindsight, how much of last night's stored energy was genuinely
+        # surplus — the pack ended above its floor by that much. Same
+        # arithmetic as the budget, with the actual drain in place of the
+        # forecast and no forecast margin: a demonstration, not a promise.
+        last_surplus, last_date = None, None
+        try:
+            from .spendable_budget import spendable_budget as _sb
+            for _r in reversed(sealed or []):
+                if not _r.get("trainable") or _r.get("reserve_hit"):
+                    continue
+                _hind = _sb(
+                    soc_pct=_r.get("soc_start"),
+                    usable_capacity_kwh=usable_kwh,
+                    overnight_need_kwh=_r.get("drain_kwh"),
+                    expected_refill_kwh=1e9,
+                    static_floor_pct=self.config.get("battery_reserve_soc"),
+                    pessimism=1.0,
+                    discharge_efficiency=self.config.get(
+                        "battery_discharge_efficiency"),
+                    refill_trusted=True,
+                )
+                last_surplus = round(max(0.0, _hind.spendable_kwh), 2)
+                last_date = _r.get("date")
+                break
+        except Exception:  # noqa: BLE001 — a demonstration never costs a cycle
+            last_surplus, last_date = None, None
+        from .forecast_ledger import MIN_SAMPLES_FOR_TRUST
+        from .planning_phase import planning_phase
+
+        phase = planning_phase(
+            nights_sealed=usable_nights(sealed),
+            nights_required=MIN_NEED_SAMPLES,
+            overnight_need_kwh=need_kwh,
+            usable_capacity_kwh=usable_kwh,
+            spendable_kwh=budget.spendable_kwh,
+        )
+
+        self._planning_evidence = {
+            "planning_phase": phase,
+            "battery_last_night_surplus_kwh": last_surplus,
+            "battery_last_night_date": last_date,
+            # The progress a user watches while the evidence accrues. Without
+            # these the learning state is a bare 0.0, which reads as "nothing
+            # to spend" rather than "not measured yet".
+            # The count the GATE uses, not the raw record length: a night
+            # sealed twice, or sealed untrainable, is not progress.
+            "nights_sealed": usable_nights(sealed),
+            "nights_recorded_raw": len(sealed),
+            "nights_required": MIN_NEED_SAMPLES,
+            "forecast_days_d1": led.settled_samples(1),
+            "forecast_days_d2": led.settled_samples(2),
+            "forecast_days_required": MIN_SAMPLES_FOR_TRUST,
+            # False means no source publishes this horizon at all — a fact
+            # that never resolves by waiting, unlike thin evidence.
+            "forecast_d1_available": led.has_horizon(1),
+            "forecast_d2_available": led.has_horizon(2),
+            # (#884) The three-state answer the card needs. `available`
+            # is kept for older cards, but it cannot tell "no records
+            # yet" from "this source has none" — which is how a fresh
+            # install got told its provider does not publish d2.
+            "forecast_d1_state": led.horizon_state(1),
+            "forecast_d2_state": led.horizon_state(2),
+            "forecast_d2_path": getattr(
+                forecast_data, "forecast_d2_path", "unknown"),
+            "battery_measured_capacity_kwh": None if cap is None else cap.usable_kwh,
+            "battery_capacity_kwh_per_pct": None if cap is None else cap.kwh_per_pct,
+            # (#778) progress counts what already qualifies — the verdict
+            # is None below MIN_SAMPLES and must not drag the count to 0
+            "battery_capacity_samples": capacity_progress(sealed),
+            "battery_capacity_drift_pct": (
+                None if drift is None else round(drift * 100.0, 1)),
+            "battery_capacity_reason": (
+                "not enough qualifying nights yet" if cap is None else cap.reason),
+            # Trust stays None until a horizon has earned it — never a
+            # confident-looking 1.0 (see forecast_ledger).
+            # Rounded at the publisher (bug class 51): trust is a ratio a
+            # person reads as a percentage, and 0.840207806207237 churns a
+            # recorder row on every cycle for digits nobody can act on.
+            "forecast_trust_d1": _round_or_none(led.trust(1), 3),
+            "forecast_trust_d2": _round_or_none(led.trust(2), 3),
+            # (#778) The budget itself — still driving nothing. Published so a
+            # season of mornings can judge it before it is allowed to spend.
+            "battery_overnight_need_kwh": need_kwh,
+            "battery_expected_refill_kwh": refill.refill_kwh,
+            "battery_refill_clipped_kwh": refill.clipped_kwh,
+            "battery_refill_reason": refill.reason,
+            "battery_spendable_kwh": budget.spendable_kwh,
+            "battery_dynamic_floor_pct": budget.floor_pct,
+            "battery_spendable_reason": budget.reason,
+        }
+
+    def _record_completed_month(self, today) -> None:
+        """(#867) Record the month that just ended, exactly once.
+
+        ``PVPerformanceAnalyzer.record_monthly`` had thirteen call sites and
+        every one of them was a test. Nothing in production had ever recorded
+        a month, so ``_monthly_history`` was empty on every install, so
+        ``_estimate_degradation`` returned 0.0 forever and the card showed
+        "unknown" on systems with years of production. The unit tests passed
+        throughout — they called the recorder themselves.
+
+        Runs on the per-cycle path, so it must be idempotent: ``has_month``
+        is what stops a month being appended once per cycle for a month, which
+        would push the 36-entry window down to a single repeated month.
+
+        A month with no recorded production is SKIPPED rather than stored as
+        zero. Zero is indistinguishable from "the accumulator was swept before
+        we looked", and a fabricated zero reads as total system failure when
+        next year's same month is compared against it.
+        """
+        analyzer = getattr(self, "_pv_analyzer", None)
+        calc = getattr(self, "_energy_calculator", None)
+        if analyzer is None or calc is None:
+            return
+        try:
+            last_month_end = today.replace(day=1) - timedelta(days=1)
+            if analyzer.has_month(last_month_end.year, last_month_end.month):
+                return
+            total = float(calc.monthly_total_for("solar", last_month_end) or 0.0)
+            if total <= 0:
+                return
+            analyzer.record_monthly(
+                last_month_end.year, last_month_end.month, total)
+            if self._storage is not None:
+                self._storage.set_pv_performance_state(analyzer.export_state())
+            _LOGGER.info(
+                "PV degradation: recorded %s-%02d at %.1f kWh (%d month(s) of "
+                "history; %d needed for a verdict)",
+                last_month_end.year, last_month_end.month, total,
+                len(analyzer.get_monthly_history()), 13,
+            )
+        except (AttributeError, TypeError, ValueError) as err:
+            _LOGGER.debug("Monthly PV performance not recorded: %s", err)
 
     def _run_due_daily_decay(self, now_time, today_date, power) -> None:
         """Run the virtual-SOC daily decay if it hasn't run yet today (#645).
@@ -10757,7 +13906,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     )
                     hp.invert_sg_ready = bool(cfg.get("heat_pump_invert_sg_ready", False))
                     # #602/#576 — priority is the DRAG-LIST position now (resolved
-                    # by refresh_direct_device_priorities), NOT a standalone knob.
+                    # by refresh_direct_device_overrides), NOT a standalone knob.
                     # (Previously clobbered here from heat_pump_priority every
                     # cycle, killing the drag position.)
                 except (TypeError, ValueError):
@@ -10998,12 +14147,32 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 lm_data.consecutive_peak_15min = lm_info.get("consecutive_peak_15min", current_import_kw)
                 lm_data.monthly_consecutive_peak = lm_info.get("monthly_consecutive_peak", 0.0)
 
+                # (#864) The preventive slot guard's live numbers — a guard
+                # invisible in diagnostics is undiagnosable (the #819
+                # inert-half lesson). None when no limit is configured.
+                lm_data.peak_slot_allowed_w = getattr(
+                    self, "_peak_slot_allowed_w", None)
+                _tr = getattr(self, "_peak_slot_tracker", None)
+                lm_data.peak_slot_used_kwh = (
+                    round(_tr.imported_kwh, 3) if _tr is not None else None)
+
                 # (#657) The device table itself. Every other field of
                 # lm_info was copied across; this one wasn't, so the load
                 # management card's device list read a key nothing wrote.
                 # ``or {}`` on purpose: a LoadManager with no managed devices
                 # may report ``{"devices": None}``, and the card iterates this.
                 lm_data.devices = lm_info.get("devices") or {}
+
+                # (#896) The load manager's telemetry — the #433 paths and
+                # the shed verdict. Same hop as ``devices``: reported by the
+                # load manager for releases, copied by nobody.
+                for key in (
+                    "state_decision_path", "process_path", "action_path",
+                    "last_error", "shed_path", "shed_need_w",
+                    "shed_sheddable_w", "shed_futile", "uncontrolled_w",
+                ):
+                    if key in lm_info:
+                        setattr(lm_data, key, lm_info[key])
 
                 # Tariff info
                 lm_data.controlled_tariff_status = lm_info.get("controlled_tariff_status", "unknown")

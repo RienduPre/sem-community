@@ -35,7 +35,19 @@ class TestSEMSwitches:
         plan into the night signals; default off = pure shadow)."""
         keys = [s.key for s in SWITCH_TYPES]
         assert keys == ["observer_mode", "vacation_mode",
-                        "energy_plan_actuation"]
+                        "energy_plan_actuation",
+                        # #778 — forecast-led spending and the two permissions
+                        # it may spend through. Order is the render order on
+                        # the Config tab: the master switch, then what it is
+                        # allowed to spend on.
+                        "forecast_spending_enabled",
+                        # #820 — charge pacing, asleep by default; sits with
+                        # the battery family it paces.
+                        "battery_charge_pacing_enabled",
+                        "battery_may_export", "battery_may_assist_ev",
+                        # arc #921 — four switches, all default OFF, after the permissions
+                        "export_guard_enabled", "export_guard_override_external",
+                        "battery_house_sink_enabled", "ev_morning_window_enabled"]
 
     # ``test_night_charging_default_off`` and
     # ``test_night_charging_existing_state_preserved`` removed in
@@ -54,9 +66,14 @@ class TestSEMSwitches:
         switch = SEMSolarSwitch(mock_coordinator, description, "test_entry_id")
         assert switch._is_on is True
 
+        # Nothing configured — the switch follows the product default,
+        # read from the constant so this test never freezes it.
+        from custom_components.solar_energy_management.consts.core import (
+            DEFAULT_OBSERVER_MODE,
+        )
         mock_coordinator.config_entry.options = {}
         switch2 = SEMSolarSwitch(mock_coordinator, description, "test_entry_id")
-        assert switch2._is_on is False
+        assert switch2._is_on is DEFAULT_OBSERVER_MODE
 
     @pytest.mark.asyncio
     async def test_switch_is_on(self, mock_coordinator):
@@ -344,9 +361,13 @@ class TestExplicitConfigBeatsGhostRestore777:
         assert sw._is_on is True
 
     def test_no_config_and_no_ghost_is_the_default(self):
+        """#777's floor: nothing recorded anywhere → the product default."""
+        from custom_components.solar_energy_management.consts.core import (
+            DEFAULT_OBSERVER_MODE,
+        )
         sw = _sw("observer_mode")
         sw._apply_restored_state(None)
-        assert sw._is_on is False
+        assert sw._is_on is DEFAULT_OBSERVER_MODE
 
     def test_actuation_ghost_off_yields_to_explicit_config(self):
         """Same precedence for the siblings: an old install's

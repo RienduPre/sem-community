@@ -5,6 +5,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import json
 import logging
+import time
+
+from .consts.core import (
+    RECORDER_ATTR_BUDGET_BYTES,
+    SENSOR_DARK_READ_GRACE_S,
+)
+from .utils.attr_budget import fit_state_attributes
 from typing import Any, Dict, List, Optional
 
 from homeassistant.components.sensor import (
@@ -34,6 +41,9 @@ from homeassistant.helpers import label_registry as lr
 from .const import SENSOR_LABEL_MAPPING
 from .consts.labels import SEM_LABELS
 from .coordinator import SEMCoordinator
+from .coordinator.install_modules import (
+    Module, keeps, kept_descriptions, presence_of, presence_summary,
+)
 from .features.device_axes import (
     has_control_handle as _has_control_handle,
     may_actuate as _may_actuate,
@@ -65,7 +75,12 @@ def _energy_plan_state(plan: Any) -> str:
 # HA's recorder refuses to store a state whose attributes serialize above
 # 16 KiB: it logs a warning and records NO attributes at all, so the plan
 # would silently vanish from history. Stay under it with headroom.
-_PLAN_ATTR_BUDGET_BYTES = 15000
+# (#979) The budget has ONE source of truth — ``RECORDER_ATTR_BUDGET_BYTES``,
+# the cap minus the attributes HA lays over ours — rather than a literal
+# restating it here (class 46). Same 15 000 bytes as before: this number
+# also decides what the LIVE state carries (``timeline_omitted``), so it
+# must not move with a rounding rule.
+_PLAN_ATTR_BUDGET_BYTES = RECORDER_ATTR_BUDGET_BYTES
 
 
 def _merge_plan_blocks(blocks: Any) -> List[Dict[str, Any]]:
@@ -249,6 +264,27 @@ SENSOR_TYPES = [
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
         suggested_display_precision=0,
+    ),
+    # (#891) Only when a house sensor is named — see ``install_modules``.
+    # What the inverter says the house is drawing, beside SEM's own figure,
+    # and what the two differ by. SEM's number is unchanged and still the
+    # one every decision uses: these are for the person comparing two
+    # dashboards, which was the complaint.
+    SensorEntityDescription(
+        key="house_meter_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        suggested_display_precision=0,
+    ),
+    SensorEntityDescription(
+        key="house_meter_gap",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:scale-balance",
     ),
     SensorEntityDescription(
         key="grid_power",
@@ -473,6 +509,26 @@ SENSOR_TYPES = [
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    ),
+    # (#871, arc #921) What a hostile meter cost today. Both stay at 0.0 on a
+    # fixed feed-in tariff, which is every install until someone opts into spot.
+    SensorEntityDescription(
+        key="daily_grid_export_negative_kwh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="daily_grid_export_negative_cost",
+        state_class=SensorStateClass.TOTAL,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    # (#955) the export guard's state: idle | holding | engaged | releasing | refused
+    SensorEntityDescription(
+        key="export_guard_state",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:transmission-tower-off",
     ),
     SensorEntityDescription(
         key="daily_battery_charge_energy",
@@ -1246,6 +1302,72 @@ SENSOR_TYPES = [
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
+    # (#778 phase 1) Planning evidence — measured, driving nothing. Diagnostic
+    # and slow-moving by nature (capacity shifts over weeks, trust over days),
+    # so they add no recorder churn (#829).
+    # (#778) The budget. Two entities, not seven — the supporting numbers ride
+    # as attributes of the headline one (#830: every control and every entity
+    # has to earn its place). Both are daily-moving, so no recorder churn.
+    SensorEntityDescription(
+        key="battery_spendable_kwh",
+        native_unit_of_measurement="kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-arrow-up-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=1,
+    ),
+    # (#820) charge pacing — state is the cap in W (unknown while idle);
+    # attributes carry reason/action/full_at. Daily-moving, no recorder churn.
+    # State is the ACTION token (idle/wrote/held/restored/observer, and
+    # #949's no_limit_entity/limit_unreadable) — never
+    # None once evaluated, so the sensor is never `unavailable` and its
+    # reason stays readable. The cap rides the attributes. (26.08: as a W
+    # value it went unavailable whenever the cap was None — which is most
+    # of the time by design — and HA hides attributes of an unavailable
+    # entity, so the reason vanished exactly when it mattered.)
+    SensorEntityDescription(
+        key="battery_charge_pacing",
+        icon="mdi:speedometer-slow",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    SensorEntityDescription(
+        key="battery_dynamic_floor_pct",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-lock-open",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=0,
+    ),
+    SensorEntityDescription(
+        key="battery_measured_capacity_kwh",
+        native_unit_of_measurement="kWh",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-heart-variant",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=1,
+    ),
+    SensorEntityDescription(
+        key="battery_capacity_drift_pct",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-alert-variant-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=1,
+    ),
+    SensorEntityDescription(
+        key="forecast_trust_d1",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:weather-partly-cloudy",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=2,
+    ),
+    SensorEntityDescription(
+        key="forecast_trust_d2",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:weather-cloudy-clock",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        suggested_display_precision=2,
+    ),
     SensorEntityDescription(
         key="forecast_dampening_factor",
         state_class=SensorStateClass.MEASUREMENT,
@@ -1709,6 +1831,12 @@ SENSOR_TYPES = [
         key="diag_sensors_unavailable",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    # (#818) True while a steering input is dark — the cycles on which SEM
+    # holds its committed command instead of steering on a fabricated 0.
+    SensorEntityDescription(
+        key="diag_inputs_degraded",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     SensorEntityDescription(
         key="diag_ed_config",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -1888,11 +2016,24 @@ async def async_setup_entry(
     _LOGGER.info("Setting up SEM sensors for entry %s", entry.entry_id)
 
     coordinator: SEMCoordinator = entry.runtime_data
-    _LOGGER.info("Got coordinator, creating %d sensors", len(SENSOR_TYPES))
+    # (#923) Only the sensors of modules this install has — UNKNOWN keeps.
+    # The same list feeds the stale sweep below, which is what removes an
+    # ABSENT module's leftovers from the registry.
+    presence = presence_of(coordinator)
+    static_descriptions = kept_descriptions("sensor", SENSOR_TYPES, presence)
+    # (#891) The two house-meter sensors depend on a SETTING, not on
+    # hardware, so the module table cannot answer for them. No sensor
+    # named, no entities — and because the same list feeds the stale sweep
+    # below, un-naming one removes them again.
+    if not (coordinator.config or {}).get("house_power_sensor"):
+        static_descriptions = [d for d in static_descriptions
+                               if d.key not in ("house_meter_power",
+                                                "house_meter_gap")]
+    _LOGGER.info("Got coordinator, creating %d sensors", len(static_descriptions))
 
     sensors = [
         SEMSolarSensor(coordinator, description, entry.entry_id)
-        for description in SENSOR_TYPES
+        for description in static_descriptions
     ]
 
     # Per-charger sensors (#131): create power + session sensors for each configured charger
@@ -2079,6 +2220,13 @@ async def async_setup_entry(
                 ),
             ])
 
+    # (#923) Battery → EV needs a battery: without one the per-charger split
+    # of that flow is not built, and the stale sweep below (fed this same
+    # list) removes what an earlier setup registered.
+    if not keeps(presence, (Module.BATTERY,)):
+        per_charger_descriptions = [
+            d for d in per_charger_descriptions if "_flow_battery_to_ev_" not in d.key]
+
     for desc in per_charger_descriptions:
         sensors.append(SEMSolarSensor(coordinator, desc, entry.entry_id))
 
@@ -2197,7 +2345,7 @@ async def async_setup_entry(
 
     # Fix entity_ids from pre-translation installs and clean up stale entities
     all_descriptions = (
-        list(SENSOR_TYPES)
+        list(static_descriptions)
         + per_charger_descriptions
         + per_string_descriptions
         + per_battery_descriptions
@@ -2212,6 +2360,13 @@ async def async_setup_entry(
 class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
     """SEM Solar Energy Management sensor with state persistence."""
 
+    # Dark-read grace (03.09): a numeric measurement keeps its last good value
+    # for SENSOR_DARK_READ_GRACE_S while its source is unreadable, and says so
+    # via ``stale_s``. Overridable clock for tests.
+    _now_monotonic = staticmethod(time.monotonic)
+    _last_good_value = None
+    _last_good_at = None
+    _stale_s = 0
     _attr_should_poll = False
     _attr_has_entity_name = True
 
@@ -2225,6 +2380,13 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
     # live state (cards still read them) while excluding them from the recorder.
     _unrecorded_attributes = frozenset({
         "devices",
+        # (#1011) provenance of the SOC estimate — timestamps and labels
+        # for the card and diagnostics, no charting value
+        "anchor", "anchor_at", "start_declined_since", "start_declined_last",
+        # (arc #921) live-card helpers, re-serialised every cycle
+        "sink_verdicts",
+        "export_guard",
+        "anti_cycle_bounds",   # (#914) a constant off consts/bounds.py
         "device_list",
         "per_charger_states",
         "per_charger_plans",
@@ -2245,6 +2407,12 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
         # already recorded via its own sensor; recording the bundle again
         # would double the write volume for zero charting value.
         "power_snapshot",
+        # (#896) the shed plan's watt figures on load_management_status —
+        # they move every cycle of an episode; the verdict beside them
+        # (``shed_path`` / ``shed_futile``) is recorded, these are not.
+        "shed_need_w",
+        "shed_sheddable_w",
+        "uncontrolled_w",
         # (#829) charging_state carried these as RECORDED attributes, so a new
         # blob was stored every time any of them wiggled — battery_soc,
         # calculated_current and available_power are ALREADY their own recorded
@@ -2261,8 +2429,23 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
         "charging_strategy",
         "strategy_reason",
         "per_charger_phases",
+        # (#944) the stand-down's countdown moves every cycle of an episode;
+        # the Repair is the record, this is live card context.
+        "per_charger_stop_war",
         "control_entities",
         "sources_available",
+        # (#979) #814's detection report — the evidence the Config card's
+        # Detected-hardware section draws — rode here RECORDED while its own
+        # sibling ``control_entities`` above did not. Its size is (entities ×
+        # scanned charger platforms): a ``near_misses`` entry per candidate
+        # entity per platform, plus the prober's candidates and the census.
+        # On RienduPre's box that crossed the recorder's 16 KB cap, so
+        # ``diag_charger_control`` was never recorded AT ALL — not this
+        # attribute, not the verdicts beside it — and every cycle logged
+        # "State attributes … exceed maximum size of 16384 bytes". It is a
+        # live-card helper rebuilt from the registry on demand: nothing about
+        # it charts, and the diagnostics download carries the full report.
+        "detection_report",
     })
 
     # Sensors disabled by default (not used by dashboard template)
@@ -2476,6 +2659,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
         if not self.coordinator.data:
             self._attr_available = False
             self._attr_native_value = None
+            # (#979) WHY, not just whether — the log line in ``available``
+            # reads this instead of calling every absence a fault.
+            self._unavailable_reason = "the coordinator has published no cycle yet"
             return
 
         key = self.entity_description.key
@@ -2560,15 +2746,48 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
             # Set values and mark as available (but unavailable if value is None)
             # Exception: timestamp sensors (e.g. ev_last_full_charge) are available
             # even when None — "no event yet" is a valid state, not unavailable.
+            # Dark-read grace (03.09, Guido: "it was very stable before"). A
+            # numeric measurement whose source is unreadable THIS cycle keeps
+            # its last good value for SENSOR_DARK_READ_GRACE_S and reports
+            # ``stale_s``; only a sustained outage blanks it. Never invents:
+            # a value that was never read stays unavailable (#875), and the
+            # coordinator's inputs_degraded / *_unavailable flags — the ones
+            # that steer — are not touched by this. PROD 03.09 14:00–18:00:
+            # 52–55 blinks per sensor, 13–15 % of the afternoon blank.
+            _now = float(self._now_monotonic())
+            if value is None and self._last_good_value is not None:
+                _age = _now - float(self._last_good_at or _now)
+                if _age <= SENSOR_DARK_READ_GRACE_S:
+                    self._stale_s = int(_age)
+                    self._attr_native_value = self._last_good_value
+                    self._attr_available = True
+                    return
+                self._last_good_value = None
+                self._last_good_at = None
+            self._stale_s = 0
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                self._last_good_value = value
+                self._last_good_at = _now
             self._attr_native_value = value
             if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP:
                 self._attr_available = True
             else:
                 self._attr_available = value is not None
+            self._unavailable_reason = (
+                None if self._attr_available
+                else "the source read empty past the dark-read grace"
+            )
         else:
             # Data key not found - mark as unavailable
             self._attr_available = False
             self._attr_native_value = None
+            # (#979) The idle-charger case: SEM computes no flow/taper/session
+            # number for a charger with no session behind it, so the key is
+            # absent by design. Not a fault — the expected answer.
+            self._unavailable_reason = (
+                "SEM publishes no value for this key right now "
+                "(nothing to compute)"
+            )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -2578,6 +2797,27 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return additional state attributes (+ ``stale_s`` while a dark
+        source is being held, see the dark-read grace in
+        ``_update_from_coordinator``)."""
+        # Unbound on purpose: a test double may call the property's fget on
+        # a MagicMock ``self`` (test_708) — the real base must still run.
+        attrs = SEMSolarSensor._extra_state_attributes_base(self)
+        if getattr(self, "_stale_s", 0):
+            attrs = dict(attrs or {})
+            attrs["stale_s"] = int(self._stale_s)
+        # (#979) The one exit gate. The RECORDED half of an entity's
+        # attributes is published on a channel with a hard 16 KB cap, and
+        # going over it costs the entity its ENTIRE history — the recorder
+        # stores nothing, not just the oversize one. Every SEM sensor's
+        # attributes leave through here, so a key that a future author
+        # forgets to declare unrecorded (which is exactly what #814's
+        # detection report did, class 24) can no longer take the whole set
+        # down with it.
+        return fit_state_attributes(
+            attrs, getattr(self, "_unrecorded_attributes", None))
+
+    def _extra_state_attributes_base(self) -> Dict[str, Any]:
         """Return additional state attributes."""
         if not self.coordinator.data:
             return {}
@@ -2623,6 +2863,33 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 if k.startswith("charger_") and k.endswith("_today_plan"):
                     cid = k[len("charger_"):-len("_today_plan")]
                     _per_charger_plans[cid] = v or []
+            # (#940) Per-charger contactor anti-cycle hold — the floor that
+            # keeps a switch-controlled charger from being toggled every
+            # 20 s. Published so "nothing is happening" reads as a decision
+            # with a countdown instead of as SEM being stuck.
+            _per_charger_anticycle = {}
+            for k, v in self.coordinator.data.items():
+                if k.startswith("charger_") and k.endswith("_anticycle_hold"):
+                    cid = k[len("charger_"):-len("_anticycle_hold")]
+                    _per_charger_anticycle[cid] = {
+                        "holding": v,
+                        "remaining_s": self.coordinator.data.get(
+                            f"charger_{cid}_anticycle_hold_s"),
+                    }
+            # (#944) Per-charger stop-war stand-down — SEM holding fire while
+            # the box keeps drawing. The EV card reads it so the tile says so
+            # instead of passing for an ordinary charge.
+            _per_charger_stop_war = {}
+            for k, v in self.coordinator.data.items():
+                if k.startswith("charger_") and k.endswith("_stop_war_stand_down"):
+                    cid = k[len("charger_"):-len("_stop_war_stand_down")]
+                    _per_charger_stop_war[cid] = {
+                        "standing_down": bool(v),
+                        "remaining_s": self.coordinator.data.get(
+                            f"charger_{cid}_stop_war_stand_down_s"),
+                        "power_w": self.coordinator.data.get(
+                            f"charger_{cid}_stop_war_stand_down_w"),
+                    }
             # (#804 Phase A) Observed phase model per charger: the
             # measured-W/A phase estimate + the user-named switch
             # capability's validation verdict. Observe-only surface.
@@ -2641,6 +2908,13 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                             f"charger_{cid}_phase_switch_state"),
                         "believed_phases": self.coordinator.data.get(
                             f"charger_{cid}_believed_phases"),
+                        # (#967) …and whether the MEASUREMENTS contradict the
+                        # configured count. Beside the estimate on purpose:
+                        # a verdict that lives only in coordinator.data is
+                        # invisible to the card, and this block is where a
+                        # reader already comes to ask about phases.
+                        "phase_verdict": self.coordinator.data.get(
+                            f"charger_{cid}_phase_verdict"),
                     }
             attrs.update({
                 "battery_soc": self.coordinator.data.get("battery_soc"),
@@ -2652,6 +2926,18 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 "charging_strategy": self.coordinator.data.get("charging_strategy"),
                 "strategy_reason": self.coordinator.data.get("charging_strategy_reason"),
                 "per_charger_states": _per_charger_states,
+                "per_charger_anticycle": _per_charger_anticycle,
+                "per_charger_stop_war": _per_charger_stop_war,
+                # (#846) fire → check → adjust: the measured watts-per-amp
+                # table, the samples still earning confidence, and every
+                # refusal with its reason — plus the cold-start replay
+                # report. The coordinator published both from the start;
+                # NOTHING exposed them, so the diagnostic the docs promised
+                # did not exist on any entity (found live on PROD 27.08,
+                # after the learner had silently learned 20 samples).
+                "ev_watts_per_amp": self.coordinator.data.get("ev_watts_per_amp"),
+                "ev_watts_per_amp_replay": self.coordinator.data.get(
+                    "ev_watts_per_amp_replay"),
                 # EV charge-target deadline (#246) + tariff-optimized status (#247)
                 "ev_target_time": self.coordinator.data.get("ev_target_time"),
                 "ev_tariff_optimized": self.coordinator.data.get("ev_tariff_optimized"),
@@ -2667,6 +2953,12 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 # Observed phase model (#804 Phase A) — {cid: {active_phases,
                 # switch_entity, switch_valid}}.
                 "per_charger_phases": _per_charger_phases,
+                # (arc #921) the cycle's sink verdicts — {sink: {state, reason,
+                # until}} — and the export guard's own state. The plan strip and
+                # the grid card read these; the scalar twin is
+                # ``sensor.sem_export_guard_state``.
+                "sink_verdicts": self.coordinator.data.get("sink_verdicts") or {},
+                "export_guard": self.coordinator.data.get("export_guard") or {},
             })
         elif self.entity_description.key in (
             "roi_payback_years", "roi_annual_savings",
@@ -2698,6 +2990,21 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 len("charger_"):-len("_estimated_soc")
             ]
             attrs.update({
+                # (#1011) the reference behind the number, and a refused
+                # start as its own fact — so a wrong anchor is visible here
+                # instead of only in the store.
+                "anchor": self.coordinator.data.get(
+                    f"charger_{cid_708}_estimated_soc_anchor"
+                ),
+                "anchor_at": self.coordinator.data.get(
+                    f"charger_{cid_708}_estimated_soc_anchor_at"
+                ),
+                "start_declined_since": self.coordinator.data.get(
+                    f"charger_{cid_708}_start_declined_since"
+                ),
+                "start_declined_last": self.coordinator.data.get(
+                    f"charger_{cid_708}_start_declined_last"
+                ),
                 "energy_accounted_soc": self.coordinator.data.get(
                     f"charger_{cid_708}_energy_accounted_soc"
                 ),
@@ -2761,6 +3068,20 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                     attrs["planes_today"] = planes
                 except Exception:  # noqa: BLE001
                     pass
+                # (#822) What every OTHER installed source says, and how well
+                # each has actually predicted this roof. Side-by-side numbers
+                # alone would mislead — they may describe differently
+                # configured arrays — so the scores are what to read.
+                try:
+                    attrs["sources_now"] = _fr.peek_sources()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                accuracy = self.coordinator.source_accuracy()
+                if accuracy:
+                    attrs["source_accuracy"] = accuracy
+            except Exception:  # noqa: BLE001
+                pass
         elif self.entity_description.key == "diag_charger_control":
             # (#814 Pillar B) the detection evidence report rides the charger
             # control diag sensor — the Config tab's Detected-hardware section
@@ -2866,6 +3187,108 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 "is_dynamic": d.get("tariff_is_dynamic"),
                 "current_import_rate": d.get("tariff_current_import_rate"),
             })
+        elif self.entity_description.key == "battery_charge_pacing":
+            # d binds PER BRANCH in this method — the block below the
+            # spendable branch documents the UnboundLocalError that blanked
+            # a whole listener when someone assumed otherwise.
+            d = self.coordinator.data
+            cp = d.get("charge_pacing") or {}
+            attrs.update({
+                "enabled": cp.get("enabled"),
+                "cap_w": cp.get("cap_w"),
+                "reason": cp.get("reason"),
+                "reason_code": cp.get("reason_code"),
+                # (#820 diag) why a day is "weak": the need vs what the day
+                # model can fill, and the model itself per slot.
+                "need_kwh": cp.get("need_kwh"),
+                "fill_kwh_at_max": cp.get("fill_kwh_at_max"),
+                # (#820) the drain the cap now covers, and the margin it carries
+                "drain_kwh": cp.get("drain_kwh"),
+                "headroom_pct": cp.get("headroom_pct"),
+                "hw_max_charge_w": cp.get("hw_max_charge_w"),
+                "slots": cp.get("slots"),
+                "action": cp.get("action"),
+                "full_at": cp.get("full_at"),
+                "limit_entity": cp.get("entity"),
+                # (#934) the SOC the decision ran on and, on a dark cycle,
+                # how long it has been held — a blink reads as a small
+                # number under an unchanged cap, not as a restore.
+                "soc": cp.get("soc"),
+                "soc_stale_s": cp.get("soc_stale_s"),
+            })
+        elif self.entity_description.key == "battery_spendable_kwh":
+            # (#778) Everything a user needs to argue with the number, on the
+            # number itself. A budget nobody can check is one nobody trusts.
+            #
+            # `d` is bound per-branch in this method, not once at the top — the
+            # first version of this block assumed otherwise and raised
+            # UnboundLocalError on EVERY cycle, which HA reported as
+            # "Unexpected error updating listener" and which blanked the whole
+            # coordinator listener update rather than just this attribute.
+            d = self.coordinator.data
+            attrs.update({
+                "why": d.get("battery_spendable_reason"),
+                "dynamic_floor_pct": d.get("battery_dynamic_floor_pct"),
+                "overnight_need_kwh": d.get("battery_overnight_need_kwh"),
+                "expected_refill_kwh": d.get("battery_expected_refill_kwh"),
+                "refill_why": d.get("battery_refill_reason"),
+                # Surplus tomorrow physically cannot hold — spending this
+                # tonight costs nothing at all.
+                "clipped_kwh": d.get("battery_refill_clipped_kwh"),
+                "measured_capacity_kwh": d.get("battery_measured_capacity_kwh"),
+                "forecast_trust_d1": d.get("forecast_trust_d1"),
+                # (#778 phase 6) The three states a card must tell apart, and
+                # the progress behind the two that look like zero. Published as
+                # a stable token beside the prose: the card switches on the
+                # token and DISPLAYS the prose, so rewording a reason — or
+                # translating it into any of sixteen languages — can never
+                # change what gets rendered.
+                "phase": d.get("planning_phase"),
+                # (#827) On a Deye the spend runs at the INVERTER's own rate
+                # — the card must say so rather than imply SEM chose it.
+                "rate_caveat": d.get("battery_discharge_rate_caveat"),
+                # (#915) Did the last battery control write TAKE? None until
+                # a changed write has been judged; True/False after. The
+                # failure side surfaces as a Repair; this is the success
+                # side, which had no surface at all — PROD's first day on
+                # the read-back could not show it working.
+                "write_verified": d.get("battery_control_write_verified"),
+                "write_strikes": d.get("battery_control_write_strikes"),
+                # (2.1 audit) last night with hindsight — the reason to wait
+                "last_night_surplus_kwh": d.get("battery_last_night_surplus_kwh"),
+                "last_night_date": d.get("battery_last_night_date"),
+                "nights_sealed": d.get("planning_nights_sealed"),
+                "nights_required": d.get("planning_nights_required"),
+                # (#845) the watched operating mode — observe, warn once,
+                # never write
+                "battery_operating_mode": d.get("battery_operating_mode"),
+                # (#778) the spend trigger's own evidence: a token the card
+                # switches on, the window's end, the block-implied rate
+                "battery_sell_state": d.get("battery_sell_state"),
+                "battery_sell_until": d.get("battery_sell_until"),
+                "battery_sell_rate_w": d.get("battery_sell_rate_w"),
+                "forecast_days_d1": d.get("forecast_days_d1"),
+                "forecast_days_d2": d.get("forecast_days_d2"),
+                "forecast_days_required": d.get("forecast_days_required"),
+                # False = no source publishes that horizon at all. Distinct
+                # from thin evidence: only one of the two resolves by waiting.
+                "forecast_d1_available": d.get("forecast_d1_available"),
+                "forecast_d2_available": d.get("forecast_d2_available"),
+                # (#884) The three-state answer. `available` is a boolean to
+                # a question with three answers, and the card rendered the
+                # harshest: a fresh install with no records yet was told its
+                # provider does not publish the horizon. `state` separates
+                # learning from unsupported; `path` separates a sensor the
+                # integration ships DISABLED (one toggle away) from one that
+                # does not exist.
+                "forecast_d1_state": d.get("forecast_d1_state"),
+                "forecast_d2_state": d.get("forecast_d2_state"),
+                "forecast_d2_path": d.get("forecast_d2_path"),
+                "capacity_samples": d.get("battery_capacity_samples"),
+                "capacity_drift_pct": d.get("battery_capacity_drift_pct"),
+                "nameplate_capacity_kwh": self.coordinator.config.get(
+                    "battery_capacity_kwh"),
+            })
         elif self.entity_description.key == "forecast_dampening_factor":
             # #416: mirror the #359 ``classifier_path`` pattern — expose
             # WHICH branch of the dampening calculation produced the
@@ -2894,6 +3317,17 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 "history_days": d.get("forecast_history_days"),
             })
         elif self.entity_description.key == "load_management_status":
+            # (#433, #896) why the shedder did what it did: the state
+            # machine's paths and the plan's verdict. The verdict strings
+            # change on transitions and earn a history row; the watt
+            # figures move every cycle of an episode and stay live-only
+            # (``_unrecorded_attributes``, #829).
+            for key in (
+                "state_decision_path", "process_path", "action_path",
+                "last_error", "shed_path", "shed_futile",
+                "shed_need_w", "shed_sheddable_w", "uncontrolled_w",
+            ):
+                attrs[key] = self.coordinator.data.get(key)
             # Add device list details for dashboard table
             devices = self.coordinator.data.get("load_management_devices", {})
             if devices:
@@ -2925,6 +3359,13 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 registry = getattr(self.coordinator, '_device_registry', None)
                 if registry:
                     attrs["devices"] = registry.get_devices_for_sensor()
+                    # (#914) the anti-cycle range, from the ONE bounds table,
+                    # so the card never re-declares it. Constant per
+                    # release: unrecorded.
+                    from .consts.bounds import BOUNDS as _B
+                    _r = _B["anti_cycle_window_min"]
+                    attrs["anti_cycle_bounds"] = {
+                        "min": _r.min, "max": _r.max, "step": _r.step}
                 elif hasattr(self.coordinator, '_load_manager') and self.coordinator._load_manager:
                     lm_data = self.coordinator._load_manager.get_load_management_data()
                     devices = lm_data.get("devices", {})
@@ -2958,6 +3399,20 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
             attrs["peak_limit_unlimited"] = self.coordinator.data.get(
                 "peak_limit_unlimited", False
             )
+            # (#909) The #864 slot guard's live numbers, on the entity that
+            # carries the limit they defend. The card showed a 15-minute
+            # AVERAGE labelled "Current Peak" and nothing about the budget
+            # that actually bounds the next command, which is how 4.9 kW of
+            # charging and a 4.36 kW "margin" could appear side by side and
+            # read as a contradiction (Guido, 03.09). None when the install is
+            # uncapped or the guard has not published yet — never 0, which
+            # would draw a slot nobody measured.
+            attrs["peak_slot_allowed_w"] = self.coordinator.data.get(
+                "peak_slot_allowed_w"
+            )
+            attrs["peak_slot_used_kwh"] = self.coordinator.data.get(
+                "peak_slot_used_kwh"
+            )
         elif self.entity_description.key == "monthly_consecutive_peak":
             # (#657) The ``top_5_peaks`` / ``top_5_peaks_formatted`` pair used
             # to be built here from ``peak_history_top5`` — a key no producer
@@ -2985,6 +3440,12 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                     attrs["energy_dashboard"] = detail
             except Exception:
                 pass
+            # (#923) What this install has — the verdict every platform and
+            # the dashboard were built on. Support's first stop for "where is
+            # my battery tab"; validate-sem.sh reads it too.
+            presence = getattr(self.coordinator, "setup_presence", None)
+            if isinstance(presence, dict):
+                attrs["install_modules"] = presence_summary(presence)
 
         # Battery charge scheduler (#6) — attach schedule to state sensor
         if self.entity_description.key == "battery_scheduler_state":
@@ -3009,15 +3470,41 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
+        """Return if entity is available.
+
+        (#979) An unavailable SEM sensor is a STATE, not a fault, and this
+        line used to call every one of them a fault at WARNING. RienduPre's
+        two wallboxes were simply idle — ``Paused``/``Waiting``, cable in, no
+        session — so the flow/taper/session analytics had nothing to compute,
+        their coordinator key was absent, and ~11 sensors per charger warned
+        on every flap. That is absence spent as evidence (class 86): the
+        surface had no notion of a state where "unavailable" is the correct
+        answer, and the noise is what makes a real warning hard to find.
+
+        What it DOES know is WHY — ``_update_from_coordinator`` took one of
+        three branches to get here — so the line says the reason and drops to
+        debug. The faults that are real have their own instruments: the
+        coordinator logs its own failed update once for the whole integration
+        (a per-entity copy is ~200 lines of one event), and a source that
+        genuinely died raises ``inputs_degraded`` and a Repair.
+        """
         self._update_from_coordinator()
         is_available = self._attr_available and self.coordinator.last_update_success
         # Log unavailability once per sensor, not every cycle
         if not is_available and not getattr(self, '_logged_unavailable', False):
-            _LOGGER.warning("Sensor %s is unavailable", self.entity_description.key)
+            reason = (
+                "the coordinator's last update failed"
+                if not self.coordinator.last_update_success
+                else getattr(self, "_unavailable_reason", None)
+                or "no value published for this key"
+            )
+            _LOGGER.debug(
+                "Sensor %s is unavailable: %s",
+                self.entity_description.key, reason,
+            )
             self._logged_unavailable = True
         elif is_available and getattr(self, '_logged_unavailable', False):
-            _LOGGER.info("Sensor %s is available again", self.entity_description.key)
+            _LOGGER.debug("Sensor %s is available again", self.entity_description.key)
             self._logged_unavailable = False
         return is_available
 

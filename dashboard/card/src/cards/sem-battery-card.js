@@ -11,8 +11,11 @@
  */
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
+import { capacityConsequence, horizonLabel, trustConsequence }
+    from '../util/forecast-evidence.js';
 import { semTheme, semFormatPower, semGetCurrency, semCardSurfaceCSS, SEM_COLORS, semDefineCard } from '../base/sem-shared.js';
 import { temperatureUnit } from '../util/temperature.js';
+import { socDisplay } from '../util/missing-value.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -25,6 +28,9 @@ const WATCHED_SUFFIXES = [
     'daily_battery_charge_energy', 'daily_battery_discharge_energy', 'daily_battery_savings',
     'flow_solar_to_battery_energy', 'flow_grid_to_battery_energy',
     'monthly_battery_charge_energy', 'monthly_battery_discharge_energy',
+    // The evidence block reads the spendable attributes and names the active
+    // forecast provider — both must be watched or the cells go stale.
+    'battery_spendable_kwh', 'forecast_source',
 ];
 
 // Phase B of per-battery card mirror — same shape as the EV card
@@ -136,6 +142,77 @@ class SEMBatteryCard extends SEMLitBase {
 
     _valStr(suffix) {
         return this._stateStr(`${this._prefix}${suffix}`);
+    }
+
+    // (#820) One line: what charge pacing is doing right now. Reads the
+    // pacing sensor's ACTION token (wrote/held/restored/idle/observer) and
+    // cap — never the prose reason (translated 16 ways; rewording must not
+    // change what renders). Absent sensor = feature absent = no line.
+    // (#820 / 2.1 audit item 4) One line, ALWAYS when a decision exists —
+    // including while the switch is off, when it says what pacing WOULD do.
+    // Token-driven (reason_code); the prose reason is the tooltip.
+    _renderPacingLine() {
+        const st = this._hass?.states?.['sensor.sem_battery_charge_pacing'];
+        if (!st || st.state === 'unavailable') return nothing;
+        const a = st.attributes || {};
+        const code = a.reason_code || 'none';
+        if (code === 'none' || code === 'night') return nothing;
+        // (#949) A cap SEM cannot write is not a cap. Before this the line
+        // read "pace · 0.4 kW · full by 19:00" on an install that had never
+        // been given a charge-limit entity, while the battery took 3 kW.
+        const blocked = {no_limit_entity: 'pacing_no_limit',
+                         limit_unreadable: 'pacing_limit_unreadable'}[a.action];
+        if (blocked) {
+            return html`
+                <div class="tonight-row" style="opacity:.85" title="${a.reason || ''}">
+                    <span>${this._t('charge_pacing')}</span>
+                    <span>${this._t(blocked)}</span>
+                </div>`;
+        }
+        const capW = Number(a.cap_w);
+        const cap = Number.isFinite(capW) && capW > 0 ? `${(capW / 1000).toFixed(1)} kW` : '';
+        const at = a.full_at ? String(a.full_at).slice(11, 16) : '';
+        const would = a.enabled ? '' : `${this._t('pacing_would')} `;
+        const what = this._t(`pacing_${code}`);
+        const tail = cap ? ` · ${cap}${at ? ` · ${this._t('pacing_full_by')} ${at}` : ''}` : '';
+        return html`
+            <div class="tonight-row" style="opacity:.85" title="${a.reason || ''}">
+                <span>${this._t('charge_pacing')}</span>
+                <span>${would}${what}${tail}</span>
+            </div>`;
+    }
+
+    // (#778) The spend trigger, visible: what the budget is DOING.
+    _renderSellLine() {
+        const a = this._stateAttrs(`${this._prefix}battery_spendable_kwh`) || {};
+        const st = a.battery_sell_state;
+        if (st !== 'selling' && st !== 'scheduled') return nothing;
+        const until = a.battery_sell_until ? String(a.battery_sell_until).slice(11, 16) : '';
+        const rate = Number(a.battery_sell_rate_w);
+        const kw = Number.isFinite(rate) && rate > 0 ? ` · ${(rate / 1000).toFixed(1)} kW` : '';
+        const what = st === 'selling' ? this._t('spend_selling') : this._t('spend_sell_planned');
+        return html`
+            <div class="tonight-row" style="opacity:.85">
+                <span>${this._t('spend_sell')}</span>
+                <span>${what}${until ? ` · ${this._t('spend_until')} ${until}` : ''}${kw}</span>
+            </div>`;
+    }
+
+    // (2.1 audit item 3) The reason to wait, shown while waiting.
+    _renderLastNightLine(a) {
+        const v = Number(a.last_night_surplus_kwh);
+        if (!Number.isFinite(v)) return nothing;
+        return html`
+            <div class="tonight-row" style="opacity:.85">
+                <span>${this._t('last_night_surplus')}</span>
+                <span>${this._fmt(v, 1)} kWh</span>
+            </div>`;
+    }
+
+    // (#827 / 2.1 audit item 7) A brand whose discharge rate SEM cannot set.
+    _renderRateCaveat(a) {
+        if (!a.rate_caveat) return nothing;
+        return html`<div class="tonight-why" style="opacity:.75">${this._t('rate_set_by_inverter')}</div>`;
     }
 
     _fmt(val, decimals = 1) {
@@ -367,6 +444,223 @@ class SEMBatteryCard extends SEMLitBase {
     }
 
     /* ── Render ── */
+    /* ── (#778) Tonight — the forecast budget, in the three states a person
+       has to be able to tell apart.
+
+       Every fresh install sits in "learning" for at least five nights, and
+       today that state renders as a bare 0.0 beside five sensors reading
+       "Unavailable" — the same word HA shows for a dead integration. The
+       whole explanation already lives on ONE entity's attributes, so this
+       reads one entity and switches on the published ``phase`` token. It
+       never matches on the reason prose: that text is translated into
+       sixteen languages and rewording it must not change what renders. ── */
+    _renderTonight(T) {
+        const eid = `${this._prefix}battery_spendable_kwh`;
+        const ent = this._hass?.states[eid];
+        if (!ent) return nothing;          // pre-2.1 install — nothing to say
+        const a = this._stateAttrs(eid);
+        const phase = a.phase;
+        if (!phase) return nothing;        // evidence not published yet
+
+        const num = (v) => (v == null || v === '' || isNaN(parseFloat(v)))
+            ? null : parseFloat(v);
+
+        const spendable = num(ent.state);
+        const floor = num(a.dynamic_floor_pct);
+        const nights = num(a.nights_sealed) ?? 0;
+        const needed = num(a.nights_required) ?? 5;
+        const days = num(a.forecast_days_d1) ?? 0;
+        const daysNeeded = num(a.forecast_days_required) ?? 7;
+
+        const PALETTE = {
+            learning: T.warning || '#e0a943',
+            holding: '#5bc8d8',
+            spending: '#4db6ac',
+        };
+        const accent = PALETTE[phase] || (T.textSec || '#888');
+
+        // The headline differs per phase because the three states are three
+        // different sentences, not one sentence with a different number.
+        let headline, unit;
+        if (phase === 'learning') {
+            headline = `${Math.min(nights, needed)}`;
+            unit = `${this._t('of')} ${needed} ${this._t('nights')}`;
+        } else {
+            headline = this._fmt(spendable ?? 0, 1);
+            unit = `kWh ${this._t('spendable_tonight')}`;
+        }
+
+        // The working, in the order a person would check it. Only rows whose
+        // value actually exists — a dash teaches nobody anything.
+        const rows = [];
+        if (phase === 'learning') {
+            rows.push([this._t('nights_recorded'), `${nights}`]);
+            rows.push([this._t('forecast_days_settled'), `${days} / ${daysNeeded}`]);
+        } else {
+            const need = num(a.overnight_need_kwh);
+            const refill = num(a.expected_refill_kwh);
+            if (need != null) rows.push([this._t('overnight_need'), `${this._fmt(need, 1)} kWh`]);
+            if (refill != null) rows.push([this._t('expected_refill'), `${this._fmt(refill, 1)} kWh`]);
+            if (floor != null) rows.push([this._t('floor_tonight'), `${Math.round(floor)}%`]);
+        }
+
+        const pips = [];
+        for (let i = 0; i < needed; i++) pips.push(i < nights);
+
+        return html`
+            <div class="tonight" style="--tn-accent:${accent}">
+                <div class="tonight-head">
+                    <span class="tonight-title">${this._t('tonight')}</span>
+                    <span class="tonight-pill">${this._t(`planning_phase_${phase}`)}</span>
+                </div>
+                <div class="tonight-big ${phase === 'spending' ? 'tn-live' : 'tn-dim'}">
+                    ${headline}<span class="tonight-unit">${unit}</span>
+                </div>
+                ${phase === 'learning' ? html`
+                    <div class="tonight-prog">
+                        ${pips.map((on) => html`<i class="${on ? 'on' : ''}"></i>`)}
+                    </div>
+                    <button class="tonight-act" @click=${this._rebuildNights}
+                            title=${this._t('rebuild_nights_hint')}>
+                        ${this._t('rebuild_nights')}
+                    </button>` : nothing}
+                <div class="tonight-why">${a.why || ''}</div>
+                ${this._renderPacingLine()}
+                ${this._renderSellLine()}
+                ${this._renderLastNightLine(a)}
+                ${this._renderRateCaveat(a)}
+                ${rows.length ? html`
+                    <div class="tonight-work">
+                        ${rows.map(([k, v]) => html`
+                            <div class="tonight-row"><span>${k}</span><span>${v}</span></div>`)}
+                    </div>` : nothing}
+            </div>
+        `;
+    }
+
+    /* (#877) The wait is announced here, so the way OUT of the wait belongs
+       here too. SEM can usually prove these nights from the recorder the
+       moment it is asked — the service reads the battery's own cumulative
+       counter — but until now the only way to ask was a button on the device
+       page that nothing pointed at. A person told "2 of 5 nights" has no
+       reason to go looking for it. */
+    async _rebuildNights(e) {
+        const btn = e?.currentTarget;
+        if (btn) { btn.disabled = true; btn.textContent = this._t('rebuild_nights_busy'); }
+        try {
+            await this._hass.callService(
+                'solar_energy_management', 'backfill_battery_nights',
+                { days: 365 },
+            );
+        } catch (err) {
+            // The service reports its own result as a notification, including
+            // refusals; a card that swallowed the error would leave the
+            // button stuck pretending to work.
+            if (btn) { btn.disabled = false; btn.textContent = this._t('rebuild_nights'); }
+        }
+    }
+
+    /* ── (#778) The evidence strip — why the number above deserves belief.
+
+       Three cells, and the important design point is that "still learning"
+       and "no source publishes this" are DIFFERENT answers. Both surface as
+       an empty sensor today, but only one of them resolves by waiting: on
+       the .175 rig Forecast.Solar exposes day-2 per string only, so that
+       horizon never fills, and a user staring at a permanently blank figure
+       deserves to be told which of the two they are looking at. ── */
+    _renderEvidence(T) {
+        const eid = `${this._prefix}battery_spendable_kwh`;
+        const a = this._stateAttrs(eid);
+        if (!a.phase) return nothing;
+
+        const num = (v) => (v == null || v === '' || isNaN(parseFloat(v)))
+            ? null : parseFloat(v);
+        const pct = (v) => `${Math.round(v * 100)}%`;
+
+        const daysNeeded = num(a.forecast_days_required) ?? 7;
+        const nightsNeeded = num(a.nights_required) ?? 5;
+
+        // (#dashboard-audit) The label names the PROVIDER and the horizon in
+        // words — "1D"/"2D" read as placeholders to the person who built this
+        // — and the third line says what the evidence BOUGHT. The accuracy is
+        // not decoration: the ledger's p20 over these settled days scales the
+        // refill, and having it is what removes the pessimism margin. A number
+        // whose effect is invisible is a number nobody trusts (#830).
+        const source = this._hass?.states[`${this._prefix}forecast_source`]?.state;
+        const t = (k) => this._t(k);
+
+        const horizon = (trustKey, daysKey, availKey, dayNo) => {
+            const trust = num(a[trustKey]);
+            const days = num(a[daysKey]) ?? 0;
+            const available = a[availKey];
+            const label = horizonLabel(source, dayNo, t);
+            const effect = trustConsequence({
+                available, trust, days, minDays: daysNeeded, t });
+            // (#884) THREE states, not two. `available === false` was
+            // rendered as "this provider does not publish this horizon" for
+            // a fresh install that simply had no records yet — reported on
+            // all three integrations at once, two of which do publish it.
+            const state = a[`forecast_d${dayNo}_state`];
+            const path = a[`forecast_d${dayNo}_path`];
+            if (state === 'unsupported' || (state == null && available === false)) {
+                // The integration ships the sensor switched off: one toggle
+                // away, so say that instead of telling them to give up.
+                if (path === 'disabled_by_integration') {
+                    return { label, value: this._t('sensor_disabled'),
+                             sub: this._t('enable_horizon_sensor'), dim: true };
+                }
+                return { label, value: this._t('no_source'), sub: effect, dim: true };
+            }
+            if (state === 'learning' && trust == null) {
+                return { label, value: this._t('learning'), sub: effect, dim: true };
+            }
+            if (trust == null) {
+                return { label, value: this._t('learning'), sub: effect, dim: true };
+            }
+            return { label, value: pct(trust),
+                     sub: `${days} ${this._t('days_settled')} · ${effect}`, dim: false };
+        };
+
+        const cells = [
+            horizon('forecast_trust_d1', 'forecast_days_d1', 'forecast_d1_available', 1),
+            horizon('forecast_trust_d2', 'forecast_days_d2', 'forecast_d2_available', 2),
+        ];
+
+        const cap = num(a.measured_capacity_kwh);
+        const samples = num(a.capacity_samples) ?? 0;
+        const drift = num(a.capacity_drift_pct);
+        const nameplate = num(a.nameplate_capacity_kwh);
+        if (cap == null) {
+            cells.push({
+                label: this._t('measured_pack_size'), value: this._t('learning'),
+                sub: `${samples} / ${nightsNeeded} ${this._t('nights')} · `
+                     + capacityConsequence({ measuredKwh: null,
+                                             nameplateKwh: nameplate, t }),
+                dim: true,
+            });
+        } else {
+            cells.push({
+                label: this._t('measured_pack_size'),
+                value: `${this._fmt(cap, 1)} kWh`,
+                sub: (drift == null ? `${samples} ${this._t('nights')}`
+                     : `${drift > 0 ? '+' : ''}${this._fmt(drift, 1)}% ${this._t('vs_nameplate')}`)
+                     + ` · ${capacityConsequence({ measuredKwh: cap, nameplateKwh: nameplate, t })}`,
+                dim: false,
+            });
+        }
+
+        return html`
+            <div class="evidence">
+                ${cells.map((c) => html`
+                    <div class="ev-cell">
+                        <div class="ev-key">${c.label}</div>
+                        <div class="ev-val ${c.dim ? 'ev-dim' : ''}">${c.value}</div>
+                        <div class="ev-sub">${c.sub}</div>
+                    </div>`)}
+            </div>
+        `;
+    }
+
     render() {
         if (!this._hass || !this._config) return nothing;
 
@@ -375,7 +669,10 @@ class SEMBatteryCard extends SEMLitBase {
         const circumferenceFixed = circumference.toFixed(1);
 
         // State reads
-        const soc = this._val('battery_soc', 0);
+        // null, not 0, when the sensor is out: an absent SOC renders as the
+        // em-dash with an empty gauge, never as a flat pack (PROD 02.09).
+        const soc = this._val('battery_soc', null);
+        const socShown = socDisplay(soc);
         const power = this._val('battery_power', 0);
         const chargePower = this._val('battery_charge_power', 0);
         const dischargePower = this._val('battery_discharge_power', 0);
@@ -420,7 +717,7 @@ class SEMBatteryCard extends SEMLitBase {
         const arcAnim = (isCharging || isDischarging || isSelling) ? 'socPulse 2s ease-in-out infinite' : 'none';
 
         // SOC arc
-        const pct = Math.min(Math.max(soc / 100, 0), 1);
+        const pct = socShown.fraction;
         const arcOffset = (circumference * (1 - pct)).toFixed(1);
 
         // Solar attribution
@@ -532,6 +829,149 @@ class SEMBatteryCard extends SEMLitBase {
                        shape as the EV card's per-charger sections so
                        a user who already knows the EV tab reads the
                        battery tab without re-learning the layout. ── */
+                /* (#778) Tonight — the forecast budget panel. Accent is set
+                   per phase from JS so the three states read at a glance
+                   without three copies of this block. */
+                .tonight {
+                    background: rgba(255,255,255,.03);
+                    border: 1px solid rgba(255,255,255,.08);
+                    border-left: 3px solid var(--tn-accent, #4db6ac);
+                    border-radius: 12px;
+                    padding: 14px 16px 15px;
+                    margin: 4px 0 14px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                .tonight-head {
+                    display: flex;
+                    align-items: baseline;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+                .tonight-title {
+                    font-size: 14px;
+                    font-weight: 500;
+                    color: var(--sem-text, #e8eeed);
+                }
+                .tonight-pill {
+                    font-size: 10px;
+                    letter-spacing: .08em;
+                    text-transform: uppercase;
+                    padding: 3px 8px;
+                    border-radius: 20px;
+                    border: 1px solid var(--tn-accent, #4db6ac);
+                    color: var(--tn-accent, #4db6ac);
+                    white-space: nowrap;
+                }
+                .tonight-big {
+                    font-size: 32px;
+                    font-weight: 300;
+                    line-height: 1;
+                    font-variant-numeric: tabular-nums;
+                    display: flex;
+                    align-items: baseline;
+                    gap: 6px;
+                    flex-wrap: wrap;
+                }
+                .tonight-big.tn-live { color: var(--tn-accent, #4db6ac); }
+                .tonight-big.tn-dim { color: var(--sem-text-sec, #9bb0ab); }
+                .tonight-unit {
+                    font-size: 13px;
+                    font-weight: 400;
+                    color: var(--sem-text-sec, #9bb0ab);
+                }
+                .tonight-prog { display: flex; gap: 4px; }
+                .tonight-prog i {
+                    flex: 1;
+                    height: 5px;
+                    border-radius: 3px;
+                    background: rgba(255,255,255,.13);
+                }
+                .tonight-prog i.on { background: var(--tn-accent, #e0a943); }
+                /* (#877) A quiet offer, not a call to action — the wait is
+                   normal and the shortcut is optional. Sits under the pips
+                   it removes. */
+                .tonight-act {
+                    /* .tonight is a column flex with align-items:stretch and
+                       its own 10px gap — so a bare button stretched to the
+                       full 822px card width and carried double spacing. The
+                       layout owns the gap; this only opts out of the
+                       stretch. */
+                    align-self: flex-start;
+                    padding: 5px 11px;
+                    font: inherit;
+                    font-size: 0.78em;
+                    letter-spacing: 0.02em;
+                    color: var(--tn-accent, #e0a943);
+                    background: transparent;
+                    border: 1px solid var(--tn-accent, #e0a943);
+                    border-radius: 999px;
+                    cursor: pointer;
+                    opacity: 0.85;
+                    transition: opacity 0.15s, background 0.15s;
+                }
+                .tonight-act:hover { opacity: 1; background: rgba(255,255,255,0.06); }
+                .tonight-act:disabled { opacity: 0.5; cursor: default; }
+                .tonight-why {
+                    font-size: 12.5px;
+                    line-height: 1.45;
+                    color: var(--sem-text-sec, #9bb0ab);
+                }
+                .tonight-work {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                    border-top: 1px solid rgba(255,255,255,.08);
+                    padding-top: 9px;
+                }
+                .tonight-row {
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 16px;
+                    font-size: 11.5px;
+                    color: var(--sem-text-sec, #8fa3a0);
+                }
+                .tonight-row span:last-child {
+                    font-variant-numeric: tabular-nums;
+                    color: var(--sem-text, #cfdad7);
+                }
+
+                /* (#778) the evidence strip */
+                .evidence {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 8px;
+                    margin: 0 0 14px;
+                }
+                .ev-cell {
+                    background: rgba(255,255,255,.03);
+                    border: 1px solid rgba(255,255,255,.07);
+                    border-radius: 10px;
+                    padding: 10px 12px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 3px;
+                }
+                .ev-key {
+                    font-size: 10px;
+                    letter-spacing: .07em;
+                    text-transform: uppercase;
+                    color: var(--sem-text-sec, #8fa3a0);
+                }
+                .ev-val {
+                    font-size: 19px;
+                    font-weight: 300;
+                    font-variant-numeric: tabular-nums;
+                    color: var(--sem-text, #e8eeed);
+                }
+                .ev-val.ev-dim { font-size: 15px; color: var(--sem-text-sec, #9bb0ab); }
+                .ev-sub {
+                    font-size: 11px;
+                    line-height: 1.35;
+                    color: var(--sem-text-sec, #8fa3a0);
+                }
+
                 .battery-sections {
                     margin-top: 16px;
                     display: flex; flex-direction: column;
@@ -701,7 +1141,7 @@ class SEMBatteryCard extends SEMLitBase {
                                         fill="#FCD170" opacity="${isCharging ? 0.95 : 0}"/>
                                 </svg>
                                 <div class="soc-value" style="color:${arcColor}">
-                                    ${soc.toFixed(0)}%
+                                    ${socShown.label}
                                 </div>
                             </div>
                         </div>
@@ -805,6 +1245,9 @@ class SEMBatteryCard extends SEMLitBase {
                         </div>
                         ` : html``}
                     </div>
+
+                    ${this._renderTonight(T)}
+                    ${this._renderEvidence(T)}
 
                     <div class="chips">
                         <div class="chip">

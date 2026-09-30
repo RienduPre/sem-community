@@ -644,11 +644,24 @@ class EnergyCalculator:
             export_increment = (power.grid_export_power * interval_hours) / 1000
             self._accumulate("grid_export", today, month_key, year_key, export_increment)
             self._accumulate_cost("cost_export", today, month_key, year_key, export_increment * self._export_rate)
+            # (#871, arc #921) The same kWh counted again when the meter was
+            # hostile — a separate key, not a sign on the export total, because
+            # that total is what a user reads as "what I sent out".
+            if float(self._export_rate or 0.0) < 0:
+                self._accumulate("grid_export_negative", today, month_key, year_key, export_increment)
+                self._accumulate_cost("cost_export_negative", today, month_key, year_key,
+                                      export_increment * abs(float(self._export_rate)))
         self._reconcile_metered_energy(
             "grid_export", today, month_key, year_key,
             cost_key="cost_export", rate=self._export_rate,
         )
         energy.daily_grid_export = self._get_daily("grid_export", today)
+        energy.daily_grid_export_negative = self._get_daily("grid_export_negative", today)
+        energy.daily_grid_export_negative_cost = self._get_daily_cost("cost_export_negative", today)
+        energy.monthly_grid_export_negative = self._get_monthly("grid_export_negative", month_key)
+        energy.yearly_grid_export_negative = self._get_yearly("grid_export_negative", year_key)
+        energy.monthly_grid_export_negative_cost = self._get_monthly_cost("cost_export_negative", month_key)
+        energy.yearly_grid_export_negative_cost = self._get_yearly_cost("cost_export_negative", year_key)
         energy.monthly_grid_export = self._get_monthly("grid_export", month_key)
         energy.yearly_grid_export = self._get_yearly("grid_export", year_key)
 
@@ -2740,6 +2753,16 @@ class EnergyCalculator:
         """Get monthly accumulated energy."""
         key = f"{category}_{month_key}"
         return round(self._monthly_accumulators.get(key, 0.0), 2)
+
+    def monthly_total_for(self, category: str, day) -> float:
+        """(#867) Accumulated ``category`` energy for the month containing
+        ``day`` — the public way to ask about a month that is not today's.
+
+        The rollover sweep deliberately keeps the PREVIOUS month's keys, so
+        the month that just ended is still readable for the first days of the
+        new one. That is the window the degradation recorder runs in.
+        """
+        return self._get_monthly(category, self._month_key(day))
 
     def _get_yearly(self, category: str, year_key: str) -> float:
         """Get yearly accumulated energy."""

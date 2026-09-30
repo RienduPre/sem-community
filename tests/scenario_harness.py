@@ -22,7 +22,7 @@ YAML scenario shape:
     timeline:
         - t: 0
           solar_power: 5500
-          grid_power: -4200          # negative = export
+          grid_power: 4200           # SEM convention: + = EXPORT, - = import
           battery_power: 0
           battery_soc: 75
           ev_power: 0
@@ -30,7 +30,7 @@ YAML scenario shape:
         - t: 60
           # Sticky semantics: omitted keys inherit from the previous cycle.
           ev_power: 9900
-          grid_power: 3100
+          grid_power: -3100          # importing for the car
           battery_power: -500
     expect:
         strategy_substring: "solar_only"
@@ -64,7 +64,25 @@ import yaml
 TIMELINE_FIELDS = {
     "solar_power", "grid_power", "battery_power", "ev_power",
     "battery_soc", "battery_temperature", "battery_soc_unavailable",
+    # (#934) seconds the SOC has been HELD through a dark read. Without it
+    # a dark cycle is fail-closed (unknown); with it a limit-type consumer
+    # (charge pacing) holds through the blink — the fixed path itself.
+    "battery_soc_stale_s",
     "ev_connected", "ev_charging",
+    # (#925/#906) THE DARK-READ FLAGS. PowerReadings carries five of these
+    # and the harness exposed exactly one, so "the meter went dark this
+    # cycle" — the single most common real-world condition on PROD, where
+    # the solar read is absent 137 times a day — could not be written in a
+    # scenario at all. #906 (the peak guard releasing on a blind meter) was
+    # therefore unreplayable for want of a field name, not for want of a
+    # code path: its trigger is `power.grid_power_unavailable`.
+    #
+    # An absent reading is NOT a reading of zero. These let a timeline say
+    # which, which is the whole distinction SEM keeps getting wrong.
+    "solar_power_unavailable",
+    "grid_power_unavailable",
+    "battery_power_unavailable",
+    "battery_power_all_unavailable",
     "home_consumption_power",  # override the derived value when needed
     # v1.6.12: per-charger EV draw in watts as a mapping ``{cid: watts}``.
     # When present, populates ``PowerReadings.ev_power_per_charger`` so
@@ -193,6 +211,19 @@ def _build_power_readings(effective: Dict[str, Any]):
         battery_soc=float(effective.get("battery_soc", 50.0)),
         battery_temperature=float(effective.get("battery_temperature", 25.0)),
         battery_soc_unavailable=bool(effective.get("battery_soc_unavailable", False)),
+        # (#934) the hold's age — see TIMELINE_FIELDS
+        battery_soc_stale_s=(
+            int(effective["battery_soc_stale_s"])
+            if effective.get("battery_soc_stale_s") is not None else None),
+        # (#925) the dark-read twins — see TIMELINE_FIELDS
+        solar_power_unavailable=bool(
+            effective.get("solar_power_unavailable", False)),
+        grid_power_unavailable=bool(
+            effective.get("grid_power_unavailable", False)),
+        battery_power_unavailable=bool(
+            effective.get("battery_power_unavailable", False)),
+        battery_power_all_unavailable=bool(
+            effective.get("battery_power_all_unavailable", False)),
         ev_connected=bool(effective.get("ev_connected", False)),
         ev_charging=bool(effective.get("ev_charging", False)),
     )
@@ -309,6 +340,16 @@ def _build_coordinator(scenario: Dict[str, Any]):
     )
     coord._surplus_controller = SurplusController(coord.hass)
 
+    # (#778) The forecast-spending evidence dict. In production this is
+    # written once per cycle by ``_update_analytics_phases`` and read by
+    # ``_build_fleet_cycle_state`` — one publisher, so the number the user
+    # is shown and the number the decision uses cannot drift. The harness
+    # injects it directly: a scenario states the budget as an INPUT so the
+    # question under test is what the decision path DOES with it, not
+    # whether the ledger arithmetic is right (that is
+    # ``test_778_spendable_budget.py``'s job).
+    coord._planning_evidence = dict(scenario.get("planning_evidence") or {})
+
     coord._ev_device = None
     coord._cycle_night_plan = None
     coord._cycle_vehicle_soc = None  # No external vehicle SOC entity in scenario
@@ -399,10 +440,39 @@ def _build_coordinator(scenario: Dict[str, Any]):
     if scenario_tariff is not None:
         tariff_stub = MagicMock()
         tariff_stub.current_level = str(scenario_tariff)
+        # The coordinator reads ``provider.get_price_level()`` (a PriceLevel
+        # or its string), NOT ``current_level``. With only the attribute set,
+        # a MagicMock answered the call and the fleet tariff_level stayed
+        # None — unnoticed for months because the night path never consults
+        # the level. #856's daytime cheap-hours scenario was the first to.
+        tariff_stub.get_price_level = MagicMock(return_value=str(scenario_tariff))
+        # (#994) …and the day the level is a claim ABOUT.
+        tariff_stub.get_tariff_data = MagicMock(
+            return_value=_tariff_stub_payload(scenario_tariff))
         tariff_stub.available = True
         coord._tariff_provider = tariff_stub
     coord._sensor_reader = MagicMock()
     return coord
+
+
+def _tariff_stub_payload(level: str):
+    """A tariff payload whose numbers AGREE with the level it claims (#994).
+
+    A stub that publishes ``very_cheap`` while saying nothing about today's
+    min and max is the exact incoherence #994 exists to end: the one
+    vocabulary refuses a comparative word when no comparison stands, so a
+    scenario asserting a cheap hour has to describe a day that HAS cheap
+    hours. These numbers are a plausible dynamic day; only the spread
+    matters to the vocabulary.
+    """
+    from unittest.mock import MagicMock as _MM
+
+    data = _MM()
+    data.today_min_price = 0.05
+    data.today_max_price = 0.40
+    data.today_avg_price = 0.20
+    data.price_level = str(level)
+    return data
 
 
 def _capture_actuator_calls(coord) -> List[Dict[str, Any]]:
@@ -499,6 +569,10 @@ async def run_scenario(yaml_path: Path) -> ScenarioRun:
                 provider.available = True
                 coord._tariff_provider = provider
             provider.current_level = str(effective["tariff_level"])
+            provider.get_price_level = MagicMock(
+                return_value=str(effective["tariff_level"]))
+            provider.get_tariff_data = MagicMock(
+                return_value=_tariff_stub_payload(effective["tariff_level"]))
         readings = _build_power_readings(effective)
 
         # Record raw + derived
@@ -514,6 +588,14 @@ async def run_scenario(yaml_path: Path) -> ScenarioRun:
             "ev_power": readings.ev_power,
             "ev_connected": readings.ev_connected,
             "home_consumption_power": readings.home_consumption_power,
+            # (#925) the dark-read twins, so a formula and a failure
+            # message can both see WHICH reading was absent rather than
+            # inferring it from a zero.
+            "solar_power_unavailable": readings.solar_power_unavailable,
+            "grid_power_unavailable": readings.grid_power_unavailable,
+            "battery_soc_unavailable": readings.battery_soc_unavailable,
+            "battery_power_all_unavailable":
+                readings.battery_power_all_unavailable,
         }
 
         # Power flows (per-cycle, correctly attributed)
@@ -822,10 +904,30 @@ def assert_expectations(run: ScenarioRun, scenario: Dict[str, Any]) -> None:
         margin_w = float(ac.get("max_w_minus_margin", 0))
         voltage = 230.0
         phases = 3.0
-        for c in run.cycles:
-            strat = str(c.result.get("canonical_strategy") or "").lower()
-            if when_strategy.lower() not in strat:
-                continue
+        # (#925) VACUITY GATE. This block skips every cycle whose strategy
+        # does not match and then asserts on what is left — so a scenario
+        # whose strategy NEVER matches asserts on nothing and passes,
+        # silently, forever. ``strategy_substring`` twelve lines above has
+        # had this guard since it was written; this one never got it.
+        #
+        # Live on 07.09: a #899 scenario passed while SEM answered "idle"
+        # on all six cycles. It looked like a regression test and was an
+        # empty loop. A check that cannot fail is worse than no check —
+        # it spends the credibility of the ones that can.
+        matched_cycles = [
+            c for c in run.cycles
+            if when_strategy.lower() in
+            str(c.result.get("canonical_strategy") or "").lower()
+        ]
+        assert matched_cycles, (
+            f"actuator_current_a asserts on cycles whose strategy contains "
+            f"'{when_strategy}', and NO cycle matched — so this expectation "
+            f"tested nothing. Strategies seen: "
+            f"{sorted({str(c.result.get('canonical_strategy')) for c in run.cycles})}. "
+            f"Either the scenario does not reach the state it claims to "
+            f"exercise, or when_strategy names a state that no longer exists."
+        )
+        for c in matched_cycles:
             # Evaluate the formula in the readings dict's namespace
             try:
                 allowed_w = float(eval(formula, {"__builtins__": {}, "max": max, "min": min}, c.readings))

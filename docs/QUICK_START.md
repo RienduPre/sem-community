@@ -12,7 +12,9 @@ Get Solar Energy Management (SEM) running in your Home Assistant in about 10 min
 
 Complete these before installing SEM:
 
-**1. Home Assistant Energy Dashboard configured**
+**1. Home Assistant Energy Dashboard configured (recommended)**
+
+Since 2.1 this is no longer required: if the Energy Dashboard is empty, SEM asks the energy integrations you run what they create and offers those sensors for you to confirm.
 
 Go to **Settings > Dashboards > Energy**. You must have at least a solar production sensor and a grid sensor set up. SEM reads all sensor configuration from here automatically.
 
@@ -63,8 +65,9 @@ Click **Submit**.
 | Battery capacity | 10 kWh | Your home battery size |
 | Generate dashboard | ON | Auto-create the SEM dashboard — leave this on |
 
-Click **Submit**. SEM starts at a 5 kW target peak limit; tune it later from
-the Control tab's slider (up to 80 kW, or **Uncapped**) — see
+Click **Submit**. SEM starts at a 5 kW target peak limit with load shedding
+**off**; tune the limit later from the Control tab's slider (up to 80 kW, or
+**Uncapped**) and enable shedding on the Configuration tab — see
 [Load Management Settings](USER_GUIDE.md#load-management-settings).
 
 EV charger configuration is available after install via the **Configuration tab** or **Settings > Devices & Services > Solar Energy Management > Configure**.
@@ -133,17 +136,20 @@ Once installed, SEM runs without manual intervention:
 - **Solar surplus appears** — EV charging current increases automatically to use it (6–32 A range)
 - **Clouds roll in** — EV charging reduces or pauses, resumes when surplus returns
 - **Battery reaches priority SOC** — surplus is redirected to EV charging
-- **Evening** — solar charging stops; system monitors overnight
+- **Evening** — solar charging stops; system monitors overnight. With a charger in **Solar + battery**, the home battery keeps the car going after sunset — down to the level the house needs for the night, no further
 - **Night charging** — *opt-in (off by default)*; when enabled, grid-charges the EV to your daily-target floor
 - **Smart forecast** — if tomorrow is sunny, tonight's grid charging is reduced or skipped
+- **The battery's overnight floor is measured** (2.1) — SEM learns what your house uses at night and spends only what tonight can spare
+- **The pack fills across the day** (2.1) — charge pacing follows the forecast so the battery lands full at sunset, not by 11:30
+- **The 15-minute peak is guarded** (2.1) — on a demand tariff SEM keeps every slot's average under your limit, across all devices
 
 The controls that matter most:
 
 | Entity | Default | Purpose |
 |--------|---------|---------|
-| `select.sem_charger_<id>_charge_mode` | `Min + Solar` | Per-charger charging mode: **Solar only** / **Solar + cheapest hours** / **Min + Solar** (grid minimum 6A + surplus) / **Always max** / **Off**. Pick based on your needs; see [Charging Modes](SETUP_GUIDE.md#8-ev-charging-modes) in the Setup Guide. |
+| `select.sem_charger_<id>_charge_mode` | `Min + Solar` | Per-charger charging mode: **Solar only** / **Solar + battery** (surplus plus the home battery, down to the level the house still needs overnight) / **Solar + cheapest hours** / **Min + Solar** (grid minimum 6A + surplus) / **Always max** / **Off** (hands-off — SEM sends nothing). Pick based on your needs; see [Charging Modes](SETUP_GUIDE.md#8-ev-charging-modes) in the Setup Guide. |
 | `number.sem_battery_assist_min_surplus` | 1200 W | **Solar Gate**: minimum real solar surplus to enable battery assist for the EV. Set to 0 W to allow battery support everywhere (previous behaviour). Prevents battery drain into the car at night. |
-| `switch.sem_observer_mode` | OFF | Monitor-only, no hardware control |
+| `switch.sem_observer_mode` | **ON** (new installs) | Monitor-only — turn it OFF to let SEM control hardware |
 
 Everything else is automatic.
 

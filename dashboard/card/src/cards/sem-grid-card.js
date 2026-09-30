@@ -18,6 +18,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semCardSurfaceCSS, SEM_COLORS, semDefineCard } from '../base/sem-shared.js';
+import { priceLevelColor, priceLevelKey } from '../util/price-level.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -27,6 +28,7 @@ const WATCHED_SUFFIXES = [
     'monthly_grid_import_energy', 'monthly_grid_export_energy',
     'consecutive_peak_15min', 'monthly_consecutive_peak',
     'current_vs_peak_percentage', 'target_peak_limit', 'peak_margin', 'peak_trend',
+    'export_guard_state',   // arc #921 — the limit at the meter, mirrored from the peak guard
     'load_management_status', 'loads_currently_shed', 'available_load_reduction',
     'controllable_devices_count',
     'tariff_current_import_rate', 'tariff_current_export_rate', 'tariff_price_level',
@@ -93,10 +95,14 @@ class SEMGridCard extends SEMLitBase {
     }
 
     _priceLevelColor(level) {
+        // 'high'/'low' are this card's own legacy load-management words.
         if (level === 'high') return '#f06292';
         if (level === 'low')  return '#8DC892';
-        if (level !== '—')   return '#ff9800';
-        return '#888';
+        // (#994) Anything that is not one of the six comparative words —
+        // '—', '', 'unknown', an entity that has not loaded — is grey. The
+        // old fallback handed every one of them NORMAL's orange, which is
+        // pixel-identical to a level SEM had actually concluded.
+        return priceLevelColor(level, '#888');
     }
 
     _metricRow(labelKey, valueHtml) {
@@ -141,6 +147,7 @@ class SEMGridCard extends SEMLitBase {
 
         // Peak management
         const peakPct = this._val('current_vs_peak_percentage');
+        const guardState = this._val('export_guard_state');   // arc #921
         const peak15 = this._val('consecutive_peak_15min');
         const monthlyPeak = this._val('monthly_consecutive_peak');
         const peakLimit = this._val('target_peak_limit');
@@ -363,6 +370,8 @@ class SEMGridCard extends SEMLitBase {
                         <div class="metric-row">
                             <span class="metric-label">${this._t('trend')}</span>
                             <span class="metric-val">${peakTrend ? this._t(peakTrend) : '—'}</span>
+                            ${guardState && guardState !== 'unknown' && guardState !== 'unavailable' ? html`
+                                <div class="row" style="opacity:.85"><span>${this._t('export_guard')}</span><span>${guardState}</span></div>` : nothing}
                         </div>
                     </div>
 
@@ -405,7 +414,7 @@ class SEMGridCard extends SEMLitBase {
                         <div class="metric-row">
                             <span class="metric-label">${this._t('price_level')}</span>
                             <span class="metric-val" style="color:${levelColor}">
-                                ${priceLevel ? this._t(priceLevel) : '—'}
+                                ${priceLevel ? this._t(priceLevelKey(priceLevel)) : '—'}
                             </span>
                         </div>
                         <div class="metric-row">

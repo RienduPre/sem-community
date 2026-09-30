@@ -24,275 +24,16 @@ LOAD_MANAGEMENT_DEVICE_PATTERNS: Final = {
 }
 
 # EV Charger manufacturer groupings
-EV_CHARGER_MANUFACTURERS: Final = {
-    "keba": {
-        "name": "KEBA KeContact",
-        "description": "KEBA P30 EV Charger",
-        "confidence_bonus": 10,
-        "patterns": {
-            "ev_connected": ["binary_sensor.keba*connected*", "binary_sensor.keba*plug*"],
-            "ev_charging": ["binary_sensor.keba*charging*", "binary_sensor.keba*state*"],
-            "ev_power": ["sensor.keba*power*", "sensor.keba*charging_power*"],
-            "ev_current": ["sensor.keba*current*", "sensor.keba*charging_current*"],
-            "ev_energy": ["sensor.keba*energy*", "sensor.keba*session*"]
-        }
-    },
-    "wallbox": {
-        "name": "Wallbox",
-        "description": "Wallbox EV Charger",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": ["binary_sensor.wallbox*connected*"],
-            "ev_charging": ["binary_sensor.wallbox*charging*"],
-            "ev_power": ["sensor.wallbox*power*"],
-            "ev_current": ["sensor.wallbox*current*"],
-            "ev_energy": ["sensor.wallbox*energy*", "sensor.wallbox*session*"]
-        }
-    },
-    "goe": {
-        "name": "go-eCharger",
-        "description": "go-eCharger Gemini/HOME+ EV Charger",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.goe*connected*",
-                "binary_sensor.goe*car*",
-                "binary_sensor.*goe*plug*"
-            ],
-            "ev_charging": [
-                "binary_sensor.goe*charging*",
-                "binary_sensor.goe*charge_state*"
-            ],
-            "ev_power": [
-                "sensor.goe*power*",
-                "sensor.goe*nrg*"
-            ],
-            "ev_current": [
-                "sensor.goe*current*",
-                "sensor.goe*amp*"
-            ],
-            "ev_energy": [
-                "sensor.goe*energy*",
-                "sensor.goe*session*",
-                "sensor.goe*wh*"
-            ]
-        }
-    },
-    "easee": {
-        "name": "Easee",
-        "description": "Easee Home/Charge EV Charger",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.easee*cable_locked*",
-                "binary_sensor.easee*connected*"
-            ],
-            "ev_charging": [
-                "binary_sensor.easee*charging*",
-                "binary_sensor.easee*is_charging*"
-            ],
-            "ev_power": [
-                "sensor.easee*power*",
-                "sensor.easee*active_power*"
-            ],
-            "ev_current": [
-                "sensor.easee*current*",
-                "sensor.easee*circuit_current*"
-            ],
-            "ev_energy": [
-                "sensor.easee*energy*",
-                "sensor.easee*session_energy*",
-                "sensor.easee*lifetime_energy*"
-            ]
-        }
-    },
-    "tesla_wall_connector": {
-        "name": "Tesla Wall Connector",
-        "description": "Tesla Wall Connector Gen 2/3",
-        "confidence_bonus": 9,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.tesla_wall_connector*vehicle_connected*",
-                "binary_sensor.*tesla*connected*"
-            ],
-            "ev_charging": [
-                "binary_sensor.tesla_wall_connector*charging*",
-                "binary_sensor.*tesla*charging*"
-            ],
-            "ev_power": [
-                "sensor.tesla_wall_connector*power*",
-                "sensor.*tesla*power*"
-            ],
-            "ev_current": [
-                "sensor.tesla_wall_connector*current*",
-                "sensor.*tesla*current*"
-            ],
-            "ev_energy": [
-                "sensor.tesla_wall_connector*energy*",
-                "sensor.*tesla*session_energy*"
-            ]
-        }
-    },
-    "zaptec": {
-        "name": "Zaptec",
-        "description": "Zaptec Pro/Go EV Charger",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.zaptec*connected*",
-                "binary_sensor.zaptec*cable_connected*"
-            ],
-            "ev_charging": [
-                "binary_sensor.zaptec*charging*",
-                "binary_sensor.zaptec*is_charging*"
-            ],
-            "ev_power": [
-                "sensor.zaptec*power*",
-                "sensor.zaptec*charge_power*"
-            ],
-            "ev_current": [
-                "sensor.zaptec*current*",
-                "sensor.zaptec*charge_current*"
-            ],
-            "ev_energy": [
-                "sensor.zaptec*energy*",
-                "sensor.zaptec*session_energy*",
-                "sensor.zaptec*total_charge_power*"
-            ]
-        }
-    },
-    "openwb": {
-        "name": "OpenWB",
-        "description": "OpenWB open-source wallbox",
-        "confidence_bonus": 7,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.openwb*plugged*",
-                "binary_sensor.openwb*connected*",
-                "binary_sensor.*openwb*plug_state*"
-            ],
-            "ev_charging": [
-                "binary_sensor.openwb*charging*",
-                "binary_sensor.openwb*charge_state*"
-            ],
-            "ev_power": [
-                "sensor.openwb*power*",
-                "sensor.openwb*w*"
-            ],
-            "ev_current": [
-                "sensor.openwb*current*",
-                "sensor.openwb*a*"
-            ],
-            "ev_energy": [
-                "sensor.openwb*energy*",
-                "sensor.openwb*kwh*"
-            ]
-        }
-    },
-    "myenergi_zappi": {
-        "name": "Myenergi Zappi",
-        "description": "Myenergi Zappi solar-optimized EV charger",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.zappi*connected*",
-                "binary_sensor.zappi*plug*",
-                "binary_sensor.myenergi_zappi*connected*"
-            ],
-            "ev_charging": [
-                "binary_sensor.zappi*charging*",
-                "binary_sensor.zappi*status*",
-                "sensor.zappi*status*"
-            ],
-            "ev_power": [
-                "sensor.zappi*power*",
-                "sensor.zappi*charge_power*",
-                "sensor.myenergi_zappi*power*"
-            ],
-            "ev_current": [
-                "sensor.zappi*current*",
-                "sensor.zappi*charge_current*"
-            ],
-            "ev_energy": [
-                "sensor.zappi*energy*",
-                "sensor.zappi*session_energy*",
-                "sensor.zappi*charge_added*"
-            ]
-        }
-    },
-    "chargepoint": {
-        "name": "ChargePoint Home Flex",
-        "description": "ChargePoint Home Flex EV charger",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.chargepoint*connected*",
-                "binary_sensor.chargepoint*plugged*",
-                "binary_sensor.*chargepoint*vehicle*"
-            ],
-            "ev_charging": [
-                "binary_sensor.chargepoint*charging*",
-                "binary_sensor.chargepoint*status*"
-            ],
-            "ev_power": [
-                "sensor.chargepoint*power*",
-                "sensor.chargepoint*charging_power*"
-            ],
-            "ev_current": [
-                "sensor.chargepoint*current*",
-                "sensor.chargepoint*charging_current*"
-            ],
-            "ev_energy": [
-                "sensor.chargepoint*energy*",
-                "sensor.chargepoint*session_energy*",
-                "sensor.chargepoint*total_energy*"
-            ]
-        }
-    },
-    "heidelberg": {
-        "name": "Heidelberg Energy Control",
-        "description": "Heidelberg Wallbox Energy Control",
-        "confidence_bonus": 8,
-        "patterns": {
-            "ev_connected": [
-                "binary_sensor.heidelberg*connected*",
-                "binary_sensor.heidelberg*plug*",
-                "binary_sensor.*wallbox*connected*"
-            ],
-            "ev_charging": [
-                "binary_sensor.heidelberg*charging*",
-                "binary_sensor.heidelberg*active*"
-            ],
-            "ev_power": [
-                "sensor.heidelberg*power*",
-                "sensor.heidelberg*charging_power*",
-                "sensor.heidelberg*leistung*"
-            ],
-            "ev_current": [
-                "sensor.heidelberg*current*",
-                "sensor.heidelberg*strom*"
-            ],
-            "ev_energy": [
-                "sensor.heidelberg*energy*",
-                "sensor.heidelberg*energie*"
-            ]
-        }
-    },
-    "generic_ev": {
-        "name": "Generic EV Charger",
-        "description": "Generic or unknown EV charger",
-        "confidence_bonus": 0,
-        "patterns": {
-            "ev_connected": ["binary_sensor.*charger*connected*", "binary_sensor.*ev*connected*"],
-            "ev_charging": ["binary_sensor.*charger*charging*", "binary_sensor.*ev*charging*"],
-            "ev_power": ["sensor.*charger*power*", "sensor.*ev*power*"],
-            "ev_current": ["sensor.*charger*current*", "sensor.*ev*current*"],
-            "ev_energy": ["sensor.*charger*energy*", "sensor.*ev*energy*"]
-        }
-    }
-}
 
-# System completeness scoring
+# (#915) EV_CHARGER_MANUFACTURERS lived here: 11 brands x entity-id globs,
+# the pre-registry detection matrix. It has been dead since #814 moved
+# detection to the entity registry — the only reference left was a docstring
+# example — and it named boxes (tesla_wall_connector, myenergi_zappi) that
+# exist nowhere else in SEM. Deleting it rather than carrying it: brand
+# knowledge now lives in ONE place per question — hardware_matrix.py for what
+# SEM claims to support, _BRAND_HINTS for how detection recognises it, and
+# consts/integration_roster.py for what the ecosystem publishes.
+
 SYSTEM_COMPONENT_WEIGHTS: Final = {
     "solar_power": 25,      # Essential - solar production
     "grid_power": 25,       # Essential - grid monitoring
@@ -311,3 +52,70 @@ CONFIDENCE_EXCELLENT: Final = 90    # Complete system, same manufacturer
 CONFIDENCE_GOOD: Final = 70         # Most components found, mixed manufacturers
 CONFIDENCE_BASIC: Final = 50        # Minimum required components only
 CONFIDENCE_POOR: Final = 30         # Missing important components
+
+
+# (#801) SG-Ready contacts that are not switches.
+#
+# The SG-Ready standard's two contacts are a pair of booleans, but the HA
+# surface that carries them varies by hardware: a relay switch on most heat
+# pumps, and on a Buderus/Bosch behind EMS-ESP a pair of ``text`` entities
+# holding a bit string (``010000000000000``). Writing a contact's boolean is
+# the same operation either way — only the service and the payload differ.
+#
+# A domain ABSENT from this table is a TOGGLE domain, driven by
+# ``homeassistant.turn_on``/``turn_off`` exactly as SG-Ready always has been.
+# A domain PRESENT is a VALUE domain: the user gives the ON and the OFF value
+# for that contact and SEM writes it verbatim.
+CONTACT_VALUE_SERVICES: Final[dict] = {
+    # domain: (service domain, service, payload key)
+    "text":         ("text", "set_value", "value"),
+    "input_text":   ("input_text", "set_value", "value"),
+    "number":       ("number", "set_value", "value"),
+    "input_number": ("input_number", "set_value", "value"),
+    "select":       ("select", "select_option", "option"),
+    "input_select": ("input_select", "select_option", "option"),
+}
+
+# Every domain a SG-Ready contact may point at, in picker order: the two
+# toggle domains first (what every existing install uses), then the value
+# domains. Used by the config flow's EntitySelector for both contacts.
+SG_READY_CONTACT_DOMAINS: Final[list] = [
+    "switch", "input_boolean",
+] + list(CONTACT_VALUE_SERVICES)
+
+
+# (#804) A device RESTART is not a charging control.
+#
+# @HorizonKane's go-e Wattpilot publishes ``button.carport_wattpilot_
+# 91114903_neustart`` — the button that reboots the box. SEM adopted it as
+# the charger's start/stop control, so every attempt to resume charging
+# rebooted the hardware and every stop wrote nothing. Each language ships
+# one of these words, and each one of them contains "start".
+REBOOT_WORDS: Final = (
+    "restart", "neustart", "neu_starten", "herstart", "genstart", "omstart",
+    "starta_om", "start_pa_nytt", "reboot", "redemarrer", "redemarrage",
+    "reiniciar", "reinicio", "riavvia", "riavvio", "uruchom_ponownie",
+    "ujrainditas", "uudelleenkaynnistys", "repornire",
+)
+
+#: The device class Home Assistant puts on a restart button
+#: (``ButtonDeviceClass.RESTART``). It is the same in every language, which
+#: a word list can never be — so it is asked FIRST and the words are the
+#: fallback for integrations that declare no class.
+REBOOT_DEVICE_CLASS: Final = "restart"
+
+
+def names_a_reboot(entity_id: str, device_class: object = None) -> bool:
+    """True when this entity is a device restart.
+
+    ``device_class`` is the authoritative answer when the integration
+    declares one: HA labels these buttons ``restart`` whatever the user's
+    language. The words are the fallback, read on the entity id because
+    that is where the label lands when no class is set. Used to keep a
+    reboot out of every charger CONTROL role — a press SEM makes to start
+    a car must never power-cycle the charger.
+    """
+    if isinstance(device_class, str) and device_class.lower() == REBOOT_DEVICE_CLASS:
+        return True
+    lowered = str(entity_id or "").lower()
+    return any(word in lowered for word in REBOOT_WORDS)

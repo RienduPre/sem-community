@@ -64,6 +64,61 @@ def ev_layer_match(commanded_amps, observed_w, phases, voltage, connected,
     return observed_w > commanded_amps * phases * voltage * threshold
 
 
+def commanded_per_charger(devices) -> dict:
+    """(#961) What SEM actually asked each charger for, in amps.
+
+    Reads each device's own ``_current_setpoint`` — the same authoritative
+    value ``sensor.sem_charger_<id>_commanded_current`` publishes (#291) — so
+    the trace and that sensor can never tell different stories. A device whose
+    setpoint will not parse is omitted rather than counted as zero; the caller
+    publishes the roster beside the result so the gap is visible.
+
+    A module function, not a coordinator method, deliberately: the trace stubs
+    in the test suite bind coordinator methods one at a time, and a helper that
+    ``_trace_ev`` reaches for through ``self`` silently took the whole trace
+    record down in two test files when it was added that way.
+    """
+    out: dict = {}
+    for cid, dev in (devices or {}).items():
+        try:
+            out[str(cid)] = int(float(getattr(dev, "_current_setpoint", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def ev_match_per_charger(devices, per_charger_w, connected,
+                         default_phases: int = 3, default_voltage: int = 230) -> dict:
+    """(#961) Per-charger "is it actually drawing?", each against its OWN
+    phases, voltage and measured draw.
+
+    A fleet cannot be judged on one sum against one topology: amps do not add
+    across chargers, and a 1-phase box drawing correctly beside a stalled
+    3-phase box clears a threshold computed from the primary's single phase —
+    hiding exactly the stall this check exists to catch.
+
+    Returns ``{charger_id: True|False|None}``; empty when there is no
+    per-charger power slice, which the caller reads as "use the single-charger
+    check".
+    """
+    if not devices or not per_charger_w:
+        return {}
+    out: dict = {}
+    for cid, dev in devices.items():
+        key = str(cid)
+        if cid not in per_charger_w and key not in per_charger_w:
+            continue
+        watts = float(per_charger_w.get(cid, per_charger_w.get(key, 0.0)) or 0.0)
+        try:
+            amps = int(float(getattr(dev, "_current_setpoint", 0) or 0))
+            phases = int(getattr(dev, "phases", 0) or default_phases)
+            volts = int(getattr(dev, "voltage", 0) or default_voltage)
+        except (TypeError, ValueError):
+            continue
+        out[key] = ev_layer_match(amps, watts, phases, volts, connected)
+    return out
+
+
 def battery_layer_match(intent, charge_w: float, discharge_w: float):
     """Is an explicit battery COMMAND actually happening? ``None`` in normal /
     idle (nothing commanded). force_charge → must be charging; force_discharge

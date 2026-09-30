@@ -297,7 +297,7 @@ async def test_string_false_never_opens_actuation_gate():
     assert adapter.supports_forced_charge is False
     hass.services.async_call.assert_not_awaited()
     assert adapter.last_intent is None
-    assert "explicitly enabled" in adapter.last_error
+    assert "deye_actuation_enabled" in adapter.last_error
 
 
 def test_non_string_scope_ids_never_enable_writes():

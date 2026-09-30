@@ -58,10 +58,22 @@ def per_charger_translation_keys() -> dict[str, tuple[str, ...]]:
     end = number_src.index("per_charger_descriptions.append(base_desc)")
     numbers = re.findall(r'\)\s*,\s*"([a-z_0-9]+)"\s*,', number_src[start:end])
 
+
     select_src = (_ROOT / "select.py").read_text(encoding="utf-8")
     selects = re.findall(r'entry,\s*cid,\s*"([a-z_0-9]+)"\s*,', select_src)
 
-    return {"number": tuple(numbers), "select": tuple(selects)}
+    # (#980) The per-charger Pause button. Its class sets the translation key
+    # directly rather than taking it as a constructor argument, so it is read
+    # from there — derived, so deleting the entity drops the key with it.
+    button_src = (_ROOT / "button.py").read_text(encoding="utf-8")
+    buttons = []
+    if "class SEMChargerPauseButton" in button_src:
+        buttons = re.findall(
+            r'_attr_translation_key\s*=\s*"([a-z_0-9]+)"',
+            button_src[button_src.index("class SEMChargerPauseButton"):])
+
+    return {"number": tuple(numbers), "select": tuple(selects),
+            "button": tuple(buttons)}
 
 
 class TestPerChargerNamesResolve677:

@@ -72,6 +72,29 @@ class TestEveryClaimHasARow:
                       "Peblar", "V2C", "Alfen", "Blue Current", "OpenEVSE"):
             assert claim in rows, f"README claims {claim}, no matrix row"
 
+    def test_readme_battery_claims_have_rows(self):
+        """(#1018) The Batteries line was never checked: Pylontech sat there
+        with no row and no code until a docs review noticed. Batteries live
+        in the INVERTERS table (Sessy, Sonnen, Powerwall) — a claim maps to
+        the brand token of its row."""
+        readme = (_ROOT / "README.md").read_text()
+        rows = " ".join(r["brand"] for r in _hm.ALL_ROWS)
+        for claim, token in (("Sessy", "Sessy"), ("LUNA2000", "Huawei"),
+                             ("Powerwall", "Powerwall"), ("Sonnen", "Sonnen"),
+                             ("BYD", "BYD")):
+            assert claim in readme, f"premise: README stopped claiming {claim}"
+            assert token in rows, (
+                f"README claims {claim} but the matrix has no {token} row")
+
+    def test_readme_meter_claims_have_rows(self):
+        """(#1018) Same for the Smart Meters line (Discovergy was listed with
+        only an auto-crawled roster row, which is not support)."""
+        readme = (_ROOT / "README.md").read_text()
+        rows = " ".join(r["brand"] for r in _hm.OTHER_DEVICES)
+        for claim in ("Shelly",):
+            assert claim in readme, f"premise: README stopped claiming {claim}"
+            assert claim in rows, f"README claims {claim}, no matrix row"
+
 
 class TestEvidenceRules:
     """The rules apply to EVERY table, including tables added later — the

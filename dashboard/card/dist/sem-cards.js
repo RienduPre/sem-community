@@ -1,4 +1,4 @@
-const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,i=Symbol(),s=new WeakMap;let r=class{constructor(e,t,s){if(this._$cssResult$=!0,s!==i)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=t}get styleSheet(){let e=this.o;const i=this.t;if(t&&void 0===e){const t=void 0!==i&&1===i.length;t&&(e=s.get(i)),void 0===e&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),t&&s.set(i,e))}return e}toString(){return this.cssText}};const a=(e,...t)=>{const s=1===e.length?e[0]:t.reduce((t,i,s)=>t+(e=>{if(!0===e._$cssResult$)return e.cssText;if("number"==typeof e)return e;throw Error("Value passed to 'css' function must be a 'css' function result: "+e+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+e[s+1],e[0]);return new r(s,e,i)},o=t?e=>e:e=>e instanceof CSSStyleSheet?(e=>{let t="";for(const i of e.cssRules)t+=i.cssText;return(e=>new r("string"==typeof e?e:e+"",void 0,i))(t)})(e):e,{is:n,defineProperty:l,getOwnPropertyDescriptor:c,getOwnPropertyNames:d,getOwnPropertySymbols:p,getPrototypeOf:h}=Object,_=globalThis,g=_.trustedTypes,u=g?g.emptyScript:"",m=_.reactiveElementPolyfillSupport,f=(e,t)=>e,v={toAttribute(e,t){switch(t){case Boolean:e=e?u:null;break;case Object:case Array:e=null==e?e:JSON.stringify(e)}return e},fromAttribute(e,t){let i=e;switch(t){case Boolean:i=null!==e;break;case Number:i=null===e?null:Number(e);break;case Object:case Array:try{i=JSON.parse(e)}catch(e){i=null}}return i}},y=(e,t)=>!n(e,t),b={attribute:!0,type:String,converter:v,reflect:!1,useDefault:!1,hasChanged:y};Symbol.metadata??=Symbol("metadata"),_.litPropertyMetadata??=new WeakMap;let x=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??=[]).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,t=b){if(t.state&&(t.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((t=Object.create(t)).wrapped=!0),this.elementProperties.set(e,t),!t.noAccessor){const i=Symbol(),s=this.getPropertyDescriptor(e,i,t);void 0!==s&&l(this.prototype,e,s)}}static getPropertyDescriptor(e,t,i){const{get:s,set:r}=c(this.prototype,e)??{get(){return this[t]},set(e){this[t]=e}};return{get:s,set(t){const a=s?.call(this);r?.call(this,t),this.requestUpdate(e,a,i)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??b}static _$Ei(){if(this.hasOwnProperty(f("elementProperties")))return;const e=h(this);e.finalize(),void 0!==e.l&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(f("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(f("properties"))){const e=this.properties,t=[...d(e),...p(e)];for(const i of t)this.createProperty(i,e[i])}const e=this[Symbol.metadata];if(null!==e){const t=litPropertyMetadata.get(e);if(void 0!==t)for(const[e,i]of t)this.elementProperties.set(e,i)}this._$Eh=new Map;for(const[e,t]of this.elementProperties){const i=this._$Eu(e,t);void 0!==i&&this._$Eh.set(i,e)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){const t=[];if(Array.isArray(e)){const i=new Set(e.flat(1/0).reverse());for(const e of i)t.unshift(o(e))}else void 0!==e&&t.push(o(e));return t}static _$Eu(e,t){const i=t.attribute;return!1===i?void 0:"string"==typeof i?i:"string"==typeof e?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??=new Set).add(e),void 0!==this.renderRoot&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){const e=new Map,t=this.constructor.elementProperties;for(const i of t.keys())this.hasOwnProperty(i)&&(e.set(i,this[i]),delete this[i]);e.size>0&&(this._$Ep=e)}createRenderRoot(){const i=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return((i,s)=>{if(t)i.adoptedStyleSheets=s.map(e=>e instanceof CSSStyleSheet?e:e.styleSheet);else for(const t of s){const s=document.createElement("style"),r=e.litNonce;void 0!==r&&s.setAttribute("nonce",r),s.textContent=t.cssText,i.appendChild(s)}})(i,this.constructor.elementStyles),i}connectedCallback(){this.renderRoot??=this.createRenderRoot(),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,t,i){this._$AK(e,i)}_$ET(e,t){const i=this.constructor.elementProperties.get(e),s=this.constructor._$Eu(e,i);if(void 0!==s&&!0===i.reflect){const r=(void 0!==i.converter?.toAttribute?i.converter:v).toAttribute(t,i.type);this._$Em=e,null==r?this.removeAttribute(s):this.setAttribute(s,r),this._$Em=null}}_$AK(e,t){const i=this.constructor,s=i._$Eh.get(e);if(void 0!==s&&this._$Em!==s){const e=i.getPropertyOptions(s),r="function"==typeof e.converter?{fromAttribute:e.converter}:void 0!==e.converter?.fromAttribute?e.converter:v;this._$Em=s;const a=r.fromAttribute(t,e.type);this[s]=a??this._$Ej?.get(s)??a,this._$Em=null}}requestUpdate(e,t,i,s=!1,r){if(void 0!==e){const a=this.constructor;if(!1===s&&(r=this[e]),i??=a.getPropertyOptions(e),!((i.hasChanged??y)(r,t)||i.useDefault&&i.reflect&&r===this._$Ej?.get(e)&&!this.hasAttribute(a._$Eu(e,i))))return;this.C(e,t,i)}!1===this.isUpdatePending&&(this._$ES=this._$EP())}C(e,t,{useDefault:i,reflect:s,wrapped:r},a){i&&!(this._$Ej??=new Map).has(e)&&(this._$Ej.set(e,a??t??this[e]),!0!==r||void 0!==a)||(this._$AL.has(e)||(this.hasUpdated||i||(t=void 0),this._$AL.set(e,t)),!0===s&&this._$Em!==e&&(this._$Eq??=new Set).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(e){Promise.reject(e)}const e=this.scheduleUpdate();return null!=e&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??=this.createRenderRoot(),this._$Ep){for(const[e,t]of this._$Ep)this[e]=t;this._$Ep=void 0}const e=this.constructor.elementProperties;if(e.size>0)for(const[t,i]of e){const{wrapped:e}=i,s=this[t];!0!==e||this._$AL.has(t)||void 0===s||this.C(t,void 0,i,s)}}let e=!1;const t=this._$AL;try{e=this.shouldUpdate(t),e?(this.willUpdate(t),this._$EO?.forEach(e=>e.hostUpdate?.()),this.update(t)):this._$EM()}catch(t){throw e=!1,this._$EM(),t}e&&this._$AE(t)}willUpdate(e){}_$AE(e){this._$EO?.forEach(e=>e.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&=this._$Eq.forEach(e=>this._$ET(e,this[e])),this._$EM()}updated(e){}firstUpdated(e){}};x.elementStyles=[],x.shadowRootOptions={mode:"open"},x[f("elementProperties")]=new Map,x[f("finalized")]=new Map,m?.({ReactiveElement:x}),(_.reactiveElementVersions??=[]).push("2.1.2");const $=globalThis,w=e=>e,k=$.trustedTypes,S=k?k.createPolicy("lit-html",{createHTML:e=>e}):void 0,C="$lit$",z=`lit$${Math.random().toFixed(9).slice(2)}$`,M="?"+z,D=`<${M}>`,E=document,F=()=>E.createComment(""),A=e=>null===e||"object"!=typeof e&&"function"!=typeof e,I=Array.isArray,B="[ \t\n\f\r]",R=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,N=/-->/g,P=/>/g,T=RegExp(`>|${B}(?:([^\\s"'>=/]+)(${B}*=${B}*(?:[^ \t\n\f\r"'\`<>=]|("|')|))|$)`,"g"),L=/'/g,U=/"/g,O=/^(?:script|style|textarea|title)$/i,H=e=>(t,...i)=>({_$litType$:e,strings:t,values:i}),W=H(1),G=H(2),j=Symbol.for("lit-noChange"),q=Symbol.for("lit-nothing"),K=new WeakMap,V=E.createTreeWalker(E,129);function Y(e,t){if(!I(e)||!e.hasOwnProperty("raw"))throw Error("invalid template strings array");return void 0!==S?S.createHTML(t):t}const X=(e,t)=>{const i=e.length-1,s=[];let r,a=2===t?"<svg>":3===t?"<math>":"",o=R;for(let t=0;t<i;t++){const i=e[t];let n,l,c=-1,d=0;for(;d<i.length&&(o.lastIndex=d,l=o.exec(i),null!==l);)d=o.lastIndex,o===R?"!--"===l[1]?o=N:void 0!==l[1]?o=P:void 0!==l[2]?(O.test(l[2])&&(r=RegExp("</"+l[2],"g")),o=T):void 0!==l[3]&&(o=T):o===T?">"===l[0]?(o=r??R,c=-1):void 0===l[1]?c=-2:(c=o.lastIndex-l[2].length,n=l[1],o=void 0===l[3]?T:'"'===l[3]?U:L):o===U||o===L?o=T:o===N||o===P?o=R:(o=T,r=void 0);const p=o===T&&e[t+1].startsWith("/>")?" ":"";a+=o===R?i+D:c>=0?(s.push(n),i.slice(0,c)+C+i.slice(c)+z+p):i+z+(-2===c?t:p)}return[Y(e,a+(e[i]||"<?>")+(2===t?"</svg>":3===t?"</math>":"")),s]};class Z{constructor({strings:e,_$litType$:t},i){let s;this.parts=[];let r=0,a=0;const o=e.length-1,n=this.parts,[l,c]=X(e,t);if(this.el=Z.createElement(l,i),V.currentNode=this.el.content,2===t||3===t){const e=this.el.content.firstChild;e.replaceWith(...e.childNodes)}for(;null!==(s=V.nextNode())&&n.length<o;){if(1===s.nodeType){if(s.hasAttributes())for(const e of s.getAttributeNames())if(e.endsWith(C)){const t=c[a++],i=s.getAttribute(e).split(z),o=/([.?@])?(.*)/.exec(t);n.push({type:1,index:r,name:o[2],strings:i,ctor:"."===o[1]?ie:"?"===o[1]?se:"@"===o[1]?re:te}),s.removeAttribute(e)}else e.startsWith(z)&&(n.push({type:6,index:r}),s.removeAttribute(e));if(O.test(s.tagName)){const e=s.textContent.split(z),t=e.length-1;if(t>0){s.textContent=k?k.emptyScript:"";for(let i=0;i<t;i++)s.append(e[i],F()),V.nextNode(),n.push({type:2,index:++r});s.append(e[t],F())}}}else if(8===s.nodeType)if(s.data===M)n.push({type:2,index:r});else{let e=-1;for(;-1!==(e=s.data.indexOf(z,e+1));)n.push({type:7,index:r}),e+=z.length-1}r++}}static createElement(e,t){const i=E.createElement("template");return i.innerHTML=e,i}}function J(e,t,i=e,s){if(t===j)return t;let r=void 0!==s?i._$Co?.[s]:i._$Cl;const a=A(t)?void 0:t._$litDirective$;return r?.constructor!==a&&(r?._$AO?.(!1),void 0===a?r=void 0:(r=new a(e),r._$AT(e,i,s)),void 0!==s?(i._$Co??=[])[s]=r:i._$Cl=r),void 0!==r&&(t=J(e,r._$AS(e,t.values),r,s)),t}class Q{constructor(e,t){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=t}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){const{el:{content:t},parts:i}=this._$AD,s=(e?.creationScope??E).importNode(t,!0);V.currentNode=s;let r=V.nextNode(),a=0,o=0,n=i[0];for(;void 0!==n;){if(a===n.index){let t;2===n.type?t=new ee(r,r.nextSibling,this,e):1===n.type?t=new n.ctor(r,n.name,n.strings,this,e):6===n.type&&(t=new ae(r,this,e)),this._$AV.push(t),n=i[++o]}a!==n?.index&&(r=V.nextNode(),a++)}return V.currentNode=E,s}p(e){let t=0;for(const i of this._$AV)void 0!==i&&(void 0!==i.strings?(i._$AI(e,i,t),t+=i.strings.length-2):i._$AI(e[t])),t++}}class ee{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,t,i,s){this.type=2,this._$AH=q,this._$AN=void 0,this._$AA=e,this._$AB=t,this._$AM=i,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode;const t=this._$AM;return void 0!==t&&11===e?.nodeType&&(e=t.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,t=this){e=J(this,e,t),A(e)?e===q||null==e||""===e?(this._$AH!==q&&this._$AR(),this._$AH=q):e!==this._$AH&&e!==j&&this._(e):void 0!==e._$litType$?this.$(e):void 0!==e.nodeType?this.T(e):(e=>I(e)||"function"==typeof e?.[Symbol.iterator])(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==q&&A(this._$AH)?this._$AA.nextSibling.data=e:this.T(E.createTextNode(e)),this._$AH=e}$(e){const{values:t,_$litType$:i}=e,s="number"==typeof i?this._$AC(e):(void 0===i.el&&(i.el=Z.createElement(Y(i.h,i.h[0]),this.options)),i);if(this._$AH?._$AD===s)this._$AH.p(t);else{const e=new Q(s,this),i=e.u(this.options);e.p(t),this.T(i),this._$AH=e}}_$AC(e){let t=K.get(e.strings);return void 0===t&&K.set(e.strings,t=new Z(e)),t}k(e){I(this._$AH)||(this._$AH=[],this._$AR());const t=this._$AH;let i,s=0;for(const r of e)s===t.length?t.push(i=new ee(this.O(F()),this.O(F()),this,this.options)):i=t[s],i._$AI(r),s++;s<t.length&&(this._$AR(i&&i._$AB.nextSibling,s),t.length=s)}_$AR(e=this._$AA.nextSibling,t){for(this._$AP?.(!1,!0,t);e!==this._$AB;){const t=w(e).nextSibling;w(e).remove(),e=t}}setConnected(e){void 0===this._$AM&&(this._$Cv=e,this._$AP?.(e))}}class te{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,t,i,s,r){this.type=1,this._$AH=q,this._$AN=void 0,this.element=e,this.name=t,this._$AM=s,this.options=r,i.length>2||""!==i[0]||""!==i[1]?(this._$AH=Array(i.length-1).fill(new String),this.strings=i):this._$AH=q}_$AI(e,t=this,i,s){const r=this.strings;let a=!1;if(void 0===r)e=J(this,e,t,0),a=!A(e)||e!==this._$AH&&e!==j,a&&(this._$AH=e);else{const s=e;let o,n;for(e=r[0],o=0;o<r.length-1;o++)n=J(this,s[i+o],t,o),n===j&&(n=this._$AH[o]),a||=!A(n)||n!==this._$AH[o],n===q?e=q:e!==q&&(e+=(n??"")+r[o+1]),this._$AH[o]=n}a&&!s&&this.j(e)}j(e){e===q?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}}class ie extends te{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===q?void 0:e}}class se extends te{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==q)}}class re extends te{constructor(e,t,i,s,r){super(e,t,i,s,r),this.type=5}_$AI(e,t=this){if((e=J(this,e,t,0)??q)===j)return;const i=this._$AH,s=e===q&&i!==q||e.capture!==i.capture||e.once!==i.once||e.passive!==i.passive,r=e!==q&&(i===q||s);s&&this.element.removeEventListener(this.name,this,i),r&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){"function"==typeof this._$AH?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}}class ae{constructor(e,t,i){this.element=e,this.type=6,this._$AN=void 0,this._$AM=t,this.options=i}get _$AU(){return this._$AM._$AU}_$AI(e){J(this,e)}}const oe={I:ee},ne=$.litHtmlPolyfillSupport;ne?.(Z,ee),($.litHtmlVersions??=[]).push("3.3.3");const le=globalThis;let ce=class extends x{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){const e=super.createRenderRoot();return this.renderOptions.renderBefore??=e.firstChild,e}update(e){const t=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=((e,t,i)=>{const s=i?.renderBefore??t;let r=s._$litPart$;if(void 0===r){const e=i?.renderBefore??null;s._$litPart$=r=new ee(t.insertBefore(F(),e),e,void 0,i??{})}return r._$AI(e),r})(t,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return j}};ce._$litElement$=!0,ce.finalized=!0,le.litElementHydrateSupport?.({LitElement:ce});const de=le.litElementPolyfillSupport;de?.({LitElement:ce}),(le.litElementVersions??=[]).push("4.2.2");const pe={solar:"#ff9800",gridImport:"#488fc2",gridExport:"#8353d1",batteryOut:"#4db6ac",battery:"#4db6ac",home:"#5BC8D8",ev:"#8DC892",inverter:"#96CAEE"},he=["#FF8A65","#AED581","#CE93D8","#64B5F6","#ff9800","#96CAEE"],_e="#86A9B4";function ge(e){if(null==e||isNaN(e))return"— W";return Math.abs(e)>=1e3?`${(e/1e3).toFixed(1)} kW`:`${Math.round(e)} W`}function ue(e,t){if(!e)return"—";try{return new Date(e).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:t||void 0})}catch(e){return"—"}}function me(e){const t=Math.abs(e);if(t<=0)return 4;const i=4-.9*Math.log10(Math.max(t,1));return Math.max(.5,Math.min(4,i))}function fe(e){if(!e)return"EUR";const t=e.states?.["sensor.sem_daily_costs"];return t?.attributes?.unit_of_measurement?t.attributes.unit_of_measurement:e.config?.currency||"EUR"}function ve(e){const t=e||document.documentElement,i=getComputedStyle(t),s=(e,t)=>i.getPropertyValue(e).trim()||t,r=s("--primary-text-color","#e0e0e0"),a=s("--secondary-text-color","#888888"),o=s("--card-background-color","rgba(30,35,45,0.5)"),n=s("--divider-color","rgba(255,255,255,0.12)"),l=s("--secondary-background-color","rgba(255,255,255,0.06)"),c=s("--ha-card-box-shadow","0 2px 8px rgba(0,0,0,0.15)"),d=s("--primary-color","#42a5f5"),p=(()=>{const e=s("--primary-background-color","#111"),t=e.match(/\d+/g);if(t&&t.length>=3){return(.299*+t[0]+.587*+t[1]+.114*+t[2])/255<.5}return!(e.startsWith("#f")||e.startsWith("#e")||e.startsWith("#d")||e.startsWith("#c")||e.startsWith("rgb(2"))})();return{text:r,textSec:a,cardBg:o,divider:n,bgSec:l,shadow:c,accent:d,isDark:p,textTertiary:p?"rgba(255,255,255,0.45)":"rgba(0,0,0,0.50)",textDisabled:p?"rgba(255,255,255,0.26)":"rgba(0,0,0,0.30)",surface:p?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.03)",surfaceHover:p?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.06)",surfaceBorder:p?"rgba(255,255,255,0.12)":"rgba(0,0,0,0.08)",dotColor:p?"rgba(128,128,128,0.05)":"rgba(128,128,128,0.06)",glowAlpha:p?.05:.03,tooltipBg:p?"rgba(20,20,30,0.95)":"rgba(255,255,255,0.95)",tooltipText:p?"#e0e0e0":"#333333",tooltipBorder:p?"rgba(255,255,255,0.15)":"rgba(0,0,0,0.12)"}}function ye(e,t,i){return`radial-gradient(ellipse 70% 60% at 50% 25%, ${t}${Math.round(.06*255).toString(16).padStart(2,"0")} 0%, transparent 100%),\n            radial-gradient(circle at 2px 2px, ${e.dotColor} 0.7px, transparent 0.7px)`}function be(e,t){if(!e?.states)return"";const i=t||"sensor.sem_";return["pv1","pv2","pv3","pv4"].map(t=>e.states[`${i}pv_string_${t}_power`]?.state??"").join("|")}function xe(e,t){if(!e||!e.states)return[];const i=t||"sensor.sem_",s=[];for(const t of["pv1","pv2","pv3","pv4"]){const r=`${i}pv_string_${t}_power`,a=e.states[r];if(!a)continue;const o=parseFloat(a.state);if(isNaN(o))continue;const n=`${i}pv_string_${t}_daily_energy`,l=e.states[n],c=l?parseFloat(l.state):NaN;s.push({slot:t,watts:o,entityId:r,energyKwh:isNaN(c)?null:c,energyEntityId:l?n:null,name:a.attributes&&a.attributes.string_name||"PV"+t.replace(/^pv/,"")})}return s.length>=2?s:[]}const $e="\n    .pv-strings-row {\n        display: flex;\n        flex-wrap: wrap;\n        gap: 6px;\n        padding: 6px 12px;\n        font-family: 'Segoe UI','Roboto',sans-serif;\n        font-size: 12px;\n    }\n    .pv-chip {\n        display: inline-flex;\n        align-items: baseline;\n        gap: 4px;\n        padding: 2px 8px;\n        background: rgba(255, 152, 0, 0.10);\n        border: 1px solid rgba(255, 152, 0, 0.25);\n        border-radius: 999px;\n        color: var(--secondary-text-color, #aaa);\n        cursor: pointer;\n        transition: background 120ms ease;\n    }\n    .pv-chip:hover { background: rgba(255, 152, 0, 0.18); }\n    .pv-chip-label {\n        font-size: 11px;\n        letter-spacing: 0.5px;\n        text-transform: uppercase;\n        opacity: 0.7;\n    }\n    .pv-chip-value {\n        color: var(--sem-solar, #ff9800);\n        font-weight: 600;\n        font-variant-numeric: tabular-nums;\n    }\n";function we(e,t,i){customElements.get(e)||(customElements.define(e,t),i&&(window.customCards=window.customCards||[],window.customCards.push(i)))}const ke=a`
+const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,i=Symbol(),s=new WeakMap;let r=class{constructor(e,t,s){if(this._$cssResult$=!0,s!==i)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=t}get styleSheet(){let e=this.o;const i=this.t;if(t&&void 0===e){const t=void 0!==i&&1===i.length;t&&(e=s.get(i)),void 0===e&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),t&&s.set(i,e))}return e}toString(){return this.cssText}};const a=(e,...t)=>{const s=1===e.length?e[0]:t.reduce((t,i,s)=>t+(e=>{if(!0===e._$cssResult$)return e.cssText;if("number"==typeof e)return e;throw Error("Value passed to 'css' function must be a 'css' function result: "+e+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+e[s+1],e[0]);return new r(s,e,i)},o=t?e=>e:e=>e instanceof CSSStyleSheet?(e=>{let t="";for(const i of e.cssRules)t+=i.cssText;return(e=>new r("string"==typeof e?e:e+"",void 0,i))(t)})(e):e,{is:n,defineProperty:l,getOwnPropertyDescriptor:c,getOwnPropertyNames:d,getOwnPropertySymbols:p,getPrototypeOf:h}=Object,_=globalThis,g=_.trustedTypes,u=g?g.emptyScript:"",m=_.reactiveElementPolyfillSupport,f=(e,t)=>e,v={toAttribute(e,t){switch(t){case Boolean:e=e?u:null;break;case Object:case Array:e=null==e?e:JSON.stringify(e)}return e},fromAttribute(e,t){let i=e;switch(t){case Boolean:i=null!==e;break;case Number:i=null===e?null:Number(e);break;case Object:case Array:try{i=JSON.parse(e)}catch(e){i=null}}return i}},y=(e,t)=>!n(e,t),b={attribute:!0,type:String,converter:v,reflect:!1,useDefault:!1,hasChanged:y};Symbol.metadata??=Symbol("metadata"),_.litPropertyMetadata??=new WeakMap;let x=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??=[]).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,t=b){if(t.state&&(t.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((t=Object.create(t)).wrapped=!0),this.elementProperties.set(e,t),!t.noAccessor){const i=Symbol(),s=this.getPropertyDescriptor(e,i,t);void 0!==s&&l(this.prototype,e,s)}}static getPropertyDescriptor(e,t,i){const{get:s,set:r}=c(this.prototype,e)??{get(){return this[t]},set(e){this[t]=e}};return{get:s,set(t){const a=s?.call(this);r?.call(this,t),this.requestUpdate(e,a,i)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??b}static _$Ei(){if(this.hasOwnProperty(f("elementProperties")))return;const e=h(this);e.finalize(),void 0!==e.l&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(f("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(f("properties"))){const e=this.properties,t=[...d(e),...p(e)];for(const i of t)this.createProperty(i,e[i])}const e=this[Symbol.metadata];if(null!==e){const t=litPropertyMetadata.get(e);if(void 0!==t)for(const[e,i]of t)this.elementProperties.set(e,i)}this._$Eh=new Map;for(const[e,t]of this.elementProperties){const i=this._$Eu(e,t);void 0!==i&&this._$Eh.set(i,e)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){const t=[];if(Array.isArray(e)){const i=new Set(e.flat(1/0).reverse());for(const e of i)t.unshift(o(e))}else void 0!==e&&t.push(o(e));return t}static _$Eu(e,t){const i=t.attribute;return!1===i?void 0:"string"==typeof i?i:"string"==typeof e?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??=new Set).add(e),void 0!==this.renderRoot&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){const e=new Map,t=this.constructor.elementProperties;for(const i of t.keys())this.hasOwnProperty(i)&&(e.set(i,this[i]),delete this[i]);e.size>0&&(this._$Ep=e)}createRenderRoot(){const i=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return((i,s)=>{if(t)i.adoptedStyleSheets=s.map(e=>e instanceof CSSStyleSheet?e:e.styleSheet);else for(const t of s){const s=document.createElement("style"),r=e.litNonce;void 0!==r&&s.setAttribute("nonce",r),s.textContent=t.cssText,i.appendChild(s)}})(i,this.constructor.elementStyles),i}connectedCallback(){this.renderRoot??=this.createRenderRoot(),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,t,i){this._$AK(e,i)}_$ET(e,t){const i=this.constructor.elementProperties.get(e),s=this.constructor._$Eu(e,i);if(void 0!==s&&!0===i.reflect){const r=(void 0!==i.converter?.toAttribute?i.converter:v).toAttribute(t,i.type);this._$Em=e,null==r?this.removeAttribute(s):this.setAttribute(s,r),this._$Em=null}}_$AK(e,t){const i=this.constructor,s=i._$Eh.get(e);if(void 0!==s&&this._$Em!==s){const e=i.getPropertyOptions(s),r="function"==typeof e.converter?{fromAttribute:e.converter}:void 0!==e.converter?.fromAttribute?e.converter:v;this._$Em=s;const a=r.fromAttribute(t,e.type);this[s]=a??this._$Ej?.get(s)??a,this._$Em=null}}requestUpdate(e,t,i,s=!1,r){if(void 0!==e){const a=this.constructor;if(!1===s&&(r=this[e]),i??=a.getPropertyOptions(e),!((i.hasChanged??y)(r,t)||i.useDefault&&i.reflect&&r===this._$Ej?.get(e)&&!this.hasAttribute(a._$Eu(e,i))))return;this.C(e,t,i)}!1===this.isUpdatePending&&(this._$ES=this._$EP())}C(e,t,{useDefault:i,reflect:s,wrapped:r},a){i&&!(this._$Ej??=new Map).has(e)&&(this._$Ej.set(e,a??t??this[e]),!0!==r||void 0!==a)||(this._$AL.has(e)||(this.hasUpdated||i||(t=void 0),this._$AL.set(e,t)),!0===s&&this._$Em!==e&&(this._$Eq??=new Set).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(e){Promise.reject(e)}const e=this.scheduleUpdate();return null!=e&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??=this.createRenderRoot(),this._$Ep){for(const[e,t]of this._$Ep)this[e]=t;this._$Ep=void 0}const e=this.constructor.elementProperties;if(e.size>0)for(const[t,i]of e){const{wrapped:e}=i,s=this[t];!0!==e||this._$AL.has(t)||void 0===s||this.C(t,void 0,i,s)}}let e=!1;const t=this._$AL;try{e=this.shouldUpdate(t),e?(this.willUpdate(t),this._$EO?.forEach(e=>e.hostUpdate?.()),this.update(t)):this._$EM()}catch(t){throw e=!1,this._$EM(),t}e&&this._$AE(t)}willUpdate(e){}_$AE(e){this._$EO?.forEach(e=>e.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&=this._$Eq.forEach(e=>this._$ET(e,this[e])),this._$EM()}updated(e){}firstUpdated(e){}};x.elementStyles=[],x.shadowRootOptions={mode:"open"},x[f("elementProperties")]=new Map,x[f("finalized")]=new Map,m?.({ReactiveElement:x}),(_.reactiveElementVersions??=[]).push("2.1.2");const $=globalThis,w=e=>e,k=$.trustedTypes,S=k?k.createPolicy("lit-html",{createHTML:e=>e}):void 0,C="$lit$",z=`lit$${Math.random().toFixed(9).slice(2)}$`,M="?"+z,D=`<${M}>`,E=document,F=()=>E.createComment(""),I=e=>null===e||"object"!=typeof e&&"function"!=typeof e,A=Array.isArray,N="[ \t\n\f\r]",B=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,T=/-->/g,R=/>/g,P=RegExp(`>|${N}(?:([^\\s"'>=/]+)(${N}*=${N}*(?:[^ \t\n\f\r"'\`<>=]|("|')|))|$)`,"g"),L=/'/g,U=/"/g,O=/^(?:script|style|textarea|title)$/i,H=e=>(t,...i)=>({_$litType$:e,strings:t,values:i}),W=H(1),j=H(2),G=Symbol.for("lit-noChange"),K=Symbol.for("lit-nothing"),q=new WeakMap,V=E.createTreeWalker(E,129);function Y(e,t){if(!A(e)||!e.hasOwnProperty("raw"))throw Error("invalid template strings array");return void 0!==S?S.createHTML(t):t}const X=(e,t)=>{const i=e.length-1,s=[];let r,a=2===t?"<svg>":3===t?"<math>":"",o=B;for(let t=0;t<i;t++){const i=e[t];let n,l,c=-1,d=0;for(;d<i.length&&(o.lastIndex=d,l=o.exec(i),null!==l);)d=o.lastIndex,o===B?"!--"===l[1]?o=T:void 0!==l[1]?o=R:void 0!==l[2]?(O.test(l[2])&&(r=RegExp("</"+l[2],"g")),o=P):void 0!==l[3]&&(o=P):o===P?">"===l[0]?(o=r??B,c=-1):void 0===l[1]?c=-2:(c=o.lastIndex-l[2].length,n=l[1],o=void 0===l[3]?P:'"'===l[3]?U:L):o===U||o===L?o=P:o===T||o===R?o=B:(o=P,r=void 0);const p=o===P&&e[t+1].startsWith("/>")?" ":"";a+=o===B?i+D:c>=0?(s.push(n),i.slice(0,c)+C+i.slice(c)+z+p):i+z+(-2===c?t:p)}return[Y(e,a+(e[i]||"<?>")+(2===t?"</svg>":3===t?"</math>":"")),s]};class Z{constructor({strings:e,_$litType$:t},i){let s;this.parts=[];let r=0,a=0;const o=e.length-1,n=this.parts,[l,c]=X(e,t);if(this.el=Z.createElement(l,i),V.currentNode=this.el.content,2===t||3===t){const e=this.el.content.firstChild;e.replaceWith(...e.childNodes)}for(;null!==(s=V.nextNode())&&n.length<o;){if(1===s.nodeType){if(s.hasAttributes())for(const e of s.getAttributeNames())if(e.endsWith(C)){const t=c[a++],i=s.getAttribute(e).split(z),o=/([.?@])?(.*)/.exec(t);n.push({type:1,index:r,name:o[2],strings:i,ctor:"."===o[1]?ie:"?"===o[1]?se:"@"===o[1]?re:te}),s.removeAttribute(e)}else e.startsWith(z)&&(n.push({type:6,index:r}),s.removeAttribute(e));if(O.test(s.tagName)){const e=s.textContent.split(z),t=e.length-1;if(t>0){s.textContent=k?k.emptyScript:"";for(let i=0;i<t;i++)s.append(e[i],F()),V.nextNode(),n.push({type:2,index:++r});s.append(e[t],F())}}}else if(8===s.nodeType)if(s.data===M)n.push({type:2,index:r});else{let e=-1;for(;-1!==(e=s.data.indexOf(z,e+1));)n.push({type:7,index:r}),e+=z.length-1}r++}}static createElement(e,t){const i=E.createElement("template");return i.innerHTML=e,i}}function J(e,t,i=e,s){if(t===G)return t;let r=void 0!==s?i._$Co?.[s]:i._$Cl;const a=I(t)?void 0:t._$litDirective$;return r?.constructor!==a&&(r?._$AO?.(!1),void 0===a?r=void 0:(r=new a(e),r._$AT(e,i,s)),void 0!==s?(i._$Co??=[])[s]=r:i._$Cl=r),void 0!==r&&(t=J(e,r._$AS(e,t.values),r,s)),t}class Q{constructor(e,t){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=t}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){const{el:{content:t},parts:i}=this._$AD,s=(e?.creationScope??E).importNode(t,!0);V.currentNode=s;let r=V.nextNode(),a=0,o=0,n=i[0];for(;void 0!==n;){if(a===n.index){let t;2===n.type?t=new ee(r,r.nextSibling,this,e):1===n.type?t=new n.ctor(r,n.name,n.strings,this,e):6===n.type&&(t=new ae(r,this,e)),this._$AV.push(t),n=i[++o]}a!==n?.index&&(r=V.nextNode(),a++)}return V.currentNode=E,s}p(e){let t=0;for(const i of this._$AV)void 0!==i&&(void 0!==i.strings?(i._$AI(e,i,t),t+=i.strings.length-2):i._$AI(e[t])),t++}}class ee{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,t,i,s){this.type=2,this._$AH=K,this._$AN=void 0,this._$AA=e,this._$AB=t,this._$AM=i,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode;const t=this._$AM;return void 0!==t&&11===e?.nodeType&&(e=t.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,t=this){e=J(this,e,t),I(e)?e===K||null==e||""===e?(this._$AH!==K&&this._$AR(),this._$AH=K):e!==this._$AH&&e!==G&&this._(e):void 0!==e._$litType$?this.$(e):void 0!==e.nodeType?this.T(e):(e=>A(e)||"function"==typeof e?.[Symbol.iterator])(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==K&&I(this._$AH)?this._$AA.nextSibling.data=e:this.T(E.createTextNode(e)),this._$AH=e}$(e){const{values:t,_$litType$:i}=e,s="number"==typeof i?this._$AC(e):(void 0===i.el&&(i.el=Z.createElement(Y(i.h,i.h[0]),this.options)),i);if(this._$AH?._$AD===s)this._$AH.p(t);else{const e=new Q(s,this),i=e.u(this.options);e.p(t),this.T(i),this._$AH=e}}_$AC(e){let t=q.get(e.strings);return void 0===t&&q.set(e.strings,t=new Z(e)),t}k(e){A(this._$AH)||(this._$AH=[],this._$AR());const t=this._$AH;let i,s=0;for(const r of e)s===t.length?t.push(i=new ee(this.O(F()),this.O(F()),this,this.options)):i=t[s],i._$AI(r),s++;s<t.length&&(this._$AR(i&&i._$AB.nextSibling,s),t.length=s)}_$AR(e=this._$AA.nextSibling,t){for(this._$AP?.(!1,!0,t);e!==this._$AB;){const t=w(e).nextSibling;w(e).remove(),e=t}}setConnected(e){void 0===this._$AM&&(this._$Cv=e,this._$AP?.(e))}}class te{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,t,i,s,r){this.type=1,this._$AH=K,this._$AN=void 0,this.element=e,this.name=t,this._$AM=s,this.options=r,i.length>2||""!==i[0]||""!==i[1]?(this._$AH=Array(i.length-1).fill(new String),this.strings=i):this._$AH=K}_$AI(e,t=this,i,s){const r=this.strings;let a=!1;if(void 0===r)e=J(this,e,t,0),a=!I(e)||e!==this._$AH&&e!==G,a&&(this._$AH=e);else{const s=e;let o,n;for(e=r[0],o=0;o<r.length-1;o++)n=J(this,s[i+o],t,o),n===G&&(n=this._$AH[o]),a||=!I(n)||n!==this._$AH[o],n===K?e=K:e!==K&&(e+=(n??"")+r[o+1]),this._$AH[o]=n}a&&!s&&this.j(e)}j(e){e===K?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}}class ie extends te{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===K?void 0:e}}class se extends te{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==K)}}class re extends te{constructor(e,t,i,s,r){super(e,t,i,s,r),this.type=5}_$AI(e,t=this){if((e=J(this,e,t,0)??K)===G)return;const i=this._$AH,s=e===K&&i!==K||e.capture!==i.capture||e.once!==i.once||e.passive!==i.passive,r=e!==K&&(i===K||s);s&&this.element.removeEventListener(this.name,this,i),r&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){"function"==typeof this._$AH?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}}class ae{constructor(e,t,i){this.element=e,this.type=6,this._$AN=void 0,this._$AM=t,this.options=i}get _$AU(){return this._$AM._$AU}_$AI(e){J(this,e)}}const oe={I:ee},ne=$.litHtmlPolyfillSupport;ne?.(Z,ee),($.litHtmlVersions??=[]).push("3.3.3");const le=globalThis;let ce=class extends x{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){const e=super.createRenderRoot();return this.renderOptions.renderBefore??=e.firstChild,e}update(e){const t=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=((e,t,i)=>{const s=i?.renderBefore??t;let r=s._$litPart$;if(void 0===r){const e=i?.renderBefore??null;s._$litPart$=r=new ee(t.insertBefore(F(),e),e,void 0,i??{})}return r._$AI(e),r})(t,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return G}};ce._$litElement$=!0,ce.finalized=!0,le.litElementHydrateSupport?.({LitElement:ce});const de=le.litElementPolyfillSupport;de?.({LitElement:ce}),(le.litElementVersions??=[]).push("4.2.2");const pe={solar:"#ff9800",gridImport:"#488fc2",gridExport:"#8353d1",batteryOut:"#4db6ac",battery:"#4db6ac",home:"#5BC8D8",ev:"#8DC892",inverter:"#96CAEE"},he=["#FF8A65","#AED581","#CE93D8","#64B5F6","#ff9800","#96CAEE"],_e="#86A9B4";function ge(e){if(null==e||isNaN(e))return"— W";return Math.abs(e)>=1e3?`${(e/1e3).toFixed(1)} kW`:`${Math.round(e)} W`}function ue(e,t){if(!e)return"—";try{return new Date(e).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:t||void 0})}catch(e){return"—"}}function me(e){const t=Math.abs(e);if(t<=0)return 4;const i=4-.9*Math.log10(Math.max(t,1));return Math.max(.5,Math.min(4,i))}function fe(e){if(!e)return"EUR";const t=e.states?.["sensor.sem_daily_costs"];return t?.attributes?.unit_of_measurement?t.attributes.unit_of_measurement:e.config?.currency||"EUR"}function ve(e){const t=e||document.documentElement,i=getComputedStyle(t),s=(e,t)=>i.getPropertyValue(e).trim()||t,r=s("--primary-text-color","#e0e0e0"),a=s("--secondary-text-color","#888888"),o=s("--card-background-color","rgba(30,35,45,0.5)"),n=s("--divider-color","rgba(255,255,255,0.12)"),l=s("--secondary-background-color","rgba(255,255,255,0.06)"),c=s("--ha-card-box-shadow","0 2px 8px rgba(0,0,0,0.15)"),d=s("--primary-color","#42a5f5"),p=(()=>{const e=s("--primary-background-color","#111"),t=e.match(/\d+/g);if(t&&t.length>=3){return(.299*+t[0]+.587*+t[1]+.114*+t[2])/255<.5}return!(e.startsWith("#f")||e.startsWith("#e")||e.startsWith("#d")||e.startsWith("#c")||e.startsWith("rgb(2"))})();return{text:r,textSec:a,cardBg:o,divider:n,bgSec:l,shadow:c,accent:d,isDark:p,textTertiary:p?"rgba(255,255,255,0.45)":"rgba(0,0,0,0.50)",textDisabled:p?"rgba(255,255,255,0.26)":"rgba(0,0,0,0.30)",surface:p?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.03)",surfaceHover:p?"rgba(255,255,255,0.10)":"rgba(0,0,0,0.06)",surfaceBorder:p?"rgba(255,255,255,0.12)":"rgba(0,0,0,0.08)",dotColor:p?"rgba(128,128,128,0.05)":"rgba(128,128,128,0.06)",glowAlpha:p?.05:.03,tooltipBg:p?"rgba(20,20,30,0.95)":"rgba(255,255,255,0.95)",tooltipText:p?"#e0e0e0":"#333333",tooltipBorder:p?"rgba(255,255,255,0.15)":"rgba(0,0,0,0.12)"}}function ye(e,t,i){return`radial-gradient(ellipse 70% 60% at 50% 25%, ${t}${Math.round(.06*255).toString(16).padStart(2,"0")} 0%, transparent 100%),\n            radial-gradient(circle at 2px 2px, ${e.dotColor} 0.7px, transparent 0.7px)`}function be(e,t){if(!e?.states)return"";const i=t||"sensor.sem_";return["pv1","pv2","pv3","pv4"].map(t=>e.states[`${i}pv_string_${t}_power`]?.state??"").join("|")}function xe(e,t){if(!e||!e.states)return[];const i=t||"sensor.sem_",s=[];for(const t of["pv1","pv2","pv3","pv4"]){const r=`${i}pv_string_${t}_power`,a=e.states[r];if(!a)continue;const o=parseFloat(a.state);if(isNaN(o))continue;const n=`${i}pv_string_${t}_daily_energy`,l=e.states[n],c=l?parseFloat(l.state):NaN;s.push({slot:t,watts:o,entityId:r,energyKwh:isNaN(c)?null:c,energyEntityId:l?n:null,name:a.attributes&&a.attributes.string_name||"PV"+t.replace(/^pv/,"")})}return s.length>=2?s:[]}const $e="\n    .pv-strings-row {\n        display: flex;\n        flex-wrap: wrap;\n        gap: 6px;\n        padding: 6px 12px;\n        font-family: 'Segoe UI','Roboto',sans-serif;\n        font-size: 12px;\n    }\n    .pv-chip {\n        display: inline-flex;\n        align-items: baseline;\n        gap: 4px;\n        padding: 2px 8px;\n        background: rgba(255, 152, 0, 0.10);\n        border: 1px solid rgba(255, 152, 0, 0.25);\n        border-radius: 999px;\n        color: var(--secondary-text-color, #aaa);\n        cursor: pointer;\n        transition: background 120ms ease;\n    }\n    .pv-chip:hover { background: rgba(255, 152, 0, 0.18); }\n    .pv-chip-label {\n        font-size: 11px;\n        letter-spacing: 0.5px;\n        text-transform: uppercase;\n        opacity: 0.7;\n    }\n    .pv-chip-value {\n        color: var(--sem-solar, #ff9800);\n        font-weight: 600;\n        font-variant-numeric: tabular-nums;\n    }\n";function we(e,t,i){customElements.get(e)||(customElements.define(e,t),i&&(window.customCards=window.customCards||[],window.customCards.push(i)))}const ke=a`
     ha-card {
         background-color: var(--card-background-color);
         color: var(--primary-text-color);
@@ -15,7 +15,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
     ha-card:hover {
         box-shadow: var(--ha-card-box-shadow, 0 4px 16px rgba(0, 0, 0, 0.12));
     }
-`;class Se extends ce{constructor(){super(),this._hass=null,this._config=null,this._lang=null,this._localizeReady=!1,this._prevVals={},this._frozenEntities={},this._holdTimers={},this._holdIntervals={},this._cachedTheme=null,this._updateTimer=null}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this.constructor.watchedEntities||[];if(r.length>0&&!s){const t=e.states[r[0]]?.state;if("unavailable"===t||"unknown"===t)return}let a=!1;for(const t of r){const i=e.states[t]?.state;if(this._prevVals[t]!==i){a=!0;break}}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_scheduleUpdate(){this._updateTimer||(this._updateTimer=setTimeout(()=>{this._updateTimer=null,this.requestUpdate()},16))}_theme(){const e=getComputedStyle(document.documentElement).getPropertyValue("--primary-background-color").trim();return this._cachedTheme&&this._cachedThemeKey===e||(this._cachedThemeKey=e,this._cachedTheme=ve()),this._cachedTheme}_t(e){return e?"function"==typeof semLocalize?semLocalize(e,this._hass?.language):e:""}_forecastProviderLabel(e){if(!e)return"";return{solcast:"Solcast",forecast_solar:"Forecast.Solar",open_meteo:"Open-Meteo",custom:this._t("custom")||"Custom"}[e]||e}_state(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_stateStr(e){const t=this._frozenEntities[e];if(t)return String(t.value);const i=this._hass?.states[e];return i&&"unavailable"!==i.state&&"unknown"!==i.state?i.state:""}_unitOf(e){const t=this._hass?.states[e];return t&&t.attributes&&t.attributes.unit_of_measurement||""}_pcEntity(e,t,i){const s=this._hass?.states||{},r=new RegExp(`^${e}\\.sem_charger_.+_${t}$`);let a=Object.keys(s).filter(e=>r.test(e));return"night_charging"===t&&(a=a.filter(e=>!e.endsWith("_smart_night_charging"))),a.sort(),a.length?a[0]:i}_stateAttrs(e){return this._hass?.states[e]?.attributes||{}}_freezeEntity(e,t){const i=this._frozenEntities[e];i?.timer&&clearTimeout(i.timer),this._frozenEntities[e]={value:t,timer:setTimeout(()=>{delete this._frozenEntities[e],this.requestUpdate()},1500)}}_isFrozen(){return Object.keys(this._frozenEntities).length>0}async _callService(e,t,i){if(this._hass)try{await this._hass.callService(e,t,i)}catch(e){console.error(`[SEM ${this.tagName}]`,e)}}_setNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.min)||0,r=parseFloat(i.attributes.max)||100,a=Math.max(s,Math.min(r,t));this._freezeEntity(e,a),this.requestUpdate(),this._callService("number","set_value",{entity_id:e,value:a})}_stepNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=this._frozenEntities[e],r=s?s.value:parseFloat(i.state)||0,a=parseFloat(i.attributes.step)||1;this._setNumber(e,r+t*a)}_toggleSwitch(e){const t=this._hass?.states[e];if(!t)return;const i="on"===t.state?"off":"on";this._freezeEntity(e,i),this.requestUpdate();const s="on"===t.state?"turn_off":"turn_on";this._callService("switch",s,{entity_id:e})}_selectOption(e,t){this._freezeEntity(e,t),this.requestUpdate(),this._callService("select","select_option",{entity_id:e,option:t})}_startHold(e,t){this._stopHold(e),this._holdTimers[e]=setTimeout(()=>{this._holdIntervals[e]=setInterval(()=>{this._stepNumber(e,t)},150)},400)}_stopHold(e){clearTimeout(this._holdTimers[e]),clearInterval(this._holdIntervals[e]),delete this._holdTimers[e],delete this._holdIntervals[e]}updated(){if(window._semDebug){this.style.outline="2px solid red",this.style.outlineOffset="-2px",clearTimeout(this._debugFlashTimer),this._debugFlashTimer=setTimeout(()=>{this.style.outline="",this.style.outlineOffset=""},200);const e=this.tagName.toLowerCase();window._semRenderLog||(window._semRenderLog={}),window._semRenderLog[e]=(window._semRenderLog[e]||0)+1}}connectedCallback(){super.connectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} connectedCallback`),this._localizeReady||"function"==typeof semLocalize?"function"==typeof semLocalize&&(this._localizeReady=!0):(this._onLocalizeReady=()=>{document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null,this._localizeReady=!0,this._hass&&this.requestUpdate()},document.addEventListener("sem-localize-ready",this._onLocalizeReady))}disconnectedCallback(){super.disconnectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} disconnectedCallback !!!`),this._onLocalizeReady&&(document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null),this._updateTimer&&(clearTimeout(this._updateTimer),this._updateTimer=null);for(const e of Object.keys(this._holdTimers))this._stopHold(e);for(const e of Object.keys(this._frozenEntities))clearTimeout(this._frozenEntities[e]?.timer);this._frozenEntities={}}setConfig(e){this._config=e}getCardSize(){return 4}static getStubConfig(){return{}}}we("sem-title-card",class extends Se{static get watchedEntities(){return[]}constructor(){super(),this._renderedSubtitle=null,this._templateUnsub=null,this._templateSubbed=!1}setConfig(e){super.setConfig(e),this._unsubTemplate(),this._templateSubbed=!1,this._renderedSubtitle=null}_hasJinja(e){return e&&(e.includes("{%")||e.includes("{{"))}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,this.requestUpdate()),this._hasJinja(this._config?.subtitle)&&!this._templateSubbed&&this._subscribeTemplate()}_subscribeTemplate(){if(!this._hass?.connection||this._templateSubbed)return;this._templateSubbed=!0;const e=this._config.subtitle;this._hass.connection.subscribeMessage(e=>{const t=e.result;t!==this._renderedSubtitle&&(this._renderedSubtitle=t,this.requestUpdate())},{type:"render_template",template:e,variables:{}}).then(e=>{this._templateUnsub=e}).catch(()=>{this._renderedSubtitle=this._config.subtitle,this.requestUpdate()})}_unsubTemplate(){this._templateUnsub&&(this._templateUnsub(),this._templateUnsub=null)}disconnectedCallback(){super.disconnectedCallback(),this._unsubTemplate()}render(){if(!this._config)return q;const e=this._t(this._config.title_key||this._config.title||"");let t="";t=this._hasJinja(this._config.subtitle)?this._renderedSubtitle||"":this._t(this._config.subtitle||"");const i=this._theme();return W`
+`;class Se extends ce{constructor(){super(),this._hass=null,this._config=null,this._lang=null,this._localizeReady=!1,this._prevVals={},this._frozenEntities={},this._holdTimers={},this._holdIntervals={},this._cachedTheme=null,this._updateTimer=null}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this.constructor.watchedEntities||[];if(r.length>0&&!s){const t=e.states[r[0]]?.state;if("unavailable"===t||"unknown"===t)return}let a=!1;for(const t of r){const i=e.states[t]?.state;if(this._prevVals[t]!==i){a=!0;break}}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_scheduleUpdate(){this._updateTimer||(this._updateTimer=setTimeout(()=>{this._updateTimer=null,this.requestUpdate()},16))}_theme(){const e=getComputedStyle(document.documentElement).getPropertyValue("--primary-background-color").trim();return this._cachedTheme&&this._cachedThemeKey===e||(this._cachedThemeKey=e,this._cachedTheme=ve()),this._cachedTheme}_t(e){return e?"function"==typeof semLocalize?semLocalize(e,this._hass?.language):e:""}_forecastProviderLabel(e){if(!e)return"";return{solcast:"Solcast",forecast_solar:"Forecast.Solar",open_meteo:"Open-Meteo",custom:this._t("custom")||"Custom"}[e]||e}_state(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_stateStr(e){const t=this._frozenEntities[e];if(t)return String(t.value);const i=this._hass?.states[e];return i&&"unavailable"!==i.state&&"unknown"!==i.state?i.state:""}_unitOf(e){const t=this._hass?.states[e];return t&&t.attributes&&t.attributes.unit_of_measurement||""}_pcEntity(e,t,i){const s=this._hass?.states||{},r=new RegExp(`^${e}\\.sem_charger_.+_${t}$`);let a=Object.keys(s).filter(e=>r.test(e));return"night_charging"===t&&(a=a.filter(e=>!e.endsWith("_smart_night_charging"))),a.sort(),a.length?a[0]:i}_stateAttrs(e){return this._hass?.states[e]?.attributes||{}}_freezeEntity(e,t){const i=this._frozenEntities[e];i?.timer&&clearTimeout(i.timer),this._frozenEntities[e]={value:t,timer:setTimeout(()=>{delete this._frozenEntities[e],this.requestUpdate()},1500)}}_isFrozen(){return Object.keys(this._frozenEntities).length>0}async _callService(e,t,i){if(this._hass)try{await this._hass.callService(e,t,i)}catch(e){console.error(`[SEM ${this.tagName}]`,e)}}_setNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.min)||0,r=parseFloat(i.attributes.max)||100,a=Math.max(s,Math.min(r,t));this._freezeEntity(e,a),this.requestUpdate(),this._callService("number","set_value",{entity_id:e,value:a})}_stepNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=this._frozenEntities[e],r=s?s.value:parseFloat(i.state)||0,a=parseFloat(i.attributes.step)||1;this._setNumber(e,r+t*a)}_toggleSwitch(e){const t=this._hass?.states[e];if(!t)return;const i="on"===t.state?"off":"on";this._freezeEntity(e,i),this.requestUpdate();const s="on"===t.state?"turn_off":"turn_on";this._callService("switch",s,{entity_id:e})}_selectOption(e,t){this._freezeEntity(e,t),this.requestUpdate(),this._callService("select","select_option",{entity_id:e,option:t})}_pressButton(e){this._callService("button","press",{entity_id:e})}_startHold(e,t){this._stopHold(e),this._holdTimers[e]=setTimeout(()=>{this._holdIntervals[e]=setInterval(()=>{this._stepNumber(e,t)},150)},400)}_stopHold(e){clearTimeout(this._holdTimers[e]),clearInterval(this._holdIntervals[e]),delete this._holdTimers[e],delete this._holdIntervals[e]}updated(){if(window._semDebug){this.style.outline="2px solid red",this.style.outlineOffset="-2px",clearTimeout(this._debugFlashTimer),this._debugFlashTimer=setTimeout(()=>{this.style.outline="",this.style.outlineOffset=""},200);const e=this.tagName.toLowerCase();window._semRenderLog||(window._semRenderLog={}),window._semRenderLog[e]=(window._semRenderLog[e]||0)+1}}connectedCallback(){super.connectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} connectedCallback`),this._localizeReady||"function"==typeof semLocalize?"function"==typeof semLocalize&&(this._localizeReady=!0):(this._onLocalizeReady=()=>{document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null,this._localizeReady=!0,this._hass&&this.requestUpdate()},document.addEventListener("sem-localize-ready",this._onLocalizeReady))}disconnectedCallback(){super.disconnectedCallback(),window._semDebug&&console.log(`[SEM DEBUG] ${this.tagName} disconnectedCallback !!!`),this._onLocalizeReady&&(document.removeEventListener("sem-localize-ready",this._onLocalizeReady),this._onLocalizeReady=null),this._updateTimer&&(clearTimeout(this._updateTimer),this._updateTimer=null);for(const e of Object.keys(this._holdTimers))this._stopHold(e);for(const e of Object.keys(this._frozenEntities))clearTimeout(this._frozenEntities[e]?.timer);this._frozenEntities={}}setConfig(e){this._config=e}getCardSize(){return 4}static getStubConfig(){return{}}}we("sem-title-card",class extends Se{static get watchedEntities(){return[]}constructor(){super(),this._renderedSubtitle=null,this._templateUnsub=null,this._templateSubbed=!1}setConfig(e){super.setConfig(e),this._unsubTemplate(),this._templateSubbed=!1,this._renderedSubtitle=null}_hasJinja(e){return e&&(e.includes("{%")||e.includes("{{"))}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,this.requestUpdate()),this._hasJinja(this._config?.subtitle)&&!this._templateSubbed&&this._subscribeTemplate()}_subscribeTemplate(){if(!this._hass?.connection||this._templateSubbed)return;this._templateSubbed=!0;const e=this._config.subtitle;this._hass.connection.subscribeMessage(e=>{const t=e.result;t!==this._renderedSubtitle&&(this._renderedSubtitle=t,this.requestUpdate())},{type:"render_template",template:e,variables:{}}).then(e=>{this._templateUnsub=e}).catch(()=>{this._renderedSubtitle=this._config.subtitle,this.requestUpdate()})}_unsubTemplate(){this._templateUnsub&&(this._templateUnsub(),this._templateUnsub=null)}disconnectedCallback(){super.disconnectedCallback(),this._unsubTemplate()}render(){if(!this._config)return K;const e=this._t(this._config.title_key||this._config.title||"");let t="";t=this._hasJinja(this._config.subtitle)?this._renderedSubtitle||"":this._t(this._config.subtitle||"");const i=this._theme();return W`
             <style>
                 :host { display: block; }
                 .sem-title-wrap {
@@ -45,10 +45,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             </style>
             <div class="sem-title-wrap">
                 <div class="title">${e}</div>
-                ${t?W`<div class="subtitle">${t}</div>`:q}
+                ${t?W`<div class="subtitle">${t}</div>`:K}
                 <div class="divider"></div>
             </div>
-        `}getCardSize(){return 1}static getStubConfig(){return{title:"Section Title"}}},{type:"sem-title-card",name:"SEM Title Card",description:"Runtime-translated section header for SEM dashboard",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-title-card"});class Ce extends Se{static properties={...Se.properties,_available:{state:!0}};setConfig(e){if(!e?.requires||!e?.card)throw new Error('sem-require: "requires" and "card" are mandatory');this._config=e,this._available=!!customElements.get(e.requires),this._inner=null,this._available||customElements.whenDefined(e.requires).then(()=>{this._available=!0,this._inner=null,this.requestUpdate()})}set hass(e){this._hass=e,this._inner&&(this._inner.hass=e),this.requestUpdate()}async _buildInner(){if(this._inner||!this._available)return;const e=await window.loadCardHelpers();this._inner=e.createCardElement(this._config.card),this._hass&&(this._inner.hass=this._hass),this.requestUpdate()}render(){if(!this._config)return q;if(this._available)return this._inner?W`${this._inner}`:(this._buildInner(),q);const e=this._config.name||this._config.requires;return W`
+        `}getCardSize(){return 1}static getStubConfig(){return{title:"Section Title"}}},{type:"sem-title-card",name:"SEM Title Card",description:"Runtime-translated section header for SEM dashboard",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-title-card"});class Ce extends Se{static properties={...Se.properties,_available:{state:!0}};setConfig(e){if(!e?.requires||!e?.card)throw new Error('sem-require: "requires" and "card" are mandatory');this._config=e,this._available=!!customElements.get(e.requires),this._inner=null,this._available||customElements.whenDefined(e.requires).then(()=>{this._available=!0,this._inner=null,this.requestUpdate()})}set hass(e){this._hass=e,this._inner&&(this._inner.hass=e),this.requestUpdate()}async _buildInner(){if(this._inner||!this._available)return;const e=await window.loadCardHelpers();this._inner=e.createCardElement(this._config.card),this._hass&&(this._inner.hass=this._hass),this.requestUpdate()}render(){if(!this._config)return K;if(this._available)return this._inner?W`${this._inner}`:(this._buildInner(),K);const e=this._config.name||this._config.requires;return W`
             <ha-card>
                 <div class="notice">
                     <ha-icon icon="mdi:puzzle-outline"></ha-icon>
@@ -66,25 +66,25 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
         .notice ha-icon { --mdc-icon-size: 30px; color: var(--warning-color, #ffa726); }
         .title { font-weight: 600; margin-bottom: 4px; }
         .body { font-size: 13px; opacity: 0.85; line-height: 1.4; }
-    `;getCardSize(){return this._inner?.getCardSize?.()||3}}we("sem-require",Ce,{type:"sem-require",name:"SEM Require Wrapper",description:"Renders a card only when its HACS dependency is installed; otherwise a friendly install notice",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-require",preview:!1});const ze=(e,t)=>"function"==typeof semLocalize?semLocalize(e,t?.language):e,Me={home:{titleKey:"home",subtitleKey:"home_sub",color:"#5BC8D8",icon:()=>G`
+    `;getCardSize(){return this._inner?.getCardSize?.()||3}}we("sem-require",Ce,{type:"sem-require",name:"SEM Require Wrapper",description:"Renders a card only when its HACS dependency is installed; otherwise a friendly install notice",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-require",preview:!1});const ze=(e,t)=>"function"==typeof semLocalize?semLocalize(e,t?.language):e,Me={home:{titleKey:"home",subtitleKey:"home_sub",color:"#5BC8D8",icon:()=>j`
             <path d="M-20,2 L0,-16 L20,2" stroke-width="2"/>
             <rect x="-15" y="2" width="30" height="22" rx="2" stroke-width="2"/>
-            <rect x="-5" y="12" width="10" height="12" stroke-width="1.5"/>`},energy:{titleKey:"energy",subtitleKey:"energy_sub",color:"#ff9800",icon:()=>G`
-            <path d="M-4,-18 L-10,2 L-2,2 L-6,18 L12,-4 L2,-4 L8,-18 Z" stroke-width="2"/>`},battery:{titleKey:"battery",subtitleKey:"battery_sub",color:"#4db6ac",icon:()=>G`
+            <rect x="-5" y="12" width="10" height="12" stroke-width="1.5"/>`},energy:{titleKey:"energy",subtitleKey:"energy_sub",color:"#ff9800",icon:()=>j`
+            <path d="M-4,-18 L-10,2 L-2,2 L-6,18 L12,-4 L2,-4 L8,-18 Z" stroke-width="2"/>`},battery:{titleKey:"battery",subtitleKey:"battery_sub",color:"#4db6ac",icon:()=>j`
             <rect x="-10" y="-16" width="20" height="32" rx="4" stroke-width="2"/>
             <rect x="-4" y="-20" width="8" height="5" rx="2" fill="currentColor" opacity="0.4" stroke="none"/>
             <line x1="-5" y1="-4" x2="5" y2="-4" stroke-width="1.5" opacity="0.5"/>
-            <line x1="-5" y1="4" x2="5" y2="4" stroke-width="1.5" opacity="0.5"/>`},ev:{titleKey:"ev_charging",subtitleKey:"ev_sub",color:"#8DC892",icon:()=>G`
+            <line x1="-5" y1="4" x2="5" y2="4" stroke-width="1.5" opacity="0.5"/>`},ev:{titleKey:"ev_charging",subtitleKey:"ev_sub",color:"#8DC892",icon:()=>j`
             <rect x="-12" y="-14" width="24" height="24" rx="5" stroke-width="2"/>
             <path d="M-3,-6 L-1,0 L-5,0 L3,8" stroke-width="2" fill="none"/>
             <line x1="0" y1="10" x2="0" y2="16" stroke-width="2"/>
-            <circle cx="0" cy="18" r="2" fill="currentColor" opacity="0.4" stroke="none"/>`},control:{titleKey:"control",subtitleKey:"control_sub",color:"#96CAEE",icon:()=>G`
+            <circle cx="0" cy="18" r="2" fill="currentColor" opacity="0.4" stroke="none"/>`},control:{titleKey:"control",subtitleKey:"control_sub",color:"#96CAEE",icon:()=>j`
             <line x1="-12" y1="-12" x2="-12" y2="12" stroke-width="2"/>
             <line x1="0" y1="-12" x2="0" y2="12" stroke-width="2"/>
             <line x1="12" y1="-12" x2="12" y2="12" stroke-width="2"/>
             <circle cx="-12" cy="-4" r="4" fill="currentColor" opacity="0.6" stroke="none"/>
             <circle cx="0" cy="4" r="4" fill="currentColor" opacity="0.6" stroke="none"/>
-            <circle cx="12" cy="-8" r="4" fill="currentColor" opacity="0.6" stroke="none"/>`},config:{titleKey:"config_tab_title",subtitleKey:"config_tab_subtitle",color:"#8DC892",icon:()=>G`
+            <circle cx="12" cy="-8" r="4" fill="currentColor" opacity="0.6" stroke="none"/>`},config:{titleKey:"config_tab_title",subtitleKey:"config_tab_subtitle",color:"#8DC892",icon:()=>j`
             <circle cx="0" cy="0" r="6" stroke-width="2"/>
             <g stroke-width="2" stroke-linecap="round">
                 <line x1="0" y1="-16" x2="0" y2="-10"/>
@@ -95,11 +95,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <line x1="7" y1="7" x2="11" y2="11"/>
                 <line x1="11" y1="-11" x2="7" y2="-7"/>
                 <line x1="-7" y1="7" x2="-11" y2="11"/>
-            </g>`},costs:{titleKey:"costs",subtitleKey:"costs_sub",color:"#f06292",icon:()=>G`
+            </g>`},costs:{titleKey:"costs",subtitleKey:"costs_sub",color:"#f06292",icon:()=>j`
             <circle cx="0" cy="0" r="16" stroke-width="2"/>
             <text x="0" y="6" text-anchor="middle" font-size="18" font-weight="700"
                   fill="currentColor" opacity="0.7" stroke="none"
-                  font-family="'Segoe UI','Roboto',sans-serif">$</text>`},system:{titleKey:"system",subtitleKey:"system_sub",color:"#96CAEE",icon:()=>G`
+                  font-family="'Segoe UI','Roboto',sans-serif">$</text>`},system:{titleKey:"system",subtitleKey:"system_sub",color:"#96CAEE",icon:()=>j`
             <path d="M-16,4 L-8,-8 L0,0 L6,-12 L10,-4 L16,4" stroke-width="2" fill="none"/>
             <line x1="-16" y1="8" x2="16" y2="8" stroke-width="1" opacity="0.3"/>`}};we("sem-tab-header",class extends Se{static get watchedEntities(){return[]}constructor(){super(),this._tab="home",this._prefix="sensor.sem_",this._responsiveApplied=!1,this._lastStatsKey=""}connectedCallback(){super.connectedCallback(),this._applyResponsiveContainer()}_applyResponsiveContainer(){this._responsiveApplied||requestAnimationFrame(()=>{let e=this;for(;e;){const t=e.getRootNode()?.host;if(!t)break;if("HUI-VERTICAL-STACK-CARD"===t.tagName){const e=t.parentElement;if(e&&"HUI-CARD"===e.tagName)return e.style.maxWidth="900px",e.style.margin="0 auto",e.style.display="block",void(this._responsiveApplied=!0)}e=t}})}setConfig(e){super.setConfig(e),this._tab=e.tab||"home",this._prefix=e.entity_prefix||"sensor.sem_"}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this._buildStatsKey(e);(r!==this._lastStatsKey||s)&&(this._lastStatsKey=r,this.requestUpdate()),this._responsiveApplied||this._applyResponsiveContainer()}_buildStatsKey(e){if(!e)return"";const t=t=>e.states[`${this._prefix}${t}`]?.state||"",i=this._tab;return"home"===i?[t("solar_power"),t("daily_solar_energy")].join(","):"energy"===i?[t("daily_solar_energy"),t("daily_home_energy"),t("self_consumption_rate")].join(","):"battery"===i?[t("battery_soc"),t("battery_power"),t("battery_health_score")].join(","):"ev"===i?[t("ev_power"),t("daily_ev_energy"),t("charging_state")].join(","):"control"===i?[t("target_peak_limit"),t("controllable_devices_count"),t("surplus_active_devices")].join(","):"config"===i?[t("charging_state"),t("heat_pump_registered"),t("battery_status")].join(","):"costs"===i?[t("daily_costs"),t("daily_savings"),t("daily_net_cost")].join(","):"system"===i?[t("energy_optimization_score"),t("lifetime_total_savings"),t("lifetime_co2_avoided")].join(","):""}_getState(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_getStatLabels(){const e=e=>ze(e,this._hass),t=this._tab;return"home"===t?[e("solar"),e("autarky"),e("self_use"),e("today")]:"energy"===t?[e("solar"),e("home"),e("self_use")]:"battery"===t?[e("soc"),e("power"),e("health")]:"ev"===t?[e("power"),e("today"),e("session")]:"control"===t?[e("peak"),e("devices"),e("active")]:"config"===t?[e("config_stat_chargers"),e("config_stat_heatpump"),e("config_stat_battery")]:"costs"===t?[e("cost"),e("saved"),e("net")]:"system"===t?[e("score"),e("saved"),e("co2")]:["—","—","—"]}_getStatValues(){const e=this._tab,t=fe(this._hass)||"EUR";if("home"===e)return[ge(this._getState("solar_power",0)),this._getState("autarky_rate",0).toFixed(0)+"%",this._getState("self_consumption_rate",0).toFixed(0)+"%",this._getState("daily_solar_energy",0).toFixed(1)+" kWh"];if("energy"===e)return[this._getState("daily_solar_energy",0).toFixed(1)+" kWh",this._getState("daily_home_energy",0).toFixed(1)+" kWh",this._getState("self_consumption_rate",0).toFixed(0)+"%"];if("battery"===e)return[this._getState("battery_soc",0).toFixed(0)+"%",ge(this._getState("battery_power",0)),this._getState("battery_health_score",100).toFixed(0)+"%"];if("ev"===e)return[ge(this._getState("ev_power",0)),this._getState("daily_ev_energy",0).toFixed(1)+" kWh",this._getState("session_energy",0).toFixed(1)+" kWh"];if("control"===e)return[this._getState("target_peak_limit",5).toFixed(1)+" kW",this._getState("controllable_devices_count",0).toFixed(0),this._getState("surplus_active_devices",0).toFixed(0)];if("config"===e){const e=e=>ze(e,this._hass),t=Object.keys(this._hass?.states||{}).filter(e=>e.match(/^number\.sem_charger_.+_minimum_current$/)).length,i="on"===this._hass?.states[`${this._prefix}heat_pump_registered`]?.state,s=this._hass?.states[`${this._prefix}battery_soc`];return[String(t),e(i?"on":"off"),s?Math.round(parseFloat(s.state)||0)+"%":"—"]}return"costs"===e?[this._getState("daily_costs",0).toFixed(2)+" "+t,this._getState("daily_savings",0).toFixed(2)+" "+t,(()=>{const e=this._getState("daily_net_cost",0);return(e<=0?"+":"")+Math.abs(e).toFixed(2)+" "+t})()]:"system"===e?[this._getState("energy_optimization_score",0).toFixed(0),this._getState("lifetime_total_savings",0).toFixed(0)+" "+t,this._getState("lifetime_co2_avoided",0).toFixed(0)+" kg"]:["—","—","—"]}_renderHomeHero(){const e=this._getState("daily_solar_energy",0),t=this._getState("solar_power",0);return W`
             <div class="hero">
@@ -111,8 +111,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="hero-now">
                     <ha-icon icon="mdi:white-balance-sunny"></ha-icon>
                     <span>${ge(t)}</span>
-                </div>`:q}
-            </div>`}render(){if(!this._hass||!this._config)return q;const e=Me[this._tab]||Me.home,t=this._config.title||ze(e.titleKey,this._hass),i=this._config.subtitle||ze(e.subtitleKey,this._hass),s=e.color,r=this._getStatLabels(),a=this._getStatValues(),o=this._theme(),n=o.isDark?s:`color-mix(in srgb, ${s} 65%, black)`,l=o.isDark?`0 0 12px ${s}40`:"none",c=o.isDark?.3:.18;return W`
+                </div>`:K}
+            </div>`}render(){if(!this._hass||!this._config)return K;const e=Me[this._tab]||Me.home,t=this._config.title||ze(e.titleKey,this._hass),i=this._config.subtitle||ze(e.subtitleKey,this._hass),s=e.color,r=this._getStatLabels(),a=this._getStatValues(),o=this._theme(),n=o.isDark?s:`color-mix(in srgb, ${s} 65%, black)`,l=o.isDark?`0 0 12px ${s}40`:"none",c=o.isDark?.3:.18;return W`
             <style>
                 :host { display: block; }
                 .header-wrap {
@@ -231,7 +231,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                     <span class="f-high">${o}°</span>
                 </div>
-            `})}_findUsableWeatherEntity(){const e=this._hass?.states;if(!e)return null;const t=Object.keys(e).filter(t=>{if(!t.startsWith("weather."))return!1;const i=e[t];return i&&"unavailable"!==i.state&&"unknown"!==i.state&&i.attributes&&null!=i.attributes.temperature});return t.filter(e=>!e.startsWith("weather.forecast_"))[0]||t[0]||null}render(){if(!this._config)return q;let e=this._config.entity;const t=this._config.forecast_rows||5;let i=this._hass?.states[e];if(!i||"unavailable"===i.state||null==i.attributes?.temperature){const t=this._findUsableWeatherEntity();t&&(e=t,i=this._hass.states[t])}if(!i)return W`
+            `})}_findUsableWeatherEntity(){const e=this._hass?.states;if(!e)return null;const t=Object.keys(e).filter(t=>{if(!t.startsWith("weather."))return!1;const i=e[t];return i&&"unavailable"!==i.state&&"unknown"!==i.state&&i.attributes&&null!=i.attributes.temperature});return t.filter(e=>!e.startsWith("weather.forecast_"))[0]||t[0]||null}render(){if(!this._config)return K;let e=this._config.entity;const t=this._config.forecast_rows||5;let i=this._hass?.states[e];if(!i||"unavailable"===i.state||null==i.attributes?.temperature){const t=this._findUsableWeatherEntity();t&&(e=t,i=this._hass.states[t])}if(!i)return W`
                 <ha-card>
                     <div style="padding:16px;color:#ef5350">Entity ${e} not found</div>
                 </ha-card>
@@ -380,11 +380,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
 
                     <div class="forecast-rows">
-                        ${h.length?this._renderForecastRows(h,t):q}
+                        ${h.length?this._renderForecastRows(h,t):K}
                     </div>
                 </div>
             </ha-card>
-        `}getCardSize(){return 5}static getStubConfig(){return{entity:"weather.home"}}},{type:"sem-weather-card",name:"SEM Weather",description:"Lumina-styled clock + weather card with forecast",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-weather-card",preview:!1});const Ee=[{key:"today",labelKey:"period_today"},{key:"yesterday",labelKey:"period_yesterday"},{key:"week",labelKey:"period_this_week"},{key:"month",labelKey:"period_this_month"},{key:"year",labelKey:"period_this_year"}];we("sem-period-selector-card",class extends Se{static get styles(){return[ke]}static get watchedEntities(){return[]}constructor(){super(),this._active="week",this._firstRender=!0}setConfig(e){super.setConfig(e),e.default_period&&(this._active=e.default_period)}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,this.requestUpdate())}get hass(){return this._hass}firstUpdated(){this._dispatchPeriod(this._active)}_getPeriod(e){const t=new Date,i=(e=>new Date(e.getFullYear(),e.getMonth(),e.getDate()))(t);switch(e){case"today":return{start:i,end:t,granularity:"hour"};case"yesterday":{const e=new Date(i);return e.setDate(e.getDate()-1),{start:e,end:i,granularity:"hour"}}case"week":{const e=t.getDay()||7,s=new Date(i);return s.setDate(s.getDate()-(e-1)),{start:s,end:t,granularity:"day"}}case"month":return{start:new Date(t.getFullYear(),t.getMonth(),1),end:t,granularity:"day"};case"year":return{start:new Date(t.getFullYear(),0,1),end:t,granularity:"month"};default:return this._getPeriod("week")}}_dispatchPeriod(e){this._active=e,this.requestUpdate();const t=this._getPeriod(e);document.dispatchEvent(new CustomEvent("sem-period-change",{detail:{...t,key:e}}))}render(){if(!this._config)return q;const e=this._theme();return W`
+        `}getCardSize(){return 5}static getStubConfig(){return{entity:"weather.home"}}},{type:"sem-weather-card",name:"SEM Weather",description:"Lumina-styled clock + weather card with forecast",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-weather-card",preview:!1});const Ee=[{key:"today",labelKey:"period_today"},{key:"yesterday",labelKey:"period_yesterday"},{key:"week",labelKey:"period_this_week"},{key:"month",labelKey:"period_this_month"},{key:"year",labelKey:"period_this_year"}];we("sem-period-selector-card",class extends Se{static get styles(){return[ke]}static get watchedEntities(){return[]}constructor(){super(),this._active="week",this._firstRender=!0}setConfig(e){super.setConfig(e),e.default_period&&(this._active=e.default_period)}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,this.requestUpdate())}get hass(){return this._hass}firstUpdated(){this._dispatchPeriod(this._active)}_getPeriod(e){const t=new Date,i=(e=>new Date(e.getFullYear(),e.getMonth(),e.getDate()))(t);switch(e){case"today":return{start:i,end:t,granularity:"hour"};case"yesterday":{const e=new Date(i);return e.setDate(e.getDate()-1),{start:e,end:i,granularity:"hour"}}case"week":{const e=t.getDay()||7,s=new Date(i);return s.setDate(s.getDate()-(e-1)),{start:s,end:t,granularity:"day"}}case"month":return{start:new Date(t.getFullYear(),t.getMonth(),1),end:t,granularity:"day"};case"year":return{start:new Date(t.getFullYear(),0,1),end:t,granularity:"month"};default:return this._getPeriod("week")}}_dispatchPeriod(e){this._active=e,this.requestUpdate();const t=this._getPeriod(e);document.dispatchEvent(new CustomEvent("sem-period-change",{detail:{...t,key:e}}))}render(){if(!this._config)return K;const e=this._theme();return W`
             <style>
                 :host { display: block; }
                 .sem-period {
@@ -440,7 +440,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     `)}
                 </div>
             </ha-card>
-        `}getCardSize(){return 1}static getStubConfig(){return{}}},{type:"sem-period-selector-card",name:"SEM Period Selector",description:"Glassmorphism period picker for SEM chart cards",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-period-selector-card",preview:!1});const Fe="sensor.sem_",Ae=["flow_solar_to_home_energy","flow_solar_to_ev_energy","daily_co2_avoided","yearly_co2_avoided","lifetime_co2_avoided","yearly_trees_equivalent","lifetime_trees_equivalent"];function Ie(e){return Ae.map(t=>`${e}${t}`)}we("sem-energy-impact-card",class extends Se{static get watchedEntities(){return Ie(Fe)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Fe,this._prefix!==Fe&&(this._prevVals={})}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=Ie(this._prefix||Fe);let a=!1;for(const t of r)if(this._prevVals[t]!==e.states[t]?.state){a=!0;break}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix||Fe}${e}`,t)}_treeIcon(e){return e>=50?"mdi:forest":e>=10?"mdi:pine-tree":e>=1?"mdi:tree":"mdi:sprout"}render(){if(!this._config)return q;const e=this._theme(),t=this._val("flow_solar_to_home_energy")+this._val("flow_solar_to_ev_energy"),i=(.128*t).toFixed(1),s=`${t.toFixed(1)} kWh × 128 g/kWh`,r=this._val("yearly_trees_equivalent"),a=this._val("lifetime_trees_equivalent"),o=this._val("yearly_co2_avoided"),n=this._val("lifetime_co2_avoided"),l=r>=10?r.toFixed(0):r.toFixed(1),c=this._treeIcon(r);return W`
+        `}getCardSize(){return 1}static getStubConfig(){return{}}},{type:"sem-period-selector-card",name:"SEM Period Selector",description:"Glassmorphism period picker for SEM chart cards",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-period-selector-card",preview:!1});const Fe="sensor.sem_",Ie=["flow_solar_to_home_energy","flow_solar_to_ev_energy","daily_co2_avoided","yearly_co2_avoided","lifetime_co2_avoided","yearly_trees_equivalent","lifetime_trees_equivalent"];function Ae(e){return Ie.map(t=>`${e}${t}`)}we("sem-energy-impact-card",class extends Se{static get watchedEntities(){return Ae(Fe)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Fe,this._prefix!==Fe&&(this._prevVals={})}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=Ae(this._prefix||Fe);let a=!1;for(const t of r)if(this._prevVals[t]!==e.states[t]?.state){a=!0;break}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix||Fe}${e}`,t)}_treeIcon(e){return e>=50?"mdi:forest":e>=10?"mdi:pine-tree":e>=1?"mdi:tree":"mdi:sprout"}render(){if(!this._config)return K;const e=this._theme(),t=this._val("flow_solar_to_home_energy")+this._val("flow_solar_to_ev_energy"),i=(.128*t).toFixed(1),s=`${t.toFixed(1)} kWh × 128 g/kWh`,r=this._val("yearly_trees_equivalent"),a=this._val("lifetime_trees_equivalent"),o=this._val("yearly_co2_avoided"),n=this._val("lifetime_co2_avoided"),l=r>=10?r.toFixed(0):r.toFixed(1),c=this._treeIcon(r);return W`
             <style>
                 :host { display: block; }
 
@@ -600,7 +600,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
 
                 </div>
             </div>
-        `}getCardSize(){return 3}static getStubConfig(){return{entity_prefix:Fe}}},{type:"sem-energy-impact-card",name:"SEM Energy Impact Card",description:"CO2 avoided and its tree equivalent — today, this year, lifetime",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-energy-impact-card",preview:!1});const Be="daily_ev_energy",Re="lifetime_ev_energy",Ne="lifetime_ev_solar_share",Pe="lifetime_ev_cost",Te="lifetime_ev_sessions",Le="sensor.sem_";we("sem-ev-progress-card",class extends Se{static get watchedEntities(){return[`${Le}${Be}`,`${Le}${Re}`,`${Le}${Ne}`,`${Le}${Pe}`,`${Le}${Te}`,"number.sem_daily_ev_target","number.sem_charger_ev_charger_daily_ev_target"]}_evDailyTarget(){const e=this._hass?.states||{},t=Object.keys(e).filter(e=>/^number\.sem_charger_.+_daily_ev_target$/.test(e)).sort();if(t.length){const i=parseFloat(e[t[0]]?.state);if(!isNaN(i))return i}return this._state("number.sem_daily_ev_target",10)}setConfig(e){super.setConfig(e)}_prefix(){return this._config?.entity_prefix??Le}_pct(e,t){return t<=0?0:Math.min(100,e/t*100)}_barColor(e,t){return 0===e?"#666":t>=100?"#8DC892":t>=70?"#ff9800":"#f44336"}_fmtEnergy(e){return null==e||isNaN(e)?"—":e.toFixed(e<10?2:1)+" kWh"}_fmtCost(e,t){return null==e||isNaN(e)?"—":e.toFixed(2)+" "+t}_fmtSessions(e){return null==e||isNaN(e)?"—":String(Math.round(e))}render(){if(!this._hass||!this._config)return q;const e=this._theme(),t=this._prefix(),i=this._state(`${t}${Be}`),s=this._evDailyTarget(),r=this._state(`${t}${Re}`),a=this._state(`${t}${Ne}`),o=this._state(`${t}${Pe}`),n=this._state(`${t}${Te}`),l=fe(this._hass),c=this._pct(i,s),d=this._barColor(s,c),p=s>0?W`<span class="target-pct">${Math.round(c)}% ${this._t("of_target")}</span>`:W`<span class="target-pct no-target">${this._t("no_target")}</span>`,h=["radial-gradient(ellipse 80% 70% at 20% 50%, rgba(141,200,146,0.06) 0%, transparent 70%)",`radial-gradient(circle at 2px 2px, ${e.dotColor} 0.7px, transparent 0.7px)`].join(", ");return W`
+        `}getCardSize(){return 3}static getStubConfig(){return{entity_prefix:Fe}}},{type:"sem-energy-impact-card",name:"SEM Energy Impact Card",description:"CO2 avoided and its tree equivalent — today, this year, lifetime",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-energy-impact-card",preview:!1});const Ne="daily_ev_energy",Be="lifetime_ev_energy",Te="lifetime_ev_solar_share",Re="lifetime_ev_cost",Pe="lifetime_ev_sessions",Le="sensor.sem_";we("sem-ev-progress-card",class extends Se{static get watchedEntities(){return[`${Le}${Ne}`,`${Le}${Be}`,`${Le}${Te}`,`${Le}${Re}`,`${Le}${Pe}`,"number.sem_daily_ev_target","number.sem_charger_ev_charger_daily_ev_target"]}_evDailyTarget(){const e=this._hass?.states||{},t=Object.keys(e).filter(e=>/^number\.sem_charger_.+_daily_ev_target$/.test(e)).sort();if(t.length){const i=parseFloat(e[t[0]]?.state);if(!isNaN(i))return i}return this._state("number.sem_daily_ev_target",10)}setConfig(e){super.setConfig(e)}_prefix(){return this._config?.entity_prefix??Le}_pct(e,t){return t<=0?0:Math.min(100,e/t*100)}_barColor(e,t){return 0===e?"#666":t>=100?"#8DC892":t>=70?"#ff9800":"#f44336"}_fmtEnergy(e){return null==e||isNaN(e)?"—":e.toFixed(e<10?2:1)+" kWh"}_fmtCost(e,t){return null==e||isNaN(e)?"—":e.toFixed(2)+" "+t}_fmtSessions(e){return null==e||isNaN(e)?"—":String(Math.round(e))}render(){if(!this._hass||!this._config)return K;const e=this._theme(),t=this._prefix(),i=this._state(`${t}${Ne}`),s=this._evDailyTarget(),r=this._state(`${t}${Be}`),a=this._state(`${t}${Te}`),o=this._state(`${t}${Re}`),n=this._state(`${t}${Pe}`),l=fe(this._hass),c=this._pct(i,s),d=this._barColor(s,c),p=s>0?W`<span class="target-pct">${Math.round(c)}% ${this._t("of_target")}</span>`:W`<span class="target-pct no-target">${this._t("no_target")}</span>`,h=["radial-gradient(ellipse 80% 70% at 20% 50%, rgba(141,200,146,0.06) 0%, transparent 70%)",`radial-gradient(circle at 2px 2px, ${e.dotColor} 0.7px, transparent 0.7px)`].join(", ");return W`
             <style>
                 :host {
                     display: block;
@@ -794,7 +794,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </div>
-        `}getCardSize(){return 3}static getStubConfig(){return{entity_prefix:Le}}},{type:"sem-ev-progress-card",name:"SEM EV Progress Card",description:"Daily EV progress bar and lifetime charging statistics",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-ev-progress-card"});we("sem-gauge-card",class extends Se{static get watchedEntities(){return[]}setConfig(e){if(!e.entity)throw new Error("sem-gauge-card requires entity");super.setConfig(e),this._entity=e.entity,this._name=e.name||null,this._min=e.min??0,this._max=e.max??100,this._color=e.color||"#4db6ac",this._unit=e.unit||"%"}set hass(e){this._hass,this._hass=e;const t=e?.states[this._entity]?.state;t!==this._lastState&&(this._lastState=t,this.requestUpdate())}get hass(){return this._hass}render(){if(!this._hass||!this._config)return q;const e=this._hass.states[this._entity],t=e&&parseFloat(e.state)||0,i=this._name||e?.attributes?.friendly_name||this._entity,s=Math.min(Math.max((t-this._min)/(this._max-this._min),0),1),r=this._theme(),a=this._color,o=58,n=-210,l=n+240*s,c=e=>{const t=e*Math.PI/180;return{x:70+o*Math.cos(t),y:70+o*Math.sin(t)}},d=c(n),p=c(30),h=c(l),_=240*s>180?1:0,g=s<.5?`color-mix(in srgb, #f44336 ${Math.round(100*(1-2*s))}%, #ff9800)`:`color-mix(in srgb, ${a} ${Math.round(2*(s-.5)*100)}%, #ff9800)`;return W`
+        `}getCardSize(){return 3}static getStubConfig(){return{entity_prefix:Le}}},{type:"sem-ev-progress-card",name:"SEM EV Progress Card",description:"Daily EV progress bar and lifetime charging statistics",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-ev-progress-card"});we("sem-gauge-card",class extends Se{static get watchedEntities(){return[]}setConfig(e){if(!e.entity)throw new Error("sem-gauge-card requires entity");super.setConfig(e),this._entity=e.entity,this._name=e.name||null,this._min=e.min??0,this._max=e.max??100,this._color=e.color||"#4db6ac",this._unit=e.unit||"%"}set hass(e){this._hass,this._hass=e;const t=e?.states[this._entity]?.state;t!==this._lastState&&(this._lastState=t,this.requestUpdate())}get hass(){return this._hass}render(){if(!this._hass||!this._config)return K;const e=this._hass.states[this._entity],t=e&&parseFloat(e.state)||0,i=this._name||e?.attributes?.friendly_name||this._entity,s=Math.min(Math.max((t-this._min)/(this._max-this._min),0),1),r=this._theme(),a=this._color,o=58,n=-210,l=n+240*s,c=e=>{const t=e*Math.PI/180;return{x:70+o*Math.cos(t),y:70+o*Math.sin(t)}},d=c(n),p=c(30),h=c(l),_=240*s>180?1:0,g=s<.5?`color-mix(in srgb, #f44336 ${Math.round(100*(1-2*s))}%, #ff9800)`:`color-mix(in srgb, ${a} ${Math.round(2*(s-.5)*100)}%, #ff9800)`;return W`
             <ha-card>
                 <div class="gauge-wrap">
                     <svg viewBox="0 0 140 100" xmlns="http://www.w3.org/2000/svg">
@@ -811,7 +811,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                               fill="none" stroke="${r.surface||"rgba(255,255,255,0.08)"}" stroke-width="8"
                               stroke-linecap="round"/>
                         <!-- Value arc -->
-                        ${s>.01?G`
+                        ${s>.01?j`
                             <path d="M ${d.x} ${d.y} A ${o} ${o} 0 ${_} 1 ${h.x} ${h.y}"
                                   fill="none" stroke="${g}" stroke-width="8"
                                   stroke-linecap="round"
@@ -864,7 +864,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 margin-top: -8px;
                 font-family: 'Segoe UI', 'Roboto', sans-serif;
             }
-        `}getCardSize(){return 3}static getStubConfig(){return{entity:"sensor.sem_self_consumption_rate"}}},{type:"sem-gauge-card",name:"SEM Gauge Card",description:"Lumina-styled arc gauge for percentage values",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-gauge-card",preview:!1});const Ue="sensor.sem_",Oe=["solar_power","daily_solar_energy","monthly_solar_yield_energy","yearly_solar_yield_energy","flow_solar_to_home_power","flow_solar_to_battery_power","flow_solar_to_ev_power","flow_solar_to_grid_power","flow_solar_to_home_energy","flow_solar_to_battery_energy","flow_solar_to_ev_energy","flow_solar_to_grid_energy","forecast_today_kwh","forecast_tomorrow_kwh","forecast_remaining_today_kwh","forecast_peak_power_today_w","forecast_peak_time_today","best_surplus_window","pv_daily_specific_yield","pv_performance_vs_forecast","pv_estimated_annual_degradation","pv_degradation_trend","pv_string_pv1_power","pv_string_pv1_daily_energy","pv_string_pv2_power","pv_string_pv2_daily_energy","pv_string_pv3_power","pv_string_pv3_daily_energy","pv_string_pv4_power","pv_string_pv4_daily_energy"];function He(e){return Oe.map(t=>`${e}${t}`)}we("sem-solar-card",class extends Se{static get styles(){return[ke]}static get watchedEntities(){return He(Ue)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Ue,this._prefix!==Ue&&(this._prevVals={})}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=He(this._prefix||Ue);let a=!1;for(const t of r)if(this._prevVals[t]!==e.states[t]?.state){a=!0;break}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}render(){if(!this._config)return q;const e=this._theme(),t=this._val("solar_power"),i=this._val("daily_solar_energy"),s=this._val("monthly_solar_yield_energy"),r=this._val("yearly_solar_yield_energy"),a=Math.min(Math.max(t/1e4,0),1),o=2*Math.PI*42,n=(o*(1-a)).toFixed(1),l=t>50?"solarPulse 3s ease-in-out infinite":"none",c=this._val("flow_solar_to_home_power"),d=this._val("flow_solar_to_home_energy"),p=this._val("flow_solar_to_battery_power"),h=this._val("flow_solar_to_battery_energy"),_=this._val("flow_solar_to_ev_power"),g=this._val("flow_solar_to_ev_energy"),u=this._val("flow_solar_to_grid_power"),m=this._val("flow_solar_to_grid_energy"),f=this._val("forecast_today_kwh"),v=this._val("forecast_tomorrow_kwh"),y=this._val("forecast_remaining_today_kwh"),b=this._val("forecast_peak_power_today_w"),x=this._valStr("forecast_peak_time_today"),$=this._valStr("best_surplus_window"),w=this._val("pv_daily_specific_yield"),k=this._val("pv_performance_vs_forecast"),S=this._val("pv_estimated_annual_degradation"),C=this._valStr("pv_degradation_trend"),z=0!==k?this._fmt(k,0)+"%":"—",M=k>=0?"#8DC892":"#f06292",D=xe(this._hass,this._prefix);return W`
+        `}getCardSize(){return 3}static getStubConfig(){return{entity:"sensor.sem_self_consumption_rate"}}},{type:"sem-gauge-card",name:"SEM Gauge Card",description:"Lumina-styled arc gauge for percentage values",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-gauge-card",preview:!1});const Ue="sensor.sem_",Oe=["solar_power","daily_solar_energy","monthly_solar_yield_energy","yearly_solar_yield_energy","flow_solar_to_home_power","flow_solar_to_battery_power","flow_solar_to_ev_power","flow_solar_to_grid_power","flow_solar_to_home_energy","flow_solar_to_battery_energy","flow_solar_to_ev_energy","flow_solar_to_grid_energy","forecast_today_kwh","forecast_tomorrow_kwh","forecast_remaining_today_kwh","forecast_peak_power_today_w","forecast_peak_time_today","forecast_peak_power_path","best_surplus_window","pv_daily_specific_yield","pv_performance_vs_forecast","pv_estimated_annual_degradation","pv_degradation_trend","pv_string_pv1_power","pv_string_pv1_daily_energy","pv_string_pv2_power","pv_string_pv2_daily_energy","pv_string_pv3_power","pv_string_pv3_daily_energy","pv_string_pv4_power","pv_string_pv4_daily_energy"];function He(e){return Oe.map(t=>`${e}${t}`)}we("sem-solar-card",class extends Se{static get styles(){return[ke]}static get watchedEntities(){return He(Ue)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Ue,this._prefix!==Ue&&(this._prevVals={})}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=He(this._prefix||Ue);let a=!1;for(const t of r)if(this._prevVals[t]!==e.states[t]?.state){a=!0;break}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}render(){if(!this._config)return K;const e=this._theme(),t=this._val("solar_power"),i=this._val("daily_solar_energy"),s=this._val("monthly_solar_yield_energy"),r=this._val("yearly_solar_yield_energy"),a=Math.min(Math.max(t/1e4,0),1),o=2*Math.PI*42,n=(o*(1-a)).toFixed(1),l=t>50?"solarPulse 3s ease-in-out infinite":"none",c=this._val("flow_solar_to_home_power"),d=this._val("flow_solar_to_home_energy"),p=this._val("flow_solar_to_battery_power"),h=this._val("flow_solar_to_battery_energy"),_=this._val("flow_solar_to_ev_power"),g=this._val("flow_solar_to_ev_energy"),u=this._val("flow_solar_to_grid_power"),m=this._val("flow_solar_to_grid_energy"),f=this._val("forecast_today_kwh"),v=this._val("forecast_tomorrow_kwh"),y=this._val("forecast_remaining_today_kwh"),b=this._val("forecast_peak_power_today_w"),x=this._valStr("forecast_peak_time_today"),$="unsupported_by_source"===this._valStr("forecast_peak_power_path")?this._t("peak_power_unsupported"):"",w=this._valStr("best_surplus_window"),k=this._val("pv_daily_specific_yield"),S=this._val("pv_performance_vs_forecast"),C=this._val("pv_estimated_annual_degradation"),z=this._valStr("pv_degradation_trend"),M=0!==S?this._fmt(S,0)+"%":"—",D=S>=0?"#8DC892":"#f06292",E=xe(this._hass,this._prefix);return W`
             <style>
                 :host { display: block; }
                 .wrap {
@@ -1024,9 +1024,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="wrap">
 
                     <!-- v1.7.1 / #312: per-PV-string chip strip (auto-shown ≥ 2 strings) -->
-                    ${D.length>=2?W`
+                    ${E.length>=2?W`
                         <div class="pv-strings-row">
-                            ${D.map(e=>W`
+                            ${E.map(e=>W`
                                 <div class="pv-chip"
                                      title="${e.entityId}"
                                      data-entity="${e.entityId}"
@@ -1036,7 +1036,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 </div>
                             `)}
                         </div>
-                    `:q}
+                    `:K}
 
                     <!-- Hero -->
                     <div class="hero">
@@ -1121,11 +1121,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                          tagged template literal, and a stray
                          backtick terminates that template at parse
                          time — see the 0x0 render bug we fixed.) -->
-                    ${D.length>=2?W`
+                    ${E.length>=2?W`
                         <div class="section">
                             <div class="section-title">${this._t("pv_strings_today")||"Per string today"}</div>
                             <div class="flows-grid">
-                                ${D.map(e=>W`
+                                ${E.map(e=>W`
                                     <div class="flow-row"
                                          style="cursor:pointer"
                                          @click=${()=>this._fireMoreInfo?.(e.entityId)}>
@@ -1139,7 +1139,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 `)}
                             </div>
                         </div>
-                    `:q}
+                    `:K}
 
                     <!-- Forecast + Performance (side by side) -->
                     <div class="section two-col">
@@ -1159,33 +1159,33 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("peak_power")}</span>
-                                <span class="metric-val">
+                                <span class="metric-val" title="${$}">
                                     ${b>0?ge(b):"—"}
                                     <span style="font-size:11px;opacity:0.7;margin-left:4px">${x||"—"}</span>
                                 </span>
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("best_surplus_window")}</span>
-                                <span class="metric-val" style="color:#ff9800;font-size:11px">${$||"—"}</span>
+                                <span class="metric-val" style="color:#ff9800;font-size:11px">${w||"—"}</span>
                             </div>
                         </div>
                         <div>
                             <div class="section-title">${this._t("performance")}</div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("specific_yield")}</span>
-                                <span class="metric-val">${w>0?this._fmt(w,2)+" kWh/kWp":"—"}</span>
+                                <span class="metric-val">${k>0?this._fmt(k,2)+" kWh/kWp":"—"}</span>
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("vs_forecast")}</span>
-                                <span class="metric-val" style="color:${M}">${z}</span>
+                                <span class="metric-val" style="color:${D}">${M}</span>
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("degradation")}</span>
-                                <span class="metric-val">${0!==S?this._fmt(S,2)+"%/yr":"—"}</span>
+                                <span class="metric-val">${0!==C?this._fmt(C,2)+"%/yr":"—"}</span>
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("trend")}</span>
-                                <span class="metric-val">${C?this._t(C):"—"}</span>
+                                <span class="metric-val">${z?this._t(z):"—"}</span>
                             </div>
                         </div>
                     </div>
@@ -1256,7 +1256,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     .kpi-value { font-size: 2.1rem; }
                     .kpi-icon { width: 44px; height: 44px; }
                 }
-            `}render(){if(!this._hass)return q;const e=this._val("daily_solar_energy"),t=this._val("solar_power");return W`
+            `}render(){if(!this._hass)return K;const e=this._val("daily_solar_energy"),t=this._val("solar_power");return W`
             <ha-card>
                 <div class="kpi">
                     <div class="kpi-icon"><ha-icon icon="mdi:solar-power-variant"></ha-icon></div>
@@ -1269,10 +1269,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <ha-icon icon="mdi:white-balance-sunny"></ha-icon>
                             <span>${ge(t)}</span>
                         </div>
-                    `:q}
+                    `:K}
                 </div>
             </ha-card>
-        `}getCardSize(){return 1}static getStubConfig(){return{}}},{type:"sem-solar-kpi-card",name:"SEM Solar KPI Card",description:"Prominent Today's Solar Production KPI for the Home tab",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-solar-kpi-card",preview:!0});const Ge="sensor.sem_",je=["solar_power","daily_solar_energy","monthly_solar_yield_energy","forecast_today_kwh","forecast_tomorrow_kwh","self_consumption_rate","autarky_rate","daily_costs","daily_savings","daily_ev_energy","daily_grid_import_energy"];function qe(e){return je.map(t=>`${e}${t}`)}we("sem-solar-summary-card",class extends Se{static get watchedEntities(){return qe(Ge)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Ge,this._prefix!==Ge&&(this._prevVals={})}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=qe(this._prefix||Ge);let a=!1;for(const t of r)if(this._prevVals[t]!==e.states[t]?.state){a=!0;break}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}render(){if(!this._config)return q;const e=this._theme(),t=this._val("solar_power"),i=this._val("daily_solar_energy"),s=this._val("monthly_solar_yield_energy"),r=this._val("forecast_today_kwh"),a=this._val("forecast_tomorrow_kwh"),o=this._val("self_consumption_rate"),n=this._val("autarky_rate"),l=this._val("daily_costs"),c=this._val("daily_savings"),d=this._val("daily_ev_energy"),p=this._val("daily_grid_import_energy"),h=fe(this._hass),_=(.15+.6*Math.min(t/1e4,1)).toFixed(3),g=2*Math.PI*42,u=(g*(1-(r>0?Math.min(i/r,1):0))).toFixed(1);return W`
+        `}getCardSize(){return 1}static getStubConfig(){return{}}},{type:"sem-solar-kpi-card",name:"SEM Solar KPI Card",description:"Prominent Today's Solar Production KPI for the Home tab",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-solar-kpi-card",preview:!0});const je="sensor.sem_",Ge=["solar_power","daily_solar_energy","monthly_solar_yield_energy","forecast_today_kwh","forecast_tomorrow_kwh","self_consumption_rate","autarky_rate","daily_costs","daily_savings","daily_ev_energy","daily_grid_import_energy"];function Ke(e){return Ge.map(t=>`${e}${t}`)}we("sem-solar-summary-card",class extends Se{static get watchedEntities(){return Ke(je)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||je,this._prefix!==je&&(this._prevVals={})}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=Ke(this._prefix||je);let a=!1;for(const t of r)if(this._prevVals[t]!==e.states[t]?.state){a=!0;break}if(a||s){for(const t of r)this._prevVals[t]=e.states[t]?.state;this._scheduleUpdate()}}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}render(){if(!this._config)return K;const e=this._theme(),t=this._val("solar_power"),i=this._val("daily_solar_energy"),s=this._val("monthly_solar_yield_energy"),r=this._val("forecast_today_kwh"),a=this._val("forecast_tomorrow_kwh"),o=this._val("self_consumption_rate"),n=this._val("autarky_rate"),l=this._val("daily_costs"),c=this._val("daily_savings"),d=this._val("daily_ev_energy"),p=this._val("daily_grid_import_energy"),h=fe(this._hass),_=(.15+.6*Math.min(t/1e4,1)).toFixed(3),g=2*Math.PI*42,u=(g*(1-(r>0?Math.min(i/r,1):0))).toFixed(1);return W`
             <style>
                 :host { display: block; }
                 .wrap {
@@ -1496,7 +1496,23 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
 
                 </div>
             </ha-card>
-        `}getCardSize(){return 4}static getStubConfig(){return{entity_prefix:Ge}}},{type:"sem-solar-summary-card",name:"SEM Solar Summary",description:"Lumina-styled solar overview with glow ring and production metrics",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-solar-summary-card"});const Ke="sensor.sem_",Ve=["battery_soc","battery_power","battery_charge_power","battery_discharge_power","battery_status","battery_health_score","battery_cycles_estimated","battery_temperature","battery_session_type","battery_session_energy","battery_session_solar_share","battery_session_duration","battery_session_avg_power","battery_session_cost","battery_session_savings","daily_battery_charge_energy","daily_battery_discharge_energy","daily_battery_savings","flow_solar_to_battery_energy","flow_grid_to_battery_energy","monthly_battery_charge_energy","monthly_battery_discharge_energy"],Ye=["#4db6ac","#FFB74D","#BA68C8","#64B5F6"];we("sem-battery-card",class extends Se{constructor(){super(),this._batteries=[],this._lastStateCount=0}static get watchedEntities(){return Ve.map(e=>`${Ke}${e}`)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Ke}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0);const r=Object.keys(e.states).length;if(r!==this._lastStateCount){this._lastStateCount=r;const t=[];for(const i of Object.keys(e.states)){const e=i.match(/^sensor\.sem_battery_(b\d+)_power$/);e&&t.push(e[1])}t.sort(),this._batteries=t}if(this._isFrozen()&&!s)return;const a=e?.states[`${this._prefix}battery_status`]?.state;if(("unavailable"===a||"unknown"===a)&&!s)return;let o=Ve.map(t=>e?.states[`${this._prefix}${t}`]?.state||"").join(",")+"|"+t;this._batteries.length?o+="|"+this._batteries.map(t=>{const i=[`battery_${t}_power`,`battery_${t}_soc`,`battery_${t}_status`,`battery_${t}_capacity_kwh`].map(t=>e?.states[`${this._prefix}${t}`]?.state||"").join(":"),s=[`select.sem_battery_${t}_mode`,`number.sem_battery_${t}_reserve_soc`].map(t=>e?.states[t]?.state||"").join(":");return i+":"+s}).join("|"):o+="|"+["select.sem_battery_mode","number.sem_battery_reserve_soc"].map(t=>e?.states[t]?.state||"").join(":"),(o!==this._lastBattKey||s)&&(this._lastBattKey=o,this._scheduleUpdate())}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}_fmtDuration(e){if(null==e||isNaN(e))return"—";const t=Math.round(e);if(t<90)return`${t} min`;const i=Math.floor(t/60),s=t-60*i;return 0===s?`${i} h`:`${i} h ${s} min`}_batteryName(e){const t=this._hass?.states[`${this._prefix}battery_${e}_power`];let i=e.toUpperCase();return t?.attributes?.friendly_name&&(i=t.attributes.friendly_name.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")),i}_renderMiniSocRing(e,t){const i=null!=e?Math.max(0,Math.min(100,e)):0,s=2*Math.PI*22,r=s*(1-i/100);return W`
+        `}getCardSize(){return 4}static getStubConfig(){return{entity_prefix:je}}},{type:"sem-solar-summary-card",name:"SEM Solar Summary",description:"Lumina-styled solar overview with glow ring and production metrics",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-solar-summary-card"});const qe={solcast:"Solcast",forecast_solar:"Forecast.Solar",open_meteo:"Open-Meteo"};function Ve(e,t,i){const s=function(e){if(!e||"string"!=typeof e)return null;const t=e.trim().toLowerCase();return t&&"unknown"!==t&&"unavailable"!==t&&"none"!==t?qe[t]||t.replace(/_/g," "):null}(e),r=i(1===t?"horizon_tomorrow":"horizon_two_days");return s?`${s} · ${r}`:`${i("forecast_accuracy")} · ${r}`}function Ye({measuredKwh:e,nameplateKwh:t,t:i}){if(null==e)return i("capacity_using_nameplate");if(null==t)return i("capacity_using_measured");const s=e-t;return Math.abs(s)<.05?i("capacity_matches_nameplate"):i("capacity_using_measured")}const Xe="—";function Ze(e,t=0){return function(e){if(!e)return!0;const t=e.state;return null==t||"unavailable"===t||"unknown"===t||""===t||Number.isNaN(parseFloat(t))}(e)?Xe:parseFloat(e.state).toFixed(t)}function Je(e,t=!1){return t||null==e||Number.isNaN(e)?{label:Xe,fraction:0,known:!1}:{label:`${e.toFixed(0)}%`,fraction:Math.max(0,Math.min(1,e/100)),known:!0}}const Qe="sensor.sem_",et=["battery_soc","battery_power","battery_charge_power","battery_discharge_power","battery_status","battery_health_score","battery_cycles_estimated","battery_temperature","battery_session_type","battery_session_energy","battery_session_solar_share","battery_session_duration","battery_session_avg_power","battery_session_cost","battery_session_savings","daily_battery_charge_energy","daily_battery_discharge_energy","daily_battery_savings","flow_solar_to_battery_energy","flow_grid_to_battery_energy","monthly_battery_charge_energy","monthly_battery_discharge_energy","battery_spendable_kwh","forecast_source"],tt=["#4db6ac","#FFB74D","#BA68C8","#64B5F6"];we("sem-battery-card",class extends Se{constructor(){super(),this._batteries=[],this._lastStateCount=0}static get watchedEntities(){return et.map(e=>`${Qe}${e}`)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Qe}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;(t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0);const r=Object.keys(e.states).length;if(r!==this._lastStateCount){this._lastStateCount=r;const t=[];for(const i of Object.keys(e.states)){const e=i.match(/^sensor\.sem_battery_(b\d+)_power$/);e&&t.push(e[1])}t.sort(),this._batteries=t}if(this._isFrozen()&&!s)return;const a=e?.states[`${this._prefix}battery_status`]?.state;if(("unavailable"===a||"unknown"===a)&&!s)return;let o=et.map(t=>e?.states[`${this._prefix}${t}`]?.state||"").join(",")+"|"+t;this._batteries.length?o+="|"+this._batteries.map(t=>{const i=[`battery_${t}_power`,`battery_${t}_soc`,`battery_${t}_status`,`battery_${t}_capacity_kwh`].map(t=>e?.states[`${this._prefix}${t}`]?.state||"").join(":"),s=[`select.sem_battery_${t}_mode`,`number.sem_battery_${t}_reserve_soc`].map(t=>e?.states[t]?.state||"").join(":");return i+":"+s}).join("|"):o+="|"+["select.sem_battery_mode","number.sem_battery_reserve_soc"].map(t=>e?.states[t]?.state||"").join(":"),(o!==this._lastBattKey||s)&&(this._lastBattKey=o,this._scheduleUpdate())}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_renderPacingLine(){const e=this._hass?.states?.["sensor.sem_battery_charge_pacing"];if(!e||"unavailable"===e.state)return K;const t=e.attributes||{},i=t.reason_code||"none";if("none"===i||"night"===i)return K;const s={no_limit_entity:"pacing_no_limit",limit_unreadable:"pacing_limit_unreadable"}[t.action];if(s)return W`
+                <div class="tonight-row" style="opacity:.85" title="${t.reason||""}">
+                    <span>${this._t("charge_pacing")}</span>
+                    <span>${this._t(s)}</span>
+                </div>`;const r=Number(t.cap_w),a=Number.isFinite(r)&&r>0?`${(r/1e3).toFixed(1)} kW`:"",o=t.full_at?String(t.full_at).slice(11,16):"",n=t.enabled?"":`${this._t("pacing_would")} `,l=this._t(`pacing_${i}`),c=a?` · ${a}${o?` · ${this._t("pacing_full_by")} ${o}`:""}`:"";return W`
+            <div class="tonight-row" style="opacity:.85" title="${t.reason||""}">
+                <span>${this._t("charge_pacing")}</span>
+                <span>${n}${l}${c}</span>
+            </div>`}_renderSellLine(){const e=this._stateAttrs(`${this._prefix}battery_spendable_kwh`)||{},t=e.battery_sell_state;if("selling"!==t&&"scheduled"!==t)return K;const i=e.battery_sell_until?String(e.battery_sell_until).slice(11,16):"",s=Number(e.battery_sell_rate_w),r=Number.isFinite(s)&&s>0?` · ${(s/1e3).toFixed(1)} kW`:"",a="selling"===t?this._t("spend_selling"):this._t("spend_sell_planned");return W`
+            <div class="tonight-row" style="opacity:.85">
+                <span>${this._t("spend_sell")}</span>
+                <span>${a}${i?` · ${this._t("spend_until")} ${i}`:""}${r}</span>
+            </div>`}_renderLastNightLine(e){const t=Number(e.last_night_surplus_kwh);return Number.isFinite(t)?W`
+            <div class="tonight-row" style="opacity:.85">
+                <span>${this._t("last_night_surplus")}</span>
+                <span>${this._fmt(t,1)} kWh</span>
+            </div>`:K}_renderRateCaveat(e){return e.rate_caveat?W`<div class="tonight-why" style="opacity:.75">${this._t("rate_set_by_inverter")}</div>`:K}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}_fmtDuration(e){if(null==e||isNaN(e))return"—";const t=Math.round(e);if(t<90)return`${t} min`;const i=Math.floor(t/60),s=t-60*i;return 0===s?`${i} h`:`${i} h ${s} min`}_batteryName(e){const t=this._hass?.states[`${this._prefix}battery_${e}_power`];let i=e.toUpperCase();return t?.attributes?.friendly_name&&(i=t.attributes.friendly_name.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")),i}_renderMiniSocRing(e,t){const i=null!=e?Math.max(0,Math.min(100,e)):0,s=2*Math.PI*22,r=s*(1-i/100);return W`
             <svg viewBox="0 0 56 56" width="56" height="56"
                  style="display:block;">
                 <circle cx="28" cy="28" r="${22}" fill="none"
@@ -1528,7 +1544,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ${null!=e?Math.round(s)+"%":"—"}
                 </text>
             </svg>
-        `}_fmtHours(e){if(null==e||!isFinite(e)||e<=0)return"—";if(e<1)return`${Math.round(60*e)} min`;const t=Math.floor(e),i=Math.round(60*(e-t));return 0===i?`${t} h`:`${t} h ${i} min`}_batteryEta(e,t,i){if(null==e||t<=0||Math.abs(i)<50)return null;if(i>50){const s=(100-e)/100*t;return{key:"until_full",text:this._fmtHours(s/(i/1e3))}}const s=e/100*t;return{key:"until_empty",text:this._fmtHours(s/(Math.abs(i)/1e3))}}_renderModeControls(e,t){const i=this._hass?.states[e];if(!i)return q;const s=this._hass?.states[t],r=i.state,a=s&&("allow_arbitrage"===r||"force_discharge"===r),o=this._t("battery_mode_hint_"+r)||"";return W`
+        `}_fmtHours(e){if(null==e||!isFinite(e)||e<=0)return"—";if(e<1)return`${Math.round(60*e)} min`;const t=Math.floor(e),i=Math.round(60*(e-t));return 0===i?`${t} h`:`${t} h ${i} min`}_batteryEta(e,t,i){if(null==e||t<=0||Math.abs(i)<50)return null;if(i>50){const s=(100-e)/100*t;return{key:"until_full",text:this._fmtHours(s/(i/1e3))}}const s=e/100*t;return{key:"until_empty",text:this._fmtHours(s/(Math.abs(i)/1e3))}}_renderModeControls(e,t){const i=this._hass?.states[e];if(!i)return K;const s=this._hass?.states[t],r=i.state,a=s&&("allow_arbitrage"===r||"force_discharge"===r),o=this._t("battery_mode_hint_"+r)||"";return W`
             <div class="battery-section-controls">
                 <div class="bsc-row">
                     <span class="bsc-label">${this._t("mode")}</span>
@@ -1546,7 +1562,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <ha-icon icon="mdi:information-outline"></ha-icon>
                         <span>${o}</span>
                     </div>
-                `:q}
+                `:K}
                 ${a?W`
                     <div class="bsc-row">
                         <span class="bsc-label">${this._t("reserve_soc")}</span>
@@ -1558,9 +1574,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 @click=${()=>this._stepNumber(t,1)}>+</button>
                         </span>
                     </div>
-                `:q}
+                `:K}
             </div>
-        `}_renderBatterySection(e,t){const i=Ye[t%Ye.length],s=this._val(`battery_${e}_power`,0),r=this._val(`battery_${e}_soc`,null),a=(this._valStr(`battery_${e}_status`)||"idle").toLowerCase(),o=this._val(`battery_${e}_capacity_kwh`,0),n=this._batteryName(e),l="selling"===a,c=!l&&("charging"===a||s>50),d=!l&&("discharging"===a||s<-50),p=c||d||l,h=l?"selling_to_grid":c?"charging":d?"discharging":"idle",_=l?"#FCD170":c?"#f06292":d?"#4db6ac":"#999",g=null!=r&&o>0?r/100*o:null,u=this._batteryEta(r,o,s);return W`
+        `}_renderBatterySection(e,t){const i=tt[t%tt.length],s=this._val(`battery_${e}_power`,0),r=this._val(`battery_${e}_soc`,null),a=(this._valStr(`battery_${e}_status`)||"idle").toLowerCase(),o=this._val(`battery_${e}_capacity_kwh`,0),n=this._batteryName(e),l="selling"===a,c=!l&&("charging"===a||s>50),d=!l&&("discharging"===a||s<-50),p=c||d||l,h=l?"selling_to_grid":c?"charging":d?"discharging":"idle",_=l?"#FCD170":c?"#f06292":d?"#4db6ac":"#999",g=null!=r&&o>0?r/100*o:null,u=this._batteryEta(r,o,s);return W`
             <div class="battery-section">
                 <div class="battery-section-header">
                     <div class="battery-dot" style="background:${i}"></div>
@@ -1588,24 +1604,61 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 <span class="bs-label">${this._t("stored")}</span>
                                 <span class="bs-val">${this._fmt(g,1)} kWh</span>
                             </div>
-                        `:q}
+                        `:K}
                         ${o>0?W`
                             <div class="bs-row">
                                 <span class="bs-label">${this._t("capacity")}</span>
                                 <span class="bs-val">${this._fmt(o,1)} kWh</span>
                             </div>
-                        `:q}
+                        `:K}
                         ${u?W`
                             <div class="bs-row">
                                 <span class="bs-label">${this._t(u.key)}</span>
                                 <span class="bs-val">${u.text}</span>
                             </div>
-                        `:q}
+                        `:K}
                     </div>
                 </div>
                 ${this._renderModeControls(`select.sem_battery_${e}_mode`,`number.sem_battery_${e}_reserve_soc`)}
             </div>
-        `}render(){if(!this._hass||!this._config)return q;const e=this._theme(),t=2*Math.PI*42,i=t.toFixed(1),s=this._val("battery_soc",0),r=this._val("battery_power",0),a=this._val("battery_charge_power",0),o=this._val("battery_discharge_power",0),n=(this._valStr("battery_status")||"").toLowerCase(),l=this._val("battery_health_score",0),c=this._val("battery_cycles_estimated",0),d=this._val("daily_battery_charge_energy",0),p=this._val("daily_battery_discharge_energy",0),h=this._val("daily_battery_savings",0),_=this._val("monthly_battery_charge_energy",0),g=this._val("monthly_battery_discharge_energy",0),u=this._val("flow_solar_to_battery_energy",0),m=fe(this._hass),f=this._hass?.states[`${this._prefix}battery_temperature`],v=f&&"unavailable"!==f.state&&"unknown"!==f.state?parseFloat(f.state):null,y=(b=f)&&b.attributes&&b.attributes.unit_of_measurement||"°C";var b;const x="selling"===n,$=!x&&("charging"===n||a>10),w=!x&&("discharging"===n||o>10),k=this._hass?.states["sensor.sem_tariff_current_export_rate"],S=k&&"unavailable"!==k.state&&"unknown"!==k.state?parseFloat(k.state):null,C="#FCD170",z=x?this._t("selling_to_grid"):$?this._t("charging"):w?this._t("discharging"):this._t("idle"),M=x?C:$?"#f06292":"#4db6ac",D=x?C:$?"#f06292":w?"#4db6ac":e.textSec||"#888",E=$||w||x?"0.5":"0.2",F=$||w||x?"socPulse 2s ease-in-out infinite":"none",A=Math.min(Math.max(s/100,0),1),I=(t*(1-A)).toFixed(1),B=d>0?Math.round(u/d*100):0,R=this._valStr("battery_session_type"),N="charge"===R||"discharge"===R,P="charge"===R,T=N?this._val("battery_session_energy",0):0,L=N?this._val("battery_session_duration",0):0,U=N?this._val("battery_session_avg_power",0):0,O=N?this._val("battery_session_solar_share",0):0,H=N?this._val("battery_session_cost",0):0,G=N?this._val("battery_session_savings",0):0,j=P?"#f06292":"#4db6ac";e.dotColor;const K=e.surface||"rgba(255,255,255,0.06)",V=e.surfaceBorder||"rgba(255,255,255,0.05)",Y=e.surfaceHover||"rgba(255,255,255,0.12)",X=e.textSec||"#999",Z=e.textTertiary||"#888";return W`
+        `}_renderTonight(e){const t=`${this._prefix}battery_spendable_kwh`,i=this._hass?.states[t];if(!i)return K;const s=this._stateAttrs(t),r=s.phase;if(!r)return K;const a=e=>null==e||""===e||isNaN(parseFloat(e))?null:parseFloat(e),o=a(i.state),n=a(s.dynamic_floor_pct),l=a(s.nights_sealed)??0,c=a(s.nights_required)??5,d=a(s.forecast_days_d1)??0,p=a(s.forecast_days_required)??7,h={learning:e.warning||"#e0a943",holding:"#5bc8d8",spending:"#4db6ac"}[r]||e.textSec||"#888";let _,g;"learning"===r?(_=`${Math.min(l,c)}`,g=`${this._t("of")} ${c} ${this._t("nights")}`):(_=this._fmt(o??0,1),g=`kWh ${this._t("spendable_tonight")}`);const u=[];if("learning"===r)u.push([this._t("nights_recorded"),`${l}`]),u.push([this._t("forecast_days_settled"),`${d} / ${p}`]);else{const e=a(s.overnight_need_kwh),t=a(s.expected_refill_kwh);null!=e&&u.push([this._t("overnight_need"),`${this._fmt(e,1)} kWh`]),null!=t&&u.push([this._t("expected_refill"),`${this._fmt(t,1)} kWh`]),null!=n&&u.push([this._t("floor_tonight"),`${Math.round(n)}%`])}const m=[];for(let e=0;e<c;e++)m.push(e<l);return W`
+            <div class="tonight" style="--tn-accent:${h}">
+                <div class="tonight-head">
+                    <span class="tonight-title">${this._t("tonight")}</span>
+                    <span class="tonight-pill">${this._t(`planning_phase_${r}`)}</span>
+                </div>
+                <div class="tonight-big ${"spending"===r?"tn-live":"tn-dim"}">
+                    ${_}<span class="tonight-unit">${g}</span>
+                </div>
+                ${"learning"===r?W`
+                    <div class="tonight-prog">
+                        ${m.map(e=>W`<i class="${e?"on":""}"></i>`)}
+                    </div>
+                    <button class="tonight-act" @click=${this._rebuildNights}
+                            title=${this._t("rebuild_nights_hint")}>
+                        ${this._t("rebuild_nights")}
+                    </button>`:K}
+                <div class="tonight-why">${s.why||""}</div>
+                ${this._renderPacingLine()}
+                ${this._renderSellLine()}
+                ${this._renderLastNightLine(s)}
+                ${this._renderRateCaveat(s)}
+                ${u.length?W`
+                    <div class="tonight-work">
+                        ${u.map(([e,t])=>W`
+                            <div class="tonight-row"><span>${e}</span><span>${t}</span></div>`)}
+                    </div>`:K}
+            </div>
+        `}async _rebuildNights(e){const t=e?.currentTarget;t&&(t.disabled=!0,t.textContent=this._t("rebuild_nights_busy"));try{await this._hass.callService("solar_energy_management","backfill_battery_nights",{days:365})}catch(e){t&&(t.disabled=!1,t.textContent=this._t("rebuild_nights"))}}_renderEvidence(e){const t=`${this._prefix}battery_spendable_kwh`,i=this._stateAttrs(t);if(!i.phase)return K;const s=e=>null==e||""===e||isNaN(parseFloat(e))?null:parseFloat(e),r=e=>`${Math.round(100*e)}%`,a=s(i.forecast_days_required)??7,o=s(i.nights_required)??5,n=this._hass?.states[`${this._prefix}forecast_source`]?.state,l=e=>this._t(e),c=(e,t,o,c)=>{const d=s(i[e]),p=s(i[t])??0,h=i[o],_=Ve(n,c,l),g=function({available:e,trust:t,days:i,minDays:s,t:r}){return!1===e?r("horizon_not_published"):null==t?r("horizon_learning_effect").replace("{days}",String(i??0)).replace("{needed}",String(s??7)):r("horizon_trusted_effect")}({available:h,trust:d,days:p,minDays:a,t:l}),u=i[`forecast_d${c}_state`],m=i[`forecast_d${c}_path`];return"unsupported"===u||null==u&&!1===h?"disabled_by_integration"===m?{label:_,value:this._t("sensor_disabled"),sub:this._t("enable_horizon_sensor"),dim:!0}:{label:_,value:this._t("no_source"),sub:g,dim:!0}:"learning"===u&&null==d||null==d?{label:_,value:this._t("learning"),sub:g,dim:!0}:{label:_,value:r(d),sub:`${p} ${this._t("days_settled")} · ${g}`,dim:!1}},d=[c("forecast_trust_d1","forecast_days_d1","forecast_d1_available",1),c("forecast_trust_d2","forecast_days_d2","forecast_d2_available",2)],p=s(i.measured_capacity_kwh),h=s(i.capacity_samples)??0,_=s(i.capacity_drift_pct),g=s(i.nameplate_capacity_kwh);return null==p?d.push({label:this._t("measured_pack_size"),value:this._t("learning"),sub:`${h} / ${o} ${this._t("nights")} · `+Ye({measuredKwh:null,nameplateKwh:g,t:l}),dim:!0}):d.push({label:this._t("measured_pack_size"),value:`${this._fmt(p,1)} kWh`,sub:(null==_?`${h} ${this._t("nights")}`:`${_>0?"+":""}${this._fmt(_,1)}% ${this._t("vs_nameplate")}`)+` · ${Ye({measuredKwh:p,nameplateKwh:g,t:l})}`,dim:!1}),W`
+            <div class="evidence">
+                ${d.map(e=>W`
+                    <div class="ev-cell">
+                        <div class="ev-key">${e.label}</div>
+                        <div class="ev-val ${e.dim?"ev-dim":""}">${e.value}</div>
+                        <div class="ev-sub">${e.sub}</div>
+                    </div>`)}
+            </div>
+        `}render(){if(!this._hass||!this._config)return K;const e=this._theme(),t=2*Math.PI*42,i=t.toFixed(1),s=this._val("battery_soc",null),r=Je(s),a=this._val("battery_power",0),o=this._val("battery_charge_power",0),n=this._val("battery_discharge_power",0),l=(this._valStr("battery_status")||"").toLowerCase(),c=this._val("battery_health_score",0),d=this._val("battery_cycles_estimated",0),p=this._val("daily_battery_charge_energy",0),h=this._val("daily_battery_discharge_energy",0),_=this._val("daily_battery_savings",0),g=this._val("monthly_battery_charge_energy",0),u=this._val("monthly_battery_discharge_energy",0),m=this._val("flow_solar_to_battery_energy",0),f=fe(this._hass),v=this._hass?.states[`${this._prefix}battery_temperature`],y=v&&"unavailable"!==v.state&&"unknown"!==v.state?parseFloat(v.state):null,b=(x=v)&&x.attributes&&x.attributes.unit_of_measurement||"°C";var x;const $="selling"===l,w=!$&&("charging"===l||o>10),k=!$&&("discharging"===l||n>10),S=this._hass?.states["sensor.sem_tariff_current_export_rate"],C=S&&"unavailable"!==S.state&&"unknown"!==S.state?parseFloat(S.state):null,z="#FCD170",M=$?this._t("selling_to_grid"):w?this._t("charging"):k?this._t("discharging"):this._t("idle"),D=$?z:w?"#f06292":"#4db6ac",E=$?z:w?"#f06292":k?"#4db6ac":e.textSec||"#888",F=w||k||$?"0.5":"0.2",I=w||k||$?"socPulse 2s ease-in-out infinite":"none",A=r.fraction,N=(t*(1-A)).toFixed(1),B=p>0?Math.round(m/p*100):0,T=this._valStr("battery_session_type"),R="charge"===T||"discharge"===T,P="charge"===T,L=R?this._val("battery_session_energy",0):0,U=R?this._val("battery_session_duration",0):0,O=R?this._val("battery_session_avg_power",0):0,H=R?this._val("battery_session_solar_share",0):0,j=R?this._val("battery_session_cost",0):0,G=R?this._val("battery_session_savings",0):0,q=P?"#f06292":"#4db6ac";e.dotColor;const V=e.surface||"rgba(255,255,255,0.06)",Y=e.surfaceBorder||"rgba(255,255,255,0.05)",X=e.surfaceHover||"rgba(255,255,255,0.12)",Z=e.textSec||"#999",J=e.textTertiary||"#888";return W`
             <style>
                 :host { display: block; contain: layout style paint; }
                 .wrap {
@@ -1649,30 +1702,30 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .metric-row {
                     display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; gap: 8px;
                 }
-                .metric-label { font-size: 12px; color: var(--secondary-text-color, ${X}); font-weight: 500; }
+                .metric-label { font-size: 12px; color: var(--secondary-text-color, ${Z}); font-weight: 500; }
                 .metric-val { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: #4db6ac; }
                 .chips { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
                 .chip {
                     flex: 1; min-width: 80px;
-                    background: var(--secondary-background-color, ${K});
-                    border: 1px solid var(--divider-color, ${V});
+                    background: var(--secondary-background-color, ${V});
+                    border: 1px solid var(--divider-color, ${Y});
                     border-radius: 10px; padding: 8px 10px; text-align: center;
                     transition: border-color 0.3s cubic-bezier(0.4,0,0.2,1);
                 }
-                .chip:hover { border-color: var(--divider-color, ${Y}); }
+                .chip:hover { border-color: var(--divider-color, ${X}); }
                 .chip-label {
-                    font-size: 11px; color: var(--secondary-text-color, ${Z});
+                    font-size: 11px; color: var(--secondary-text-color, ${J});
                     font-weight: 500; letter-spacing: 0.3px; margin-bottom: 3px;
                 }
                 .chip-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
                 .c-charge { color: #f06292; }
                 .c-discharge { color: #4db6ac; }
                 .c-savings { color: #8DC892; }
-                .chip-src { font-size: 10px; color: var(--secondary-text-color, ${Z}); margin-top: 1px; }
+                .chip-src { font-size: 10px; color: var(--secondary-text-color, ${J}); margin-top: 1px; }
                 .session-section {
                     margin-top: 14px; padding: 10px 12px;
-                    background: var(--secondary-background-color, ${K});
-                    border: 1px solid var(--divider-color, ${V});
+                    background: var(--secondary-background-color, ${V});
+                    border: 1px solid var(--divider-color, ${Y});
                     border-radius: 10px;
                 }
                 .sess-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -1681,7 +1734,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     text-transform: uppercase; letter-spacing: 0.5px;
                 }
                 .sess-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
-                .sess-item-label { font-size: 11px; color: var(--secondary-text-color, ${Z}); }
+                .sess-item-label { font-size: 11px; color: var(--secondary-text-color, ${J}); }
                 .sess-item-value {
                     font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
                     color: var(--primary-text-color, ${e.text||"#e0e0e0"});
@@ -1692,14 +1745,157 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                        shape as the EV card's per-charger sections so
                        a user who already knows the EV tab reads the
                        battery tab without re-learning the layout. ── */
+                /* (#778) Tonight — the forecast budget panel. Accent is set
+                   per phase from JS so the three states read at a glance
+                   without three copies of this block. */
+                .tonight {
+                    background: rgba(255,255,255,.03);
+                    border: 1px solid rgba(255,255,255,.08);
+                    border-left: 3px solid var(--tn-accent, #4db6ac);
+                    border-radius: 12px;
+                    padding: 14px 16px 15px;
+                    margin: 4px 0 14px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                }
+                .tonight-head {
+                    display: flex;
+                    align-items: baseline;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+                .tonight-title {
+                    font-size: 14px;
+                    font-weight: 500;
+                    color: var(--sem-text, #e8eeed);
+                }
+                .tonight-pill {
+                    font-size: 10px;
+                    letter-spacing: .08em;
+                    text-transform: uppercase;
+                    padding: 3px 8px;
+                    border-radius: 20px;
+                    border: 1px solid var(--tn-accent, #4db6ac);
+                    color: var(--tn-accent, #4db6ac);
+                    white-space: nowrap;
+                }
+                .tonight-big {
+                    font-size: 32px;
+                    font-weight: 300;
+                    line-height: 1;
+                    font-variant-numeric: tabular-nums;
+                    display: flex;
+                    align-items: baseline;
+                    gap: 6px;
+                    flex-wrap: wrap;
+                }
+                .tonight-big.tn-live { color: var(--tn-accent, #4db6ac); }
+                .tonight-big.tn-dim { color: var(--sem-text-sec, #9bb0ab); }
+                .tonight-unit {
+                    font-size: 13px;
+                    font-weight: 400;
+                    color: var(--sem-text-sec, #9bb0ab);
+                }
+                .tonight-prog { display: flex; gap: 4px; }
+                .tonight-prog i {
+                    flex: 1;
+                    height: 5px;
+                    border-radius: 3px;
+                    background: rgba(255,255,255,.13);
+                }
+                .tonight-prog i.on { background: var(--tn-accent, #e0a943); }
+                /* (#877) A quiet offer, not a call to action — the wait is
+                   normal and the shortcut is optional. Sits under the pips
+                   it removes. */
+                .tonight-act {
+                    /* .tonight is a column flex with align-items:stretch and
+                       its own 10px gap — so a bare button stretched to the
+                       full 822px card width and carried double spacing. The
+                       layout owns the gap; this only opts out of the
+                       stretch. */
+                    align-self: flex-start;
+                    padding: 5px 11px;
+                    font: inherit;
+                    font-size: 0.78em;
+                    letter-spacing: 0.02em;
+                    color: var(--tn-accent, #e0a943);
+                    background: transparent;
+                    border: 1px solid var(--tn-accent, #e0a943);
+                    border-radius: 999px;
+                    cursor: pointer;
+                    opacity: 0.85;
+                    transition: opacity 0.15s, background 0.15s;
+                }
+                .tonight-act:hover { opacity: 1; background: rgba(255,255,255,0.06); }
+                .tonight-act:disabled { opacity: 0.5; cursor: default; }
+                .tonight-why {
+                    font-size: 12.5px;
+                    line-height: 1.45;
+                    color: var(--sem-text-sec, #9bb0ab);
+                }
+                .tonight-work {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                    border-top: 1px solid rgba(255,255,255,.08);
+                    padding-top: 9px;
+                }
+                .tonight-row {
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 16px;
+                    font-size: 11.5px;
+                    color: var(--sem-text-sec, #8fa3a0);
+                }
+                .tonight-row span:last-child {
+                    font-variant-numeric: tabular-nums;
+                    color: var(--sem-text, #cfdad7);
+                }
+
+                /* (#778) the evidence strip */
+                .evidence {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 8px;
+                    margin: 0 0 14px;
+                }
+                .ev-cell {
+                    background: rgba(255,255,255,.03);
+                    border: 1px solid rgba(255,255,255,.07);
+                    border-radius: 10px;
+                    padding: 10px 12px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 3px;
+                }
+                .ev-key {
+                    font-size: 10px;
+                    letter-spacing: .07em;
+                    text-transform: uppercase;
+                    color: var(--sem-text-sec, #8fa3a0);
+                }
+                .ev-val {
+                    font-size: 19px;
+                    font-weight: 300;
+                    font-variant-numeric: tabular-nums;
+                    color: var(--sem-text, #e8eeed);
+                }
+                .ev-val.ev-dim { font-size: 15px; color: var(--sem-text-sec, #9bb0ab); }
+                .ev-sub {
+                    font-size: 11px;
+                    line-height: 1.35;
+                    color: var(--sem-text-sec, #8fa3a0);
+                }
+
                 .battery-sections {
                     margin-top: 16px;
                     display: flex; flex-direction: column;
                     gap: 12px;
                 }
                 .battery-section {
-                    background: ${K};
-                    border: 1px solid ${V};
+                    background: ${V};
+                    border: 1px solid ${Y};
                     border-radius: 12px;
                     padding: 12px 14px;
                 }
@@ -1731,7 +1927,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .battery-section-soc-label {
                     display: block;
-                    font-size: 10px; color: ${X};
+                    font-size: 10px; color: ${Z};
                     margin-top: 2px;
                     text-transform: uppercase; letter-spacing: 0.05em;
                 }
@@ -1744,7 +1940,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     padding: 2px 0;
                 }
                 .bs-label {
-                    font-size: 11px; color: ${X};
+                    font-size: 11px; color: ${Z};
                     font-weight: 500;
                 }
                 .bs-val {
@@ -1755,7 +1951,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 /* Per-battery controls (#523) — mode select + reserve stepper */
                 .battery-section-controls {
                     margin-top: 10px; padding-top: 10px;
-                    border-top: 1px solid ${V};
+                    border-top: 1px solid ${Y};
                     display: flex; flex-direction: column; gap: 8px;
                 }
                 .bsc-row {
@@ -1765,7 +1961,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .bsc-hint {
                     display: flex; align-items: flex-start; gap: 5px;
                     font-size: 11px; line-height: 1.35;
-                    color: ${X};
+                    color: ${Z};
                     margin: -2px 0 1px 0;
                     opacity: 0.92;
                 }
@@ -1774,23 +1970,23 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     flex: 0 0 auto; margin-top: 1px; opacity: 0.8;
                 }
                 .bsc-label {
-                    font-size: 12px; color: ${X}; font-weight: 500;
+                    font-size: 12px; color: ${Z}; font-weight: 500;
                 }
                 .bsc-select {
-                    background: ${K};
+                    background: ${V};
                     color: var(--primary-text-color, ${e.text||"#e0e0e0"});
-                    border: 1px solid ${V};
+                    border: 1px solid ${Y};
                     border-radius: 8px; padding: 5px 8px; font-size: 12px;
                     font-weight: 600; cursor: pointer; min-width: 150px;
                 }
                 .bsc-stepper { display: flex; align-items: center; gap: 8px; }
                 .bsc-btn {
                     width: 24px; height: 24px; border-radius: 6px;
-                    background: ${K}; border: 1px solid ${V};
+                    background: ${V}; border: 1px solid ${Y};
                     color: var(--primary-text-color, ${e.text||"#e0e0e0"});
                     font-size: 15px; font-weight: 700; cursor: pointer; line-height: 1;
                 }
-                .bsc-btn:hover { border-color: ${Y}; }
+                .bsc-btn:hover { border-color: ${X}; }
                 .bsc-stepval {
                     min-width: 38px; text-align: center; font-size: 13px;
                     font-weight: 700; font-variant-numeric: tabular-nums;
@@ -1809,8 +2005,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .month-chip {
                     flex: 1; text-align: center; padding: 6px 8px;
-                    background: var(--secondary-background-color, ${K});
-                    border: 1px solid var(--divider-color, ${V});
+                    background: var(--secondary-background-color, ${V});
+                    border: 1px solid var(--divider-color, ${Y});
                     border-radius: 8px;
                 }
             </style>
@@ -1819,7 +2015,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <defs>
                     <filter id="batt-glow" x="-50%" y="-50%" width="200%" height="200%">
                         <feGaussianBlur stdDeviation="4" result="blur"/>
-                        <feFlood flood-color="${M}" flood-opacity="0.25" result="color"/>
+                        <feFlood flood-color="${D}" flood-opacity="0.25" result="color"/>
                         <feComposite in="color" in2="blur" operator="in" result="glow"/>
                         <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
                     </filter>
@@ -1836,11 +2032,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="battery-ring">
                             <svg viewBox="0 0 100 100">
                                 <circle class="glow-ring" cx="50" cy="50" r="42"
-                                    style="stroke:${M};opacity:${E}"/>
+                                    style="stroke:${D};opacity:${F}"/>
                                 <circle class="ring-bg" cx="50" cy="50" r="42"/>
                                 <circle class="soc-arc" cx="50" cy="50" r="42"
                                     stroke-dasharray="${i}"
-                                    style="stroke-dashoffset:${I};stroke:${M};animation:${F}"/>
+                                    style="stroke-dashoffset:${N};stroke:${D};animation:${I}"/>
                             </svg>
                             <div class="ring-center">
                                 <!-- #523/#524 follow-up: filled SOC-level
@@ -1850,18 +2046,18 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                      charging bolt. -->
                                 <svg class="battery-icon" width="18" height="26" viewBox="0 0 20 30">
                                     <rect x="6" y="0" width="8" height="4" rx="1.5"
-                                        fill="${M}" opacity="0.7"/>
+                                        fill="${D}" opacity="0.7"/>
                                     <rect x="2" y="4" width="16" height="26" rx="3"
-                                        fill="rgba(0,0,0,0.30)" stroke="${M}"
+                                        fill="rgba(0,0,0,0.30)" stroke="${D}"
                                         stroke-width="1.6" opacity="0.9"/>
                                     <rect x="4" y="${(28-22*A).toFixed(1)}" width="12"
                                         height="${(22*A).toFixed(1)}" rx="1.5"
-                                        fill="${M}" opacity="0.55"/>
+                                        fill="${D}" opacity="0.55"/>
                                     <path d="M11,9.5 L6.5,18.5 L9.5,18.5 L8.5,24.5 L13.5,15 L10.5,15 Z"
-                                        fill="#FCD170" opacity="${$?.95:0}"/>
+                                        fill="#FCD170" opacity="${w?.95:0}"/>
                                 </svg>
-                                <div class="soc-value" style="color:${M}">
-                                    ${s.toFixed(0)}%
+                                <div class="soc-value" style="color:${D}">
+                                    ${r.label}
                                 </div>
                             </div>
                         </div>
@@ -1873,31 +2069,31 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("power")}</span>
-                                <span class="metric-val">${ge(r)}</span>
+                                <span class="metric-val">${ge(a)}</span>
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("status")}</span>
-                                <span class="metric-val" style="color:${D}">${z}</span>
+                                <span class="metric-val" style="color:${E}">${M}</span>
                             </div>
-                            ${x&&null!=S?W`
+                            ${$&&null!=C?W`
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("export_rate")}</span>
-                                <span class="metric-val" style="color:${C}">${this._fmt(S,3)} ${m}/kWh</span>
+                                <span class="metric-val" style="color:${z}">${this._fmt(C,3)} ${f}/kWh</span>
                             </div>
-                            `:q}
+                            `:K}
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("health")}</span>
-                                <span class="metric-val">${this._fmt(l,1)}%</span>
+                                <span class="metric-val">${this._fmt(c,1)}%</span>
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("cycles")}</span>
-                                <span class="metric-val">${this._fmt(c,1)}</span>
+                                <span class="metric-val">${this._fmt(d,1)}</span>
                             </div>
                             ${this._batteries.length>1?"":W`
                                 <div class="metric-row">
                                     <span class="metric-label">${this._t("temperature")}</span>
                                     <span class="metric-val">
-                                        ${null!=v?`${this._fmt(v,1)} ${y}`:"—"}
+                                        ${null!=y?`${this._fmt(y,1)} ${b}`:"—"}
                                     </span>
                                 </div>
                             `}
@@ -1923,58 +2119,61 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <div class="session-section">
                         <div class="sess-header">
                             <ha-icon icon="mdi:battery-sync"
-                                style="--mdc-icon-size:14px;color:${N?j:e.textSec}">
+                                style="--mdc-icon-size:14px;color:${R?q:e.textSec}">
                             </ha-icon>
-                            <span class="sess-title" style="color:${N?j:e.textSec}">
+                            <span class="sess-title" style="color:${R?q:e.textSec}">
                                 ${this._t("current_session")}
                             </span>
                         </div>
-                        ${N?W`
+                        ${R?W`
                         <div class="sess-grid">
                             <div>
                                 <div class="sess-item-label">${this._t("energy")}</div>
-                                <div class="sess-item-value">${this._fmt(T,2)} kWh</div>
+                                <div class="sess-item-value">${this._fmt(L,2)} kWh</div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("duration")}</div>
-                                <div class="sess-item-value">${this._fmtDuration(L)}</div>
+                                <div class="sess-item-value">${this._fmtDuration(U)}</div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("avg_power")}</div>
-                                <div class="sess-item-value">${ge(U)}</div>
+                                <div class="sess-item-value">${ge(O)}</div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("source")}</div>
                                 <div class="sess-item-value">
-                                    ${P?`${this._t("solar")}: ${this._fmt(O,0)}%`:""}
+                                    ${P?`${this._t("solar")}: ${this._fmt(H,0)}%`:""}
                                 </div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("cost")}</div>
                                 <div class="sess-item-value">
-                                    ${P?`${this._fmt(H,2)} ${m}`:`${this._t("saved")} ${this._fmt(G,2)} ${m}`}
+                                    ${P?`${this._fmt(j,2)} ${f}`:`${this._t("saved")} ${this._fmt(G,2)} ${f}`}
                                 </div>
                             </div>
                         </div>
                         `:W``}
                     </div>
 
+                    ${this._renderTonight(e)}
+                    ${this._renderEvidence(e)}
+
                     <div class="chips">
                         <div class="chip">
                             <div class="chip-label">${this._t("charge_today")}</div>
-                            <div class="chip-value c-charge">${this._fmt(d,2)} kWh</div>
+                            <div class="chip-value c-charge">${this._fmt(p,2)} kWh</div>
                             <div class="chip-src">
                                 ${B>0?`${B}% ${this._t("solar")}`:""}
                             </div>
                         </div>
                         <div class="chip">
                             <div class="chip-label">${this._t("discharge_today")}</div>
-                            <div class="chip-value c-discharge">${this._fmt(p,2)} kWh</div>
+                            <div class="chip-value c-discharge">${this._fmt(h,2)} kWh</div>
                         </div>
                         <div class="chip">
                             <div class="chip-label">${this._t("savings_today")}</div>
                             <div class="chip-value c-savings">
-                                ${this._fmt(h,2)} ${m}
+                                ${this._fmt(_,2)} ${f}
                             </div>
                         </div>
                     </div>
@@ -1984,23 +2183,23 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <div class="chip-label">
                                 ${this._t("monthly")} ${this._t("charge")}
                             </div>
-                            <div class="chip-value c-charge">${this._fmt(_,1)} kWh</div>
+                            <div class="chip-value c-charge">${this._fmt(g,1)} kWh</div>
                         </div>
                         <div class="month-chip">
                             <div class="chip-label">
                                 ${this._t("monthly")} ${this._t("discharge")}
                             </div>
-                            <div class="chip-value c-discharge">${this._fmt(g,1)} kWh</div>
+                            <div class="chip-value c-discharge">${this._fmt(u,1)} kWh</div>
                         </div>
                     </div>
                 </div>
             </ha-card>
-        `}getCardSize(){return 3}static getStubConfig(){return{}}},{type:"sem-battery-card",name:"SEM Battery",description:"Lumina-styled battery hero card with SOC arc ring and key metrics",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-battery-card"});const Xe="sensor.sem_",Ze=["grid_power","grid_import_power","grid_export_power","grid_status","daily_grid_import_energy","daily_grid_export_energy","monthly_grid_import_energy","monthly_grid_export_energy","consecutive_peak_15min","monthly_consecutive_peak","current_vs_peak_percentage","target_peak_limit","peak_margin","peak_trend","load_management_status","loads_currently_shed","available_load_reduction","controllable_devices_count","tariff_current_import_rate","tariff_current_export_rate","tariff_price_level","tariff_today_min_price","tariff_today_max_price","surplus_total_w","surplus_unallocated_w","surplus_active_devices","surplus_total_devices"];we("sem-grid-card",class extends Se{static get watchedEntities(){return Ze.map(e=>`${Xe}${e}`)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Xe}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=Ze.map(t=>e?.states[`${this._prefix}${t}`]?.state||"").join(",")+"|"+t;(r!==this._lastGridKey||s)&&(this._lastGridKey=r,this._scheduleUpdate())}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}_peakColor(e){return e>=90?"#f06292":e>=70?"#ff9800":"#8DC892"}_priceLevelColor(e){return"high"===e?"#f06292":"low"===e?"#8DC892":"—"!==e?"#ff9800":"#888"}_metricRow(e,t){return W`
+        `}getCardSize(){return 3}static getStubConfig(){return{}}},{type:"sem-battery-card",name:"SEM Battery",description:"Lumina-styled battery hero card with SOC arc ring and key metrics",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-battery-card"});const it="flat",st="no_prices",rt={negative:"price_negative",[it]:"price_level_flat",[st]:"price_level_no_prices"};function at(e){const t=String(e||"").toLowerCase();return rt[t]||t}function ot(e,t="#888"){switch(String(e||"").toLowerCase()){case"negative":return"#4db6ac";case"very_cheap":case"cheap":return"#8DC892";case"normal":return"#ff9800";case"expensive":return"#f06292";case"very_expensive":return"#e53935";case it:case st:return"#9e9e9e";default:return t}}const nt="sensor.sem_",lt=["grid_power","grid_import_power","grid_export_power","grid_status","daily_grid_import_energy","daily_grid_export_energy","monthly_grid_import_energy","monthly_grid_export_energy","consecutive_peak_15min","monthly_consecutive_peak","current_vs_peak_percentage","target_peak_limit","peak_margin","peak_trend","export_guard_state","load_management_status","loads_currently_shed","available_load_reduction","controllable_devices_count","tariff_current_import_rate","tariff_current_export_rate","tariff_price_level","tariff_today_min_price","tariff_today_max_price","surplus_total_w","surplus_unallocated_w","surplus_active_devices","surplus_total_devices"];we("sem-grid-card",class extends Se{static get watchedEntities(){return lt.map(e=>`${nt}${e}`)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||nt}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=lt.map(t=>e?.states[`${this._prefix}${t}`]?.state||"").join(",")+"|"+t;(r!==this._lastGridKey||s)&&(this._lastGridKey=r,this._scheduleUpdate())}get hass(){return this._hass}_val(e,t=0){return this._state(`${this._prefix}${e}`,t)}_valStr(e){return this._stateStr(`${this._prefix}${e}`)}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}_peakColor(e){return e>=90?"#f06292":e>=70?"#ff9800":"#8DC892"}_priceLevelColor(e){return"high"===e?"#f06292":"low"===e?"#8DC892":ot(e,"#888")}_metricRow(e,t){return W`
             <div class="metric-row">
                 <span class="metric-label">${this._t(e)}</span>
                 <span class="metric-val">${t}</span>
             </div>
-        `}render(){if(!this._hass||!this._config)return q;const e=this._theme(),t=fe(this._hass),i=this._val("grid_import_power"),s=this._val("grid_export_power"),r=s>i&&s>10,a=i>10,o=r?"mdi:transmission-tower-export":"mdi:transmission-tower-import",n=r?"#8353d1":"#488fc2",l=a||r?"0.45":"0.1",c=this._valStr("grid_status"),d=""!==c&&"—"!==c?this._t(c.toLowerCase()):r?this._t("exporting"):a?this._t("importing"):this._t("idle"),p=r?"#8353d1":a?"#488fc2":"#888",h=this._val("daily_grid_import_energy"),_=this._val("daily_grid_export_energy"),g=h-_,u=g<=0?"#8353d1":"#488fc2",m=this._val("current_vs_peak_percentage"),f=this._val("consecutive_peak_15min"),v=this._val("monthly_consecutive_peak"),y=this._val("target_peak_limit"),b=this._val("peak_margin"),x=this._valStr("peak_trend"),$=this._peakColor(m),w=b>0?"#8DC892":"#f06292",k=(200*Math.min(Math.max(m/100,0),1)).toFixed(1),S=this._valStr("load_management_status"),C=this._val("loads_currently_shed"),z=this._val("available_load_reduction"),M=this._val("controllable_devices_count"),D=this._val("tariff_current_import_rate"),E=this._val("tariff_current_export_rate"),F=this._valStr("tariff_price_level"),A=this._val("tariff_today_min_price"),I=this._val("tariff_today_max_price"),B=this._priceLevelColor(F),R=this._val("surplus_total_w"),N=this._val("surplus_unallocated_w"),P=Math.max(0,R-N),T=this._val("surplus_active_devices"),L=this._val("surplus_total_devices");e.dotColor;const U=e.textSec||"#999",O=e.surface||"rgba(255,255,255,0.06)",H=e.surfaceBorder||"rgba(255,255,255,0.12)";return W`
+        `}render(){if(!this._hass||!this._config)return K;const e=this._theme(),t=fe(this._hass),i=this._val("grid_import_power"),s=this._val("grid_export_power"),r=s>i&&s>10,a=i>10,o=r?"mdi:transmission-tower-export":"mdi:transmission-tower-import",n=r?"#8353d1":"#488fc2",l=a||r?"0.45":"0.1",c=this._valStr("grid_status"),d=""!==c&&"—"!==c?this._t(c.toLowerCase()):r?this._t("exporting"):a?this._t("importing"):this._t("idle"),p=r?"#8353d1":a?"#488fc2":"#888",h=this._val("daily_grid_import_energy"),_=this._val("daily_grid_export_energy"),g=h-_,u=g<=0?"#8353d1":"#488fc2",m=this._val("current_vs_peak_percentage"),f=this._val("export_guard_state"),v=this._val("consecutive_peak_15min"),y=this._val("monthly_consecutive_peak"),b=this._val("target_peak_limit"),x=this._val("peak_margin"),$=this._valStr("peak_trend"),w=this._peakColor(m),k=x>0?"#8DC892":"#f06292",S=(200*Math.min(Math.max(m/100,0),1)).toFixed(1),C=this._valStr("load_management_status"),z=this._val("loads_currently_shed"),M=this._val("available_load_reduction"),D=this._val("controllable_devices_count"),E=this._val("tariff_current_import_rate"),F=this._val("tariff_current_export_rate"),I=this._valStr("tariff_price_level"),A=this._val("tariff_today_min_price"),N=this._val("tariff_today_max_price"),B=this._priceLevelColor(I),T=this._val("surplus_total_w"),R=this._val("surplus_unallocated_w"),P=Math.max(0,T-R),L=this._val("surplus_active_devices"),U=this._val("surplus_total_devices");e.dotColor;const O=e.textSec||"#999",H=e.surface||"rgba(255,255,255,0.06)",j=e.surfaceBorder||"rgba(255,255,255,0.12)";return W`
             <style>
                 :host { display: block; }
                 .wrap {
@@ -2028,7 +2227,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .hero-pw { display: flex; flex-direction: column; }
                 .hero-pw-label {
                     font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
-                    color: var(--secondary-text-color, ${U}); margin-bottom: 1px;
+                    color: var(--secondary-text-color, ${O}); margin-bottom: 1px;
                 }
                 .hero-pw-val { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
                 .hero-pw-val.import { color: #488fc2; }
@@ -2039,8 +2238,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .section {
                     margin-top: 10px; padding: 10px 12px;
-                    background: var(--secondary-background-color, ${O});
-                    border: 1px solid var(--divider-color, ${H});
+                    background: var(--secondary-background-color, ${H});
+                    border: 1px solid var(--divider-color, ${j});
                     border-radius: 10px;
                 }
                 .section-title {
@@ -2051,7 +2250,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0;
                 }
                 .metric-label {
-                    font-size: 12px; color: var(--secondary-text-color, ${U}); font-weight: 500;
+                    font-size: 12px; color: var(--secondary-text-color, ${O}); font-weight: 500;
                 }
                 .metric-val {
                     font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
@@ -2059,7 +2258,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .net-row {
                     margin-top: 4px; padding-top: 4px;
-                    border-top: 1px solid var(--divider-color, ${H});
+                    border-top: 1px solid var(--divider-color, ${j});
                 }
                 .peak-bar-wrap { margin: 6px 0 4px; position: relative; }
                 .peak-bar-bg { width: 100%; height: 8px; fill: rgba(72,143,194,0.12); }
@@ -2159,34 +2358,36 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <svg class="peak-bar-svg" viewBox="0 0 200 8" preserveAspectRatio="none">
                                 <rect class="peak-bar-bg" x="0" y="0" width="200" height="8" rx="4" ry="4"/>
                                 <rect class="peak-bar-fill" x="0" y="0"
-                                    width="${k}" height="8" rx="4" ry="4"
-                                    fill="${$}"/>
+                                    width="${S}" height="8" rx="4" ry="4"
+                                    fill="${w}"/>
                             </svg>
                         </div>
-                        <div class="peak-pct-label" style="color:${$}">
+                        <div class="peak-pct-label" style="color:${w}">
                             ${this._fmt(m,0)}%
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("peak_15min")}</span>
-                            <span class="metric-val">${ge(f)}</span>
-                        </div>
-                        <div class="metric-row">
-                            <span class="metric-label">${this._t("monthly_peak")}</span>
                             <span class="metric-val">${ge(v)}</span>
                         </div>
                         <div class="metric-row">
-                            <span class="metric-label">${this._t("peak_limit")}</span>
+                            <span class="metric-label">${this._t("monthly_peak")}</span>
                             <span class="metric-val">${ge(y)}</span>
                         </div>
                         <div class="metric-row">
+                            <span class="metric-label">${this._t("peak_limit")}</span>
+                            <span class="metric-val">${ge(b)}</span>
+                        </div>
+                        <div class="metric-row">
                             <span class="metric-label">${this._t("peak_margin")}</span>
-                            <span class="metric-val" style="color:${w}">
-                                ${ge(b)}
+                            <span class="metric-val" style="color:${k}">
+                                ${ge(x)}
                             </span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("trend")}</span>
-                            <span class="metric-val">${x?this._t(x):"—"}</span>
+                            <span class="metric-val">${$?this._t($):"—"}</span>
+                            ${f&&"unknown"!==f&&"unavailable"!==f?W`
+                                <div class="row" style="opacity:.85"><span>${this._t("export_guard")}</span><span>${f}</span></div>`:K}
                         </div>
                     </div>
 
@@ -2195,19 +2396,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="section-title" style="color:#488fc2">${this._t("load_control")}</div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("status")}</span>
-                            <span class="metric-val">${S?this._t(S):"—"}</span>
+                            <span class="metric-val">${C?this._t(C):"—"}</span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("loads_shed")}</span>
-                            <span class="metric-val">${this._fmt(C,0)}</span>
+                            <span class="metric-val">${this._fmt(z,0)}</span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("available_reduction")}</span>
-                            <span class="metric-val">${ge(z)}</span>
+                            <span class="metric-val">${ge(M)}</span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("controllable_devices")}</span>
-                            <span class="metric-val">${this._fmt(M,0)}</span>
+                            <span class="metric-val">${this._fmt(D,0)}</span>
                         </div>
                     </div>
 
@@ -2217,19 +2418,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="metric-row">
                             <span class="metric-label">${this._t("import_rate")}</span>
                             <span class="metric-val c-import">
-                                ${0!==D?`${this._fmt(D,4)} ${t}/kWh`:"—"}
+                                ${0!==E?`${this._fmt(E,4)} ${t}/kWh`:"—"}
                             </span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("export_rate")}</span>
                             <span class="metric-val c-export">
-                                ${0!==E?`${this._fmt(E,4)} ${t}/kWh`:"—"}
+                                ${0!==F?`${this._fmt(F,4)} ${t}/kWh`:"—"}
                             </span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("price_level")}</span>
                             <span class="metric-val" style="color:${B}">
-                                ${F?this._t(F):"—"}
+                                ${I?this._t(at(I)):"—"}
                             </span>
                         </div>
                         <div class="metric-row">
@@ -2241,7 +2442,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="metric-row">
                             <span class="metric-label">${this._t("today_max")}</span>
                             <span class="metric-val c-solar">
-                                ${0!==I?this._fmt(I,4):"—"}
+                                ${0!==N?this._fmt(N,4):"—"}
                             </span>
                         </div>
                     </div>
@@ -2251,7 +2452,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="section-title" style="color:#488fc2">${this._t("surplus")}</div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("total_surplus")}</span>
-                            <span class="metric-val c-solar">${ge(R)}</span>
+                            <span class="metric-val c-solar">${ge(T)}</span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("allocated")}</span>
@@ -2259,18 +2460,18 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("unallocated")}</span>
-                            <span class="metric-val c-green">${ge(N)}</span>
+                            <span class="metric-val c-green">${ge(R)}</span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t("active_devices")}</span>
                             <span class="metric-val">
-                                ${Math.round(T)} / ${Math.round(L)}
+                                ${Math.round(L)} / ${Math.round(U)}
                             </span>
                         </div>
                     </div>
                 </div>
             </ha-card>
-        `}getCardSize(){return 5}static getStubConfig(){return{entity_prefix:Xe}}},{type:"sem-grid-card",name:"SEM Grid",description:"Consolidated grid card with import/export, peak management, load control, tariff, and surplus",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-grid-card"});const Je="sensor.sem_",Qe=20;function et(e){return 36+556*e}function tt(e){if(!e||"string"!=typeof e)return null;const t=e.match(/^(\d{1,2}):(\d{2})$/);if(!t)return null;const i=parseInt(t[1],10),s=parseInt(t[2],10);return i>24||s>59?null:(i+s/60)/24}function it(e){if(!Array.isArray(e))return[];const t=[];let i=-1;for(let s=0;s<24;s++)e[s]&&-1===i?i=s:e[s]||-1===i||(t.push({start:i/24,end:s/24}),i=-1);return-1!==i&&t.push({start:i/24,end:1}),t}we("sem-schedule-card",class extends Se{static get watchedEntities(){return[`${Je}tariff_current_import_rate`,`${Je}tariff_price_level`,`${Je}night_start_time`,`${Je}night_end_time`,`${Je}best_surplus_window`,`${Je}predicted_surplus_window`,`${Je}ev_power`,`${Je}charging_state`,`${Je}surplus_total_w`]}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||Je}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=["tariff_current_import_rate","tariff_price_level","night_start_time","night_end_time","best_surplus_window","predicted_surplus_window","ev_power","charging_state"].map(t=>{const i=e?.states[`${this._prefix}${t}`];return(i?.state||"")+JSON.stringify(i?.attributes?.schedule_today||"")+JSON.stringify(i?.attributes?.tariff_schedule_today||"")+JSON.stringify(i?.attributes?.schedule_surplus_hours||"")+JSON.stringify(i?.attributes?.schedule_ev_hours||"")}),a=r.join("|")+"|"+t;(a!==this._lastSchedKey||s)&&(this._lastSchedKey=a,this._scheduleUpdate())}get hass(){return this._hass}_stateObj(e){return this._hass?.states[`${this._prefix}${e}`]||null}_getTariffSchedule(){const e=this._stateObj("tariff_current_import_rate")||this._stateObj("tariff_price_level"),t=e?.attributes?.schedule_today||e?.attributes?.tariff_schedule_today;if(Array.isArray(t)&&t.length>0)return t.map(e=>({start:tt(e.start)??0,end:tt(e.end)??1,level:e.level||("NT"===(e.tariff||e.type||"HT").toUpperCase()?"cheap":"normal"),type:(e.tariff||e.type||"HT").toUpperCase(),avgPrice:e.avg_price}));const i=this._stateObj("tariff_price_level")?.state,s=new Set(["cheap","very_cheap","normal","expensive","very_expensive"]);return i&&s.has(i)?[{start:0,end:1,level:i,type:"cheap"===i||"very_cheap"===i?"NT":"HT",isFallback:!0}]:[{start:0,end:1,level:"normal",type:"HT",isFallback:!0}]}_getNightWindow(){const e=tt(this._stateObj("night_start_time")?.state),t=tt(this._stateObj("night_end_time")?.state);return null==e||null==t?null:{start:e,end:t}}_getPredictedSurplusWindow(){for(const e of["predicted_surplus_window","best_surplus_window"]){const t=this._stateObj(e)?.state;if(!t||"unknown"===t||"unavailable"===t)continue;if(t.toLowerCase().startsWith("tomorrow"))continue;const i=t.split(/[-–]/);if(2!==i.length)continue;const s=tt(i[0].trim()),r=tt(i[1].trim());if(null!=s&&null!=r)return{start:s,end:r}}return null}_getSurplusBlocks(){const e=this._hass?.states[`${this._prefix}surplus_total_w`];return it(e?.attributes?.schedule_surplus_hours)}_getEvBlocks(){const e=this._hass?.states[`${this._prefix}surplus_total_w`];return it(e?.attributes?.schedule_ev_hours)}_getEvPlanWindow(){const e=this._stateObj("charging_state"),t=e?.attributes?.today_plan;if(!Array.isArray(t))return null;const i=new Date;i.setHours(0,0,0,0);const s=i.getTime()+864e5,r=e=>{const t=new Date(e).getTime();return t<i.getTime()||t>=s?null:(t-i.getTime())/864e5};let a,o,n,l;for(const e of t)"ev_charge_start"===e.kind?a=r(e.when):"ev_min_reached"===e.kind?(o=r(e.when),l=e.values?.kwh):"ev_deadline"===e.kind&&(n=r(e.when));const c=o??n;return null==a&&null==c&&null==n?null:{plan:null!=a&&null!=c&&c>a?[{start:a,end:c,kwh:l}]:[],deadlineFrac:n,minReachedFrac:o}}_getSolarIntensity(){const e=this._stateObj("forecast_peak_time_today")?.state||this._stateObj("peak_time_today")?.state,t=parseFloat(this._stateObj("forecast_today_kwh")?.state||this._stateObj("forecast_today")?.state);if(!e||isNaN(t)||t<.5)return null;const i=tt(e.slice(0,5));if(null==i)return null;const s=new Array(24).fill(0);for(let e=0;e<24;e++){const t=e/24-i,r=Math.exp(-t*t/(.26*.13));s[e]=r}const r=Math.max(...s);return s.map(e=>e/r)}_isEvCharging(){const e=parseFloat(this._stateObj("ev_power")?.state);if(!isNaN(e)&&e>10)return!0;const t=this._stateObj("charging_state")?.state;return t&&"charging"===t.toLowerCase()}_getNowBadges(){const e=this._stateObj("tariff_price_level")?.state,t=["cheap","normal","expensive","very_cheap","very_expensive"].includes(e)?e:null,i=["active","target_reached"].includes(this._stateObj("night_charging_status")?.state),s=parseFloat(this._stateObj("solar_power")?.state),r=!isNaN(s)&&s>50?`${(s/1e3).toFixed(1)} kW`:null,a=this._isEvCharging(),o=this._getEvPlanWindow();return{tariff:t,night:i?"now":null,surplus:r,ev:a?"charging":o?.plan?.length?"planned":null}}_buildSvgContent(e){const t=pe,i=e.textSec||"#888",s=e.textTertiary||"#777",r=e.surface||"rgba(255,255,255,0.03)";let a="";for(let e=0;e<=24;e+=2){const t=et(e/24);a+=`<text x="${t}" y="12" text-anchor="middle" fill="${i}"\n                font-size="10" font-family="'Segoe UI','Roboto',sans-serif"\n                font-variant-numeric="tabular-nums">${e.toString().padStart(2,"0")}</text>`}[this._t("tariff"),this._t("night"),this._t("surplus"),this._t("ev")].forEach((e,t)=>{a+=`<text x="32" y="${Qe+22*t+9+3.5}" text-anchor="end" fill="${s}"\n                font-size="10" font-family="'Segoe UI','Roboto',sans-serif">${e}</text>`});for(let e=0;e<4;e++){a+=`<rect x="36" y="${Qe+22*e}" width="556" height="18" rx="3" fill="${r}"/>`}const o={cheap:{fill:"#66bb6a",opacity:.62},normal:{fill:t.solar,opacity:.55},expensive:{fill:"#e91e63",opacity:.9}},n={cheap:"cheap",normal:"normal",expensive:"expensive"};for(const e of this._getTariffSchedule()){const t=et(e.start),i=et(e.end)-t,s=o[e.level]||o.normal,r=!0===e.isFallback,l=r?.35*s.opacity:s.opacity,c=r?` stroke="${s.fill}" stroke-width="1" stroke-opacity="0.6" stroke-dasharray="3,2"`:"",d=r?`${e.level} (no per-hour data — showing current level)`:null!=e.avgPrice?`${e.level} · avg ${e.avgPrice.toFixed(2)}`:e.level;if(a+=`<rect x="${t}" y="20" width="${i}" height="18"\n                rx="3" fill="${s.fill}" opacity="${l}"${c}>\n                <title>${d}</title></rect>`,i>30){const s=e.level&&n[e.level]?n[e.level]:e.type.toLowerCase();a+=`<text x="${t+i/2}" y="32.5" text-anchor="middle"\n                    fill="rgba(255,255,255,0.92)" font-size="9" font-weight="600"\n                    font-family="'Segoe UI','Roboto',sans-serif">${this._t(s)}</text>`}}const l=this._getNightWindow();if(l){const e=e=>{const t=Math.round(24*e*60);return`${String(Math.floor(t/60)).padStart(2,"0")}:${String(t%60).padStart(2,"0")}`},t=`${this._t("night")} ${e(l.start)}–${e(l.end)}`;if(l.start>l.end){const e=et(l.start);a+=`<rect x="${e}" y="42" width="${et(1)-e}"\n                    height="18" rx="3" fill="#42a5f5" opacity="0.55"><title>${t}</title></rect>`,a+=`<rect x="${et(0)}" y="42"\n                    width="${et(l.end)-et(0)}" height="18"\n                    rx="3" fill="#42a5f5" opacity="0.55"><title>${t}</title></rect>`}else{const e=et(l.start),i=et(l.end)-e;a+=`<rect x="${e}" y="42" width="${i}" height="18"\n                    rx="3" fill="#42a5f5" opacity="0.55"><title>${t}</title></rect>`}}const c=this._getSolarIntensity(),d=parseFloat(this._stateObj("forecast_today_kwh")?.state||NaN);if(c){const e=isNaN(d)?this._t("surplus"):`${this._t("surplus")} · forecast ${d.toFixed(1)} kWh`;for(let t=0;t<24;t++){const i=c[t];if(i<.08)continue;const s=et(t/24),r=et(1/24);a+=`<rect x="${s}" y="64" width="${r}" height="18"\n                    fill="#fdd835" opacity="${(.55*i).toFixed(2)}"><title>${e}</title></rect>`}}const p=this._getPredictedSurplusWindow();if(p){const e=et(p.start),t=Math.max(0,et(p.end)-e);a+=`<rect x="${e}" y="64" width="${t}" height="18"\n                rx="3" fill="none" stroke="#fdd835" stroke-width="1"\n                stroke-opacity="0.5" stroke-dasharray="2,2"/>`}for(const e of this._getSurplusBlocks()){const t=et(e.start),i=Math.max(0,et(e.end)-t);a+=`<rect x="${t}" y="64" width="${i}" height="18"\n                rx="3" fill="#fdd835" opacity="0.62"/>`}const h=this._getEvPlanWindow();if(h?.plan?.length)for(const e of h.plan){const i=et(e.start),s=Math.max(0,et(e.end)-i),r=e.kwh?`${this._t("plan_ev_charge_start")} → ${this._t("plan_ev_min_reached").replace("{kwh}",e.kwh)}`:this._t("plan_ev_charge_start");a+=`<rect x="${i}" y="86" width="${s}" height="18"\n                    rx="3" fill="${t.ev}" opacity="0.30"\n                    stroke="${t.ev}" stroke-width="0.6" stroke-opacity="0.6"\n                    stroke-dasharray="3,2"><title>${r}</title></rect>`}for(const e of this._getEvBlocks()){const i=et(e.start),s=Math.max(0,et(e.end)-i);a+=`<rect x="${i}" y="86" width="${s}" height="18"\n                rx="3" fill="${t.ev}" opacity="0.55"/>`}if(null!=h?.deadlineFrac){const e=et(h.deadlineFrac);a+=`<line x1="${e}" y1="84" x2="${e}" y2="106"\n                stroke="#f06292" stroke-width="1.2" stroke-dasharray="2,1" opacity="0.85">\n                <title>${this._t("plan_ev_deadline")}</title></line>`}if(this._isEvCharging()){const e=new Date,i=(e.getHours()+e.getMinutes()/60)/24,s=.5/24,r=Math.max(0,i-s),o=Math.min(1,i+s),n=et(r),l=et(o)-n;a+=`<rect x="${n}" y="86" width="${l}" height="18"\n                rx="3" fill="${t.ev}" opacity="0.95"/>`}const _=new Date,g=et((_.getHours()+_.getMinutes()/60)/24);return a+=`<line x1="${g}" y1="18" x2="${g}" y2="104"\n            stroke="#ef5350" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>`,a+=`<polygon points="${g-3},18 ${g+3},18 ${g},22"\n            fill="#ef5350" opacity="0.9"/>`,a}render(){if(!this._hass||!this._config)return q;const e=this._theme(),t=e.dotColor||"rgba(128,128,128,0.04)",i=this._buildSvgContent(e),s=this._getNowBadges(),r={cheap:"#66bb6a",very_cheap:"#66bb6a",normal:"#ff9800",expensive:"#e91e63",very_expensive:"#e91e63",now:"#42a5f5",charging:"#8DC892",planned:"#8DC892"},a=(e,t)=>{if(!t)return q;const i=r[t]||"#888",s=/\d/.test(t)?t:this._t(t);return W`<span class="now-badge"
+        `}getCardSize(){return 5}static getStubConfig(){return{entity_prefix:nt}}},{type:"sem-grid-card",name:"SEM Grid",description:"Consolidated grid card with import/export, peak management, load control, tariff, and surplus",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-grid-card"});const ct="sensor.sem_",dt=20;function pt(e){return 36+556*e}function ht(e){if(!e||"string"!=typeof e)return null;const t=e.match(/^(\d{1,2}):(\d{2})$/);if(!t)return null;const i=parseInt(t[1],10),s=parseInt(t[2],10);return i>24||s>59?null:(i+s/60)/24}function _t(e){if(!Array.isArray(e))return[];const t=[];let i=-1;for(let s=0;s<24;s++)e[s]&&-1===i?i=s:e[s]||-1===i||(t.push({start:i/24,end:s/24}),i=-1);return-1!==i&&t.push({start:i/24,end:1}),t}we("sem-schedule-card",class extends Se{static get watchedEntities(){return[`${ct}tariff_current_import_rate`,`${ct}tariff_price_level`,`${ct}night_start_time`,`${ct}night_end_time`,`${ct}best_surplus_window`,`${ct}predicted_surplus_window`,`${ct}ev_power`,`${ct}charging_state`,`${ct}surplus_total_w`]}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||ct}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=["tariff_current_import_rate","tariff_price_level","night_start_time","night_end_time","best_surplus_window","predicted_surplus_window","ev_power","charging_state"].map(t=>{const i=e?.states[`${this._prefix}${t}`];return(i?.state||"")+JSON.stringify(i?.attributes?.schedule_today||"")+JSON.stringify(i?.attributes?.tariff_schedule_today||"")+JSON.stringify(i?.attributes?.schedule_surplus_hours||"")+JSON.stringify(i?.attributes?.schedule_ev_hours||"")}),a=r.join("|")+"|"+t;(a!==this._lastSchedKey||s)&&(this._lastSchedKey=a,this._scheduleUpdate())}get hass(){return this._hass}_stateObj(e){return this._hass?.states[`${this._prefix}${e}`]||null}_getTariffSchedule(){const e=this._stateObj("tariff_current_import_rate")||this._stateObj("tariff_price_level"),t=e?.attributes?.schedule_today||e?.attributes?.tariff_schedule_today;if(Array.isArray(t)&&t.length>0)return t.map(e=>({start:ht(e.start)??0,end:ht(e.end)??1,level:e.level||(null===e.tariff?"no_prices":"NT"===(e.tariff||e.type||"HT").toUpperCase()?"cheap":"normal"),type:null===e.tariff?"":(e.tariff||e.type||"HT").toUpperCase(),avgPrice:e.avg_price}));const i=this._stateObj("tariff_price_level")?.state,s=new Set(["cheap","very_cheap","normal","expensive","very_expensive"]);return i&&s.has(i)?[{start:0,end:1,level:i,type:"cheap"===i||"very_cheap"===i?"NT":"HT",isFallback:!0}]:[{start:0,end:1,level:st,type:"",isFallback:!0}]}_getNightWindow(){const e=ht(this._stateObj("night_start_time")?.state),t=ht(this._stateObj("night_end_time")?.state);return null==e||null==t?null:{start:e,end:t}}_getPredictedSurplusWindow(){for(const e of["predicted_surplus_window","best_surplus_window"]){const t=this._stateObj(e)?.state;if(!t||"unknown"===t||"unavailable"===t)continue;if(t.toLowerCase().startsWith("tomorrow"))continue;const i=t.split(/[-–]/);if(2!==i.length)continue;const s=ht(i[0].trim()),r=ht(i[1].trim());if(null!=s&&null!=r)return{start:s,end:r}}return null}_getSurplusBlocks(){const e=this._hass?.states[`${this._prefix}surplus_total_w`];return _t(e?.attributes?.schedule_surplus_hours)}_getEvBlocks(){const e=this._hass?.states[`${this._prefix}surplus_total_w`];return _t(e?.attributes?.schedule_ev_hours)}_getEvPlanWindow(){const e=this._stateObj("charging_state"),t=e?.attributes?.today_plan;if(!Array.isArray(t))return null;const i=new Date;i.setHours(0,0,0,0);const s=i.getTime()+864e5,r=e=>{const t=new Date(e).getTime();return t<i.getTime()||t>=s?null:(t-i.getTime())/864e5};let a,o,n,l;for(const e of t)"ev_charge_start"===e.kind?a=r(e.when):"ev_min_reached"===e.kind?(o=r(e.when),l=e.values?.kwh):"ev_deadline"===e.kind&&(n=r(e.when));const c=o??n;return null==a&&null==c&&null==n?null:{plan:null!=a&&null!=c&&c>a?[{start:a,end:c,kwh:l}]:[],deadlineFrac:n,minReachedFrac:o}}_getSolarIntensity(){const e=this._stateObj("forecast_peak_time_today")?.state||this._stateObj("peak_time_today")?.state,t=parseFloat(this._stateObj("forecast_today_kwh")?.state||this._stateObj("forecast_today")?.state);if(!e||isNaN(t)||t<.5)return null;const i=ht(e.slice(0,5));if(null==i)return null;const s=new Array(24).fill(0);for(let e=0;e<24;e++){const t=e/24-i,r=Math.exp(-t*t/(.26*.13));s[e]=r}const r=Math.max(...s);return s.map(e=>e/r)}_isEvCharging(){const e=parseFloat(this._stateObj("ev_power")?.state);if(!isNaN(e)&&e>10)return!0;const t=this._stateObj("charging_state")?.state;return t&&"charging"===t.toLowerCase()}_getNowBadges(){const e=this._stateObj("tariff_price_level")?.state,t=["cheap","normal","expensive","very_cheap","very_expensive"].includes(e)?e:null,i=["active","target_reached"].includes(this._stateObj("night_charging_status")?.state),s=parseFloat(this._stateObj("solar_power")?.state),r=!isNaN(s)&&s>50?`${(s/1e3).toFixed(1)} kW`:null,a=this._isEvCharging(),o=this._getEvPlanWindow();return{tariff:t,night:i?"now":null,surplus:r,ev:a?"charging":o?.plan?.length?"planned":null}}_buildSvgContent(e){const t=pe,i=e.textSec||"#888",s=e.textTertiary||"#777",r=e.surface||"rgba(255,255,255,0.03)";let a="";for(let e=0;e<=24;e+=2){const t=pt(e/24);a+=`<text x="${t}" y="12" text-anchor="middle" fill="${i}"\n                font-size="10" font-family="'Segoe UI','Roboto',sans-serif"\n                font-variant-numeric="tabular-nums">${e.toString().padStart(2,"0")}</text>`}[this._t("tariff"),this._t("night"),this._t("surplus"),this._t("ev")].forEach((e,t)=>{a+=`<text x="32" y="${dt+22*t+9+3.5}" text-anchor="end" fill="${s}"\n                font-size="10" font-family="'Segoe UI','Roboto',sans-serif">${e}</text>`});for(let e=0;e<4;e++){a+=`<rect x="36" y="${dt+22*e}" width="556" height="18" rx="3" fill="${r}"/>`}const o={cheap:{fill:"#66bb6a",opacity:.62},normal:{fill:t.solar,opacity:.55},expensive:{fill:"#e91e63",opacity:.9},[it]:{fill:"#9e9e9e",opacity:.35},[st]:{fill:"#9e9e9e",opacity:.35}},n={cheap:"cheap",normal:"normal",expensive:"expensive",[it]:"price_level_flat",[st]:"price_level_no_prices"};for(const e of this._getTariffSchedule()){const t=pt(e.start),i=pt(e.end)-t,s=o[e.level]||o.normal,r=!0===e.isFallback,l=r?.35*s.opacity:s.opacity,c=r?` stroke="${s.fill}" stroke-width="1" stroke-opacity="0.6" stroke-dasharray="3,2"`:"",d=r?`${e.level} (no per-hour data — showing current level)`:null!=e.avgPrice?`${e.level} · avg ${e.avgPrice.toFixed(2)}`:e.level;if(a+=`<rect x="${t}" y="20" width="${i}" height="18"\n                rx="3" fill="${s.fill}" opacity="${l}"${c}>\n                <title>${d}</title></rect>`,i>30){const s=e.level&&n[e.level]?n[e.level]:e.type.toLowerCase();a+=`<text x="${t+i/2}" y="32.5" text-anchor="middle"\n                    fill="rgba(255,255,255,0.92)" font-size="9" font-weight="600"\n                    font-family="'Segoe UI','Roboto',sans-serif">${this._t(s)}</text>`}}const l=this._getNightWindow();if(l){const e=e=>{const t=Math.round(24*e*60);return`${String(Math.floor(t/60)).padStart(2,"0")}:${String(t%60).padStart(2,"0")}`},t=`${this._t("night")} ${e(l.start)}–${e(l.end)}`;if(l.start>l.end){const e=pt(l.start);a+=`<rect x="${e}" y="42" width="${pt(1)-e}"\n                    height="18" rx="3" fill="#42a5f5" opacity="0.55"><title>${t}</title></rect>`,a+=`<rect x="${pt(0)}" y="42"\n                    width="${pt(l.end)-pt(0)}" height="18"\n                    rx="3" fill="#42a5f5" opacity="0.55"><title>${t}</title></rect>`}else{const e=pt(l.start),i=pt(l.end)-e;a+=`<rect x="${e}" y="42" width="${i}" height="18"\n                    rx="3" fill="#42a5f5" opacity="0.55"><title>${t}</title></rect>`}}const c=this._getSolarIntensity(),d=parseFloat(this._stateObj("forecast_today_kwh")?.state||NaN);if(c){const e=isNaN(d)?this._t("surplus"):`${this._t("surplus")} · forecast ${d.toFixed(1)} kWh`;for(let t=0;t<24;t++){const i=c[t];if(i<.08)continue;const s=pt(t/24),r=pt(1/24);a+=`<rect x="${s}" y="64" width="${r}" height="18"\n                    fill="#fdd835" opacity="${(.55*i).toFixed(2)}"><title>${e}</title></rect>`}}const p=this._getPredictedSurplusWindow();if(p){const e=pt(p.start),t=Math.max(0,pt(p.end)-e);a+=`<rect x="${e}" y="64" width="${t}" height="18"\n                rx="3" fill="none" stroke="#fdd835" stroke-width="1"\n                stroke-opacity="0.5" stroke-dasharray="2,2"/>`}for(const e of this._getSurplusBlocks()){const t=pt(e.start),i=Math.max(0,pt(e.end)-t);a+=`<rect x="${t}" y="64" width="${i}" height="18"\n                rx="3" fill="#fdd835" opacity="0.62"/>`}const h=this._getEvPlanWindow();if(h?.plan?.length)for(const e of h.plan){const i=pt(e.start),s=Math.max(0,pt(e.end)-i),r=e.kwh?`${this._t("plan_ev_charge_start")} → ${this._t("plan_ev_min_reached").replace("{kwh}",e.kwh)}`:this._t("plan_ev_charge_start");a+=`<rect x="${i}" y="86" width="${s}" height="18"\n                    rx="3" fill="${t.ev}" opacity="0.30"\n                    stroke="${t.ev}" stroke-width="0.6" stroke-opacity="0.6"\n                    stroke-dasharray="3,2"><title>${r}</title></rect>`}for(const e of this._getEvBlocks()){const i=pt(e.start),s=Math.max(0,pt(e.end)-i);a+=`<rect x="${i}" y="86" width="${s}" height="18"\n                rx="3" fill="${t.ev}" opacity="0.55"/>`}if(null!=h?.deadlineFrac){const e=pt(h.deadlineFrac);a+=`<line x1="${e}" y1="84" x2="${e}" y2="106"\n                stroke="#f06292" stroke-width="1.2" stroke-dasharray="2,1" opacity="0.85">\n                <title>${this._t("plan_ev_deadline")}</title></line>`}if(this._isEvCharging()){const e=new Date,i=(e.getHours()+e.getMinutes()/60)/24,s=.5/24,r=Math.max(0,i-s),o=Math.min(1,i+s),n=pt(r),l=pt(o)-n;a+=`<rect x="${n}" y="86" width="${l}" height="18"\n                rx="3" fill="${t.ev}" opacity="0.95"/>`}const _=new Date,g=pt((_.getHours()+_.getMinutes()/60)/24);return a+=`<line x1="${g}" y1="18" x2="${g}" y2="104"\n            stroke="#ef5350" stroke-width="1.5" stroke-linecap="round" opacity="0.9"/>`,a+=`<polygon points="${g-3},18 ${g+3},18 ${g},22"\n            fill="#ef5350" opacity="0.9"/>`,a}render(){if(!this._hass||!this._config)return K;const e=this._theme(),t=e.dotColor||"rgba(128,128,128,0.04)",i=this._buildSvgContent(e),s=this._getNowBadges(),r={cheap:"#66bb6a",very_cheap:"#66bb6a",normal:"#ff9800",expensive:"#e91e63",very_expensive:"#e91e63",now:"#42a5f5",charging:"#8DC892",planned:"#8DC892"},a=(e,t)=>{if(!t)return K;const i=r[t]||"#888",s=/\d/.test(t)?t:this._t(t);return W`<span class="now-badge"
                 style="color:${i};border-color:${i}55;background:${i}22">${s}</span>`};return W`
             <style>
                 :host { display: block; }
@@ -2343,12 +2544,16 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </ha-card>
-        `}getCardSize(){return 2}static getStubConfig(){return{}}},{type:"sem-schedule-card",name:"SEM Schedule",description:"24-hour timeline showing tariff, night window, surplus window, and EV charging periods",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-schedule-card"});const st=[{id:"autostart",entity:"number.sem_battery_auto_start_soc",icon:"mdi:play-circle",labelKey:"auto_start_soc",helpKey:"zone_help_autostart",color:"#4db6ac"},{id:"buffer",entity:"number.sem_battery_buffer_soc",icon:"mdi:shield-half-full",labelKey:"buffer_soc",helpKey:"zone_help_buffer",color:"#ff9800"},{id:"priority",entity:"number.sem_battery_priority_soc",icon:"mdi:shield-alert",labelKey:"priority_soc",helpKey:"zone_help_priority",color:"#f44336"}];we("sem-battery-zones-card",class extends Se{static get watchedEntities(){return st.map(e=>e.entity)}static get properties(){return{...super.properties,_showHelp:{state:!0}}}constructor(){super(),this._showHelp=!1}_toggleHelp(){this._showHelp=!this._showHelp}setConfig(e){super.setConfig(e)}_getDecimalsForZone(e){const t=this._hass?.states[e];return(t&&parseFloat(t.attributes.step)||1)<1?1:0}_renderZoneMarkers(e){return st.map(t=>{const i=this._state(t.entity),s=Math.max(0,Math.min(100,i));return W`
+        `}getCardSize(){return 2}static getStubConfig(){return{}}},{type:"sem-schedule-card",name:"SEM Schedule",description:"24-hour timeline showing tariff, night window, surplus window, and EV charging periods",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-schedule-card"});const gt=[{id:"autostart",entity:"number.sem_battery_auto_start_soc",icon:"mdi:play-circle",labelKey:"auto_start_soc",helpKey:"zone_help_autostart",color:"#4db6ac"},{id:"buffer",entity:"number.sem_battery_buffer_soc",icon:"mdi:shield-half-full",labelKey:"buffer_soc",helpKey:"zone_help_buffer",color:"#ff9800"},{id:"priority",entity:"number.sem_battery_priority_soc",icon:"mdi:shield-alert",labelKey:"priority_soc",helpKey:"zone_help_priority",color:"#f44336"}];we("sem-battery-zones-card",class extends Se{static get watchedEntities(){return gt.map(e=>e.entity)}static get properties(){return{...super.properties,_showHelp:{state:!0}}}constructor(){super(),this._showHelp=!1}_toggleHelp(){this._showHelp=!this._showHelp}setConfig(e){super.setConfig(e)}_getDecimalsForZone(e){const t=this._hass?.states[e];return(t&&parseFloat(t.attributes.step)||1)<1?1:0}_renderZoneMarkers(e){return gt.map(t=>{const i=this._state(t.entity),s=Math.max(0,Math.min(100,i));return W`
                 <div class="zone-marker" style="left:${s}%">
                     <div class="zone-dot" style="background:${t.color};border-color:${e.isDark?"#1e232d":"#fff"}"></div>
                     <span class="zone-marker-label">${i.toFixed(0)}%</span>
                 </div>
-            `})}_renderStepper(e,t){const i=this._state(e.entity),s=this._getDecimalsForZone(e.entity),r=this._t(e.labelKey),a=this._showHelp?this._t(e.helpKey):"";return W`
+            `})}_renderDynamicFloor(){const e=this._hass?.states["sensor.sem_battery_spendable_kwh"]?.attributes||{};if("spending"!==e.phase)return K;const t=parseFloat(e.dynamic_floor_pct);if(null==t||isNaN(t))return K;const i=Math.max(0,Math.min(100,t));return W`
+            <div class="dyn-floor" style="left:${i}%">
+                <span class="dyn-floor-label">${this._t("tonight")} ${t.toFixed(0)}%</span>
+            </div>
+        `}_renderStepper(e,t){const i=this._state(e.entity),s=this._getDecimalsForZone(e.entity),r=this._t(e.labelKey),a=this._showHelp?this._t(e.helpKey):"";return W`
             <div class="stepper-cell">
                 <div class="stepper-row">
                     <ha-icon icon="${e.icon}" style="--mdc-icon-size:18px;color:${e.color}"></ha-icon>
@@ -2373,9 +2578,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         >+</button>
                     </div>
                 </div>
-                ${this._showHelp?W`<div class="zone-help-text" style="border-left-color:${e.color}">${a}</div>`:q}
+                ${this._showHelp?W`<div class="zone-help-text" style="border-left-color:${e.color}">${a}</div>`:K}
             </div>
-        `}render(){if(!this._config)return q;const e=this._theme(),t=this._state(st[0].entity),i=this._state(st[1].entity),s=this._state(st[2].entity),r=`${this._t("auto_start_soc")} ${t.toFixed(0)}% · Buffer ${i.toFixed(0)}% · ${this._t("priority_soc")} ${s.toFixed(0)}%`;return W`
+        `}render(){if(!this._config)return K;const e=this._theme(),t=this._state(gt[0].entity),i=this._state(gt[1].entity),s=this._state(gt[2].entity),r=`${this._t("auto_start_soc")} ${t.toFixed(0)}% · Buffer ${i.toFixed(0)}% · ${this._t("priority_soc")} ${s.toFixed(0)}%`;return W`
             <style>
                 :host { display: block; contain: layout style paint; }
                 .wrap {
@@ -2418,6 +2623,28 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     background: linear-gradient(90deg, #f44336 0%, #ff9800 30%, #4db6ac 60%, #488fc2 80%, #8DC892 100%);
                     opacity: 0.6;
                 }
+                /* (#778) tonight's computed floor — a line, not a dot:
+                   the dots are settings, this is an answer. */
+                .dyn-floor {
+                    position: absolute;
+                    top: -5px;
+                    bottom: -5px;
+                    width: 2px;
+                    background: #ff9800;
+                    border-radius: 1px;
+                    pointer-events: none;
+                }
+                .dyn-floor-label {
+                    position: absolute;
+                    bottom: -19px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    font-size: 10px;
+                    font-weight: 500;
+                    color: #ff9800;
+                    white-space: nowrap;
+                }
+
                 .zone-marker {
                     position: absolute;
                     top: -6px;
@@ -2543,13 +2770,14 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="zone-bar-wrap">
                     <div class="zone-bar">
                         ${this._renderZoneMarkers(e)}
+                        ${this._renderDynamicFloor()}
                     </div>
                 </div>
                 <div class="stepper-grid">
-                    ${st.map(t=>this._renderStepper(t,e))}
+                    ${gt.map(t=>this._renderStepper(t,e))}
                 </div>
             </div>
-        `}getCardSize(){return 4}static getStubConfig(){return{}}},{type:"sem-battery-zones-card",name:"SEM Battery Zones Card",description:"The three battery SOC thresholds — priority, buffer and auto-start",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-battery-zones-card",preview:!1});const rt="sensor.sem_",at=["daily_costs","daily_savings","daily_export_revenue","daily_battery_savings","daily_net_cost","monthly_costs","monthly_savings","monthly_export_revenue","monthly_net_cost","monthly_battery_savings","yearly_costs","yearly_savings","yearly_export_revenue","yearly_net_cost","yearly_battery_savings","lifetime_total_savings","roi_percentage","roi_payback_years","roi_annual_savings","daily_co2_avoided","yearly_co2_avoided","lifetime_co2_avoided","yearly_trees_equivalent","lifetime_trees_equivalent"];we("sem-costs-card",class extends Se{static get watchedEntities(){return at.map(e=>`${rt}${e}`)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||rt}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_fmt(e,t=2){return null==e||isNaN(e)?"—":e.toFixed(t)}_fmtCurr(e,t,i=2){return null==e||isNaN(e)?"—":e.toFixed(i)+" "+t}_netColor(e){return e<=0?"#8DC892":"#f06292"}_renderPeriodSection(e,t,i,s,r){const a=this._val(`${e}_costs`),o=this._val(`${e}_savings`),n=this._val(`${e}_battery_savings`),l=this._val(`${e}_export_revenue`),c=this._val(`${e}_net_cost`),d=this._netColor(c),p=(c<=0?"+":"")+this._fmtCurr(Math.abs(c),s),h=o+n;return W`
+        `}getCardSize(){return 4}static getStubConfig(){return{}}},{type:"sem-battery-zones-card",name:"SEM Battery Zones Card",description:"The three battery SOC thresholds — priority, buffer and auto-start",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-battery-zones-card",preview:!1});const ut="sensor.sem_",mt=["daily_costs","daily_savings","daily_export_revenue","daily_battery_savings","daily_net_cost","monthly_costs","monthly_savings","monthly_export_revenue","monthly_net_cost","monthly_battery_savings","yearly_costs","yearly_savings","yearly_export_revenue","yearly_net_cost","yearly_battery_savings","lifetime_total_savings","roi_percentage","roi_payback_years","roi_annual_savings","daily_co2_avoided","yearly_co2_avoided","lifetime_co2_avoided","yearly_trees_equivalent","lifetime_trees_equivalent"];we("sem-costs-card",class extends Se{static get watchedEntities(){return mt.map(e=>`${ut}${e}`)}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||ut}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_fmt(e,t=2){return null==e||isNaN(e)?"—":e.toFixed(t)}_fmtCurr(e,t,i=2){return null==e||isNaN(e)?"—":e.toFixed(i)+" "+t}_netColor(e){return e<=0?"#8DC892":"#f06292"}_renderPeriodSection(e,t,i,s,r){const a=this._val(`${e}_costs`),o=this._val(`${e}_savings`),n=this._val(`${e}_battery_savings`),l=this._val(`${e}_export_revenue`),c=this._val(`${e}_net_cost`),d=this._netColor(c),p=(c<=0?"+":"")+this._fmtCurr(Math.abs(c),s),h=o+n;return W`
             <div class="section">
                 <div class="section-title">${this._t(t)}</div>
 
@@ -2583,7 +2811,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
 
                 <div class="block-note">${this._t("cost_block_note")}</div>
             </div>
-        `}render(){if(!this._config||!this._hass)return q;const e=fe(this._hass),t=this._theme(),i=this._val("daily_net_cost"),s=i<=0,r=s?"#8DC892":"#f06292",a=(s?"+":"")+this._fmt(Math.abs(i),2)+" "+e,o=s?this._t("net_saving_today"):this._t("net_cost_today"),n=this._val("roi_percentage"),l=n>=0?"#8DC892":"#f06292",c=this._val("roi_payback_years");return W`
+        `}render(){if(!this._config||!this._hass)return K;const e=fe(this._hass),t=this._theme(),i=this._val("daily_net_cost"),s=i<=0,r=s?"#8DC892":"#f06292",a=(s?"+":"")+this._fmt(Math.abs(i),2)+" "+e,o=s?this._t("net_saving_today"):this._t("net_cost_today"),n=this._val("roi_percentage"),l=n>=0?"#8DC892":"#f06292",c=this._val("roi_payback_years");return W`
             <ha-card>
                 <div class="wrap">
                     <!-- Hero -->
@@ -2738,7 +2966,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             .c-export  { color: #8353d1; }
             .c-green   { color: #8DC892; }
             .c-leaf    { color: #8DC892; }
-        `}getCardSize(){return 5}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-costs-card",name:"SEM Costs",description:"Consolidated financial card with daily/monthly/yearly costs, savings, ROI, and environmental impact",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-costs-card"});const ot="sensor.sem_",nt=[{id:"ev_econ",icon:"mdi:car-electric",color:"#8DC892",titleKey:"ev_charging_economics"},{id:"investment",icon:"mdi:bank",color:"#96CAEE",titleKey:"system_investment_cost"},{id:"demand",icon:"mdi:flash-triangle",color:"#ff9800",titleKey:"demand_charge"},{id:"tariff",icon:"mdi:tag-multiple",color:"#488fc2",titleKey:"tariff_rates"}];we("sem-costs-detail-card",class extends Se{static get watchedEntities(){return[`${ot}lifetime_ev_energy`,`${ot}lifetime_ev_cost`,`${ot}lifetime_ev_solar_share`,`${ot}lifetime_ev_battery_share`,`${ot}lifetime_ev_grid_share`,"number.sem_system_investment_cost",`${ot}monthly_consecutive_peak`,`${ot}power_charge_cost`,"number.sem_demand_charge_rate",`${ot}tariff_current_import_rate`,`${ot}tariff_current_export_rate`,`${ot}tariff_price_level`,"number.sem_electricity_import_rate","number.sem_electricity_export_rate"]}constructor(){super(),this._collapsed={}}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||ot}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_numVal(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_entityExists(e){const t=this._hass?.states[e];return!(!t||"unavailable"===t.state||"unknown"===t.state)}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_sectionSubtitle(e,t){if("ev_econ"===e){const e=this._val("lifetime_ev_energy");if(e<=0)return this._t("no_ev_data");const i=this._val("lifetime_ev_cost"),s=this._val("lifetime_ev_solar_share");return`${(e>0?i/e:0).toFixed(2)} ${t}/kWh · ${s.toFixed(0)}% solar`}if("investment"===e){const e=this._numVal("number.sem_system_investment_cost");return e>0?`${e.toFixed(0)} ${t}`:""}if("demand"===e){const e=this._val("monthly_consecutive_peak"),i=this._val("power_charge_cost");return`${e.toFixed(1)} kW · ${i.toFixed(2)} ${t}`}if("tariff"===e){const e=this._val("tariff_current_import_rate"),i=this._valStr("tariff_price_level");return i?`${e.toFixed(4)} ${t} · ${this._t(i.toLowerCase())}`:`${e.toFixed(4)} ${t}`}return""}_renderTypedStepper(e,t){const i=this._hass?.states[e],s=this._numVal(e),r=i?.attributes?.unit_of_measurement||"";return W`
+        `}getCardSize(){return 5}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-costs-card",name:"SEM Costs",description:"Consolidated financial card with daily/monthly/yearly costs, savings, ROI, and environmental impact",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-costs-card"});const ft="sensor.sem_",vt=[{id:"ev_econ",icon:"mdi:car-electric",color:"#8DC892",titleKey:"ev_charging_economics"},{id:"investment",icon:"mdi:bank",color:"#96CAEE",titleKey:"system_investment_cost"},{id:"demand",icon:"mdi:flash-triangle",color:"#ff9800",titleKey:"demand_charge"},{id:"tariff",icon:"mdi:tag-multiple",color:"#488fc2",titleKey:"tariff_rates"}];we("sem-costs-detail-card",class extends Se{static get watchedEntities(){return[`${ft}lifetime_ev_energy`,`${ft}lifetime_ev_cost`,`${ft}lifetime_ev_solar_share`,`${ft}lifetime_ev_battery_share`,`${ft}lifetime_ev_grid_share`,"number.sem_system_investment_cost",`${ft}monthly_consecutive_peak`,`${ft}power_charge_cost`,"number.sem_demand_charge_rate",`${ft}tariff_current_import_rate`,`${ft}tariff_current_export_rate`,`${ft}tariff_price_level`,"number.sem_electricity_import_rate","number.sem_electricity_export_rate"]}constructor(){super(),this._collapsed={}}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||ft}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_numVal(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_entityExists(e){const t=this._hass?.states[e];return!(!t||"unavailable"===t.state||"unknown"===t.state)}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_sectionSubtitle(e,t){if("ev_econ"===e){const e=this._val("lifetime_ev_energy");if(e<=0)return this._t("no_ev_data");const i=this._val("lifetime_ev_cost"),s=this._val("lifetime_ev_solar_share");return`${(e>0?i/e:0).toFixed(2)} ${t}/kWh · ${s.toFixed(0)}% solar`}if("investment"===e){const e=this._numVal("number.sem_system_investment_cost");return e>0?`${e.toFixed(0)} ${t}`:""}if("demand"===e){const e=this._val("monthly_consecutive_peak"),i=this._val("power_charge_cost");return`${e.toFixed(1)} kW · ${i.toFixed(2)} ${t}`}if("tariff"===e){const e=this._val("tariff_current_import_rate"),i=this._valStr("tariff_price_level");return i?`${e.toFixed(4)} ${t} · ${this._t(at(i))}`:`${e.toFixed(4)} ${t}`}return""}_renderTypedStepper(e,t){const i=this._hass?.states[e],s=this._numVal(e),r=i?.attributes?.unit_of_measurement||"";return W`
             <div class="stepper-row">
                 <span class="stepper-label">${this._t(t)}</span>
                 <div class="stepper-controls">
@@ -2748,7 +2976,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         .value=${String(s)}
                         @change=${t=>{const i=parseFloat(t.target.value);Number.isNaN(i)||this._setNumber(e,i)}}
                         @keydown=${e=>{"Enter"===e.key&&e.target.blur()}}>
-                    ${r?W`<span class="stepper-unit">${r}</span>`:q}
+                    ${r?W`<span class="stepper-unit">${r}</span>`:K}
                     <button class="stepper-plus" aria-label="Increase"
                         @click=${()=>this._stepNumber(e,1)}>+</button>
                 </div>
@@ -2801,11 +3029,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="info-tiles tariff-info-tiles">
                     ${this._renderInfoTile("mdi:transmission-tower-import","#488fc2","current_import_rate",`${r} ${a}`)}
                     ${this._renderInfoTile("mdi:transmission-tower-export","#8353d1","current_export_rate",`${o} ${n}`)}
-                    ${this._renderInfoTile("mdi:signal-cellular-outline","#96CAEE","price_level",l?this._t(l):"—")}
+                    ${this._renderInfoTile("mdi:signal-cellular-outline","#96CAEE","price_level",l?this._t(at(l)):"—")}
                 </div>
-                ${c?this._renderStepper("number.sem_electricity_import_rate","current_import_rate"):q}
-                ${d?this._renderStepper("number.sem_electricity_export_rate","current_export_rate"):q}
-            `}return q}_renderSection(e,t){const i=this._collapsed[e.id],s=this._sectionSubtitle(e.id,t);return W`
+                ${c?this._renderStepper("number.sem_electricity_import_rate","current_import_rate"):K}
+                ${d?this._renderStepper("number.sem_electricity_export_rate","current_export_rate"):K}
+            `}return K}_renderSection(e,t){const i=this._collapsed[e.id],s=this._sectionSubtitle(e.id,t);return W`
             <div class="section">
                 <div
                     class="section-header"
@@ -2824,15 +3052,15 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         style="--mdc-icon-size:18px;transform:rotate(${i?"-90deg":"0deg"});transition:transform 0.25s ease"
                     ></ha-icon>
                 </div>
-                ${i?q:W`
+                ${i?K:W`
                     <div class="section-body">
                         ${this._renderSectionBody(e.id,t)}
                     </div>
                 `}
             </div>
-        `}render(){if(!this._config||!this._hass)return q;const e=fe(this._hass);return W`
+        `}render(){if(!this._config||!this._hass)return K;const e=fe(this._hass);return W`
             <div class="wrap">
-                ${nt.map(t=>this._renderSection(t,e))}
+                ${vt.map(t=>this._renderSection(t,e))}
             </div>
         `}static get styles(){return a`
             :host { display: block; }
@@ -2981,7 +3209,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 padding: 12px 0;
                 font-style: italic;
             }
-        `}getCardSize(){return 8}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-costs-detail-card",name:"SEM Costs Detail Card",description:"Financial details — EV economics, investment, demand charge, and tariff rates",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-costs-detail-card",preview:!1});const lt="sensor.sem_";we("sem-charger-status-card",class extends Se{constructor(){super(),this._chargers=[],this._lastStateCount=0}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;if(this._chargers?.length>0&&!s){const t=this._config?.entity_prefix||lt,i=e.states[`${t}charger_${this._chargers[0]}_power`]?.state;if("unavailable"===i||"unknown"===i)return}const r=Object.keys(e.states).length;if(r!==this._lastStateCount){this._lastStateCount=r;const t=[];for(const i of Object.keys(e.states)){if(i.includes("_flow_"))continue;const e=i.match(/^sensor\.sem_charger_(.+)_power$/);e&&t.push(e[1])}this._chargers=t}const a=this._config?.entity_prefix||lt,o=this._chargers.map(t=>[`charger_${t}_power`,`charger_${t}_session_energy`,`charger_${t}_session_solar_share`,`charger_${t}_taper_trend`].map(t=>e.states[`${a}${t}`]?.state||"").join(":")).join("|");(o!==this._lastKey||s)&&(this._lastKey=o,this._scheduleUpdate())}get hass(){return this._hass}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||lt}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_chargerName(e){const t=this._hass?.states[`${this._prefix}charger_${e}_power`];let i=e.replace(/_/g," ").replace(/\b\w/g,e=>e.toUpperCase());return t?.attributes?.friendly_name&&(i=t.attributes.friendly_name.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")),i}_renderChargerTile(e){const t=this._val(`charger_${e}_power`),i=this._val(`charger_${e}_session_energy`),s=this._val(`charger_${e}_session_solar_share`),r=this._valStr(`charger_${e}_taper_trend`)||"stable",a=this._t(r),o=this._chargerName(e),n=t>50,l=n?"#8DC892":"#888",c=n?this._t("charging"):this._t("idle");return W`
+        `}getCardSize(){return 8}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-costs-detail-card",name:"SEM Costs Detail Card",description:"Financial details — EV economics, investment, demand charge, and tariff rates",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-costs-detail-card",preview:!1});const yt="sensor.sem_";we("sem-charger-status-card",class extends Se{constructor(){super(),this._chargers=[],this._lastStateCount=0}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;if(this._chargers?.length>0&&!s){const t=this._config?.entity_prefix||yt,i=e.states[`${t}charger_${this._chargers[0]}_power`]?.state;if("unavailable"===i||"unknown"===i)return}const r=Object.keys(e.states).length;if(r!==this._lastStateCount){this._lastStateCount=r;const t=[];for(const i of Object.keys(e.states)){if(i.includes("_flow_"))continue;const e=i.match(/^sensor\.sem_charger_(.+)_power$/);e&&t.push(e[1])}this._chargers=t}const a=this._config?.entity_prefix||yt,o=this._chargers.map(t=>[`charger_${t}_power`,`charger_${t}_session_energy`,`charger_${t}_session_solar_share`,`charger_${t}_taper_trend`].map(t=>e.states[`${a}${t}`]?.state||"").join(":")).join("|");(o!==this._lastKey||s)&&(this._lastKey=o,this._scheduleUpdate())}get hass(){return this._hass}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||yt}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_chargerName(e){const t=this._hass?.states[`${this._prefix}charger_${e}_power`];let i=e.replace(/_/g," ").replace(/\b\w/g,e=>e.toUpperCase());return t?.attributes?.friendly_name&&(i=t.attributes.friendly_name.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")),i}_renderChargerTile(e){const t=this._val(`charger_${e}_power`),i=this._val(`charger_${e}_session_energy`),s=this._val(`charger_${e}_session_solar_share`),r=this._valStr(`charger_${e}_taper_trend`)||"stable",a=this._t(r),o=this._chargerName(e),n=t>50,l=n?"#8DC892":"#888",c=n?this._t("charging"):this._t("idle");return W`
             <div class="charger-tile">
                 <div class="charger-glow" style="opacity:${n?"0.15":"0"}"></div>
                 <div class="charger-header">
@@ -3019,7 +3247,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ${this._chargers.map(e=>this._renderChargerTile(e))}
                 </div>
             </div>
-        `:q}static get styles(){return a`
+        `:K}static get styles(){return a`
             :host { display: block; }
             .card-wrap {
                 padding: 16px;
@@ -3104,7 +3332,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             .taper-rising  { color: #f06292; }
             .taper-falling { color: #8DC892; }
             .taper-stable  { color: var(--secondary-text-color, #999); }
-        `}getCardSize(){return Math.max(2,this._chargers.length)}static getStubConfig(){return{}}},{type:"sem-charger-status-card",name:"SEM Charger Status",description:"Multi-charger status display with per-charger tiles",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-charger-status-card"});const ct="sensor.sem_",dt=["#8DC892","#64B5F6"];we("sem-ev-status-card",class extends Se{static get properties(){return{...super.properties,_showHelp:{state:!0}}}constructor(){super(),this._chargers=[],this._lastStateCount=0,this._showHelp=!1,this._boundVisibility=()=>{document.hidden||this.requestUpdate()}}connectedCallback(){super.connectedCallback(),document.addEventListener("visibilitychange",this._boundVisibility)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("visibilitychange",this._boundVisibility)}_toggleHelp(){this._showHelp=!this._showHelp}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=Object.keys(e.states).length;if(r!==this._lastStateCount){this._lastStateCount=r;const t=[];for(const i of Object.keys(e.states)){if(i.includes("_flow_"))continue;const e=i.match(/^sensor\.sem_charger_(.+)_power$/);e&&t.push(e[1])}this._chargers=t}const a=this._config?.entity_prefix||ct;let o=["ev_connected","ev_charging","ev_power","calculated_current","session_energy","session_solar_share","session_cost","daily_ev_energy","energy_ev_solar_percentage","charging_state"].map(t=>{const i="ev_connected"===t||"ev_charging"===t?"binary_sensor.sem_":a;return e.states[`${i}${t}`]?.state||""}).join(",");if(this._chargers.length>=1){o+="|"+this._chargers.map(t=>[`charger_${t}_power`,`charger_${t}_session_energy`,`charger_${t}_session_energy_external`,`charger_${t}_daily_energy`,`charger_${t}_session_solar_share`,`charger_${t}_estimated_soc`,`charger_${t}_vehicle_soc`,`charger_${t}_commanded_current`].map(t=>e.states[`${a}${t}`]?.state||"").join(":")).join("|"),o+="|"+this._chargers.map(t=>e.states[`switch.sem_charger_${t}_night_charging`]?.state||"").join(":"),o+="|"+this._chargers.map(t=>[e.states[`time.sem_charger_${t}_target_time`]?.state||"",e.states[`switch.sem_charger_${t}_tariff_optimized`]?.state||""].join(":")).join("|");const t=e.states[`${a}charging_state`]?.attributes||{};o+="|"+[t.ev_tariff_waiting,t.ev_deadline_reachable,t.ev_next_cheap_window].join(":"),o+="|"+this._chargers.map(t=>e.states[`number.sem_charger_${t}_daily_ev_target`]?.state||"").join(":"),o+="|"+this._chargers.map(t=>[e.states[`select.sem_charger_${t}_ev_target_type`]?.state||"",e.states[`number.sem_charger_${t}_target_soc`]?.state||"",e.states[`number.sem_charger_${t}_daily_ev_target_max`]?.state||"",e.states[`number.sem_charger_${t}_target_soc_max`]?.state||"",e.states[`number.sem_charger_${t}_ev_battery_capacity_kwh`]?.state||"",e.states[`number.sem_charger_${t}_ev_kwh_per_100km`]?.state||""].join(":")).join("|"),o+="|"+(e.states[`${a}ev_remaining_range`]?.state||"")}o+="|"+this._localizeReady+"|"+this._lang,(o!==this._lastKey||s)&&(this._lastKey=o,this._scheduleUpdate())}get hass(){return this._hass}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||ct}_binaryState(e){const t=this._hass?.states[`binary_sensor.sem_${e}`];return"on"===t?.state}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t?.state||""}_entityVal(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}_chargerName(e){const t=this._hass?.states[`${this._prefix}charger_${e}_power`];let i=e.replace(/_/g," ").replace(/\b\w/g,e=>e.toUpperCase());return t?.attributes?.friendly_name&&(i=t.attributes.friendly_name.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")),i}_renderSocGauge(e,t=!1){const i=null!=e?Math.max(0,Math.min(100,e)):0,s=i>60?"#8DC892":i>30?"#ff9800":"#f06292",r=Math.max(2,i/100*52);return W`
+        `}getCardSize(){return Math.max(2,this._chargers.length)}static getStubConfig(){return{}}},{type:"sem-charger-status-card",name:"SEM Charger Status",description:"Multi-charger status display with per-charger tiles",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-charger-status-card"});const bt=["now","night_open","ev_charge_start","ev_min_reached","ev_deadline"];const xt=36e5,$t=["ev_charge_start","ev_min_reached","ev_deadline"];const wt="sensor.sem_",kt=["#8DC892","#64B5F6"];we("sem-ev-status-card",class extends Se{static get properties(){return{...super.properties,_showHelp:{state:!0}}}constructor(){super(),this._chargers=[],this._lastStateCount=0,this._showHelp=!1,this._boundVisibility=()=>{document.hidden||this.requestUpdate()}}connectedCallback(){super.connectedCallback(),document.addEventListener("visibilitychange",this._boundVisibility)}disconnectedCallback(){super.disconnectedCallback(),this._pauseTimer&&(clearInterval(this._pauseTimer),this._pauseTimer=null),document.removeEventListener("visibilitychange",this._boundVisibility)}_toggleHelp(){this._showHelp=!this._showHelp}set hass(e){this._hass,this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=Object.keys(e.states).length;if(r!==this._lastStateCount){this._lastStateCount=r;const t=[];for(const i of Object.keys(e.states)){if(i.includes("_flow_"))continue;const e=i.match(/^sensor\.sem_charger_(.+)_power$/);e&&t.push(e[1])}this._chargers=t}const a=this._config?.entity_prefix||wt;let o=["ev_connected","ev_charging","ev_power","calculated_current","session_energy","session_solar_share","session_cost","daily_ev_energy","energy_ev_solar_percentage","charging_state"].map(t=>{const i="ev_connected"===t||"ev_charging"===t?"binary_sensor.sem_":a;return e.states[`${i}${t}`]?.state||""}).join(",");if(this._chargers.length>=1){o+="|"+this._chargers.map(t=>[`charger_${t}_power`,`charger_${t}_session_energy`,`charger_${t}_session_energy_external`,`charger_${t}_daily_energy`,`charger_${t}_session_solar_share`,`charger_${t}_estimated_soc`,`charger_${t}_vehicle_soc`,`charger_${t}_commanded_current`].map(t=>e.states[`${a}${t}`]?.state||"").join(":")).join("|"),o+="|"+this._chargers.map(t=>e.states[`switch.sem_charger_${t}_night_charging`]?.state||"").join(":"),o+="|"+this._chargers.map(t=>[e.states[`time.sem_charger_${t}_target_time`]?.state||"",e.states[`switch.sem_charger_${t}_tariff_optimized`]?.state||""].join(":")).join("|");const t=e.states[`${a}charging_state`]?.attributes||{};o+="|"+[t.ev_tariff_waiting,t.ev_deadline_reachable,t.ev_next_cheap_window].join(":"),o+="|"+this._chargers.map(e=>!0===((t.per_charger_stop_war||{})[e]||{}).standing_down?"1":"0").join(":"),o+="|"+this._chargers.map(t=>e.states[`number.sem_charger_${t}_daily_ev_target`]?.state||"").join(":"),o+="|"+this._chargers.map(t=>[e.states[`select.sem_charger_${t}_ev_target_type`]?.state||"",e.states[`number.sem_charger_${t}_target_soc`]?.state||"",e.states[`number.sem_charger_${t}_daily_ev_target_max`]?.state||"",e.states[`number.sem_charger_${t}_target_soc_max`]?.state||"",e.states[`number.sem_charger_${t}_ev_battery_capacity_kwh`]?.state||"",e.states[`number.sem_charger_${t}_ev_kwh_per_100km`]?.state||""].join(":")).join("|"),o+="|"+(e.states[`${a}ev_remaining_range`]?.state||"")}o+="|"+this._localizeReady+"|"+this._lang,(o!==this._lastKey||s)&&(this._lastKey=o,this._scheduleUpdate())}get hass(){return this._hass}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||wt}_binaryState(e){const t=this._hass?.states[`binary_sensor.sem_${e}`];return"on"===t?.state}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t?.state||""}_entityVal(e,t=0){const i=this._frozenEntities[e];if(i)return i.value;const s=this._hass?.states[e];return s&&"unavailable"!==s.state&&"unknown"!==s.state?parseFloat(s.state)??t:t}_fmt(e,t=1){return null==e||isNaN(e)?"—":e.toFixed(t)}_chargerName(e){const t=this._hass?.states[`${this._prefix}charger_${e}_power`];let i=e.replace(/_/g," ").replace(/\b\w/g,e=>e.toUpperCase());return t?.attributes?.friendly_name&&(i=t.attributes.friendly_name.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")),i}_renderSocGauge(e,t=!1){const i=null!=e?Math.max(0,Math.min(100,e)):0,s=i>60?"#8DC892":i>30?"#ff9800":"#f06292",r=Math.max(2,i/100*52);return W`
             <svg viewBox="0 0 44 76" width="44" height="76">
                 <rect x="14" y="0" width="16" height="5" rx="2" fill="rgba(255,255,255,0.15)"/>
                 <rect x="6" y="4" width="32" height="60" rx="4"
@@ -3118,39 +3346,40 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ${null!=e?(t?"~":"")+Math.round(e)+"%":"—"}
                 </text>
             </svg>
-        `}_renderPlanStrip(e){const t=this._hass?.states["sensor.sem_charging_state"],i=e?t?.attributes?.per_charger_plans?.[e]:null,s=Array.isArray(i)&&i.length>0,r=s?i:t?.attributes?.today_plan||[];if(!Array.isArray(r)||r.length<2)return q;const a=new Set(["ev_charge_start","ev_min_reached","ev_deadline"]);if(!r.some(e=>a.has(e.kind)))return q;const o=Date.now(),n=432e5,l=o+n,c=e=>Math.max(0,Math.min(100,(e-o)/n*100)),d=r.filter(e=>["now","night_open","ev_charge_start","ev_min_reached","ev_deadline"].includes(e.kind));d.sort((e,t)=>new Date(e.when)-new Date(t.when));const p=s?r.some(e=>"ev_charge_start"===e.kind&&"plan_ev_charge_tariff"===e.detail):!!t?.attributes?.ev_tariff_waiting,h=[];let _=o,g="idle";for(const e of d){const t=new Date(e.when).getTime(),i=Math.min(t,l);i>_&&h.push({s:_,e:i,state:g}),_=Math.max(_,i),"night_open"===e.kind?g=p?"wait":"charging":"ev_charge_start"===e.kind?g="charging":("ev_min_reached"===e.kind||"ev_deadline"===e.kind)&&(g="done")}_<l&&h.push({s:_,e:l,state:g});const u=[];for(const e of r){const t=new Date(e.when).getTime();if("expensive_start"===e.kind&&t<l){const i=e.values?.end;if(i){const[e,s]=i.split(":").map(Number),r=new Date(t);r.setHours(e,s,0,0),r.getTime()<t&&r.setDate(r.getDate()+1),u.push({s:t,e:Math.min(r.getTime(),l),kind:"expensive"})}}else if("cheap_start"===e.kind&&t<l){const i=e.values?.end;if(i){const[e,s]=i.split(":").map(Number),r=new Date(t);r.setHours(e,s,0,0),r.getTime()<t&&r.setDate(r.getDate()+1),u.push({s:t,e:Math.min(r.getTime(),l),kind:"cheap"})}}}const m=e=>({idle:"#566072",wait:"#8353d1",charging:"#8DC892",done:"#4db6ac"}[e]||"#566072"),f=e=>"cheap"===e?"#43a047":"#f06292",v=this._hass?.config?.time_zone||void 0,y=[];for(let e=0;e<=12;e+=3){const t=o+3600*e*1e3,i=new Date(t).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:v});y.push({x:c(t),label:i})}return W`
-            <div class="plan-strip" title="${this._t("today_plan_title")} (12h)">
+        `}updated(e){super.updated?.(e);const t=Object.keys(this._hass?.states||{}).some(e=>e.startsWith("select.sem_charger_")&&e.endsWith("_charge_mode")&&"off"===this._hass.states[e]?.state&&this._hass.states[e]?.attributes?.paused_until);t&&!this._pauseTimer?this._pauseTimer=setInterval(()=>this.requestUpdate(),6e4):!t&&this._pauseTimer&&(clearInterval(this._pauseTimer),this._pauseTimer=null)}_renderPlanStrip(e){const t=this._hass?.states["sensor.sem_charging_state"],i=e?t?.attributes?.per_charger_plans?.[e]:null,s=Array.isArray(i)&&i.length>0?i:t?.attributes?.today_plan||[];if(!Array.isArray(s)||s.length<2)return K;const r=new Set(["ev_charge_start","ev_min_reached","ev_deadline"]);if(!s.some(e=>r.has(e.kind)))return K;const a=Date.now(),o=s.filter(e=>["now","night_open","ev_charge_start","ev_min_reached","ev_deadline"].includes(e.kind));o.sort((e,t)=>new Date(e.when)-new Date(t.when));const{end:n,hours:l}=function(e,t){const i=t+432e5,s=t+864e5;let r=0;for(const t of e||[]){if(!t||!$t.includes(t.kind))continue;const e=new Date(t.when).getTime();Number.isFinite(e)&&e>r&&(r=e)}const a=r>t?Math.ceil((r+1)/xt)*xt:0,o=Math.min(s,Math.max(i,a));return{end:o,hours:Math.max(1,Math.round((o-t)/xt))}}(o,a),c=n-a,d=e=>Math.max(0,Math.min(100,(e-a)/c*100)),p=function(e,{now:t,end:i}){const s=(e||[]).filter(e=>e&&bt.includes(e.kind)).map(e=>({...e,t:new Date(e.when).getTime()})).filter(e=>Number.isFinite(e.t)).sort((e,t)=>e.t-t.t),r=s.filter(e=>"ev_charge_start"===e.kind),a=e=>"plan_ev_charge_estimate"===e.detail?"estimate":"charging",o=[];let n=t,l="idle";for(const e of s){const t=Math.min(e.t,i);if(t>n&&o.push({s:n,e:t,state:l}),n=Math.max(n,t),"night_open"===e.kind){const t=r.find(t=>Math.abs(t.t-e.t)<=6e4);l=t?a(t):"wait"}else"ev_charge_start"===e.kind?l=a(e):"ev_min_reached"!==e.kind&&"ev_deadline"!==e.kind||(l="done")}return n<i&&o.push({s:n,e:i,state:l}),o}(o,{now:a,end:n,fleetTariffWait:!!t?.attributes?.ev_tariff_waiting}),h=[];for(const e of s){const t=new Date(e.when).getTime();if("expensive_start"===e.kind&&t<n){const i=e.values?.end;if(i){const[e,s]=i.split(":").map(Number),r=new Date(t);r.setHours(e,s,0,0),r.getTime()<t&&r.setDate(r.getDate()+1),h.push({s:t,e:Math.min(r.getTime(),n),kind:"expensive"})}}else if("cheap_start"===e.kind&&t<n){const i=e.values?.end;if(i){const[e,s]=i.split(":").map(Number),r=new Date(t);r.setHours(e,s,0,0),r.getTime()<t&&r.setDate(r.getDate()+1),h.push({s:t,e:Math.min(r.getTime(),n),kind:"cheap"})}}}const _=e=>({idle:"#566072",wait:"#8353d1",estimate:"#b8a6e8",charging:"#8DC892",done:"#4db6ac"}[e]||"#566072"),g=e=>"cheap"===e?"#43a047":"#f06292",u=e=>(this._t(e)||"").split("{hours}").join(l),m=this._hass?.config?.time_zone||void 0,f=[];for(let e=0;e<=4;e++){const t=a+c*e/4,i=new Date(t).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:m});f.push({x:d(t),label:i})}return W`
+            <div class="plan-strip" title="${this._t("today_plan_title")} (${l}h)">
                 <div class="strip-title">
                     <ha-icon icon="mdi:chart-timeline" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
-                    <span>${this._t("plan_strip_title")}</span>
+                    <span>${u("plan_strip_title")}</span>
                 </div>
                 <svg viewBox="0 0 ${100} 16" preserveAspectRatio="none" class="strip-svg">
-                    ${h.map(e=>G`
-                        <rect x="${c(e.s)}" y="5" width="${c(e.e)-c(e.s)}"
-                              height="10" fill="${m(e.state)}" />
+                    ${p.map(e=>j`
+                        <rect x="${d(e.s)}" y="5" width="${d(e.e)-d(e.s)}"
+                              height="10" fill="${_(e.state)}" />
                     `)}
-                    ${u.map(e=>G`
-                        <rect x="${c(e.s)}" y="0" width="${c(e.e)-c(e.s)}"
-                              height="3" fill="${f(e.kind)}"
+                    ${h.map(e=>j`
+                        <rect x="${d(e.s)}" y="0" width="${d(e.e)-d(e.s)}"
+                              height="3" fill="${g(e.kind)}"
                               opacity="0.75" />
                     `)}
                 </svg>
                 <div class="strip-axis">
-                    ${y.map(e=>W`
+                    ${f.map(e=>W`
                         <span class="tick" style="left: ${e.x}%">${e.label}</span>
                     `)}
                 </div>
                 <div class="strip-legend">
-                    <span><i style="background:${m("idle")}"></i>${this._t("plan_strip_idle")}</span>
-                    <span><i style="background:${m("wait")}"></i>${this._t("plan_strip_wait")}</span>
-                    <span><i style="background:${m("charging")}"></i>${this._t("plan_strip_charging")}</span>
-                    <span><i style="background:${m("done")}"></i>${this._t("plan_strip_done")}</span>
-                    <span><i class="line" style="background:${f("cheap")}"></i>${this._t("plan_strip_cheap")}</span>
-                    <span><i class="line" style="background:${f("expensive")}"></i>${this._t("plan_strip_expensive")}</span>
+                    <span><i style="background:${_("idle")}"></i>${this._t("plan_strip_idle")}</span>
+                    <span><i style="background:${_("wait")}"></i>${this._t("plan_strip_wait")}</span>
+                    <span><i style="background:${_("estimate")}"></i>${this._t("plan_strip_estimate")}</span>
+                    <span><i style="background:${_("charging")}"></i>${this._t("plan_strip_charging")}</span>
+                    <span><i style="background:${_("done")}"></i>${this._t("plan_strip_done")}</span>
+                    <span><i class="line" style="background:${g("cheap")}"></i>${this._t("plan_strip_cheap")}</span>
+                    <span><i class="line" style="background:${g("expensive")}"></i>${this._t("plan_strip_expensive")}</span>
                 </div>
                 ${this._showHelp?W`
-                    <div class="setting-help strip-help">${this._t("plan_strip_help")}</div>
-                `:q}
+                    <div class="setting-help strip-help">${u("plan_strip_help")}</div>
+                `:K}
             </div>
         `}_renderRangeSlider(e,t,i){const s=this._hass?.states[e],r=this._hass?.states[t],a=i?"%":" kWh",o=e=>i?String(Math.round(e)):this._fmt(e,e%1==0?0:1);if(!s||!r){const t=this._entityVal(e,i?80:10);return W`<div class="ct-row">
                 <span class="ct-label">${this._t("charge_to")}</span>
@@ -3176,18 +3405,18 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <ha-icon icon="mdi:arrow-split-vertical"
                                      style="--mdc-icon-size:14px"></ha-icon>
                         </span>
-                    `:q}
+                    `:K}
                 </div>
-            </div>`}_rangeHandleStart(e,t,i,s,r,a){e.stopPropagation(),e.preventDefault();const o=e.currentTarget.closest(".range-track");if(!o)return;const n="min"===t?i:s,l="min"===t?s:i,c=this._hass?.states[n],d=parseFloat(c?.attributes?.step)||(a>50?1:.5),p=a-r||1,h=e=>{const i=o.getBoundingClientRect();let s=(e-i.left)/(i.width||1);s=Math.max(0,Math.min(1,s));let n=Math.round((r+s*p)/d)*d;const c=this._entityVal(l,"min"===t?a:r);return n="min"===t?Math.min(n,c):Math.max(n,c),Math.max(r,Math.min(a,n))},_=e=>{this._freezeEntity(n,h(e.clientX)),this.requestUpdate()},g=e=>{window.removeEventListener("pointermove",_),window.removeEventListener("pointerup",g),window.removeEventListener("pointercancel",g),this._setNumber(n,h(e.clientX))};window.addEventListener("pointermove",_),window.addEventListener("pointerup",g),window.addEventListener("pointercancel",g)}_renderChargerSection(e,t){const i=dt[t%dt.length],s=this._val(`charger_${e}_power`,0),r=this._val(`charger_${e}_session_energy_external`,0),a=this._val(`charger_${e}_session_energy`,0),o=r>0?r:a,n=this._val(`charger_${e}_daily_energy`,0),l=this._val("energy_ev_solar_percentage",0),{soc:c,isEstimate:d}=function(e,t,i,s){const r=null!=e?e:s<=1?t??null:null;return null!=r?{soc:r,isEstimate:!1}:null!=i?{soc:i,isEstimate:!0}:{soc:null,isEstimate:!1}}(this._val(`charger_${e}_vehicle_soc`,null),this._val("vehicle_soc",null),this._val(`charger_${e}_estimated_soc`,null),this._chargers.length),p=this._stateAttrs(`sensor.sem_charger_${e}_estimated_soc`),h=p.energy_accounted_soc,_=!0===p.estimate_stop_active,g=this._val(`charger_${e}_vehicle_soc`,null),u=p.vehicle_soc_last??g;let m=null;const f=Date.parse(p.vehicle_soc_last_at??"");Number.isNaN(f)||(m=Math.round((Date.now()-f)/6e4));const v=e=>(this._t(e)||"").replace(/\{soc\}/g,null!=u?Math.round(u):"—").replace(/\{age\}/g,null!=m?m:"—").replace(/\{est\}/g,null!=h?Math.round(h):"—"),y=null!=u&&null!=h&&null!=m&&m>=5&&(h-u>=1||null==g),b=this._chargerName(e),x=this._hass?.states[`binary_sensor.sem_charger_${e}_connected`],$="on"===x?.state,w=s>50,k=w?this._t("charging"):$?this._t("connected"):this._t("idle"),S=this._val(`charger_${e}_commanded_current`,0),C=this._entityVal(`number.sem_charger_${e}_minimum_current`,6),z=this._entityVal(`number.sem_charger_${e}_ev_battery_capacity_kwh`,40),M=this._entityVal(`number.sem_charger_${e}_ev_kwh_per_100km`,18),D=`select.sem_charger_${e}_charge_mode`,E=this._stateAttrs(D),F=this._stateStr(D)||"min_plus_solar",A=E.options||["solar_only","min_plus_solar","always_max","off"],I={solar_only:this._t("charge_mode_solar_only"),solar_plus_cheap:this._t("charge_mode_solar_plus_cheap"),min_plus_solar:this._t("charge_mode_min_plus_solar"),always_max:this._t("charge_mode_always_max"),off:this._t("charge_mode_off")},B=Math.round(this._entityVal("number.sem_battery_buffer_soc",70)),R=Math.round(this._entityVal("number.sem_battery_priority_soc",30)),N=e=>(this._t(e)||"").replace(/\{buffer\}/g,B).replace(/\{priority\}/g,R),P=N(`charge_mode_hint_${F}_surplus`),T=N(`charge_mode_hint_${F}_overnight`),L=N(`charge_mode_hint_${F}_battery`),U=`select.sem_charger_${e}_ev_target_type`,O=this._stateStr(U)||"kwh",H=this._stateAttrs(U).options||["kwh"],G="soc"===O,j=G?`number.sem_charger_${e}_target_soc`:`number.sem_charger_${e}_daily_ev_target`,K=G?`number.sem_charger_${e}_target_soc_max`:`number.sem_charger_${e}_daily_ev_target_max`,V=`time.sem_charger_${e}_target_time`,Y=this._stateStr(V),X=Y?Y.slice(0,5):"—",Z=this._stateAttrs(`${this._prefix}charging_state`),J=!1===Z.ev_deadline_reachable,Q=Z.ev_next_cheap_window;let ee="";if(Q)try{const e=new Date(Q);isNaN(e)||(ee=e.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:this._hass?.config?.time_zone||void 0}))}catch(e){}const te="solar_plus_cheap"===F&&ee,ie=`select.sem_charger_${e}_phase_mode`,se=!!this._hass?.states?.[ie],re=(Z.per_charger_phases||{})[e]||{},ae=this._stateStr(ie)||"auto",oe=this._stateAttrs(ie).options||["auto","1","3"],ne={auto:this._t("phase_mode_auto"),1:this._t("phase_mode_1"),3:this._t("phase_mode_3")};let le="";le="stopping"===re.switch_state?this._t("phase_status_stopping"):"settling"===re.switch_state?this._t("phase_status_settling"):re.active_phases?(this._t("phase_status_measured")||"{n}-phase measured").replace("{n}",re.active_phases):re.believed_phases?(this._t("phase_status_believed")||"{n}-phase").replace("{n}",re.believed_phases):this._t("phase_status_unknown");const ce=this._entityVal(j,G?80:10),de=G?Math.max(0,(ce-c)/100*z):Math.max(0,ce-n),pe=M>0?Math.round(de/M*100):null,he=H.length>1?W`<select class="ct-unit" .value=${O}
+            </div>`}_rangeHandleStart(e,t,i,s,r,a){e.stopPropagation(),e.preventDefault();const o=e.currentTarget.closest(".range-track");if(!o)return;const n="min"===t?i:s,l="min"===t?s:i,c=this._hass?.states[n],d=parseFloat(c?.attributes?.step)||(a>50?1:.5),p=a-r||1,h=e=>{const i=o.getBoundingClientRect();let s=(e-i.left)/(i.width||1);s=Math.max(0,Math.min(1,s));let n=Math.round((r+s*p)/d)*d;const c=this._entityVal(l,"min"===t?a:r);return n="min"===t?Math.min(n,c):Math.max(n,c),Math.max(r,Math.min(a,n))},_=e=>{this._freezeEntity(n,h(e.clientX)),this.requestUpdate()},g=e=>{window.removeEventListener("pointermove",_),window.removeEventListener("pointerup",g),window.removeEventListener("pointercancel",g),this._setNumber(n,h(e.clientX))};window.addEventListener("pointermove",_),window.addEventListener("pointerup",g),window.addEventListener("pointercancel",g)}_renderChargerSection(e,t){const i=kt[t%kt.length],s=this._val(`charger_${e}_power`,0),r=this._val(`charger_${e}_session_energy_external`,0),a=this._val(`charger_${e}_session_energy`,0),o=r>0?r:a,n=this._val(`charger_${e}_daily_energy`,0),l=this._val("energy_ev_solar_percentage",0),{soc:c,isEstimate:d}=function(e,t,i,s){const r=null!=e?e:s<=1?t??null:null;return null!=r?{soc:r,isEstimate:!1}:null!=i?{soc:i,isEstimate:!0}:{soc:null,isEstimate:!1}}(this._val(`charger_${e}_vehicle_soc`,null),this._val("vehicle_soc",null),this._val(`charger_${e}_estimated_soc`,null),this._chargers.length),p=this._stateAttrs(`sensor.sem_charger_${e}_estimated_soc`),h=p.energy_accounted_soc,_=!0===p.estimate_stop_active,g=this._val(`charger_${e}_vehicle_soc`,null),u=p.vehicle_soc_last??g;let m=null;const f=Date.parse(p.vehicle_soc_last_at??"");Number.isNaN(f)||(m=Math.round((Date.now()-f)/6e4));const v=e=>(this._t(e)||"").replace(/\{soc\}/g,null!=u?Math.round(u):"—").replace(/\{age\}/g,null!=m?m:"—").replace(/\{est\}/g,null!=h?Math.round(h):"—"),y=null!=u&&null!=h&&null!=m&&m>=5&&(h-u>=1||null==g),b=this._chargerName(e),x=this._hass?.states[`binary_sensor.sem_charger_${e}_connected`],$="on"===x?.state,w=s>50,k=(this._stateAttrs(`${this._prefix}charging_state`).per_charger_stop_war||{})[e],S=this._t(function({isCharging:e,isConnected:t,standDown:i}){return e&&i&&!0===i.standing_down?"charger_status_stood_down":e?"charging":t?"connected":"idle"}({isCharging:w,isConnected:$,standDown:k})),C=this._val(`charger_${e}_commanded_current`,0),z=this._entityVal(`number.sem_charger_${e}_minimum_current`,6),M=this._entityVal(`number.sem_charger_${e}_ev_battery_capacity_kwh`,40),D=this._entityVal(`number.sem_charger_${e}_ev_kwh_per_100km`,18),E="select.sem_pause_duration",F=this._stateAttrs(E),I=this._stateStr(E)||"1_hour",A=F.options||[],N=`button.sem_charger_${e}_pause_charging`,B=!!this._hass?.states?.[N],T=`select.sem_charger_${e}_charge_mode`,R=this._stateAttrs(T),P=this._stateStr(T)||"min_plus_solar",L="off"===P?R.paused_until:null,U=L?new Date(L):null,O=!(!U||isNaN(U)),H=O?Math.max(0,Math.round((U-Date.now())/6e4)):0,j=R.pause_resume_mode||"",G=O?U.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:this._hass?.config?.time_zone||void 0}):"",q=H>=60?`${Math.floor(H/60)} h ${H%60} min`:`${H} min`,V=R.options||["solar_only","solar_plus_battery","solar_plus_cheap","min_plus_solar","always_max","off"],Y=!1!==R.tariff_available,X=R.modes_needing_tariff||[],Z=e=>!Y&&X.includes(e),J=this._stateAttrs("sensor.sem_battery_spendable_kwh"),Q="learning"===J.phase,ee=(this._t("charge_mode_battery_learning_info")||"").replace(/\{n\}/g,J.nights_sealed??"?").replace(/\{total\}/g,J.nights_required??"?"),te={solar_only:this._t("charge_mode_solar_only"),solar_plus_battery:this._t("charge_mode_solar_plus_battery"),solar_plus_cheap:this._t("charge_mode_solar_plus_cheap"),min_plus_solar:this._t("charge_mode_min_plus_solar"),always_max:this._t("charge_mode_always_max"),off:this._t("charge_mode_off")},ie=Math.round(this._entityVal("number.sem_battery_buffer_soc",70)),se=Math.round(this._entityVal("number.sem_battery_priority_soc",30)),re=e=>(this._t(e)||"").replace(/\{buffer\}/g,ie).replace(/\{priority\}/g,se),ae=re(`charge_mode_hint_${P}_surplus`),oe=re(`charge_mode_hint_${P}_overnight`),ne=re(`charge_mode_hint_${P}_battery`),le=`select.sem_charger_${e}_ev_target_type`,ce=this._stateStr(le)||"kwh",de=this._stateAttrs(le).options||["kwh"],pe="soc"===ce,he=pe?`number.sem_charger_${e}_target_soc`:`number.sem_charger_${e}_daily_ev_target`,_e=pe?`number.sem_charger_${e}_target_soc_max`:`number.sem_charger_${e}_daily_ev_target_max`,ue=`time.sem_charger_${e}_target_time`,me=this._stateStr(ue),fe=me?me.slice(0,5):"—",ve=this._stateAttrs(`${this._prefix}charging_state`),ye=!1===ve.ev_deadline_reachable,be=ve.ev_next_cheap_window;let xe="";if(be)try{const e=new Date(be);isNaN(e)||(xe=e.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:this._hass?.config?.time_zone||void 0}))}catch(e){}const $e="solar_plus_cheap"===P&&xe,we=`select.sem_charger_${e}_phase_mode`,ke=!!this._hass?.states?.[we],Se=(ve.per_charger_phases||{})[e]||{},Ce=this._stateStr(we)||"auto",ze=this._stateAttrs(we).options||["auto","1","3"],Me={auto:this._t("phase_mode_auto"),1:this._t("phase_mode_1"),3:this._t("phase_mode_3")};let De="";De="stopping"===Se.switch_state?this._t("phase_status_stopping"):"settling"===Se.switch_state?this._t("phase_status_settling"):Se.active_phases?(this._t("phase_status_measured")||"{n}-phase measured").replace("{n}",Se.active_phases):Se.believed_phases?(this._t("phase_status_believed")||"{n}-phase").replace("{n}",Se.believed_phases):this._t("phase_status_unknown");const Ee=this._entityVal(he,pe?80:10),Fe=pe?Math.max(0,(Ee-c)/100*M):Math.max(0,Ee-n),Ie=D>0?Math.round(Fe/D*100):null,Ae=de.length>1?W`<select class="ct-unit" .value=${ce}
                     @click=${e=>e.stopPropagation()}
-                    @change=${e=>this._selectOption(U,e.target.value)}>
-                    ${H.map(e=>W`<option value=${e} ?selected=${e===O}>${"soc"===e?"%":"kWh"}</option>`)}
-                </select>`:W`<span class="ct-unit-static">${G?"%":"kWh"}</span>`;return W`
+                    @change=${e=>this._selectOption(le,e.target.value)}>
+                    ${de.map(e=>W`<option value=${e} ?selected=${e===ce}>${"soc"===e?"%":"kWh"}</option>`)}
+                </select>`:W`<span class="ct-unit-static">${pe?"%":"kWh"}</span>`;return W`
             <div class="charger-section">
                 <div class="charger-header">
                     <div class="charger-dot" style="background:${i}"></div>
                     <span class="charger-name">${b}</span>
-                    <span class="charger-status" style="color:${w?i:""}">${k}${S>0?W` <span class="charger-set">(${Math.round(S)}&nbsp;A)</span>`:q}</span>
+                    <span class="charger-status" style="color:${w?i:""}">${S}${C>0?W` <span class="charger-set">(${Math.round(C)}&nbsp;A)</span>`:K}</span>
                 </div>
 
                 <div class="charger-body">
@@ -3229,17 +3458,17 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="soc-info-708">
                     <ha-icon icon="mdi:information-outline" style="--mdc-icon-size:14px;color:#5BC8D8"></ha-icon>
                     <span>${v("soc_info_line")}</span>
-                </div>`:q}
+                </div>`:K}
 
                 <div class="charge-target-group">
                     <div class="ct-title">
                         <ha-icon icon="mdi:target" style="--mdc-icon-size:14px;color:#8DC892"></ha-icon>
                         ${this._t("charge_target")}
-                        ${null!=pe&&pe>0?W`<span class="ct-range">· +${pe} km</span>`:q}
+                        ${null!=Ie&&Ie>0?W`<span class="ct-range">· +${Ie} km</span>`:K}
                         <span class="ct-spacer"></span>
-                        ${he}
+                        ${Ae}
                     </div>
-                    ${this._renderRangeSlider(j,K,G)}
+                    ${this._renderRangeSlider(he,_e,pe)}
                     <!-- #277 Phase B.2: one named Charge mode selector
                          replaces the legacy ev_grid_charging + nested
                          ev_tariff_mode toggles. Options come from the HA
@@ -3252,54 +3481,94 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <span class="ct-label">${this._t("charge_mode")}</span>
                         <span class="ct-ctl">
                             <select class="ct-mode-select"
-                                    .value=${F}
+                                    .value=${P}
                                     @click=${e=>e.stopPropagation()}
-                                    @change=${e=>this._selectOption(D,e.target.value)}>
-                                ${A.map(e=>W`
-                                    <option value=${e} ?selected=${e===F}>
-                                        ${I[e]||e}
+                                    @change=${e=>this._selectOption(T,e.target.value)}>
+                                ${V.map(e=>W`
+                                    <option value=${e} ?selected=${e===P}
+                                            ?disabled=${Z(e)}>
+                                        ${te[e]||e}${Z(e)?` — ${this._t("charge_mode_needs_tariff")}`:""}
                                     </option>`)}
                             </select>
                         </span>
                     </div>
+                    ${B?W`
+                    <div class="ct-row">
+                        <span class="ct-label">${this._t("pause_charging_for")}</span>
+                        <span class="ct-ctl ct-pause">
+                            <select class="ct-mode-select ct-pause-select"
+                                    .value=${I}
+                                    @click=${e=>e.stopPropagation()}
+                                    @change=${e=>this._selectOption(E,e.target.value)}>
+                                ${A.map(e=>W`
+                                    <option value=${e} ?selected=${e===I}>
+                                        ${this._t(`pause_duration_${e}`)||e}
+                                    </option>`)}
+                            </select>
+                            <button class="ct-pause-btn"
+                                    @click=${e=>{e.stopPropagation(),this._pressButton(N)}}
+                                    title=${this._t("pause_charging_hint")}>
+                                <ha-icon icon="mdi:pause-octagon-outline" style="--mdc-icon-size:15px"></ha-icon>
+                                ${O?this._t("pause_charging_again"):this._t("pause_charging")}
+                            </button>
+                        </span>
+                    </div>
+                    ${O?W`
+                    <div class="ct-subhint">
+                        <div class="ct-hint-row">
+                            <ha-icon icon="mdi:pause-circle-outline" style="--mdc-icon-size:13px;color:#8DC892"></ha-icon>
+                            <span class="ct-hint-text">${H>0?W`${(this._t("pause_status_line")||"").replace("{left}",q).replace("{mode}",te[j]||j).replace("{time}",G)}
+                                    <span style="opacity:.75"> ${this._t("pause_resume_hint")}</span>`:this._t("pause_resuming")}</span>
+                        </div>
+                    </div>
+                    `:K}
+                    `:K}
+                    ${"solar_plus_battery"===P&&Q?W`
+                    <div class="ct-subhint">
+                        <div class="ct-hint-row">
+                            <ha-icon icon="mdi:school-outline" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
+                            <span class="ct-hint-text">${ee}</span>
+                        </div>
+                    </div>
+                    `:K}
                     ${this._showHelp?W`
                     <div class="ct-subhint">
                         <div class="ct-hint-row">
                             <span class="ct-hint-label">${this._t("hint_label_surplus")}:</span>
-                            <span class="ct-hint-text">${P}</span>
+                            <span class="ct-hint-text">${ae}</span>
                         </div>
                         <div class="ct-hint-row">
                             <span class="ct-hint-label">${this._t("hint_label_overnight")}:</span>
-                            <span class="ct-hint-text">${T}</span>
+                            <span class="ct-hint-text">${oe}</span>
                         </div>
                         <div class="ct-hint-row">
                             <span class="ct-hint-label">${this._t("hint_label_battery")}:</span>
-                            <span class="ct-hint-text">${L}</span>
+                            <span class="ct-hint-text">${ne}</span>
                         </div>
-                        ${te?W`
+                        ${$e?W`
                             <div class="ct-hint-row ct-hint-extra">
                                 <span class="ct-hint-label">${this._t("ev_next_cheap")}:</span>
-                                <span class="ct-hint-text"><b style="color:#8DC892">${ee}</b></span>
+                                <span class="ct-hint-text"><b style="color:#8DC892">${xe}</b></span>
                             </div>
-                        `:q}
+                        `:K}
                     </div>
-                    `:te?W`
+                    `:$e?W`
                         <div class="ct-cheap-hint">
                             <span class="ct-hint-label">${this._t("ev_next_cheap")}:</span>
-                            <b style="color:#8DC892">${ee}</b>
+                            <b style="color:#8DC892">${xe}</b>
                         </div>
-                    `:q}
-                    ${se?W`
+                    `:K}
+                    ${ke?W`
                     <div class="ct-row">
                         <span class="ct-label">${this._t("phase_mode")}</span>
                         <span class="ct-ctl">
                             <select class="ct-mode-select"
-                                    .value=${ae}
+                                    .value=${Ce}
                                     @click=${e=>e.stopPropagation()}
-                                    @change=${e=>this._selectOption(ie,e.target.value)}>
-                                ${oe.map(e=>W`
-                                    <option value=${e} ?selected=${e===ae}>
-                                        ${ne[e]||e}
+                                    @change=${e=>this._selectOption(we,e.target.value)}>
+                                ${ze.map(e=>W`
+                                    <option value=${e} ?selected=${e===Ce}>
+                                        ${Me[e]||e}
                                     </option>`)}
                             </select>
                         </span>
@@ -3308,25 +3577,25 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="ct-hint-row">
                             <span class="ct-hint-text">
                                 <ha-icon icon="mdi:sine-wave" style="--mdc-icon-size:12px;color:#8DC892"></ha-icon>
-                                ${le}
+                                ${De}
                             </span>
                         </div>
                     </div>
-                    `:q}
+                    `:K}
                     <div class="ct-row clickable"
-                        @click=${()=>this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:V}}))}>
+                        @click=${()=>this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:ue}}))}>
                         <span class="ct-label">${this._t("ev_charge_by")}</span>
                         <span class="ct-ctl ct-time">
                             <ha-icon icon="mdi:clock-end" style="--mdc-icon-size:13px;color:#5BC8D8"></ha-icon>
-                            ${X}
+                            ${fe}
                         </span>
                     </div>
-                    ${J?W`
+                    ${ye?W`
                         <div class="ct-warn">
                             <ha-icon icon="mdi:clock-alert" style="--mdc-icon-size:14px;color:#f06292"></ha-icon>
                             <span>${this._t("ev_deadline_unreachable_short")}</span>
                         </div>
-                    `:q}
+                    `:K}
                     ${this._renderPlanStrip(e)}
                 </div>
 
@@ -3338,9 +3607,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             @click=${()=>{const t=new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:`number.sem_charger_${e}_minimum_current`}});this.dispatchEvent(t)}}
                         >
                             <ha-icon icon="mdi:speedometer-slow" style="--mdc-icon-size:16px;color:#ff9800"></ha-icon>
-                            <span class="setting-value">${this._fmt(C,0)}A</span>
+                            <span class="setting-value">${this._fmt(z,0)}A</span>
                         </div>
-                        ${this._showHelp?W`<div class="setting-help">${this._t("tile_help_min_amps")}</div>`:q}
+                        ${this._showHelp?W`<div class="setting-help">${this._t("tile_help_min_amps")}</div>`:K}
                     </div>
                     <div class="setting-cell">
                         <div
@@ -3348,9 +3617,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             @click=${()=>{const t=new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:`number.sem_charger_${e}_ev_battery_capacity_kwh`}});this.dispatchEvent(t)}}
                         >
                             <ha-icon icon="mdi:car-battery" style="--mdc-icon-size:16px;color:#8DC892"></ha-icon>
-                            <span class="setting-value">${this._fmt(z,0)} kWh</span>
+                            <span class="setting-value">${this._fmt(M,0)} kWh</span>
                         </div>
-                        ${this._showHelp?W`<div class="setting-help">${this._t("tile_help_capacity")}</div>`:q}
+                        ${this._showHelp?W`<div class="setting-help">${this._t("tile_help_capacity")}</div>`:K}
                     </div>
                     <div class="setting-cell">
                         <div
@@ -3358,9 +3627,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             @click=${()=>{const t=new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:`number.sem_charger_${e}_ev_kwh_per_100km`}});this.dispatchEvent(t)}}
                         >
                             <ha-icon icon="mdi:map-marker-distance" style="--mdc-icon-size:16px;color:#5BC8D8"></ha-icon>
-                            <span class="setting-value">${this._fmt(M,0)} kWh/100km</span>
+                            <span class="setting-value">${this._fmt(D,0)} kWh/100km</span>
                         </div>
-                        ${this._showHelp?W`<div class="setting-help">${this._t("tile_help_consumption")}</div>`:q}
+                        ${this._showHelp?W`<div class="setting-help">${this._t("tile_help_consumption")}</div>`:K}
                     </div>
                     <ha-icon
                         class="ev-help-toggle ${this._showHelp?"on":""}"
@@ -3371,7 +3640,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ></ha-icon>
                 </div>
             </div>
-        `}render(){if(!this._config||!this._hass)return q;const e=this._binaryState("ev_connected"),t=this._chargers&&this._chargers.length?this._chargers.reduce((e,t)=>e+this._val(`charger_${t}_power`,0),0):this._val("ev_power",0),i=t>50;this._val("calculated_current",0),this._val("session_energy",0);const s=this._val("energy_ev_solar_percentage",0),r=this._val("session_cost",0),a=this._val("daily_ev_energy",0);this._valStr("charging_state");const o=fe(this._hass),n=i?"wrap state-charging":e?"wrap state-connected":"wrap state-disconnected",l=i?this._t("charging"):e?this._t("connected"):this._t("disconnected"),c=i?"status-value charging":e?"status-value connected":"status-value disconnected";return W`
+        `}render(){if(!this._config||!this._hass)return K;const e=this._binaryState("ev_connected"),t=this._chargers&&this._chargers.length?this._chargers.reduce((e,t)=>e+this._val(`charger_${t}_power`,0),0):this._val("ev_power",0),i=t>50;this._val("calculated_current",0),this._val("session_energy",0);const s=this._val("energy_ev_solar_percentage",0),r=this._val("session_cost",0),a=this._val("daily_ev_energy",0);this._valStr("charging_state");const o=fe(this._hass),n=i?"wrap state-charging":e?"wrap state-connected":"wrap state-disconnected",l=i?this._t("charging"):e?this._t("connected"):this._t("disconnected"),c=i?"status-value charging":e?"status-value connected":"status-value disconnected";return W`
             <svg class="glow-svg">
                 <defs>
                     <filter id="ev-glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -3426,7 +3695,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                         <span class="metric-label">${this._t("power")}</span>
                                         <span class="metric-value power-value">${ge(t)}</span>
                                     </div>
-                                `:q}
+                                `:K}
                             </div>
                         `:W`
                             <div class="metrics-col">
@@ -3439,7 +3708,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                         <span class="metric-label">${this._t("power")}</span>
                                         <span class="metric-value power-value">${ge(t)}</span>
                                     </div>
-                                `:q}
+                                `:K}
                                 <div class="metric-row">
                                     <span class="metric-label">${this._t("today")}</span>
                                     <span class="metric-value">${this._fmt(a,1)} kWh</span>
@@ -3458,7 +3727,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                          cost. Only hide for multi-charger setups where
                          the global is a fleet aggregate and per-charger
                          attribution lives in each section's metrics. -->
-                    ${this._chargers.length>1?q:W`
+                    ${this._chargers.length>1?K:W`
                         <div class="bottom-bar">
                             <div class="chip">
                                 <span class="chip-label">${this._t("session_cost")}</span>
@@ -3471,7 +3740,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="charger-sections">
                             ${this._chargers.map((e,t)=>this._renderChargerSection(e,t))}
                         </div>
-                    `:q}
+                    `:K}
                 </div>
             </ha-card>
         `}static get styles(){return a`
@@ -3984,19 +4253,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .hero { flex-direction: column; gap: 12px; }
                 .ev-icon-area { width: 80px; height: 80px; }
             }
-        `}getCardSize(){return this._chargers.length>=1?3+2*this._chargers.length:3}static getStubConfig(){return{}}},{type:"sem-ev-status-card",name:"SEM EV Status",description:"Lumina-styled EV charging hero card with per-charger intelligence and settings",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-ev-status-card"});const pt=["sensor.sem_solar_power","sensor.sem_battery_soc","sensor.sem_autarky_rate","sensor.sem_ev_power","sensor.sem_energy_optimization_score","sensor.sem_energy_tip","sensor.sem_best_surplus_window","sensor.sem_forecast_remaining_today_kwh","sensor.sem_current_vs_peak_percentage","sensor.sem_consecutive_peak_15min","sensor.sem_target_peak_limit","sensor.sem_daily_co2_avoided","sensor.sem_lifetime_co2_avoided"];we("sem-home-status-card",class extends Se{static get watchedEntities(){return pt}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_"}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_scoreColor(e){return e>=80?"#8DC892":e>=50?"#ff9800":"#f44336"}_peakColor(e){return e>90?"#f44336":e>70?"#ff9800":"#8DC892"}_peakStatusKey(e){return e>90?"peak_critical":e>70?"peak_warning":"peak_safe"}_renderChip(e,t,i){return W`
+        `}getCardSize(){return this._chargers.length>=1?3+2*this._chargers.length:3}static getStubConfig(){return{}}},{type:"sem-ev-status-card",name:"SEM EV Status",description:"Lumina-styled EV charging hero card with per-charger intelligence and settings",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-ev-status-card"});const St=["sensor.sem_solar_power","sensor.sem_battery_soc","sensor.sem_autarky_rate","sensor.sem_ev_power","sensor.sem_energy_optimization_score","sensor.sem_energy_tip","sensor.sem_best_surplus_window","sensor.sem_forecast_remaining_today_kwh","sensor.sem_current_vs_peak_percentage","sensor.sem_consecutive_peak_15min","sensor.sem_target_peak_limit","sensor.sem_daily_co2_avoided","sensor.sem_lifetime_co2_avoided"];we("sem-home-status-card",class extends Se{static get watchedEntities(){return St}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_"}_val(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];if(!i||"unavailable"===i.state||"unknown"===i.state)return t;const s=parseFloat(i.state);return Number.isFinite(s)?s:t}_valStr(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_scoreColor(e){return e>=80?"#8DC892":e>=50?"#ff9800":"#f44336"}_peakColor(e){return e>90?"#f44336":e>70?"#ff9800":"#8DC892"}_peakStatusKey(e){return e>90?"peak_critical":e>70?"peak_warning":"peak_safe"}_renderChip(e,t,i){return W`
             <div class="chip">
                 <ha-icon icon="${e}" style="--mdc-icon-size:16px;color:${t}"></ha-icon>
                 <span class="chip-val">${i}</span>
             </div>
-        `}render(){if(!this._config||!this._hass)return q;const e=this._val("solar_power"),t=this._val("battery_soc"),i=this._val("autarky_rate"),s=this._val("ev_power"),r=this._val("energy_optimization_score"),a=this._scoreColor(r),o=this._valStr("energy_tip"),n=this._valStr("best_surplus_window")||"—",l=this._val("forecast_remaining_today_kwh").toFixed(1),c=this._val("current_vs_peak_percentage"),d=this._peakColor(c),p=this._val("consecutive_peak_15min").toFixed(1),h=this._val("target_peak_limit").toFixed(1),_=this._val("daily_co2_avoided").toFixed(2),g=this._val("lifetime_co2_avoided").toFixed(1);return W`
+        `}render(){if(!this._config||!this._hass)return K;const e=this._val("solar_power",null),t=Je(this._val("battery_soc",null)),i=this._val("autarky_rate",null),s=this._val("ev_power"),r=this._val("energy_optimization_score"),a=this._scoreColor(r),o=this._valStr("energy_tip"),n=this._valStr("best_surplus_window")||"—",l=this._val("forecast_remaining_today_kwh").toFixed(1),c=this._val("current_vs_peak_percentage"),d=this._peakColor(c),p=this._val("consecutive_peak_15min").toFixed(1),h=this._val("target_peak_limit").toFixed(1),_=this._val("daily_co2_avoided").toFixed(2),g=this._val("lifetime_co2_avoided").toFixed(1);return W`
             <div class="wrap">
 
                 <!-- 1. Status Chips -->
                 <div class="chips-row">
-                    ${this._renderChip("mdi:solar-power","#ff9800",ge(e))}
-                    ${this._renderChip("mdi:battery","#4db6ac",`${t.toFixed(0)}%`)}
-                    ${this._renderChip("mdi:leaf","#8DC892",`${i.toFixed(0)}%`)}
+                    ${this._renderChip("mdi:solar-power","#ff9800",null==e?Xe:ge(e))}
+                    ${this._renderChip("mdi:battery","#4db6ac",t.label)}
+                    ${this._renderChip("mdi:leaf","#8DC892",null==i?Xe:`${i.toFixed(0)}%`)}
                     ${this._renderChip("mdi:car-electric","#8DC892",s>0?ge(s):"—")}
                     <div class="chip">
                         <ha-icon icon="mdi:speedometer" style="--mdc-icon-size:16px;color:${a}"></ha-icon>
@@ -4197,7 +4466,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             @media (max-width: 400px) {
                 .env-row { flex-direction: column; }
             }
-        `}getCardSize(){return 5}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-home-status-card",name:"SEM Home Status Card",description:"Consolidated status panel for the SEM Home tab",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-home-status-card",preview:!1});const ht="sensor.sem_tariff_current_import_rate",_t={negative:{color:"#4db6ac",key:"price_negative"},very_cheap:{color:"#8DC892",key:"very_cheap"},cheap:{color:"#8DC892",key:"cheap"},normal:{color:"#ff9800",key:"normal"},expensive:{color:"#f06292",key:"expensive"},very_expensive:{color:"#e53935",key:"very_expensive"}};we("sem-price-card",class extends Se{constructor(){super(),this._boundVisibility=()=>{document.hidden||this.requestUpdate()}}connectedCallback(){super.connectedCallback(),document.addEventListener("visibilitychange",this._boundVisibility)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("visibilitychange",this._boundVisibility)}setConfig(e){super.setConfig(e),this._entity=e.entity||ht,this._compact=!!e.compact}set hass(e){this._hass=e;const t=e?.states[this._entity],i=t?.attributes||{},s=[t?.state,i.price_level,i.next_cheap_start,(i.upcoming||[]).length,this._lang].join("|"),r="function"==typeof semLocalize;(s!==this._lastKey||r&&!this._localizeReady)&&(this._lastKey=s,this._lang=e?.language,this._localizeReady=r,this.requestUpdate())}get hass(){return this._hass}_hm(e){if(!e)return null;const t=this._hass?.config?.time_zone||void 0;try{return new Date(e).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:t})}catch(e){return null}}_levelInfo(e){return _t[e]||{color:"#9e9e9e",key:"normal"}}render(){if(!this._hass||!this._config)return q;const e=this._hass.states[this._entity];if(!e||"unavailable"===e.state||"unknown"===e.state)return W`<ha-card><div class="wrap empty">${this._t("current_electricity_price")}: —</div></ha-card>`;const t=e.attributes||{};if(!1===t.is_dynamic)return this.style.display="none",q;this.style.display="";const i=parseFloat(e.state),s=t.currency||"",r=this._levelInfo(t.price_level),a=e=>null==e||isNaN(e)?"—":Number(e).toFixed(2),o=Array.isArray(t.upcoming)?t.upcoming:[],n=this._hm(t.next_cheap_start),l=this._hm(t.next_cheap_end);return this._compact?W`
+        `}getCardSize(){return 5}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-home-status-card",name:"SEM Home Status Card",description:"Consolidated status panel for the SEM Home tab",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-home-status-card",preview:!1});const Ct="sensor.sem_tariff_current_import_rate";we("sem-price-card",class extends Se{constructor(){super(),this._boundVisibility=()=>{document.hidden||this.requestUpdate()}}connectedCallback(){super.connectedCallback(),document.addEventListener("visibilitychange",this._boundVisibility)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("visibilitychange",this._boundVisibility)}setConfig(e){super.setConfig(e),this._entity=e.entity||Ct,this._compact=!!e.compact}set hass(e){this._hass=e;const t=e?.states[this._entity],i=t?.attributes||{},s=[t?.state,i.price_level,i.next_cheap_start,(i.upcoming||[]).length,this._lang].join("|"),r="function"==typeof semLocalize;(s!==this._lastKey||r&&!this._localizeReady)&&(this._lastKey=s,this._lang=e?.language,this._localizeReady=r,this.requestUpdate())}get hass(){return this._hass}_hm(e){if(!e)return null;const t=this._hass?.config?.time_zone||void 0;try{return new Date(e).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",timeZone:t})}catch(e){return null}}_levelInfo(e){return{color:ot(e,"#9e9e9e"),key:at(e)}}render(){if(!this._hass||!this._config)return K;const e=this._hass.states[this._entity];if(!e||"unavailable"===e.state||"unknown"===e.state)return W`<ha-card><div class="wrap empty">${this._t("current_electricity_price")}: —</div></ha-card>`;const t=e.attributes||{};if(!1===t.is_dynamic)return this.style.display="none",K;this.style.display="";const i=parseFloat(e.state),s=t.currency||"",r=this._levelInfo(t.price_level),a=e=>null==e||isNaN(e)?"—":Number(e).toFixed(2),o=Array.isArray(t.upcoming)?t.upcoming:[],n=this._hm(t.next_cheap_start),l=this._hm(t.next_cheap_end);return this._compact?W`
                 <ha-card>
                     <div class="chip-row">
                         <span class="chip-title">${this._t("current_electricity_price")}</span>
@@ -4206,7 +4475,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <span class="chip-badge" style="background:${r.color}22;color:${r.color};border-color:${r.color}55">
                             ${this._t(r.key)}
                         </span>
-                        ${n?W`<span class="chip-next">${this._t("price_next_cheap")}: <b style="color:#8DC892">${n}</b></span>`:q}
+                        ${n?W`<span class="chip-next">${this._t("price_next_cheap")}: <b style="color:#8DC892">${n}</b></span>`:K}
                     </div>
                 </ha-card>
             `:W`
@@ -4214,7 +4483,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="wrap">
                     <div class="head">
                         <span class="title">${this._t("current_electricity_price")}</span>
-                        ${t.provider&&"unknown"!==t.provider?W`<span class="prov">${t.provider}</span>`:q}
+                        ${t.provider&&"unknown"!==t.provider?W`<span class="prov">${t.provider}</span>`:K}
                     </div>
                     <div class="now">
                         <span class="price" style="color:${r.color}">${a(i)}</span>
@@ -4225,19 +4494,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                     <div class="summary">
                         <span>${this._t("today")}: <b>min ${a(t.today_min)}</b> · avg ${a(t.today_avg)} · <b>max ${a(t.today_max)}</b></span>
-                        ${n?W`<span class="cheap">${this._t("price_next_cheap")}: <b>${n}${l?"–"+l:""}</b></span>`:q}
+                        ${n?W`<span class="cheap">${this._t("price_next_cheap")}: <b>${n}${l?"–"+l:""}</b></span>`:K}
                     </div>
-                    ${o.length>=2?this._renderStrip(o):q}
+                    ${o.length>=2?this._renderStrip(o):K}
                 </div>
             </ha-card>
-        `}_renderStrip(e){const t=Date.now(),i=e.map(e=>({t:new Date(e.t).getTime(),price:e.price,level:e.level})).filter(e=>!isNaN(e.t)).sort((e,t)=>e.t-t.t).filter(e=>e.t>=t-36e5).slice(0,24);if(i.length<2)return q;const s=i.map(e=>e.price),r=Math.min(...s),a=Math.max(...s)-r||1,o=i.length,n=(320-2*(o-1))/o,l=i.map((e,i)=>{const s=6+52*((e.price-r)/a),o=i*(n+2),l=64-s,c=this._levelInfo(e.level).color,d=e.t<=t&&t<e.t+36e5;return G`<rect x="${o}" y="${l}" width="${n}" height="${s}" rx="1.5"
+        `}_renderStrip(e){const t=Date.now(),i=e.map(e=>({t:new Date(e.t).getTime(),price:e.price,level:e.level})).filter(e=>!isNaN(e.t)).sort((e,t)=>e.t-t.t).filter(e=>e.t>=t-36e5).slice(0,24);if(i.length<2)return K;const s=i.map(e=>e.price),r=Math.min(...s),a=Math.max(...s)-r||1,o=i.length,n=(320-2*(o-1))/o,l=i.map((e,i)=>{const s=6+52*((e.price-r)/a),o=i*(n+2),l=64-s,c=this._levelInfo(e.level).color,d=e.t<=t&&t<e.t+36e5;return j`<rect x="${o}" y="${l}" width="${n}" height="${s}" rx="1.5"
                 fill="${c}" opacity="${d?"1":"0.65"}"
-                stroke="${d?"#fff":"none"}" stroke-width="${d?"1":"0"}"/>`}),c=i.map((e,t)=>{if(t%6!=0)return q;const i=t*(n+2)+n/2,s=new Date(e.t).getHours();return G`<text x="${i}" y="${75}" text-anchor="middle"
+                stroke="${d?"#fff":"none"}" stroke-width="${d?"1":"0"}"/>`}),c=i.map((e,t)=>{if(t%6!=0)return K;const i=t*(n+2)+n/2,s=new Date(e.t).getHours();return j`<text x="${i}" y="${75}" text-anchor="middle"
                 fill="var(--secondary-text-color,#999)" font-size="9">${String(s).padStart(2,"0")}</text>`});return W`
             <svg class="strip" viewBox="0 0 ${320} ${78}" width="100%" preserveAspectRatio="none">
                 ${l}${c}
             </svg>
-        `}getCardSize(){return 2}static getStubConfig(){return{entity:ht}}static get styles(){return a`
+        `}getCardSize(){return 2}static getStubConfig(){return{entity:Ct}}static get styles(){return a`
             ha-card { background: var(--ha-card-background, var(--card-background-color)); }
             .wrap { padding: 12px 14px; }
             .wrap.empty { color: var(--secondary-text-color,#999); }
@@ -4267,7 +4536,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                           border-radius: 9px; border: 1px solid; text-transform: capitalize; }
             .chip-next { margin-left: auto; font-size: 12px; color: var(--secondary-text-color,#aaa); }
             .chip-next b { font-variant-numeric: tabular-nums; }
-        `}},{type:"sem-price-card",name:"SEM Price Card",description:"Dynamic electricity price: current price, level, today range, next cheap window, and an hourly price strip (#257)",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-price-card",preview:!1});const gt=[{id:"info",icon:"mdi:information-outline",color:"#96CAEE",titleKey:"system_info",subtitleFn:e=>{const t=e._val("diag_version")||"—",i=e._val("diag_grid_mode")||"—";return`v${t} · ${"combined"===i?e._t("grid_combined"):"split"===i?e._t("grid_split"):i}`}},{id:"health",icon:"mdi:heart-pulse",color:"#8DC892",titleKey:"health_overview",subtitleFn:e=>`${e._valNum("solar_power").toFixed(0)}W solar · SOC ${e._valNum("battery_soc").toFixed(0)}%`},{id:"diag",icon:"mdi:bug-outline",color:"#ff9800",titleKey:"diagnostics",subtitleFn:()=>""}],ut=[{key:"solar_power",icon:"mdi:solar-power",color:"#ff9800",suffix:"W"},{key:"grid_power",icon:"mdi:transmission-tower",color:"#488fc2",suffix:"W"},{key:"battery_soc",icon:"mdi:battery",color:"#4db6ac",suffix:"%"},{key:"forecast_today_kwh",icon:"mdi:weather-sunny",color:"#ff9800",suffix:"kWh"},{key:"tariff_current_import_rate",icon:"mdi:tag",color:"#96CAEE",suffix:""}],mt=["sensor.sem_diag_version","sensor.sem_diag_grid_mode","sensor.sem_diag_battery_capacity","sensor.sem_diag_update_interval","sensor.sem_diag_charger_count","sensor.sem_diag_charger_control","sensor.sem_diag_sensors_unavailable","sensor.sem_diag_ed_config","sensor.sem_solar_power","sensor.sem_grid_power","sensor.sem_battery_soc","sensor.sem_ev_power","sensor.sem_forecast_today_kwh","sensor.sem_tariff_current_import_rate","switch.sem_observer_mode","sensor.sem_home_consumption_power","sensor.sem_grid_import_power","sensor.sem_grid_export_power","sensor.sem_autarky_rate","sensor.sem_self_consumption_rate","sensor.sem_battery_power","sensor.sem_night_charging_status","sensor.sem_battery_status","sensor.sem_grid_status","sensor.sem_charging_state"];we("sem-system-card",class extends Se{static get watchedEntities(){return mt}constructor(){super(),this._collapsed={info:!1,health:!1,diag:!0},this._copyFeedback=""}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_"}_val(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_valNum(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_switchOn(e){return"on"===this._hass?.states[`switch.sem_${e}`]?.state}_available(e){const t=this._hass?.states[e];return!(!t||"unavailable"===t.state||"unknown"===t.state)}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_copyDiagnostics(){const e=this._val("diag_version")||"—",t=this._val("diag_grid_mode")||"—",i=this._val("diag_charger_count")||"—",s=this._val("diag_charger_control")||"—",r=this._valNum("diag_battery_capacity"),a=`SEM ${e} | Grid: ${t} | Chargers: ${i} (${s}) | Battery: ${r>0?r.toFixed(1):"—"}kWh | Unavailable: ${this._val("diag_sensors_unavailable")||"0"}`,o=this._hass?.states?.["sensor.sem_diag_ed_config"]?.attributes?.energy_dashboard;let n;if(o){const e=e=>e||"—";n=`Solar:   pwr=${e(o.solar?.power)} [${e(o.solar?.power_source)}]  energy=${e(o.solar?.energy)}\nGrid:    pwr=${e(o.grid?.power)} [${e(o.grid?.power_source)}]  imp=${e(o.grid?.import_energy)}  exp=${e(o.grid?.export_energy)}\nBattery: pwr=${e(o.battery?.power)} [${e(o.battery?.power_source)}]  chg=${e(o.battery?.charge_energy)}  dis=${e(o.battery?.discharge_energy)}`}else n=`Config: ${this._val("diag_ed_config")||"—"}`;const l=`${a}\n${n}`;this._writeClipboard(l)}async _writeClipboard(e){const t=e=>{this._copyFeedback=this._t(e),this.requestUpdate(),setTimeout(()=>{this._copyFeedback="",this.requestUpdate()},2e3)};if(navigator?.clipboard?.writeText&&!1!==window.isSecureContext)try{return await navigator.clipboard.writeText(e),void t("copied")}catch(e){console.warn("[SEM System] modern clipboard API failed, falling back to execCommand",e)}try{const i=document.createElement("textarea");i.value=e,i.setAttribute("readonly",""),i.style.position="fixed",i.style.top="0",i.style.left="0",i.style.width="1px",i.style.height="1px",i.style.opacity="0",document.body.appendChild(i),i.focus(),i.select();const s=document.execCommand("copy");document.body.removeChild(i),s?t("copied"):(t("copy_failed"),console.error('[SEM System] execCommand("copy") returned false'))}catch(e){t("copy_failed"),console.error("[SEM System] legacy clipboard fallback threw",e)}}_renderSectionHeader(e,t){const i=this._collapsed[e.id],s=i?"rotate(-90deg)":"rotate(0deg)";return W`
+        `}},{type:"sem-price-card",name:"SEM Price Card",description:"Dynamic electricity price: current price, level, today range, next cheap window, and an hourly price strip (#257)",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-price-card",preview:!1});const zt=[{id:"info",icon:"mdi:information-outline",color:"#96CAEE",titleKey:"system_info",subtitleFn:e=>{const t=e._val("diag_version")||"—",i=e._val("diag_grid_mode")||"—";return`v${t} · ${"combined"===i?e._t("grid_combined"):"split"===i?e._t("grid_split"):i}`}},{id:"health",icon:"mdi:heart-pulse",color:"#8DC892",titleKey:"health_overview",subtitleFn:e=>`${e._valFmt("solar_power")}W solar · SOC ${e._valFmt("battery_soc")}%`},{id:"diag",icon:"mdi:bug-outline",color:"#ff9800",titleKey:"diagnostics",subtitleFn:()=>""}],Mt=[{key:"solar_power",icon:"mdi:solar-power",color:"#ff9800",suffix:"W"},{key:"grid_power",icon:"mdi:transmission-tower",color:"#488fc2",suffix:"W"},{key:"battery_soc",icon:"mdi:battery",color:"#4db6ac",suffix:"%"},{key:"forecast_today_kwh",icon:"mdi:weather-sunny",color:"#ff9800",suffix:"kWh"},{key:"tariff_current_import_rate",icon:"mdi:tag",color:"#96CAEE",suffix:""}],Dt=["sensor.sem_diag_version","sensor.sem_diag_grid_mode","sensor.sem_diag_battery_capacity","sensor.sem_diag_update_interval","sensor.sem_diag_charger_count","sensor.sem_diag_charger_control","sensor.sem_diag_sensors_unavailable","sensor.sem_diag_ed_config","sensor.sem_solar_power","sensor.sem_grid_power","sensor.sem_battery_soc","sensor.sem_ev_power","sensor.sem_forecast_today_kwh","sensor.sem_tariff_current_import_rate","switch.sem_observer_mode","sensor.sem_home_consumption_power","sensor.sem_grid_import_power","sensor.sem_grid_export_power","sensor.sem_autarky_rate","sensor.sem_self_consumption_rate","sensor.sem_battery_power","sensor.sem_night_charging_status","sensor.sem_battery_status","sensor.sem_grid_status","sensor.sem_charging_state"];we("sem-system-card",class extends Se{static get watchedEntities(){return Dt}constructor(){super(),this._collapsed={info:!1,health:!1,diag:!0},this._copyFeedback=""}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_"}_val(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_valFmt(e,t=0){return Ze(this._hass?.states[`${this._prefix}${e}`],t)}_valNum(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_switchOn(e){return"on"===this._hass?.states[`switch.sem_${e}`]?.state}_available(e){const t=this._hass?.states[e];return!(!t||"unavailable"===t.state||"unknown"===t.state)}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_copyDiagnostics(){const e=this._val("diag_version")||"—",t=this._val("diag_grid_mode")||"—",i=this._val("diag_charger_count")||"—",s=this._val("diag_charger_control")||"—",r=this._valNum("diag_battery_capacity"),a=`SEM ${e} | Grid: ${t} | Chargers: ${i} (${s}) | Battery: ${r>0?r.toFixed(1):"—"}kWh | Unavailable: ${this._val("diag_sensors_unavailable")||"0"}`,o=this._hass?.states?.["sensor.sem_diag_ed_config"]?.attributes?.energy_dashboard;let n;if(o){const e=e=>e||"—";n=`Solar:   pwr=${e(o.solar?.power)} [${e(o.solar?.power_source)}]  energy=${e(o.solar?.energy)}\nGrid:    pwr=${e(o.grid?.power)} [${e(o.grid?.power_source)}]  imp=${e(o.grid?.import_energy)}  exp=${e(o.grid?.export_energy)}\nBattery: pwr=${e(o.battery?.power)} [${e(o.battery?.power_source)}]  chg=${e(o.battery?.charge_energy)}  dis=${e(o.battery?.discharge_energy)}`}else n=`Config: ${this._val("diag_ed_config")||"—"}`;const l=`${a}\n${n}`;this._writeClipboard(l)}async _writeClipboard(e){const t=e=>{this._copyFeedback=this._t(e),this.requestUpdate(),setTimeout(()=>{this._copyFeedback="",this.requestUpdate()},2e3)};if(navigator?.clipboard?.writeText&&!1!==window.isSecureContext)try{return await navigator.clipboard.writeText(e),void t("copied")}catch(e){console.warn("[SEM System] modern clipboard API failed, falling back to execCommand",e)}try{const i=document.createElement("textarea");i.value=e,i.setAttribute("readonly",""),i.style.position="fixed",i.style.top="0",i.style.left="0",i.style.width="1px",i.style.height="1px",i.style.opacity="0",document.body.appendChild(i),i.focus(),i.select();const s=document.execCommand("copy");document.body.removeChild(i),s?t("copied"):(t("copy_failed"),console.error('[SEM System] execCommand("copy") returned false'))}catch(e){t("copy_failed"),console.error("[SEM System] legacy clipboard fallback threw",e)}}_renderSectionHeader(e,t){const i=this._collapsed[e.id],s=i?"rotate(-90deg)":"rotate(0deg)";return W`
             <div
                 class="section-header"
                 tabindex="0"
@@ -4312,7 +4581,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             </div>
         `}_renderHealthSection(e){return W`
             <div class="health-chips">
-                ${ut.map(e=>{const t=`${this._prefix}${e.key}`,i=this._available(t),s=this._hass?.states[t],r=s?s.state:"—";let a=e.suffix;if("tariff_current_import_rate"===e.key){const e=s?.attributes?.currency;a=e?` ${e}/kWh`:""}return W`
+                ${Mt.map(e=>{const t=`${this._prefix}${e.key}`,i=this._available(t),s=this._hass?.states[t],r=s?s.state:"—";let a=e.suffix;if("tariff_current_import_rate"===e.key){const e=s?.attributes?.currency;a=e?` ${e}/kWh`:""}return W`
                         <div class="health-chip" style="background:${i?"rgba(141,200,146,0.12)":"rgba(244,67,54,0.12)"};border:1px solid ${i?"rgba(141,200,146,0.3)":"rgba(244,67,54,0.3)"}">
                             <ha-icon icon="${e.icon}" style="--mdc-icon-size:16px;color:${e.color}"></ha-icon>
                             <span class="chip-value">${i?`${r}${a}`:"—"}</span>
@@ -4334,7 +4603,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <span class="diag-block-label">${this._t(e)}</span>
                 <span class="diag-block-text">${t}</span>
             </div>
-        `}_renderDiagSection(e){const t=`Solar ${this._valNum("solar_power").toFixed(0)}W · Grid ${this._valNum("grid_power").toFixed(0)}W · Battery ${this._valNum("battery_power").toFixed(0)}W · SOC ${this._valNum("battery_soc").toFixed(0)}% · EV ${this._valNum("ev_power").toFixed(0)}W`,i=`Home ${this._valNum("home_consumption_power").toFixed(0)}W · Import ${this._valNum("grid_import_power").toFixed(0)}W · Export ${this._valNum("grid_export_power").toFixed(0)}W · Autarky ${this._valNum("autarky_rate").toFixed(0)}% · Self ${this._valNum("self_consumption_rate").toFixed(0)}%`,s=this._val("charging_state")||"—",r=this._val("night_charging_status")||"—",a=this._val("battery_status")||"—",o=this._val("grid_status")||"—",n=`${s} · ${this._t("night")}: ${r} · ${this._t("battery")}: ${a} · ${this._t("grid")}: ${o}`;return W`
+        `}_renderDiagSection(e){const t=`Solar ${this._valFmt("solar_power")}W · Grid ${this._valFmt("grid_power")}W · Battery ${this._valFmt("battery_power")}W · SOC ${this._valFmt("battery_soc")}% · EV ${this._valFmt("ev_power")}W`,i=`Home ${this._valFmt("home_consumption_power")}W · Import ${this._valFmt("grid_import_power")}W · Export ${this._valFmt("grid_export_power")}W · Autarky ${this._valFmt("autarky_rate")}% · Self ${this._valFmt("self_consumption_rate")}%`,s=this._val("charging_state")||"—",r=this._val("night_charging_status")||"—",a=this._val("battery_status")||"—",o=this._val("grid_status")||"—",n=`${s} · ${this._t("night")}: ${r} · ${this._t("battery")}: ${a} · ${this._t("grid")}: ${o}`;return W`
             ${this._renderDiagBlock("source_sensors",t)}
             ${this._renderDiagBlock("derived_values",i)}
             ${this._renderDiagBlock("mode_status",n)}
@@ -4347,7 +4616,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </div>
-        `}render(){if(!this._config)return q;const e=this._theme(),t=!1!==e.isDark,i=e.accent||"#42a5f5",s={info:e=>this._renderInfoSection(e),health:e=>this._renderHealthSection(e),diag:e=>this._renderDiagSection(e)};return W`
+        `}render(){if(!this._config)return K;const e=this._theme(),t=!1!==e.isDark,i=e.accent||"#42a5f5",s={info:e=>this._renderInfoSection(e),health:e=>this._renderHealthSection(e),diag:e=>this._renderDiagSection(e)};return W`
             <style>
                 :host { display: block; contain: layout style paint; }
                 .wrap {
@@ -4531,7 +4800,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
             </style>
             <div class="wrap">
-                ${gt.map(t=>this._renderSection(t,s[t.id],e))}
+                ${zt.map(t=>this._renderSection(t,s[t.id],e))}
                 <div class="copy-row">
                     <button class="copy-btn" @click=${()=>this._copyDiagnostics()}>
                         <ha-icon icon="mdi:content-copy" style="--mdc-icon-size:16px"></ha-icon>
@@ -4540,7 +4809,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <span class="copy-feedback">${this._copyFeedback}</span>
                 </div>
             </div>
-        `}getCardSize(){return 8}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-system-card",name:"SEM System Card",description:"Integration health — version, detected hardware, grid mode, sensor availability",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-system-card",preview:!1});const ft={now:{icon:"mdi:clock-outline",color:"#5BC8D8"},solar_peak:{icon:"mdi:weather-sunny",color:"#ff9800"},solar_end:{icon:"mdi:weather-sunset",color:"#ff9800"},cheap_start:{icon:"mdi:arrow-down-bold",color:"#8DC892"},cheap_end:{icon:"mdi:arrow-up-bold",color:"#ff9800"},expensive_start:{icon:"mdi:flash-alert",color:"#f06292"},expensive_end:{icon:"mdi:flash-off",color:"#8DC892"},night_open:{icon:"mdi:weather-night",color:"#8353d1"},night_end:{icon:"mdi:weather-sunset-up",color:"#ff9800"},ev_charge_start:{icon:"mdi:ev-station",color:"#8DC892"},ev_min_reached:{icon:"mdi:battery-charging-80",color:"#4db6ac"},ev_target_reached:{icon:"mdi:car-electric",color:"#8DC892"},ev_deadline:{icon:"mdi:clock-end",color:"#f06292"},ev_wait:{icon:"mdi:pause-circle",color:"#8353d1"},battery_full:{icon:"mdi:battery-charging-100",color:"#f06292"},battery_empty:{icon:"mdi:battery-low",color:"#4db6ac"},device_run:{icon:"mdi:power-plug",color:"#5BC8D8"},device_done:{icon:"mdi:check-circle",color:"#8DC892"}};we("sem-today-plan-card",class extends Se{setConfig(e){super.setConfig(e),this._entity=e.entity||"sensor.sem_charging_state"}set hass(e){this._hass=e;const t=(e?.states[this._entity]?.attributes||{}).today_plan||[],i=[t.length,t[0]?.when,t.at(-1)?.when,this._lang].join("|"),s="function"==typeof semLocalize;(i!==this._lastKey||s&&!this._localizeReady)&&(this._lastKey=i,this._lang=e?.language,this._localizeReady=s,this.requestUpdate())}get hass(){return this._hass}_hm(e){if(!e)return"—";try{const t=new Date(e),i=this._hass?.config?.time_zone||void 0,s=ue(e,i),r=e=>e.toLocaleDateString("en-CA",{timeZone:i}),a=r(t),o=new Date;if(a===r(o))return s;if(a===r(new Date(o.getTime()+864e5))){return`${this._t("tomorrow")||"Tomorrow"} ${s}`}return`${t.toLocaleDateString([],{weekday:"short",timeZone:i})} ${s}`}catch(e){return"—"}}_format(e,t){let i=this._t(e);if(!i||i===e)return null;for(const[e,s]of Object.entries(t||{}))i=i.replace(new RegExp(`\\{${e}\\}`,"g"),s);return i}render(){if(!this._hass||!this._config)return q;const e=this._hass.states[this._entity],t=e?.attributes?.today_plan||[];return!Array.isArray(t)||t.length<=1?(this.style.display="none",q):(this.style.display="",W`
+        `}getCardSize(){return 8}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-system-card",name:"SEM System Card",description:"Integration health — version, detected hardware, grid mode, sensor availability",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-system-card",preview:!1});const Et={now:{icon:"mdi:clock-outline",color:"#5BC8D8"},solar_peak:{icon:"mdi:weather-sunny",color:"#ff9800"},solar_end:{icon:"mdi:weather-sunset",color:"#ff9800"},cheap_start:{icon:"mdi:arrow-down-bold",color:"#8DC892"},cheap_end:{icon:"mdi:arrow-up-bold",color:"#ff9800"},expensive_start:{icon:"mdi:flash-alert",color:"#f06292"},expensive_end:{icon:"mdi:flash-off",color:"#8DC892"},night_open:{icon:"mdi:weather-night",color:"#8353d1"},night_end:{icon:"mdi:weather-sunset-up",color:"#ff9800"},ev_charge_start:{icon:"mdi:ev-station",color:"#8DC892"},ev_min_reached:{icon:"mdi:battery-charging-80",color:"#4db6ac"},ev_target_reached:{icon:"mdi:car-electric",color:"#8DC892"},ev_deadline:{icon:"mdi:clock-end",color:"#f06292"},ev_wait:{icon:"mdi:pause-circle",color:"#8353d1"},battery_full:{icon:"mdi:battery-charging-100",color:"#f06292"},battery_empty:{icon:"mdi:battery-low",color:"#4db6ac"},device_run:{icon:"mdi:power-plug",color:"#5BC8D8"},device_done:{icon:"mdi:check-circle",color:"#8DC892"},export_closed:{icon:"mdi:transmission-tower-off",color:"#f06292"},export_reopens:{icon:"mdi:transmission-tower",color:"#8353d1"}};we("sem-today-plan-card",class extends Se{setConfig(e){super.setConfig(e),this._entity=e.entity||"sensor.sem_charging_state"}set hass(e){this._hass=e;const t=(e?.states[this._entity]?.attributes||{}).today_plan||[],i=[t.length,t[0]?.when,t.at(-1)?.when,this._lang].join("|"),s="function"==typeof semLocalize;(i!==this._lastKey||s&&!this._localizeReady)&&(this._lastKey=i,this._lang=e?.language,this._localizeReady=s,this.requestUpdate())}get hass(){return this._hass}_hm(e){if(!e)return"—";try{const t=new Date(e),i=this._hass?.config?.time_zone||void 0,s=ue(e,i),r=e=>e.toLocaleDateString("en-CA",{timeZone:i}),a=r(t),o=new Date;if(a===r(o))return s;if(a===r(new Date(o.getTime()+864e5))){return`${this._t("tomorrow")||"Tomorrow"} ${s}`}return`${t.toLocaleDateString([],{weekday:"short",timeZone:i})} ${s}`}catch(e){return"—"}}_format(e,t){let i=this._t(e);if(!i||i===e)return null;for(const[e,s]of Object.entries(t||{}))i=i.replace(new RegExp(`\\{${e}\\}`,"g"),s);return i}render(){if(!this._hass||!this._config)return K;const e=this._hass.states[this._entity],t=e?.attributes?.today_plan||[];return!Array.isArray(t)||t.length<=1?(this.style.display="none",K):(this.style.display="",W`
             <ha-card>
                 <div class="wrap">
                     <div class="head">
@@ -4548,13 +4817,13 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <span class="title">${this._t("today_plan_title")}</span>
                     </div>
                     <ul class="rows">
-                        ${t.map(e=>{const t=ft[e.kind]||ft.now,i=this._format(e.label,e.values)||e.label,s=e.detail?this._format(e.detail,e.values):null;return W`
+                        ${t.map(e=>{const t=Et[e.kind]||Et.now,i=this._format(e.label,e.values)||e.label,s=e.detail?this._format(e.detail,e.values):null;return W`
                                 <li class="row ${"now"===e.kind?"now":""}">
                                     <span class="time">${this._hm(e.when)}</span>
                                     <ha-icon icon="${t.icon}" style="--mdc-icon-size:14px;color:${t.color}"></ha-icon>
                                     <div class="text">
                                         <span class="label">${i}</span>
-                                        ${s?W`<span class="detail">${s}</span>`:q}
+                                        ${s?W`<span class="detail">${s}</span>`:K}
                                     </div>
                                 </li>
                             `})}
@@ -4607,18 +4876,18 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             .detail {
                 font-size: 11px; opacity: 0.65; line-height: 1.2;
             }
-        `}},{type:"sem-today-plan-card",name:"SEM Today's Plan",description:"Forward-looking schedule combining tariff, solar, and EV",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-today-plan-card"});const vt={ev:{icon:"mdi:ev-station",color:"#8DC892",label:"energy_plan_kind_ev"},load:{icon:"mdi:power-plug",color:"#5BC8D8",label:"energy_plan_kind_load"},battery:{icon:"mdi:home-battery",color:"#f06292",label:"energy_plan_kind_battery"},comfort:{icon:"mdi:thermometer",color:"#4db6ac",label:"energy_plan_kind_comfort"}},yt={actuation:{docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/ENERGY_PLANNER.md#actuation-g4"},arbitrage:{docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/ENERGY_PLANNER.md#the-arbitrage-advisor"}},bt={fits:{icon:"mdi:check-circle",color:"#8DC892"},partial:{icon:"mdi:circle-slice-4",color:"#ff9800"},yields:{icon:"mdi:alert-circle-outline",color:"#f06292"}};class xt extends Se{setConfig(e){super.setConfig(e),this._entity=e.entity||"sensor.sem_energy_plan"}set hass(e){this._hass=e;const t=e?.states[this._entity],i=t?.attributes||{},s=!0===i.actuation&&Array.isArray(i.demands)?i.demands.map(e=>this._liveState(e,i.blocks)).join(","):"",r=i.tomorrow||{},a=i.coverage?Object.entries(i.coverage).map(([e,t])=>e+"="+t).join(","):"",o=[t?.state,i.computed_at,i.actuation,s,a,this._view||"today",r.prices,r.forecast_kwh,r.stamps_at,e?.states["switch.sem_energy_plan_actuation"]?.state,e?.states["sensor.sem_night_start_time"]?.state,e?.language].join("|"),n="function"==typeof semLocalize;(o!==this._lastKey||n&&!this._localizeReady)&&(this._lastKey=o,this._lang=e?.language,this._localizeReady=n,this.requestUpdate())}get hass(){return this._hass}_liveState(e,t){if(!e||"battery"===e.kind)return null;if("fits"!==e.status)return"reactive";const i=Date.now();let s=null,r=!1;for(const a of Array.isArray(t)?t:[]){if(a.id!==e.id)continue;const t=Date.parse(a.start),o=Date.parse(a.end);if(Number.isFinite(t)&&Number.isFinite(o)){if(r=!0,t<=i&&i<o)return"now";t>i&&(null===s||t<s)&&(s=t)}}return null!==s?"wait:"+s:r?"done":null}_covKey(e){if(!e||"covered"===e)return null;if(e.startsWith("verdict"))return"energy_plan_cov_yields";return{"no plan":"energy_plan_cov_no_plan","stale stamp":"energy_plan_cov_stale","outside span":"energy_plan_cov_outside","not in plan":"energy_plan_cov_not_in_plan","actuation off":"energy_plan_cov_actuation_off","nothing planned":"energy_plan_cov_nothing_planned"}[e]||"energy_plan_cov_unreadable"}_covChip(e){const t=this._covKey(e);return t?W`<span class="chip chip-reactive"
+        `}},{type:"sem-today-plan-card",name:"SEM Today's Plan",description:"Forward-looking schedule combining tariff, solar, and EV",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-today-plan-card"});const Ft={ev:{icon:"mdi:ev-station",color:"#8DC892",label:"energy_plan_kind_ev"},load:{icon:"mdi:power-plug",color:"#5BC8D8",label:"energy_plan_kind_load"},battery:{icon:"mdi:home-battery",color:"#f06292",label:"energy_plan_kind_battery"},comfort:{icon:"mdi:thermometer",color:"#4db6ac",label:"energy_plan_kind_comfort"}},It={actuation:{docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/ENERGY_PLANNER.md#actuation-g4"},arbitrage:{docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/ENERGY_PLANNER.md#the-arbitrage-advisor"}},At={fits:{icon:"mdi:check-circle",color:"#8DC892"},partial:{icon:"mdi:circle-slice-4",color:"#ff9800"},yields:{icon:"mdi:alert-circle-outline",color:"#f06292"}};class Nt extends Se{setConfig(e){super.setConfig(e),this._entity=e.entity||"sensor.sem_energy_plan"}set hass(e){this._hass=e;const t=e?.states[this._entity],i=t?.attributes||{},s=!0===i.actuation&&Array.isArray(i.demands)?i.demands.map(e=>this._liveState(e,i.blocks)).join(","):"",r=i.tomorrow||{},a=i.coverage?Object.entries(i.coverage).map(([e,t])=>e+"="+t).join(","):"",o=[t?.state,i.computed_at,i.actuation,s,a,this._view||"today",r.prices,r.forecast_kwh,r.stamps_at,e?.states["switch.sem_energy_plan_actuation"]?.state,e?.states["sensor.sem_night_start_time"]?.state,e?.language].join("|"),n="function"==typeof semLocalize;(o!==this._lastKey||n&&!this._localizeReady)&&(this._lastKey=o,this._lang=e?.language,this._localizeReady=n,this.requestUpdate())}get hass(){return this._hass}_liveState(e,t){if(!e||"battery"===e.kind)return null;if("fits"!==e.status)return"reactive";const i=Date.now();let s=null,r=!1;for(const a of Array.isArray(t)?t:[]){if(a.id!==e.id)continue;const t=Date.parse(a.start),o=Date.parse(a.end);if(Number.isFinite(t)&&Number.isFinite(o)){if(r=!0,t<=i&&i<o)return"now";t>i&&(null===s||t<s)&&(s=t)}}return null!==s?"wait:"+s:r?"done":null}_covKey(e){if(!e||"covered"===e)return null;if(e.startsWith("verdict"))return"energy_plan_cov_yields";return{"no plan":"energy_plan_cov_no_plan","stale stamp":"energy_plan_cov_stale","outside span":"energy_plan_cov_outside","not in plan":"energy_plan_cov_not_in_plan","actuation off":"energy_plan_cov_actuation_off","nothing planned":"energy_plan_cov_nothing_planned"}[e]||"energy_plan_cov_unreadable"}_covChip(e){const t=this._covKey(e);return t?W`<span class="chip chip-reactive"
             title="${this._t("energy_plan_reactive_tip")} — ${this._t(t)}"
-            >${this._t("energy_plan_reactive")} · ${this._t(t)}</span>`:q}_liveChip(e){if(!e)return q;if("now"===e)return W`<span class="live now">▶ ${this._t("energy_plan_live_now")}</span>`;if(e.startsWith("wait:")){const t=this._hm(new Date(Number(e.slice(5))).toISOString());return W`<span class="live wait">${this._format("energy_plan_live_wait",{time:t})||t}</span>`}return"done"===e?W`<span class="live done">${this._t("energy_plan_live_done")}</span>`:W`<span class="live react">${this._t("energy_plan_live_reactive")}</span>`}_hm(e){return e?ue(e,this._hass?.config?.time_zone||void 0):"—"}_format(e,t){let i=this._t(e);if(!i||i===e)return null;for(const[e,s]of Object.entries(t||{}))i=i.replace(new RegExp("\\{"+e+"\\}","g"),s);return i}_runs(e,t,i,s){const r=[];for(const t of e){const e=s(t),i=Date.parse(t.start),a=Date.parse(t.end);if(!Number.isFinite(i)||!Number.isFinite(a))continue;const o=r[r.length-1];o&&o.v===e&&Math.abs(o.endMs-i)<1e3?o.endMs=a:r.push({v:e,startMs:i,endMs:a})}return r.map(e=>({v:e.v,left:(e.startMs-t)/i*100,width:(e.endMs-e.startMs)/i*100}))}_modeChip(e){return W`<span class="chip ${e?"chip-active":""}"
-            title="${this._t(e?"energy_plan_active_note":"energy_plan_shadow_note")}">${this._t(e?"energy_plan_active":"energy_plan_shadow")}</span>`}_docsLink(e="actuation"){return W`<a class="docs-link" href="${yt[e].docs}" target="_blank"
+            >${this._t("energy_plan_reactive")} · ${this._t(t)}</span>`:K}_liveChip(e){if(!e)return K;if("now"===e)return W`<span class="live now">▶ ${this._t("energy_plan_live_now")}</span>`;if(e.startsWith("wait:")){const t=this._hm(new Date(Number(e.slice(5))).toISOString());return W`<span class="live wait">${this._format("energy_plan_live_wait",{time:t})||t}</span>`}return"done"===e?W`<span class="live done">${this._t("energy_plan_live_done")}</span>`:W`<span class="live react">${this._t("energy_plan_live_reactive")}</span>`}_hm(e){return e?ue(e,this._hass?.config?.time_zone||void 0):"—"}_format(e,t){let i=this._t(e);if(!i||i===e)return null;for(const[e,s]of Object.entries(t||{}))i=i.replace(new RegExp("\\{"+e+"\\}","g"),s);return i}_runs(e,t,i,s){const r=[];for(const t of e){const e=s(t),i=Date.parse(t.start),a=Date.parse(t.end);if(!Number.isFinite(i)||!Number.isFinite(a))continue;const o=r[r.length-1];o&&o.v===e&&Math.abs(o.endMs-i)<1e3?o.endMs=a:r.push({v:e,startMs:i,endMs:a})}return r.map(e=>({v:e.v,left:(e.startMs-t)/i*100,width:(e.endMs-e.startMs)/i*100}))}_modeChip(e){return W`<span class="chip ${e?"chip-active":""}"
+            title="${this._t(e?"energy_plan_active_note":"energy_plan_shadow_note")}">${this._t(e?"energy_plan_active":"energy_plan_shadow")}</span>`}_docsLink(e="actuation"){return W`<a class="docs-link" href="${It[e].docs}" target="_blank"
             rel="noopener" title="${this._t("config_docs")}">
             <ha-icon icon="mdi:book-open-variant" style="--mdc-icon-size:13px"></ha-icon>
-        </a>`}_viewToggle(e){if(!e)return q;const t=this._view||"today",i=(e,i)=>W`
+        </a>`}_viewToggle(e){if(!e)return K;const t=this._view||"today",i=(e,i)=>W`
             <button class="vbtn ${t===e?"vbtn-on":""}"
                 @click=${()=>{this._view=e,this.requestUpdate()}}>
                 ${this._t(i)}</button>`;return W`<span class="vtoggle">
             ${i("today","energy_plan_today")}${i("tomorrow","energy_plan_tomorrow")}
-        </span>`}_renderTomorrow(e){const t=e.provisional||null,i=Date.parse(e.stamps_at),s=Date.parse(e.night_open),r=s-i,a=Number.isFinite(r)&&r>0,o=e=>(Date.parse(e)-i)/r*100,n=(e,t,i)=>{const s=Math.max(0,o(e.start)),r=Math.min(100,o(e.end))-s;return!Number.isFinite(s)||!Number.isFinite(r)||r<=0?q:W`<div class="seg ${t}" style="left:${s}%;width:${Math.max(r,1.2)}%${i?`;background:${i}`:""}"></div>`},l=W`
+        </span>`}_renderTomorrow(e){const t=e.provisional||null,i=Date.parse(e.stamps_at),s=Date.parse(e.night_open),r=s-i,a=Number.isFinite(r)&&r>0,o=e=>(Date.parse(e)-i)/r*100,n=(e,t,i)=>{const s=Math.max(0,o(e.start)),r=Math.min(100,o(e.end))-s;return!Number.isFinite(s)||!Number.isFinite(r)||r<=0?K:W`<div class="seg ${t}" style="left:${s}%;width:${Math.max(r,1.2)}%${i?`;background:${i}`:""}"></div>`},l=W`
             <div class="band">
                 ${(e.surplus_windows||[]).map(e=>n(e,"tmw-sun"))}
                 ${(e.cheap_windows||[]).map(e=>n(e,"cheap"))}
@@ -4650,7 +4919,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 `)}
                             </div>
                             <div class="stat axis"></div>
-                        `:q}
+                        `:K}
                         ${p.length>1?W`
                             <div class="lbl" title="${this._t("energy_plan_provisional_tip")}">
                                 <div class="lname">
@@ -4663,12 +4932,12 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                     ${l}
                                     ${h.map(e=>n(e,"run",e.rising?"#f06292":"#4db6ac"))}
                                 </div>
-                            `:q}
+                            `:K}
                             <div class="stat">
                                 <span>${p[0].kwh.toFixed(1)} → ${p[p.length-1].kwh.toFixed(1)} kWh</span>
                             </div>
-                        `:q}
-                        ${_.map((e,i)=>{const s=vt[e.kind]||vt.load,r=((e,i)=>t&&Array.isArray(t.blocks)?t.blocks.filter(t=>t.id===`${e}:${i}`):[])(e.kind,i),o=[e.label,r.map(e=>`${this._hm(e.start)}–${this._hm(e.end)}`).join("\n")||null,this._t("energy_plan_provisional_tip")].filter(Boolean).join("\n");return W`
+                        `:K}
+                        ${_.map((e,i)=>{const s=Ft[e.kind]||Ft.load,r=((e,i)=>t&&Array.isArray(t.blocks)?t.blocks.filter(t=>t.id===`${e}:${i}`):[])(e.kind,i),o=[e.label,r.map(e=>`${this._hm(e.start)}–${this._hm(e.end)}`).join("\n")||null,this._t("energy_plan_provisional_tip")].filter(Boolean).join("\n");return W`
                                 <div class="lbl" title="${o}">
                                     <div class="lname">
                                         <ha-icon icon="${s.icon}" style="--mdc-icon-size:13px;color:${s.color}"></ha-icon>
@@ -4680,7 +4949,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                         ${l}
                                         ${r.map(e=>n(e,"run",s.color))}
                                     </div>
-                                `:q}
+                                `:K}
                                 <div class="stat">
                                     <span>${(e.kwh||0).toFixed(1)} kWh</span>
                                 </div>
@@ -4697,7 +4966,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </ha-card>
-        `}_renderReview(){const e=this._hass?.states?.[this._entity]?.attributes?.review;if(!e)return q;const t=[];for(const i of e.demands||[]){const e=this._format("energy_plan_review_"+i.code,{nights:i.nights,asked:(i.asked_kwh||0).toFixed(1),suggested:null==i.suggested_kwh?"":Number(i.suggested_kwh).toFixed(1),actual:(i.last_kwh||0).toFixed(1)});e&&t.push({d:i,text:e,k:vt[i.kind]||vt.load})}const i=e.battery,s=i?this._format("energy_plan_review_"+i.code,{drained:(i.drained||0).toFixed(1),clipped:(i.clipped_h||0).toFixed(1),full_at:i.full_at_ts?new Date(1e3*i.full_at_ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}):null,r=e.self_consumption,a=r?this._format("energy_plan_review_"+r.code,{actual:Math.round(100*(r.actual_share||0)),predicted:Math.round(100*(r.predicted_share||0))}):null;return t.length||a||s?W`
+        `}_renderReview(){const e=this._hass?.states?.[this._entity]?.attributes?.review;if(!e)return K;const t=[];for(const i of e.demands||[]){const e=this._format("energy_plan_review_"+i.code,{nights:i.nights,asked:(i.asked_kwh||0).toFixed(1),suggested:null==i.suggested_kwh?"":Number(i.suggested_kwh).toFixed(1),actual:(i.last_kwh||0).toFixed(1)});e&&t.push({d:i,text:e,k:Ft[i.kind]||Ft.load})}const i=e.battery,s=i?this._format("energy_plan_review_"+i.code,{drained:(i.drained||0).toFixed(1),clipped:(i.clipped_h||0).toFixed(1),full_at:i.full_at_ts?new Date(1e3*i.full_at_ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}):null,r=e.self_consumption,a=r?this._format("energy_plan_review_"+r.code,{actual:Math.round(100*(r.actual_share||0)),predicted:Math.round(100*(r.predicted_share||0))}):null;return t.length||a||s?W`
             <div class="review">
                 <div class="rev-h">${this._t("energy_plan_review_title")}</div>
                 ${t.map(e=>W`
@@ -4714,16 +4983,16 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                  style="--mdc-icon-size:12px;color:#4db6ac"></ha-icon>
                         <span class="rev-name">${this._t("battery")}</span>
                         <span class="rev-txt">${s}</span>
-                    </div>`:q}
+                    </div>`:K}
                 ${a?W`
                     <div class="rev-row">
                         <ha-icon icon="mdi:solar-power-variant"
                                  style="--mdc-icon-size:12px;color:#ff9800"></ha-icon>
                         <span class="rev-txt wide">${a}</span>
                     </div>
-                `:q}
+                `:K}
             </div>
-        `:q}_renderArb(e){return e&&e.enabled?W`
+        `:K}_renderArb(e){return e&&e.enabled?W`
             <div class="arb" title="${this._t("energy_plan_arbitrage_tip")}">
                 <ha-icon icon="mdi:swap-vertical-bold"
                          style="--mdc-icon-size:13px;color:${e.opportunity?"#8DC892":"var(--secondary-text-color,#8a93a5)"}"></ha-icon>
@@ -4731,7 +5000,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <span class="arb-txt">${e.reason||""}</span>
                 ${this._docsLink("arbitrage")}
             </div>
-        `:q}_renderIdle(e,t="energy_plan_idle",i="",s=!1,r="",a=[],o=[],n=null){const l=(a||[]).map(e=>this._t("energy_plan_whyc_"+e)).filter(Boolean).join(" · ");return W`
+        `:K}_renderIdle(e,t="energy_plan_idle",i="",s=!1,r="",a=[],o=[],n=null){const l=(a||[]).map(e=>this._t("energy_plan_whyc_"+e)).filter(Boolean).join(" · ");return W`
             <ha-card>
                 <div class="wrap">
                     <div class="head">
@@ -4742,7 +5011,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         ${this._docsLink()}
                     </div>
                     <div class="idle">${this._t(t)}${i}</div>
-                    ${l?W`<div class="why" title="${r}">${l}</div>`:r?W`<div class="why" title="${r}">${r}</div>`:q}
+                    ${l?W`<div class="why" title="${r}">${l}</div>`:r?W`<div class="why" title="${r}">${r}</div>`:K}
                     ${(o||[]).length?W`
                         <div class="notsched">
                             <div class="notsched-h">${this._t("energy_plan_not_scheduled")}</div>
@@ -4755,20 +5024,20 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 </div>
                             `)}
                         </div>
-                    `:q}
+                    `:K}
                     ${this._renderArb(n)}
                     ${this._renderReview()}
                 </div>
             </ha-card>
-        `}render(){if(!this._hass||!this._config)return q;const e=this._hass.states[this._entity],t=e?.state;if(!e||"unavailable"===t||"unknown"===t)return this.style.display="none",q;this.style.display="";const i=e.attributes||{},s=!0===i.actuation||void 0===i.actuation&&"on"===this._hass.states["switch.sem_energy_plan_actuation"]?.state;if("tomorrow"===(this._view||"today")&&i.tomorrow)return this._renderTomorrow(i.tomorrow);if("pending"===t){const e=this._hass.states["sensor.sem_night_start_time"]?.state,t=e&&/^\d{1,2}:\d{2}$/.test(e)?` (~${e})`:"";return this._renderIdle(s,"energy_plan_pending",t,!!i.tomorrow)}const r=Array.isArray(i.demands)?i.demands:[],a=Array.isArray(i.slots)?i.slots:[],o=Array.isArray(i.blocks)?i.blocks:[];if("idle"===t||!r.length)return this._renderIdle(s,"energy_plan_idle","",!!i.tomorrow,i.why||"",i.why_codes||[],i.not_scheduled||[],i.arbitrage);const n=a.length?Date.parse(a[0].start):NaN,l=a.length?Date.parse(a[a.length-1].end):NaN,c=l-n,d=a.length>0&&Number.isFinite(c)&&c>0,p=this._runs(a,n,c,e=>!!e.cheap).filter(e=>e.v);let h=null;const _=this._hass.states["sensor.sem_night_start_time"]?.state;if(d&&_&&/^\d{1,2}:\d{2}$/.test(_)){const[e,t]=_.split(":").map(Number);for(const i of[0,1]){const s=new Date(n);s.setDate(s.getDate()+i),s.setHours(e,t,0,0);const r=s.getTime();if(r>=n&&r<l){h=(r-n)/c*100;break}}}const g=Date.now(),u=d&&g>=n&&g<l?(g-n)/c*100:null,m=W`
+        `}render(){if(!this._hass||!this._config)return K;const e=this._hass.states[this._entity],t=e?.state;if(!e||"unavailable"===t||"unknown"===t)return this.style.display="none",K;this.style.display="";const i=e.attributes||{},s=!0===i.actuation||void 0===i.actuation&&"on"===this._hass.states["switch.sem_energy_plan_actuation"]?.state;if("tomorrow"===(this._view||"today")&&i.tomorrow)return this._renderTomorrow(i.tomorrow);if("pending"===t){const e=this._hass.states["sensor.sem_night_start_time"]?.state,t=e&&/^\d{1,2}:\d{2}$/.test(e)?` (~${e})`:"";return this._renderIdle(s,"energy_plan_pending",t,!!i.tomorrow)}const r=Array.isArray(i.demands)?i.demands:[],a=Array.isArray(i.slots)?i.slots:[],o=Array.isArray(i.blocks)?i.blocks:[];if("idle"===t||!r.length)return this._renderIdle(s,"energy_plan_idle","",!!i.tomorrow,i.why||"",i.why_codes||[],i.not_scheduled||[],i.arbitrage);const n=a.length?Date.parse(a[0].start):NaN,l=a.length?Date.parse(a[a.length-1].end):NaN,c=l-n,d=a.length>0&&Number.isFinite(c)&&c>0,p=this._runs(a,n,c,e=>!!e.cheap).filter(e=>e.v);let h=null;const _=this._hass.states["sensor.sem_night_start_time"]?.state;if(d&&_&&/^\d{1,2}:\d{2}$/.test(_)){const[e,t]=_.split(":").map(Number);for(const i of[0,1]){const s=new Date(n);s.setDate(s.getDate()+i),s.setHours(e,t,0,0);const r=s.getTime();if(r>=n&&r<l){h=(r-n)/c*100;break}}}const g=Date.now(),u=d&&g>=n&&g<l?(g-n)/c*100:null,m=W`
             <div class="band">
                 ${p.map(e=>W`
                     <div class="cheap" style="left:${e.left}%;width:${e.width}%"></div>
                 `)}
                 ${null!==h?W`
-                    <div class="nightband" style="left:${h}%;width:${100-h}%"></div>`:q}
+                    <div class="nightband" style="left:${h}%;width:${100-h}%"></div>`:K}
                 ${null!==u?W`
-                    <div class="nowline" style="left:${u}%"></div>`:q}
+                    <div class="nowline" style="left:${u}%"></div>`:K}
             </div>
         `;let f=a.filter(e=>0===new Date(e.start).getMinutes());f.length||(f=a);const v=Math.max(1,Math.ceil(f.length/8)),y=f.filter((e,t)=>t%v===0).map(e=>({left:(Date.parse(e.start)-n)/c*100,text:this._hm(e.start)})).filter(e=>e.left<=94),b=this._runs(a,n,c,e=>(e.home_grid_w||0)<=1),x=i.takeover?this._format("energy_plan_takeover",{time:this._hm(i.takeover)}):this._t("energy_plan_all_night"),$=i.takeover?W`
                 <ha-icon icon="mdi:transmission-tower"
@@ -4797,7 +5066,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <span class="vtext">
                             ${C?this._t("energy_plan_fits"):this._t("energy_plan_yields")}
                         </span>
-                        ${S?W`<span class="cost">${S}</span>`:q}
+                        ${S?W`<span class="cost">${S}</span>`:K}
                     </div>
 
                     <div class="strip ${d?"":"nostrip"}">
@@ -4809,11 +5078,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                     <span class="tick ${e.left<4?"first":""}"
                                           style="left:${e.left}%">${e.text}</span>
                                 `)}
-                                ${a.map(e=>{const t=(Date.parse(e.start)-n)/c*100,i=(Date.parse(e.end)-Date.parse(e.start))/c*100;if(!Number.isFinite(t)||!Number.isFinite(i))return q;const s=null===e.price||void 0===e.price?"—":`${e.price} ${w}`,r=`${this._hm(e.start)}–${this._hm(e.end)} · ${s}`+(e.cheap?` · ${this._t("energy_plan_legend_cheap")}`:"");return W`<div class="slotcell" title="${r}"
+                                ${a.map(e=>{const t=(Date.parse(e.start)-n)/c*100,i=(Date.parse(e.end)-Date.parse(e.start))/c*100;if(!Number.isFinite(t)||!Number.isFinite(i))return K;const s=null===e.price||void 0===e.price?"—":`${e.price} ${w}`,r=`${this._hm(e.start)}–${this._hm(e.end)} · ${s}`+(e.cheap?` · ${this._t("energy_plan_legend_cheap")}`:"");return W`<div class="slotcell" title="${r}"
                                         style="left:${t}%;width:${i}%"></div>`})}
                             </div>
                             <div class="stat axis"></div>
-                        `:q}
+                        `:K}
 
                         <div class="lbl">
                             <ha-icon icon="mdi:home-battery" style="--mdc-icon-size:13px;color:#4db6ac"></ha-icon>
@@ -4827,17 +5096,17 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                          style="left:${e.left}%;width:${e.width}%"></div>
                                 `)}
                             </div>
-                        `:q}
+                        `:K}
                         <div class="stat" title="${x}">${$}</div>
 
-                        ${r.map(e=>{const t=vt[e.kind]||vt.load,r=bt[e.status]||bt.yields,a=z[e.id]||[],l=e.label||this._t(t.label),p="fits"===e.status?`${(e.planned_kwh||0).toFixed(1)} kWh`:`${(e.planned_kwh||0).toFixed(1)}/${(e.needed_kwh||0).toFixed(1)} kWh`,h=[l,"comfort"===e.kind?this._t("energy_plan_comfort_tip"):null,a.map(e=>`${this._hm(e.start)}–${this._hm(e.end)} · ${(e.power_w/1e3).toFixed(1)} kW${null!=e.price?` · ${e.price}`:""}`).join("\n")||null,`${(e.planned_kwh||0).toFixed(1)} / ${(e.needed_kwh||0).toFixed(1)} kWh · ${this._t("energy_plan_est")} ${(e.est_cost||0).toFixed(2)} ${w}`,e.note||null].filter(Boolean).join("\n"),_=s?this._liveState(e,o):null,g=e.note||("fits"!==e.status?this._format("energy_plan_yield_reason",{planned:(e.planned_kwh||0).toFixed(1),needed:(e.needed_kwh||0).toFixed(1)}):null);return W`
+                        ${r.map(e=>{const t=Ft[e.kind]||Ft.load,r=At[e.status]||At.yields,a=z[e.id]||[],l=e.label||this._t(t.label),p="fits"===e.status?`${(e.planned_kwh||0).toFixed(1)} kWh`:`${(e.planned_kwh||0).toFixed(1)}/${(e.needed_kwh||0).toFixed(1)} kWh`,h=[l,"comfort"===e.kind?this._t("energy_plan_comfort_tip"):null,a.map(e=>`${this._hm(e.start)}–${this._hm(e.end)} · ${(e.power_w/1e3).toFixed(1)} kW${null!=e.price?` · ${e.price}`:""}`).join("\n")||null,`${(e.planned_kwh||0).toFixed(1)} / ${(e.needed_kwh||0).toFixed(1)} kWh · ${this._t("energy_plan_est")} ${(e.est_cost||0).toFixed(2)} ${w}`,e.note||null].filter(Boolean).join("\n"),_=s?this._liveState(e,o):null,g=e.note||("fits"!==e.status?this._format("energy_plan_yield_reason",{planned:(e.planned_kwh||0).toFixed(1),needed:(e.needed_kwh||0).toFixed(1)}):null);return W`
                                 <div class="lbl ${_?"col":""}" title="${h}">
                                     <div class="lname">
                                         <ha-icon icon="${t.icon}" style="--mdc-icon-size:13px;color:${t.color}"></ha-icon>
                                         <span class="name">${l}</span>
                                     </div>
                                     ${this._liveChip(_)}
-                                    ${s?this._covChip((i.coverage||{})[e.id]):q}
+                                    ${s?this._covChip((i.coverage||{})[e.id]):K}
                                 </div>
                                 ${d?W`
                                     <div class="track">
@@ -4848,7 +5117,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                                      style="left:${i}%;width:${Math.max(s,1.2)}%;background:${t.color}"></div>
                                             `})}
                                     </div>
-                                `:q}
+                                `:K}
                                 <div class="stat" title="${h}">
                                     <ha-icon icon="${r.icon}" style="--mdc-icon-size:13px;color:${r.color}"></ha-icon>
                                     <span>${p}</span>
@@ -4856,8 +5125,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 ${g?W`
                                     <div class="lbl"></div>
                                     <div class="note">${g}</div>
-                                    ${d?W`<div class="stat"></div>`:q}
-                                `:q}
+                                    ${d?W`<div class="stat"></div>`:K}
+                                `:K}
                             `})}
                     </div>
 
@@ -4880,7 +5149,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <ha-icon icon="mdi:alert-outline" style="--mdc-icon-size:13px;color:#ff9800"></ha-icon>
                             <span>${this._t("energy_plan_fleet_partial")}</span>
                         </div>
-                    `:q}
+                    `:K}
 
                     ${(i.not_scheduled||[]).length?W`
                         <div class="notsched">
@@ -4894,7 +5163,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 </div>
                             `)}
                         </div>
-                    `:q}
+                    `:K}
 
                     ${this._renderArb(i.arbitrage)}
 
@@ -5198,7 +5467,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 margin-top: 8px; font-size: 10px; opacity: 0.5;
                 color: var(--secondary-text-color);
             }
-        `}}we("sem-energy-plan-card",xt,{type:"sem-energy-plan-card",name:"SEM Energy Plan",description:"The joint plan for the energy day — when each demand runs and where the battery hands over",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-energy-plan-card"}),we("sem-overnight-plan-card",class extends xt{});const $t=2,wt=e=>(...t)=>({_$litDirective$:e,values:t});let kt=class{constructor(e){}get _$AU(){return this._$AM._$AU}_$AT(e,t,i){this._$Ct=e,this._$AM=t,this._$Ci=i}_$AS(e,t){return this.update(e,t)}update(e,t){return this.render(...t)}};class St extends kt{constructor(e){if(super(e),this.it=q,e.type!==$t)throw Error(this.constructor.directiveName+"() can only be used in child bindings")}render(e){if(e===q||null==e)return this._t=void 0,this.it=e;if(e===j)return e;if("string"!=typeof e)throw Error(this.constructor.directiveName+"() called with a non-string value");if(e===this.it)return this._t;this.it=e;const t=[e];return t.raw=t,this._t={_$litType$:this.constructor.resultType,strings:t,values:[]}}}St.directiveName="unsafeHTML",St.resultType=1;let Ct=class extends St{};Ct.directiveName="unsafeSVG",Ct.resultType=2;const zt=wt(Ct),Mt={solar:{nameKey:"solar",color:"#ff9800"},grid:{nameKey:"grid",color_import:"#488fc2",color_export:"#8353d1"},battery:{nameKey:"battery",color:"#4db6ac"},home:{nameKey:"home",color:"#5BC8D8"},ev:{nameKey:"ev_charger",color:"#8DC892"},inverter:{nameKey:"inverter",color:"#96CAEE"}};we("sem-flow-card",class extends Se{constructor(){super(),this._lastKey="",this._animFrames={},this._currentValues={},this._compact=!1,this._visible=!0,this._deviceConfigSig="",this._devicePositions=[],this._updateTimer=null,this._resizeObserver=null,this._intersectionObserver=null,this._resizeTimeout=null,this._mode="prefix",this._prefix="sensor.sem_",this._entities=null}setConfig(e){if(this._config=e,e.entity_prefix)this._mode="prefix",this._prefix=e.entity_prefix;else{if(!e.entities)throw new Error('sem-flow-card requires either "entities" or "entity_prefix" config');this._mode="entities",this._entities=e.entities}this._showLabels=!1!==e.show_labels,this._showValues=!1!==e.show_values,this._showGlow=!1!==e.show_glow,this._showInverter=!1!==e.show_inverter,this._showEv=!1!==e.show_ev,this._showBattery=!1!==e.show_battery,this.requestUpdate()}set hass(e){this._hass,this._hass=e;const t=e?.language;if(t!==this._lang)return this._lang=t,void this.requestUpdate();const i=be(e,this._prefix);if(i!==this._lastPVKey)return this._lastPVKey=i,void this.requestUpdate();this._visible&&(clearTimeout(this._updateTimer),this._updateTimer=setTimeout(()=>this._updateFlowsImperative(),100))}get hass(){return this._hass}firstUpdated(){this._resizeTimeout=null,this._resizeObserver=new ResizeObserver(e=>{this._resizeTimeout&&clearTimeout(this._resizeTimeout),this._resizeTimeout=setTimeout(()=>{for(const t of e){const e=t.contentRect.width<400;e!==this._compact&&(this._compact=e,this._lastKey="",this._deviceConfigSig="",this.requestUpdate())}},100)}),this._resizeObserver.observe(this),this._intersectionObserver=new IntersectionObserver(e=>{this._visible=e[0].isIntersecting;const t=this.renderRoot.querySelector("svg");t&&(t.style.animationPlayState=this._visible?"running":"paused"),this._visible&&this._hass&&this._updateFlowsImperative()},{threshold:.01}),this._intersectionObserver.observe(this),this._onVisibility=()=>{"visible"===document.visibilityState&&this._hass&&(this._visible=!0,this._updateFlowsImperative())},document.addEventListener("visibilitychange",this._onVisibility)}disconnectedCallback(){super.disconnectedCallback(),this._resizeObserver&&(this._resizeObserver.disconnect(),this._resizeObserver=null),this._intersectionObserver&&(this._intersectionObserver.disconnect(),this._intersectionObserver=null),clearTimeout(this._updateTimer),clearTimeout(this._resizeTimeout),this._onVisibility&&(document.removeEventListener("visibilitychange",this._onVisibility),this._onVisibility=null);for(const e of Object.keys(this._animFrames))cancelAnimationFrame(this._animFrames[e]);this._animFrames={}}updated(){this._setupClickHandlers(),this._updateFlowsImperative()}static get styles(){return a`
+        `}}we("sem-energy-plan-card",Nt,{type:"sem-energy-plan-card",name:"SEM Energy Plan",description:"The joint plan for the energy day — when each demand runs and where the battery hands over",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-energy-plan-card"}),we("sem-overnight-plan-card",class extends Nt{});const Bt=2,Tt=e=>(...t)=>({_$litDirective$:e,values:t});let Rt=class{constructor(e){}get _$AU(){return this._$AM._$AU}_$AT(e,t,i){this._$Ct=e,this._$AM=t,this._$Ci=i}_$AS(e,t){return this.update(e,t)}update(e,t){return this.render(...t)}};class Pt extends Rt{constructor(e){if(super(e),this.it=K,e.type!==Bt)throw Error(this.constructor.directiveName+"() can only be used in child bindings")}render(e){if(e===K||null==e)return this._t=void 0,this.it=e;if(e===G)return e;if("string"!=typeof e)throw Error(this.constructor.directiveName+"() called with a non-string value");if(e===this.it)return this._t;this.it=e;const t=[e];return t.raw=t,this._t={_$litType$:this.constructor.resultType,strings:t,values:[]}}}Pt.directiveName="unsafeHTML",Pt.resultType=1;let Lt=class extends Pt{};Lt.directiveName="unsafeSVG",Lt.resultType=2;const Ut=Tt(Lt),Ot={solar:{nameKey:"solar",color:"#ff9800"},grid:{nameKey:"grid",color_import:"#488fc2",color_export:"#8353d1"},battery:{nameKey:"battery",color:"#4db6ac"},home:{nameKey:"home",color:"#5BC8D8"},ev:{nameKey:"ev_charger",color:"#8DC892"},inverter:{nameKey:"inverter",color:"#96CAEE"}};we("sem-flow-card",class extends Se{constructor(){super(),this._lastKey="",this._animFrames={},this._currentValues={},this._compact=!1,this._visible=!0,this._deviceConfigSig="",this._devicePositions=[],this._updateTimer=null,this._resizeObserver=null,this._intersectionObserver=null,this._resizeTimeout=null,this._mode="prefix",this._prefix="sensor.sem_",this._entities=null}setConfig(e){if(this._config=e,e.entity_prefix)this._mode="prefix",this._prefix=e.entity_prefix;else{if(!e.entities)throw new Error('sem-flow-card requires either "entities" or "entity_prefix" config');this._mode="entities",this._entities=e.entities}this._showLabels=!1!==e.show_labels,this._showValues=!1!==e.show_values,this._showGlow=!1!==e.show_glow,this._showInverter=!1!==e.show_inverter,this._showEv=!1!==e.show_ev,this._showBattery=!1!==e.show_battery,this.requestUpdate()}set hass(e){this._hass,this._hass=e;const t=e?.language;if(t!==this._lang)return this._lang=t,void this.requestUpdate();const i=be(e,this._prefix);if(i!==this._lastPVKey)return this._lastPVKey=i,void this.requestUpdate();this._visible&&(clearTimeout(this._updateTimer),this._updateTimer=setTimeout(()=>this._updateFlowsImperative(),100))}get hass(){return this._hass}firstUpdated(){this._resizeTimeout=null,this._resizeObserver=new ResizeObserver(e=>{this._resizeTimeout&&clearTimeout(this._resizeTimeout),this._resizeTimeout=setTimeout(()=>{for(const t of e){const e=t.contentRect.width<400;e!==this._compact&&(this._compact=e,this._lastKey="",this._deviceConfigSig="",this.requestUpdate())}},100)}),this._resizeObserver.observe(this),this._intersectionObserver=new IntersectionObserver(e=>{this._visible=e[0].isIntersecting;const t=this.renderRoot.querySelector("svg");t&&(t.style.animationPlayState=this._visible?"running":"paused"),this._visible&&this._hass&&this._updateFlowsImperative()},{threshold:.01}),this._intersectionObserver.observe(this),this._onVisibility=()=>{"visible"===document.visibilityState&&this._hass&&(this._visible=!0,this._updateFlowsImperative())},document.addEventListener("visibilitychange",this._onVisibility)}disconnectedCallback(){super.disconnectedCallback(),this._resizeObserver&&(this._resizeObserver.disconnect(),this._resizeObserver=null),this._intersectionObserver&&(this._intersectionObserver.disconnect(),this._intersectionObserver=null),clearTimeout(this._updateTimer),clearTimeout(this._resizeTimeout),this._onVisibility&&(document.removeEventListener("visibilitychange",this._onVisibility),this._onVisibility=null);for(const e of Object.keys(this._animFrames))cancelAnimationFrame(this._animFrames[e]);this._animFrames={}}updated(){this._setupClickHandlers(),this._updateFlowsImperative()}static get styles(){return a`
             :host { display: block; }
             ha-card {
                 overflow: hidden; padding: 0;
@@ -5216,7 +5485,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             .clickable-node:hover { opacity: 0.85; }
             .device-clickable { cursor: pointer; }
             .device-clickable:hover { opacity: 0.85; }
-        `}render(){if(!this._config)return q;const e=this._getLayout(),t=e.solar,i=e.inverter,s=e.battery,r=e.grid,a=e.home,o=e.ev,n=(2*Math.PI*e.socR).toFixed(1),l=(2*Math.PI*e.autarkyR).toFixed(1),c=e.font.label,d=e.font.value,p=e.font.sub,h=e.font.homeVal,_="'Segoe UI','Roboto',sans-serif",g=this._getNodeColor("grid_import"),u=this._getNodeColor("grid_export"),m=this._getNodeColor("solar"),f=this._getNodeColor("battery"),v=this._getNodeColor("home"),y=this._getNodeColor("ev"),b=Mt.inverter.color,x=this._hasNode("solar"),$=this._hasNode("battery"),w=this._hasNode("grid"),k=this._hasNode("ev"),S=this._showInverter&&this._hasNode("inverter"),C=xe(this._hass,this._prefix);return W`
+        `}render(){if(!this._config)return K;const e=this._getLayout(),t=e.solar,i=e.inverter,s=e.battery,r=e.grid,a=e.home,o=e.ev,n=(2*Math.PI*e.socR).toFixed(1),l=(2*Math.PI*e.autarkyR).toFixed(1),c=e.font.label,d=e.font.value,p=e.font.sub,h=e.font.homeVal,_="'Segoe UI','Roboto',sans-serif",g=this._getNodeColor("grid_import"),u=this._getNodeColor("grid_export"),m=this._getNodeColor("solar"),f=this._getNodeColor("battery"),v=this._getNodeColor("home"),y=this._getNodeColor("ev"),b=Ot.inverter.color,x=this._hasNode("solar"),$=this._hasNode("battery"),w=this._hasNode("grid"),k=this._hasNode("ev"),S=this._showInverter&&this._hasNode("inverter"),C=xe(this._hass,this._prefix);return W`
             <ha-card>
                 <style>${$e}</style>
                 ${C.length>=2?W`
@@ -5231,7 +5500,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             </div>
                         `)}
                     </div>
-                `:q}
+                `:K}
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="${e.vb}" style="background:transparent">
                     <defs>
                         <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
@@ -5300,7 +5569,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                           fill="var(--secondary-text-color,#808080)" opacity="0.15">SEM</text>
                 </svg>
             </ha-card>
-        `}_svgRaw(e){return e?zt(e):q}_escSvg(e){return e?String(e).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"):""}_updateFlowsImperative(){if(!this._hass)return;const e=this._powerSnapshot(),t=e=>{const t=parseFloat(e);return isNaN(t)?0:t};let i,s,r,a=e?t(e.solar_w):this._getState("solar_power");if(this._entities?.solar?.reverse&&(a=-a),"entities"===this._mode&&(this._entities?.battery?.charge||this._entities?.battery?.discharge))i=this._getState("battery_charge_power")-this._getState("battery_discharge_power");else if(e)i=t(e.battery_w);else{let e=this._getState("battery_power");i=this._entities?.battery?.reverse?-e:e}if("entities"===this._mode&&this._entities?.grid?.entity){const e=this._getState("grid_power"),t=this._entities.grid.reverse;s=Math.max(0,t?-e:e),r=Math.max(0,t?e:-e)}else e?(s=t(e.grid_import_w),r=t(e.grid_export_w)):(s=this._getState("grid_import_power"),r=this._getState("grid_export_power"));let o=e?t(e.ev_w):this._getState("ev_power");this._entities?.ev?.invert&&(o=-o);const n=e?t(e.battery_soc):this._getState("battery_soc"),l=this._getState("autarky_rate"),c=Math.max(0,i),d=Math.max(0,-i);let p;if(e&&null!==e.home_w&&void 0!==e.home_w)p=t(e.home_w);else{const e=this._getEntityId("home_consumption_power");e&&this._hass?.states[e]?(p=this._getState("home_consumption_power"),this._entities?.home?.invert&&(p=-p)):p=Math.max(0,a+s+d-r-c-o)}const h=this._getStateStr("daily_solar_energy"),_=this._getStateStr("daily_ev_energy"),g=this._getStateStr("daily_grid_import_energy"),u=this._getStateStr("daily_grid_export_energy"),m=this._getStateStr("daily_battery_energy"),f=this._getStateStr("daily_home_energy"),v={solar:a,battery:i,gridImport:s,gridExport:r,home:p,ev:o,soc:n,autarky:l,dailySolar:h,dailyEv:_,dailyGridImport:g,dailyGridExport:u,dailyBattery:m,dailyHome:f},y=JSON.stringify(v);if(this._lastKey===y)return;this._lastKey=y,this._animateValue("val-solar",a);const b=i>10?"▼ ":i<-10?"▲ ":"";this._animateValue("val-battery-power",Math.abs(i),800,e=>b+ge(e));const x=s>r,$=x?"↓ ":r>10?"↑ ":"";this._animateValue("val-grid",x?s:r,800,e=>$+ge(e)),this._animateValue("val-home",p),this._animateValue("val-ev",o);const w=this._getState("ev_charger_count");this._setText("val-ev-subtitle",w>1?`(${w} ${this._t("chargers")})`:""),this._animateValue("val-battery-soc",n,800,e=>`${e.toFixed(0)}%`);const k=this._getEntityId("autarky_rate");k&&this._animateValue("val-autarky",l,800,e=>`⚡ ${e.toFixed(0)}% self`),this._setText("val-inverter-status",this._getStateStr("charging_state"));const S=this._t("today");this._setText("val-today-solar",h?`${S} ${h} kWh`:""),this._setText("val-today-ev",_?`${S} ${_} kWh`:""),this._setText("val-today-battery",m?`${S} ${m} kWh`:""),this._setText("val-today-home",f?`${S} ${f} kWh`:"");const C=[];if(g&&C.push(`↓${g}`),u&&C.push(`↑${u}`),g&&u){const e=(parseFloat(g)-parseFloat(u)).toFixed(1);C.push(`Net ${e>0?"+":""}${e}`)}this._setText("val-today-grid",C.length?C.join(" ")+" kWh":"");const z=this._getLayout(),M=this.renderRoot.getElementById("soc-arc");if(M){const e=2*Math.PI*z.socR;M.style.strokeDashoffset=(e*(1-n/100)).toFixed(1),M.style.animation=c>10?"socPulse 2s ease-in-out infinite":d>10?"socDrain 2.5s ease-in-out infinite":"none"}const D=this.renderRoot.getElementById("autarky-arc");if(D&&k&&l>0){const e=2*Math.PI*z.autarkyR;D.style.strokeDashoffset=(e*(1-l/100)).toFixed(1),D.style.stroke=this._autarkyColor(l),D.style.opacity="0.75"}else D&&(D.style.opacity="0");const E=x?this._getNodeColor("grid_import"):r>10?this._getNodeColor("grid_export"):this._getNodeColor("grid_import");this._updateGridColor(E,x);const F=this.renderRoot.getElementById("label-grid");F&&(F.textContent=x?this._t("importing"):r>10?this._t("exporting"):this._t("grid"));const A=c>10?"#f06292":d>10?"#4db6ac":this._getNodeColor("battery"),I=this.renderRoot.getElementById("label-battery-state");I&&(I.textContent=c>10?this._t("charging"):d>10?this._t("discharging"):"");for(const e of["val-battery-soc","val-battery-power","label-battery-state","val-today-battery"]){const t=this.renderRoot.getElementById(e);t&&t.setAttribute("fill",A)}const B=this.renderRoot.getElementById("soc-arc");B&&(c>10||d>10)&&(B.style.stroke=A),this._updateFlow("flow-solar",a>10,!1,me(a)),this._updateFlow("flow-battery",Math.abs(i)>10,i<0,me(i),A),this._updateFlow("flow-grid",s>10||r>10,x,me(s||r),E),this._updateFlow("flow-home",p>10,!1,me(p)),this._updateFlow("flow-ev",o>10,!1,me(o)),this._setGlowIntensity("node-solar",a,1e4),this._setGlowIntensity("node-battery",Math.abs(i),5e3),this._setGlowIntensity("node-grid",Math.max(s,r),1e4),this._setGlowIntensity("node-home",p,8e3),this._setGlowIntensity("node-ev",o,11e3),this._updateDeviceLabels()}_updateFlow(e,t,i,s,r){const a=this.renderRoot.getElementById(e);if(!a)return;if(a.style.opacity=t?"1":"0",!t)return void(a.dataset.sig="");const o=r||a.dataset.color;r&&(a.dataset.color=r);const n=a.dataset.pathD,l=parseInt(a.dataset.count,10)||2,c=`${i?"r":"f"}:${s.toFixed(1)}:${o}`;a.dataset.sig!==c&&(a.dataset.sig=c,a.innerHTML=this._flowEffects(n,o,l,s,i))}_flowEffects(e,t,i,s,r){const a=s.toFixed(1),o=r?' keyPoints="1;0" keyTimes="0;1"':"";let n=`<path d="${e}" fill="none" stroke="${t}" stroke-width="3"\n                     stroke-dasharray="12,20" opacity="0.5" stroke-linecap="round">\n                     <animate attributeName="stroke-dashoffset" from="0" to="${r?"32":"-32"}"\n                              dur="${a}s" repeatCount="indefinite"/>\n                   </path>`;for(let r=0;r<i;r++){const l=r/i*s;n+=`\n                <circle r="5" fill="${t}" opacity="0.12">\n                    <animateMotion path="${e}" dur="${a}s" repeatCount="indefinite" calcMode="paced"${o} begin="-${l.toFixed(2)}s"/>\n                </circle>\n                <circle r="2.5" fill="${t}" opacity="0.9">\n                    <animateMotion path="${e}" dur="${a}s" repeatCount="indefinite" calcMode="paced"${o} begin="-${l.toFixed(2)}s"/>\n                </circle>`}return n}_updateGridColor(e,t){const i=this.renderRoot.getElementById("node-grid");i&&i.setAttribute("filter",`url(#glowGrid${t?"Import":"Export"})`);const s=this.renderRoot.getElementById("grid-circle");s&&(s.setAttribute("stroke",e),s.setAttribute("fill",this._hexToRgba(e,.07)));const r=this.renderRoot.querySelector("#node-grid .glow-ring");r&&r.setAttribute("stroke",e);const a=this.renderRoot.getElementById("grid-icon");a&&a.setAttribute("stroke",e);for(const t of["val-grid","label-grid","val-today-grid"]){const i=this.renderRoot.getElementById(t);i&&i.setAttribute("fill",e)}const o=this.renderRoot.getElementById("track-grid");o&&o.setAttribute("stroke",e)}_updateDeviceLabels(){const e=this.renderRoot.getElementById("device-labels");if(!e)return;const t=this._getDeviceList(),i=t.map(([e,t],i)=>`${t.power_entity}:${t.name}:${t.color||he[i%he.length]}:${t.icon_override||""}:${t.daily_energy_entity||""}`).join("|");this._deviceConfigSig!==i&&(this._deviceConfigSig=i,this._buildDeviceDOM(e,t)),this._updateDeviceValues(t)}_getDeviceList(){let e=[];if("entities"===this._mode&&this._entities?.individual)e=this._entities.individual.map((e,t)=>[e.entity||`device_${t}`,{name:e.name||e.entity?.split(".").pop()||`Device ${t+1}`,power_entity:e.entity,device_type:e.device_type||"appliance",is_on:!1,current_power:0,color:e.color,icon_override:e.icon,daily_energy_entity:e.daily_energy}]);else if("prefix"===this._mode){const t=this._hass.states[`${this._prefix}controllable_devices_count`];t?.attributes?.devices&&(e=Object.entries(t.attributes.devices).filter(([,e])=>e.power_entity||e.current_power>0).sort((e,t)=>(e[1].priority||5)-(t[1].priority||5)))}return e.slice(0,6)}_buildDeviceDOM(e,t){if(!t.length)return e.innerHTML="",void(this._devicePositions=[]);const i="'Segoe UI','Roboto',sans-serif",s=this._getLayout(),r=s.home,a=this._compact,o=a?26:24,n=a?2:Math.min(t.length,3),l=a?30:60,c=((a?500:1e3)-2*l)/n,d=s.deviceY,p=a?18:20;let h="";this._devicePositions=[],t.forEach(([e,t],s)=>{let _=t.name||e;_.length>p&&(_=_.substring(0,p-1)+"…");const g=t.color||he[s%he.length],u=this._deviceIcon(t.device_type,t.name||e),m=s%n,f=Math.floor(s/n),v=l+m*c+c/2,y=d+f*(a?100:90);this._devicePositions.push({cx:v,cy:y,nodeR:o,color:g}),h+=`<path id="dev-conn-${s}" d="M${r.cx},${r.cy+r.r} C${r.cx},${r.cy+r.r+30} ${v},${y-40} ${v},${y-o}" fill="none" stroke="${g}" stroke-width="1.2" stroke-dasharray="3,5" opacity="0.1"/>`,h+=`<g id="dev-flow-${s}"></g>`;const b=t.power_entity?` data-entity="${t.power_entity}"`:"";h+=`<g id="dev-group-${s}" class="device-clickable"${b} data-idx="${s}">`,h+=`<circle id="dev-circle-${s}" cx="${v}" cy="${y}" r="${o}" fill="rgba(128,128,128,0.03)" stroke="${g}" stroke-width="1.2" opacity="0.4"/>`,h+=`<g transform="translate(${v},${y})" stroke="${g}" fill="none" opacity="0.35" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${u}</g>`,h+=`<text x="${v}" y="${y+o+14}" text-anchor="middle" font-family="${i}" font-size="11" font-weight="500" fill="${g}" opacity="0.8">${this._escSvg(_)}</text>`,h+=`<text id="dev-val-${s}" x="${v}" y="${y+o+14+11+2}" text-anchor="middle" font-family="${i}" font-size="11" font-weight="600" fill="${g}" opacity="0.7">0 W</text>`,h+=`<text id="dev-daily-${s}" x="${v}" y="${y+o+14+26}" text-anchor="middle" font-family="${i}" font-size="11" fill="${g}" opacity="0.65"></text>`,h+="</g>"}),e.innerHTML=h,e.querySelectorAll(".device-clickable[data-entity]").forEach(e=>{const t=parseInt(e.dataset.idx);this._setupNodeActions(e,`device_${t}`,e.dataset.entity)}),t.forEach((e,t)=>{delete this._currentValues[`dev-val-${t}`]})}_updateDeviceValues(e){const t=this._getLayout().home;e.forEach(([e,i],s)=>{const r=i.power_entity?this._hass.states[i.power_entity]:null,a=r?parseFloat(r.state)||0:i.current_power||0,o=a>5,n=i.color||he[s%he.length],l=this._devicePositions[s];if(!l)return;if(this._animateValue(`dev-val-${s}`,a),i.daily_energy_entity){const e=this._hass.states[i.daily_energy_entity];this._setText(`dev-daily-${s}`,e?`${this._t("today")} ${e.state} kWh`:"")}const c=this.renderRoot.getElementById(`dev-conn-${s}`);c&&c.setAttribute("opacity",o?"0.3":"0.1");const d=this.renderRoot.getElementById(`dev-circle-${s}`);d&&(d.setAttribute("fill",`rgba(128,128,128,${o?.08:.03})`),d.setAttribute("opacity",o?"1":"0.4"));const p=this.renderRoot.getElementById(`dev-val-${s}`);p&&p.setAttribute("opacity",o?"1":"0.5");const h=this.renderRoot.getElementById(`dev-group-${s}`);if(h){const e=h.querySelector("g[transform]");e&&e.setAttribute("opacity",o?"0.7":"0.35")}const _=this.renderRoot.getElementById(`dev-flow-${s}`);if(_)if(a>5){const e=me(a).toFixed(1);if(_.dataset.sig!==e){_.dataset.sig=e;const i=`M${t.cx},${t.cy+t.r} C${t.cx},${t.cy+t.r+30} ${l.cx},${l.cy-40} ${l.cx},${l.cy-l.nodeR}`;_.innerHTML=`\n                            <path d="${i}" fill="none" stroke="${n}" stroke-width="2" stroke-dasharray="8,16" opacity="0.4" stroke-linecap="round">\n                                <animate attributeName="stroke-dashoffset" from="0" to="-24" dur="${e}s" repeatCount="indefinite"/>\n                            </path>\n                            <circle r="2" fill="${n}" opacity="0.8">\n                                <animateMotion path="${i}" dur="${e}s" repeatCount="indefinite" calcMode="paced" begin="-${(.3*s).toFixed(1)}s"/>\n                            </circle>`}}else""!==_.dataset.sig&&(_.dataset.sig="",_.innerHTML="")})}_setupClickHandlers(){const e={"node-solar":"solar_power","val-solar":"solar_power","val-today-solar":"daily_solar_energy","node-battery":"battery_soc","val-battery-soc":"battery_soc","val-battery-power":"battery_power","label-battery-state":"battery_power","val-today-battery":"daily_battery_energy","node-grid":"grid_import_power","val-grid":"grid_import_power","label-grid":"grid_import_power","val-today-grid":"daily_grid_import_energy","node-home":"home_consumption_power","val-home":"home_consumption_power","val-autarky":"autarky_rate","val-today-home":"daily_home_energy","node-ev":"ev_power","val-ev":"ev_power","val-today-ev":"daily_ev_energy","val-inverter-status":"charging_state"};for(const[t,i]of Object.entries(e)){const e=this._getEntityId(i);if(!e)continue;const s=this.renderRoot.getElementById(t);s&&(s.setAttribute("data-entity",e),s.style.cursor="pointer")}const t=this.renderRoot.querySelector("svg");t&&!t._semClickBound&&(t._semClickBound=!0,t.addEventListener("click",e=>{let i=e.target;for(let e=0;e<5&&i&&i!==t;e++){const e=i.getAttribute?.("data-entity");if(e)return void this._fireMoreInfo(e);i=i.parentElement}}));const i=[{ids:["node-solar"],node:"solar",key:"solar_power"},{ids:["node-battery"],node:"battery",key:"battery_soc"},{ids:["node-grid"],node:"grid",key:"grid_import_power"},{ids:["node-home"],node:"home",key:"home_consumption_power"},{ids:["node-ev"],node:"ev",key:"ev_power"}];for(const{ids:e,node:t,key:s}of i){const i=this._getEntityId(s);if(i)for(const s of e){const e=this.renderRoot.getElementById(s);e&&!e._semActionsBound&&(e._semActionsBound=!0,e.classList.add("clickable-node"),this._setupNodeActions(e,t,i))}}}_setupNodeActions(e,t,i){let s=null,r=!1,a=0,o=null;e.style.cursor="pointer",e.addEventListener("pointerdown",()=>{r=!1,s=setTimeout(()=>{r=!0;const e=this._getActionConfig(t,"hold_action");"none"!==e.action&&this._handleAction(e,i)},500)}),e.addEventListener("pointerup",()=>clearTimeout(s)),e.addEventListener("pointercancel",()=>{clearTimeout(s),r=!1}),e.addEventListener("click",()=>{if(r)return void(r=!1);const e=this._getActionConfig(t,"double_tap_action");if(!e||"none"===e.action)return void this._handleAction(this._getActionConfig(t,"tap_action"),i);const s=Date.now();s-a<300?(clearTimeout(o),a=0,this._handleAction(e,i)):(a=s,o=setTimeout(()=>{a=0,this._handleAction(this._getActionConfig(t,"tap_action"),i)},300))})}_getActionConfig(e,t){const i=this._entities;if(!i)return{action:"tap_action"===t?"more-info":"none"};let s;if(e.startsWith("device_")){const t=parseInt(e.split("_")[1]);s=i.individual?.[t]}else{s={solar:i.solar,battery:i.battery,grid:i.grid,home:i.home,ev:i.ev||i.individual?.[0]}[e]}const r=s?.[t];return r?"string"==typeof r?{action:r}:r:{action:"tap_action"===t?"more-info":"none"}}_handleAction(e,t){switch(e||(e={action:"more-info"}),e.action){case"more-info":this._fireMoreInfo(e.entity||t);break;case"toggle":this._hass&&this._hass.callService("homeassistant","toggle",{entity_id:e.entity||t});break;case"navigate":e.navigation_path&&(window.history.pushState(null,"",e.navigation_path),window.dispatchEvent(new CustomEvent("location-changed")));break;case"call-service":if(e.service&&this._hass){const[t,i]=e.service.split(".");this._hass.callService(t,i,e.service_data||{})}break;case"url":e.url_path&&window.open(e.url_path,"_blank")}}_fireMoreInfo(e){e&&this.dispatchEvent(new CustomEvent("hass-more-info",{detail:{entityId:e},bubbles:!0,composed:!0}))}_setGlowIntensity(e,t,i){const s=this.renderRoot.querySelector(`#${e} .glow-ring`);if(!s)return;const r=Math.min(1,Math.abs(t)/i);s.style.opacity=(.15+.85*r).toFixed(2)}_animateValue(e,t,i=800,s=null){const r=this.renderRoot.getElementById(e);if(!r)return;this._animFrames[e]&&cancelAnimationFrame(this._animFrames[e]);const a=s||(e=>ge(e)),o=this._currentValues[e]||0;if(this._currentValues[e]=t,Math.abs(o-t)<.5)return void(r.textContent=a(t));const n=performance.now(),l=s=>{const c=Math.min(1,(s-n)/i),d=c<.5?2*c*c:1-Math.pow(-2*c+2,2)/2;r.textContent=a(o+(t-o)*d),c<1?this._animFrames[e]=requestAnimationFrame(l):delete this._animFrames[e]};this._animFrames[e]=requestAnimationFrame(l),setTimeout(()=>{this._currentValues[e]===t&&(this._animFrames[e]&&(cancelAnimationFrame(this._animFrames[e]),delete this._animFrames[e]),r.textContent=a(t))},i+250)}_setText(e,t){const i=this.renderRoot.getElementById(e);i&&(i.textContent=t)}_getState(e){if(!this._hass)return 0;const t="prefix"===this._mode?`${this._prefix}${e}`:this._resolveEntity(e);if(!t)return 0;const i=this._hass.states[t];if(!i)return 0;const s=parseFloat(i.state);return isNaN(s)?0:s}_powerSnapshot(){if("prefix"!==this._mode||!this._hass)return null;const e=this._hass.states[this._prefix+"home_consumption_power"],t=e&&e.attributes&&e.attributes.power_snapshot;return t&&"object"==typeof t?t:null}_getStateStr(e){if(!this._hass)return"";const t="prefix"===this._mode?`${this._prefix}${e}`:this._resolveEntity(e);if(!t)return"";const i=this._hass.states[t];return i?i.state:""}_getEntityId(e){return"prefix"===this._mode?`${this._prefix}${e}`:this._resolveEntity(e)}_resolveEntity(e){const t=this._entities;if(!t)return null;return{solar_power:t.solar?.entity,battery_power:t.battery?.entity,battery_charge_power:t.battery?.charge,battery_discharge_power:t.battery?.discharge,grid_power:t.grid?.entity,grid_import_power:t.grid?.consumption,grid_export_power:t.grid?.production,ev_power:t.ev?.entity||t.individual?.[0]?.entity,battery_soc:t.battery?.state_of_charge,home_consumption_power:t.home?.entity,charging_state:t.inverter?.entity,daily_solar_energy:t.solar?.daily_energy,daily_ev_energy:t.ev?.daily_energy||t.individual?.[0]?.daily_energy,daily_grid_import_energy:t.grid?.daily_import_energy,daily_grid_export_energy:t.grid?.daily_export_energy,daily_battery_energy:t.battery?.daily_energy,daily_home_energy:t.home?.daily_energy,autarky_rate:t.home?.autarky,ev_charger_count:t.ev?.charger_count||"sensor.sem_ev_charger_count"}[e]||null}_hasNode(e){if("ev"===e&&!this._showEv)return!1;if("battery"===e&&!this._showBattery)return!1;if("prefix"===this._mode)return!0;const t=this._entities;if(!t)return!1;return{solar:!!t.solar?.entity,battery:!!(t.battery?.entity||t.battery?.charge||t.battery?.discharge),grid:!(!t.grid?.consumption&&!t.grid?.entity),home:!0,ev:!(!t.ev?.entity&&!t.individual?.[0]?.entity),inverter:!!t.inverter?.entity||!!t.solar?.entity}[e]||!1}_getNodeColor(e){const t=this._entities,i={solar:Mt.solar.color,battery:Mt.battery.color,grid:Mt.grid.color_import,grid_import:Mt.grid.color_import,grid_export:Mt.grid.color_export,home:Mt.home.color,ev:Mt.ev.color,inverter:Mt.inverter.color};if(!t)return i[e]||"#888";return{solar:t.solar?.color,battery:t.battery?.color,grid:t.grid?.color_import,grid_import:t.grid?.color_import,grid_export:t.grid?.color_export,home:t.home?.color,ev:t.ev?.color||t.individual?.[0]?.color}[e]||i[e]||"#888"}_getNodeName(e){const t=this._entities,i=Mt[e]?.nameKey,s=i?this._t(i):e;if(!t)return s;return{solar:t.solar?.name,battery:t.battery?.name,grid:t.grid?.name,home:t.home?.name,ev:t.ev?.name||t.individual?.[0]?.name}[e]||s}_getLayout(){return this._compact?{vb:"0 0 500 1100",solar:{cx:250,cy:70,r:48},inverter:{cx:250,cy:225,r:20},battery:{cx:100,cy:340,r:48},grid:{cx:400,cy:340,r:48},home:{cx:250,cy:510,r:60},ev:{cx:100,cy:660,r:42},socR:33,autarkyR:48,paths:{solar:"M250,118 L250,205",home:"M250,245 L250,450",battery:"M230,230 C180,260 120,290 100,292",grid:"M270,230 C320,260 380,290 400,292",ev:"M230,240 C180,380 130,560 100,618"},font:{label:14,value:22,sub:12,homeVal:26},deviceY:810}:{vb:"0 0 1000 800",solar:{cx:500,cy:65,r:50},inverter:{cx:500,cy:210,r:20},battery:{cx:150,cy:270,r:50},grid:{cx:850,cy:270,r:50},home:{cx:500,cy:385,r:62},ev:{cx:150,cy:460,r:44},socR:40,autarkyR:50,paths:{solar:"M500,115 L500,190",home:"M500,230 L500,323",battery:"M480,215 C380,230 250,245 200,270",grid:"M520,215 C620,230 750,245 800,270",ev:"M480,225 C380,330 250,410 195,460"},font:{label:13,value:20,sub:11,homeVal:24},deviceY:590}}_glowFilter(e,t,i){return`<filter id="${e}" x="-30%" y="-30%" width="160%" height="160%">\n            <feGaussianBlur stdDeviation="${i}" result="blur"/>\n            <feFlood flood-color="${t}" flood-opacity="0.25"/>\n            <feComposite in2="blur" operator="in"/>\n            <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>\n        </filter>`}_glowRing(e,t,i=1.2){const s=e.r+5;return`<circle class="glow-ring" cx="${e.cx}" cy="${e.cy}" r="${s}" fill="none" stroke="${t}" stroke-width="${i}" opacity="0.3">\n            <animate attributeName="r" values="${s};${s+5};${s}" dur="3s" repeatCount="indefinite"/>\n            <animate attributeName="opacity" values="0.3;0.12;0.3" dur="3s" repeatCount="indefinite"/>\n        </circle>`}_track(e,t){return`<path d="${e}" fill="none" stroke="${t}" stroke-width="1.5" stroke-dasharray="4,6" opacity="0.18"/>`}_hexToRgba(e,t){const i=e.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);return i?`rgba(${parseInt(i[1],16)},${parseInt(i[2],16)},${parseInt(i[3],16)},${t})`:`rgba(128,128,128,${t})`}_autarkyColor(e){if((e=Math.max(0,Math.min(100,e)))<=50){const t=e/50;return`rgb(220,${Math.round(50+150*t)},50)`}const t=(e-50)/50;return`rgb(${Math.round(220-170*t)},200,50)`}_deviceIcon(e,t){const i=(t||"").toLowerCase();return"ev_charger"===(e||"").toLowerCase()||i.includes("keba")||i.includes("charger")||i.includes("wallbox")?'<rect x="-6" y="-10" width="12" height="16" rx="2"/><path d="M-2,-4 L0,2 L2,-4"/><line x1="0" y1="6" x2="0" y2="10"/>':i.includes("heiz")||i.includes("heat")||i.includes("warm")||i.includes("boiler")?'<path d="M-4,-10 C-4,-4 4,-4 4,-10"/><path d="M-4,-3 C-4,3 4,3 4,-3"/><path d="M-4,4 C-4,10 4,10 4,4"/>':i.includes("wash")||i.includes("spül")||i.includes("geschirr")||i.includes("wasch")?'<circle r="10" fill="none"/><circle r="5" fill="none"/><circle r="1.5" fill="currentColor" opacity="0.3" stroke="none"/>':i.includes("dryer")||i.includes("trockn")?'<circle r="10" fill="none"/><path d="M-4,-4 C0,-8 0,8 4,4" fill="none"/>':i.includes("pool")||i.includes("pump")?'<circle r="8" fill="none"/><path d="M-6,0 L6,0 M0,-6 L0,6" opacity="0.5"/><path d="M-4,-4 L4,4 M4,-4 L-4,4"/>':i.includes("klima")||i.includes("ac")||i.includes("cool")||i.includes("air")?'<rect x="-10" y="-6" width="20" height="12" rx="2"/><path d="M-6,6 C-6,10 -2,10 -2,6" fill="none"/><path d="M2,6 C2,10 6,10 6,6" fill="none"/>':i.includes("light")||i.includes("licht")||i.includes("lamp")?'<path d="M-5,-10 C-8,-2 -3,4 -2,6 L2,6 C3,4 8,-2 5,-10 C2,-14 -2,-14 -5,-10Z" fill="none"/><line x1="-2" y1="8" x2="2" y2="8"/>':i.includes("shelly")||i.includes("plug")||i.includes("switch")||i.includes("steckdose")?'<rect x="-8" y="-10" width="16" height="20" rx="3"/><circle cx="-3" cy="-2" r="2" fill="none"/><circle cx="3" cy="-2" r="2" fill="none"/><line x1="0" y1="4" x2="0" y2="7"/>':'<path d="M-3,-10 L-3,0 L-6,0 L0,10 L0,0 L3,0 L-3,-10Z" fill="none"/>'}getCardSize(){return 8}static async getConfigElement(){return document.createElement("sem-flow-card-editor")}static getStubConfig(e){const t=e?Object.keys(e.states):[],i=e=>{for(const i of e){const e=t.find(e=>e.includes(i));if(e)return e}return null};return{entities:{solar:{entity:i(["solar_power","pv_power"])||"sensor.solar_power"},grid:{consumption:i(["grid_import","grid_consumption"])||"sensor.grid_import_power",production:i(["grid_export","grid_feed"])||"sensor.grid_export_power"},battery:{entity:i(["battery_power","batt_power"])||"sensor.battery_power",state_of_charge:i(["battery_soc","battery_level"])||"sensor.battery_soc"},home:{entity:i(["home_consumption","house_power"])||"sensor.home_consumption_power"}}}}},{type:"sem-flow-card",name:"SEM Flow Card",description:"Animated energy flow diagram — works with any HA entities",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-flow-card"});const Dt=864e5,Et=36e5;const Ft="sensor.sem_",At=["solar_power","battery_power","grid_import_power","grid_export_power","ev_power","battery_soc","battery_temperature","charging_state","home_consumption_power","daily_solar_energy","daily_battery_charge_energy","daily_battery_discharge_energy","daily_ev_energy","daily_home_energy","daily_grid_import_energy","daily_grid_export_energy","forecast_today_kwh","controllable_devices_count"],It=2551442889.6,Bt=Date.parse("2000-01-06T18:14:00Z"),Rt={new_moon:{k:0,waxing:!0},waxing_crescent:{k:.25,waxing:!0},first_quarter:{k:.5,waxing:!0},waxing_gibbous:{k:.75,waxing:!0},full_moon:{k:1,waxing:!0},waning_gibbous:{k:.75,waxing:!1},last_quarter:{k:.5,waxing:!1},waning_crescent:{k:.25,waxing:!1}};we("sem-system-diagram-card",class extends Se{static properties={_solarDisp:{state:!0},_battDisp:{state:!0},_homeDisp:{state:!0},_evDisp:{state:!0},_gridDisp:{state:!0},_gridDispMode:{state:!0},_sunTransform:{state:!0},_moonTransform:{state:!0},_sunPowerX:{state:!0},_sunPowerY:{state:!0},_sunPtX:{state:!0},_sunPtY:{state:!0}};static get watchedEntities(){return At.map(e=>`${Ft}${e}`)}constructor(){super(),this._prefix=Ft,this._mode="prefix",this._entities=null,this._compact=!1,this._visible=!0,this._resizeObserver=null,this._intersectionObserver=null,this._resizeTimeout=null,this._counterRaf=null,this._targets=null,this._lastDiagKey="",this._sunSparkProps=null,this._sunSparkSig="",this._sparkWaveD=""}setConfig(e){super.setConfig(e),e.entities&&!e.entity_prefix?(this._mode="entities",this._entities=e.entities):(this._mode="prefix",this._entities=null),this._prefix=e.entity_prefix||Ft,this._showEv=!1!==e.show_ev,this._showBattery=!1!==e.show_battery}_eid(e){if("entities"!==this._mode)return`${this._prefix}${e}`;const t=this._entities;if(!t)return null;return{solar_power:t.solar?.entity,battery_power:t.battery?.entity,battery_charge_power:t.battery?.charge,battery_discharge_power:t.battery?.discharge,grid_power:t.grid?.entity,grid_import_power:t.grid?.consumption,grid_export_power:t.grid?.production,ev_power:t.ev?.entity||t.individual?.[0]?.entity,battery_soc:t.battery?.state_of_charge,battery_temperature:t.battery?.temperature,home_consumption_power:t.home?.entity,charging_state:t.inverter?.entity,daily_solar_energy:t.solar?.daily_energy,daily_ev_energy:t.ev?.daily_energy||t.individual?.[0]?.daily_energy,daily_grid_import_energy:t.grid?.daily_import_energy,daily_grid_export_energy:t.grid?.daily_export_energy,daily_battery_charge_energy:t.battery?.daily_charge_energy,daily_battery_discharge_energy:t.battery?.daily_discharge_energy,daily_home_energy:t.home?.daily_energy,autarky_rate:t.home?.autarky,self_consumption_rate:t.home?.self_consumption,forecast_today_kwh:t.solar?.forecast_remaining,controllable_devices_count:t.devices?.count_entity}[e]||null}_powerSnapshot(){if("prefix"!==this._mode||!this._hass)return null;const e=this._hass.states[this._prefix+"home_consumption_power"],t=e&&e.attributes&&e.attributes.power_snapshot;return t&&"object"==typeof t?t:null}_snapNum(e){const t=parseFloat(e);return isNaN(t)?0:t}_flowSolar(){const e=this._powerSnapshot();if(e)return this._snapNum(e.solar_w);const t=this._val("solar_power");return this._entities?.solar?.reverse?-t:t}_flowBattery(){const e=this._entities;if(e?.battery?.charge||e?.battery?.discharge)return this._val("battery_charge_power")-this._val("battery_discharge_power");const t=this._powerSnapshot();if(t&&null!==t.battery_soc&&void 0!==t.battery_soc)return this._snapNum(t.battery_w);const i=this._val("battery_power");return e?.battery?.reverse?-i:i}_flowGridPair(){const e=this._entities;if("entities"===this._mode&&e?.grid?.entity){const t=this._state(e.grid.entity,0),i=e.grid.reverse;return{gridImport:Math.max(0,i?-t:t),gridExport:Math.max(0,i?t:-t)}}const t=this._powerSnapshot();return t?{gridImport:this._snapNum(t.grid_import_w),gridExport:this._snapNum(t.grid_export_w)}:{gridImport:this._val("grid_import_power"),gridExport:this._val("grid_export_power")}}_flowEv(){const e=this._powerSnapshot();if(e)return this._snapNum(e.ev_w);const t=this._val("ev_power");return this._entities?.ev?.invert?-t:t}_flowHome(e,t,i,s,r,a){const o=this._powerSnapshot();if(o&&null!==o.home_w&&void 0!==o.home_w)return Math.max(0,this._snapNum(o.home_w));const n=this._eid("home_consumption_power"),l=n?this._hass?.states[n]:null;if(l&&"unavailable"!==l.state&&"unknown"!==l.state){let e=this._state(n,0);return this._entities?.home?.invert&&(e=-e),Math.max(0,e)}return Math.max(0,e+t+r-i-s-a)}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this._eid("solar_power"),a=r?e?.states[r]?.state:void 0;if(("unavailable"===a||"unknown"===a)&&!s)return;const o=At.filter(e=>!(!this._showEv&&"ev_power"===e)&&!!(this._showBattery||"battery_power"!==e&&"battery_soc"!==e&&"battery_temperature"!==e));let n=o.map(t=>{const i=this._eid(t);return i&&e?.states[i]?.state||""}).join(",")+"|"+t;n+="|"+be(e,this._prefix),this._showEv&&(n+="|"+(e?.states["binary_sensor.sem_ev_connected"]?.state||""),n+="|"+(e?.states["binary_sensor.sem_ev_charging"]?.state||""));const l=e?.states["sun.sun"];if(n+="|"+(l?.attributes?.elevation??"")+":"+(l?.attributes?.next_rising||"")+":"+(l?.attributes?.next_setting||""),n+="|"+(e?.states["sensor.moon"]?.state||""),n===this._lastDiagKey&&!s)return;this._lastDiagKey=n;const c=this._flowSolar(),d=this._flowBattery(),p=Math.max(0,d),h=Math.max(0,-d),{gridImport:_,gridExport:g}=this._flowGridPair(),u=this._flowEv(),m=this._flowHome(c,_,g,p,h,u);this._targets={solar:c,batt:Math.abs(d),home:m,ev:u,grid:g>10?g:_>10?_:0,gridMode:g>10?"↑":_>10?"↓":null},this._startTickIfIdle(),this._scheduleUpdate()}get hass(){return this._hass}_val(e,t=0){const i=this._eid(e);return i?this._state(i,t):t}_valStr(e){const t=this._eid(e);return t?this._stateStr(t):""}_unitStr(e){const t=this._eid(e);return t?this._unitOf(t):""}_readWithHold(e,t,i){const s=this._eid(e),r=s?this._hass?.states[s]:void 0,a=r?.state,o=r&&"unavailable"!==a&&"unknown"!==a,n=Date.now(),l=t+"Ts",c=t.startsWith("this.")?t.slice(5):t,d=l.startsWith("this.")?l.slice(5):l;if(o){const e=parseFloat(a);if(!Number.isNaN(e))return this[c]=e,this[d]=n,{value:e,stale:!1}}return null!=this[c]&&n-(this[d]||0)<i?{value:this[c],stale:!1}:{value:0,stale:!0}}_startTickIfIdle(){if(this._counterRaf)return;const e=(e,t)=>{const i=e??0,s=t-i;return Math.abs(s)<.5?t:i+.18*s},t=()=>{if(!this._targets)return void(this._counterRaf=null);const i=this._targets,s=e(this._solarDisp,i.solar),r=e(this._battDisp,i.batt),a=e(this._homeDisp,i.home),o=e(this._evDisp,i.ev),n=e(this._gridDisp,i.grid),l=s===i.solar&&r===i.batt&&a===i.home&&o===i.ev&&n===i.grid&&this._gridDispMode===i.gridMode;this._solarDisp=s,this._battDisp=r,this._homeDisp=a,this._evDisp=o,this._gridDisp=n,this._gridDispMode=i.gridMode,this._counterRaf=l?null:requestAnimationFrame(t)};this._counterRaf=requestAnimationFrame(t)}firstUpdated(){this._resizeObserver=new ResizeObserver(e=>{this._resizeTimeout&&clearTimeout(this._resizeTimeout),this._resizeTimeout=setTimeout(()=>{for(const t of e){const e=t.contentRect.width<500;e!==this._compact&&(this._compact=e,this._sunSparkSig="",this._lastDiagKey="",this.requestUpdate())}},100)}),this._resizeObserver.observe(this),this._intersectionObserver=new IntersectionObserver(e=>{this._visible=e[0].isIntersecting;const t=this.renderRoot.querySelector("svg");t&&(t.style.animationPlayState=this._visible?"running":"paused")},{threshold:.01}),this._intersectionObserver.observe(this)}disconnectedCallback(){super.disconnectedCallback(),this._resizeObserver&&(this._resizeObserver.disconnect(),this._resizeObserver=null),this._intersectionObserver&&(this._intersectionObserver.disconnect(),this._intersectionObserver=null),clearTimeout(this._resizeTimeout),this._counterRaf&&(cancelAnimationFrame(this._counterRaf),this._counterRaf=null)}updated(e){if(super.updated(e),!this._hass)return;const t=this.renderRoot.querySelector("#sun-arc-path");if(!t)return;const i=this._getLayout(),s=this._computeSunPose();try{const e=t.getTotalLength(),r=t.getPointAtLength(s.pos*e),a=r.x-i.sunX,o=r.y-i.sunY,n=`translate(${a.toFixed(1)},${o.toFixed(1)}) translate(${i.sunX},${i.sunY}) scale(${s.scale.toFixed(2)}) translate(${(-i.sunX).toFixed(1)},${(-i.sunY).toFixed(1)})`,l=s.isNight?`translate(${a.toFixed(1)},${o.toFixed(1)})`:"",c=r.x.toFixed(1),d=(r.y+i.sunR*s.scale+16).toFixed(1),p=+r.x.toFixed(1),h=+r.y.toFixed(1);if(this._sunTransform===n&&this._moonTransform===l&&this._sunPowerX===c&&this._sunPowerY===d&&this._sunPtX===p&&this._sunPtY===h)return;this._sunTransform=n,this._moonTransform=l,this._sunPowerX=c,this._sunPowerY=d,this._sunPtX=p,this._sunPtY=h}catch(e){}}_computeSunPose(){const e=this._hass?.states["sun.sun"],t=(e&&parseFloat(e.attributes?.elevation)||-90)<0,i=this._val("solar_power"),s=e?.attributes;let r=.5;if(s){const e=s.next_rising?new Date(s.next_rising).getTime():0,i=s.next_setting?new Date(s.next_setting).getTime():0,a=Date.now();if(!t&&e&&i){const t=e-864e5,s=i-t;s>0&&(r=(a-t)/s)}else if(t&&e&&i){const t=function(e,t,i){if(!t||!i)return null;const s=i-e<Et?i:i-Dt,r=t-e>828e5?t-Dt:t,a=r-s;return a<=0?Math.abs(e-r)<=Math.abs(e-s)?0:1:1-(e-s)/a}(a,e,i);null!==t&&(r=t)}else r=e&&a<e?0:1;r=Math.max(.06,Math.min(.94,r))}return{pos:r,scale:t?.7:.7+.6*Math.min(1,i/1e4),isNight:t,solar:i}}_computeMoonPhase(){const e=this._hass?.states["sensor.moon"]?.state;if(e&&Rt[e])return Rt[e];const t=((Date.now()-Bt)%It+It)%It/It;return{k:(1-Math.cos(2*Math.PI*t))/2,waxing:t<.5}}_moonPhasePath(e,t,i){const s=i?1:0;return`M 0 ${-e} A ${e} ${e} 0 0 ${s} 0 ${e} A ${(e*Math.abs(1-2*t)).toFixed(2)} ${e} 0 0 ${t<.5?1-s:s} 0 ${-e} Z`}static get styles(){return a`
+        `}_svgRaw(e){return e?Ut(e):K}_escSvg(e){return e?String(e).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"):""}_updateFlowsImperative(){if(!this._hass)return;const e=this._powerSnapshot(),t=e=>{const t=parseFloat(e);return isNaN(t)?0:t};let i,s,r,a=e?t(e.solar_w):this._getState("solar_power");if(this._entities?.solar?.reverse&&(a=-a),"entities"===this._mode&&(this._entities?.battery?.charge||this._entities?.battery?.discharge))i=this._getState("battery_charge_power")-this._getState("battery_discharge_power");else if(e)i=t(e.battery_w);else{let e=this._getState("battery_power");i=this._entities?.battery?.reverse?-e:e}if("entities"===this._mode&&this._entities?.grid?.entity){const e=this._getState("grid_power"),t=this._entities.grid.reverse;s=Math.max(0,t?-e:e),r=Math.max(0,t?e:-e)}else e?(s=t(e.grid_import_w),r=t(e.grid_export_w)):(s=this._getState("grid_import_power"),r=this._getState("grid_export_power"));let o=e?t(e.ev_w):this._getState("ev_power");this._entities?.ev?.invert&&(o=-o);const n=e?t(e.battery_soc):this._getState("battery_soc"),l=this._getState("autarky_rate"),c=Math.max(0,i),d=Math.max(0,-i);let p;if(e&&null!==e.home_w&&void 0!==e.home_w)p=t(e.home_w);else{const e=this._getEntityId("home_consumption_power");e&&this._hass?.states[e]?(p=this._getState("home_consumption_power"),this._entities?.home?.invert&&(p=-p)):p=Math.max(0,a+s+d-r-c-o)}const h=this._getStateStr("daily_solar_energy"),_=this._getStateStr("daily_ev_energy"),g=this._getStateStr("daily_grid_import_energy"),u=this._getStateStr("daily_grid_export_energy"),m=this._getStateStr("daily_battery_energy"),f=this._getStateStr("daily_home_energy"),v={solar:a,battery:i,gridImport:s,gridExport:r,home:p,ev:o,soc:n,autarky:l,dailySolar:h,dailyEv:_,dailyGridImport:g,dailyGridExport:u,dailyBattery:m,dailyHome:f},y=JSON.stringify(v);if(this._lastKey===y)return;this._lastKey=y,this._animateValue("val-solar",a);const b=i>10?"▼ ":i<-10?"▲ ":"";this._animateValue("val-battery-power",Math.abs(i),800,e=>b+ge(e));const x=s>r,$=x?"↓ ":r>10?"↑ ":"";this._animateValue("val-grid",x?s:r,800,e=>$+ge(e)),this._animateValue("val-home",p),this._animateValue("val-ev",o);const w=this._getState("ev_charger_count");this._setText("val-ev-subtitle",w>1?`(${w} ${this._t("chargers")})`:""),this._animateValue("val-battery-soc",n,800,e=>`${e.toFixed(0)}%`);const k=this._getEntityId("autarky_rate");k&&this._animateValue("val-autarky",l,800,e=>`⚡ ${e.toFixed(0)}% self`),this._setText("val-inverter-status",this._getStateStr("charging_state"));const S=this._t("today");this._setText("val-today-solar",h?`${S} ${h} kWh`:""),this._setText("val-today-ev",_?`${S} ${_} kWh`:""),this._setText("val-today-battery",m?`${S} ${m} kWh`:""),this._setText("val-today-home",f?`${S} ${f} kWh`:"");const C=[];if(g&&C.push(`↓${g}`),u&&C.push(`↑${u}`),g&&u){const e=(parseFloat(g)-parseFloat(u)).toFixed(1);C.push(`Net ${e>0?"+":""}${e}`)}this._setText("val-today-grid",C.length?C.join(" ")+" kWh":"");const z=this._getLayout(),M=this.renderRoot.getElementById("soc-arc");if(M){const e=2*Math.PI*z.socR;M.style.strokeDashoffset=(e*(1-n/100)).toFixed(1),M.style.animation=c>10?"socPulse 2s ease-in-out infinite":d>10?"socDrain 2.5s ease-in-out infinite":"none"}const D=this.renderRoot.getElementById("autarky-arc");if(D&&k&&l>0){const e=2*Math.PI*z.autarkyR;D.style.strokeDashoffset=(e*(1-l/100)).toFixed(1),D.style.stroke=this._autarkyColor(l),D.style.opacity="0.75"}else D&&(D.style.opacity="0");const E=x?this._getNodeColor("grid_import"):r>10?this._getNodeColor("grid_export"):this._getNodeColor("grid_import");this._updateGridColor(E,x);const F=this.renderRoot.getElementById("label-grid");F&&(F.textContent=x?this._t("importing"):r>10?this._t("exporting"):this._t("grid"));const I=c>10?"#f06292":d>10?"#4db6ac":this._getNodeColor("battery"),A=this.renderRoot.getElementById("label-battery-state");A&&(A.textContent=c>10?this._t("charging"):d>10?this._t("discharging"):"");for(const e of["val-battery-soc","val-battery-power","label-battery-state","val-today-battery"]){const t=this.renderRoot.getElementById(e);t&&t.setAttribute("fill",I)}const N=this.renderRoot.getElementById("soc-arc");N&&(c>10||d>10)&&(N.style.stroke=I),this._updateFlow("flow-solar",a>10,!1,me(a)),this._updateFlow("flow-battery",Math.abs(i)>10,i<0,me(i),I),this._updateFlow("flow-grid",s>10||r>10,x,me(s||r),E),this._updateFlow("flow-home",p>10,!1,me(p)),this._updateFlow("flow-ev",o>10,!1,me(o)),this._setGlowIntensity("node-solar",a,1e4),this._setGlowIntensity("node-battery",Math.abs(i),5e3),this._setGlowIntensity("node-grid",Math.max(s,r),1e4),this._setGlowIntensity("node-home",p,8e3),this._setGlowIntensity("node-ev",o,11e3),this._updateDeviceLabels()}_updateFlow(e,t,i,s,r){const a=this.renderRoot.getElementById(e);if(!a)return;if(a.style.opacity=t?"1":"0",!t)return void(a.dataset.sig="");const o=r||a.dataset.color;r&&(a.dataset.color=r);const n=a.dataset.pathD,l=parseInt(a.dataset.count,10)||2,c=`${i?"r":"f"}:${s.toFixed(1)}:${o}`;a.dataset.sig!==c&&(a.dataset.sig=c,a.innerHTML=this._flowEffects(n,o,l,s,i))}_flowEffects(e,t,i,s,r){const a=s.toFixed(1),o=r?' keyPoints="1;0" keyTimes="0;1"':"";let n=`<path d="${e}" fill="none" stroke="${t}" stroke-width="3"\n                     stroke-dasharray="12,20" opacity="0.5" stroke-linecap="round">\n                     <animate attributeName="stroke-dashoffset" from="0" to="${r?"32":"-32"}"\n                              dur="${a}s" repeatCount="indefinite"/>\n                   </path>`;for(let r=0;r<i;r++){const l=r/i*s;n+=`\n                <circle r="5" fill="${t}" opacity="0.12">\n                    <animateMotion path="${e}" dur="${a}s" repeatCount="indefinite" calcMode="paced"${o} begin="-${l.toFixed(2)}s"/>\n                </circle>\n                <circle r="2.5" fill="${t}" opacity="0.9">\n                    <animateMotion path="${e}" dur="${a}s" repeatCount="indefinite" calcMode="paced"${o} begin="-${l.toFixed(2)}s"/>\n                </circle>`}return n}_updateGridColor(e,t){const i=this.renderRoot.getElementById("node-grid");i&&i.setAttribute("filter",`url(#glowGrid${t?"Import":"Export"})`);const s=this.renderRoot.getElementById("grid-circle");s&&(s.setAttribute("stroke",e),s.setAttribute("fill",this._hexToRgba(e,.07)));const r=this.renderRoot.querySelector("#node-grid .glow-ring");r&&r.setAttribute("stroke",e);const a=this.renderRoot.getElementById("grid-icon");a&&a.setAttribute("stroke",e);for(const t of["val-grid","label-grid","val-today-grid"]){const i=this.renderRoot.getElementById(t);i&&i.setAttribute("fill",e)}const o=this.renderRoot.getElementById("track-grid");o&&o.setAttribute("stroke",e)}_updateDeviceLabels(){const e=this.renderRoot.getElementById("device-labels");if(!e)return;const t=this._getDeviceList(),i=t.map(([e,t],i)=>`${t.power_entity}:${t.name}:${t.color||he[i%he.length]}:${t.icon_override||""}:${t.daily_energy_entity||""}`).join("|");this._deviceConfigSig!==i&&(this._deviceConfigSig=i,this._buildDeviceDOM(e,t)),this._updateDeviceValues(t)}_getDeviceList(){let e=[];if("entities"===this._mode&&this._entities?.individual)e=this._entities.individual.map((e,t)=>[e.entity||`device_${t}`,{name:e.name||e.entity?.split(".").pop()||`Device ${t+1}`,power_entity:e.entity,device_type:e.device_type||"appliance",is_on:!1,current_power:0,color:e.color,icon_override:e.icon,daily_energy_entity:e.daily_energy}]);else if("prefix"===this._mode){const t=this._hass.states[`${this._prefix}controllable_devices_count`];t?.attributes?.devices&&(e=Object.entries(t.attributes.devices).filter(([,e])=>e.power_entity||e.current_power>0).sort((e,t)=>(e[1].priority||5)-(t[1].priority||5)))}return e.slice(0,6)}_buildDeviceDOM(e,t){if(!t.length)return e.innerHTML="",void(this._devicePositions=[]);const i="'Segoe UI','Roboto',sans-serif",s=this._getLayout(),r=s.home,a=this._compact,o=a?26:24,n=a?2:Math.min(t.length,3),l=a?30:60,c=((a?500:1e3)-2*l)/n,d=s.deviceY,p=a?18:20;let h="";this._devicePositions=[],t.forEach(([e,t],s)=>{let _=t.name||e;_.length>p&&(_=_.substring(0,p-1)+"…");const g=t.color||he[s%he.length],u=this._deviceIcon(t.device_type,t.name||e),m=s%n,f=Math.floor(s/n),v=l+m*c+c/2,y=d+f*(a?100:90);this._devicePositions.push({cx:v,cy:y,nodeR:o,color:g}),h+=`<path id="dev-conn-${s}" d="M${r.cx},${r.cy+r.r} C${r.cx},${r.cy+r.r+30} ${v},${y-40} ${v},${y-o}" fill="none" stroke="${g}" stroke-width="1.2" stroke-dasharray="3,5" opacity="0.1"/>`,h+=`<g id="dev-flow-${s}"></g>`;const b=t.power_entity?` data-entity="${t.power_entity}"`:"";h+=`<g id="dev-group-${s}" class="device-clickable"${b} data-idx="${s}">`,h+=`<circle id="dev-circle-${s}" cx="${v}" cy="${y}" r="${o}" fill="rgba(128,128,128,0.03)" stroke="${g}" stroke-width="1.2" opacity="0.4"/>`,h+=`<g transform="translate(${v},${y})" stroke="${g}" fill="none" opacity="0.35" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${u}</g>`,h+=`<text x="${v}" y="${y+o+14}" text-anchor="middle" font-family="${i}" font-size="11" font-weight="500" fill="${g}" opacity="0.8">${this._escSvg(_)}</text>`,h+=`<text id="dev-val-${s}" x="${v}" y="${y+o+14+11+2}" text-anchor="middle" font-family="${i}" font-size="11" font-weight="600" fill="${g}" opacity="0.7">0 W</text>`,h+=`<text id="dev-daily-${s}" x="${v}" y="${y+o+14+26}" text-anchor="middle" font-family="${i}" font-size="11" fill="${g}" opacity="0.65"></text>`,h+="</g>"}),e.innerHTML=h,e.querySelectorAll(".device-clickable[data-entity]").forEach(e=>{const t=parseInt(e.dataset.idx);this._setupNodeActions(e,`device_${t}`,e.dataset.entity)}),t.forEach((e,t)=>{delete this._currentValues[`dev-val-${t}`]})}_updateDeviceValues(e){const t=this._getLayout().home;e.forEach(([e,i],s)=>{const r=i.power_entity?this._hass.states[i.power_entity]:null,a=r?parseFloat(r.state)||0:i.current_power||0,o=a>5,n=i.color||he[s%he.length],l=this._devicePositions[s];if(!l)return;if(this._animateValue(`dev-val-${s}`,a),i.daily_energy_entity){const e=this._hass.states[i.daily_energy_entity];this._setText(`dev-daily-${s}`,e?`${this._t("today")} ${e.state} kWh`:"")}const c=this.renderRoot.getElementById(`dev-conn-${s}`);c&&c.setAttribute("opacity",o?"0.3":"0.1");const d=this.renderRoot.getElementById(`dev-circle-${s}`);d&&(d.setAttribute("fill",`rgba(128,128,128,${o?.08:.03})`),d.setAttribute("opacity",o?"1":"0.4"));const p=this.renderRoot.getElementById(`dev-val-${s}`);p&&p.setAttribute("opacity",o?"1":"0.5");const h=this.renderRoot.getElementById(`dev-group-${s}`);if(h){const e=h.querySelector("g[transform]");e&&e.setAttribute("opacity",o?"0.7":"0.35")}const _=this.renderRoot.getElementById(`dev-flow-${s}`);if(_)if(a>5){const e=me(a).toFixed(1);if(_.dataset.sig!==e){_.dataset.sig=e;const i=`M${t.cx},${t.cy+t.r} C${t.cx},${t.cy+t.r+30} ${l.cx},${l.cy-40} ${l.cx},${l.cy-l.nodeR}`;_.innerHTML=`\n                            <path d="${i}" fill="none" stroke="${n}" stroke-width="2" stroke-dasharray="8,16" opacity="0.4" stroke-linecap="round">\n                                <animate attributeName="stroke-dashoffset" from="0" to="-24" dur="${e}s" repeatCount="indefinite"/>\n                            </path>\n                            <circle r="2" fill="${n}" opacity="0.8">\n                                <animateMotion path="${i}" dur="${e}s" repeatCount="indefinite" calcMode="paced" begin="-${(.3*s).toFixed(1)}s"/>\n                            </circle>`}}else""!==_.dataset.sig&&(_.dataset.sig="",_.innerHTML="")})}_setupClickHandlers(){const e={"node-solar":"solar_power","val-solar":"solar_power","val-today-solar":"daily_solar_energy","node-battery":"battery_soc","val-battery-soc":"battery_soc","val-battery-power":"battery_power","label-battery-state":"battery_power","val-today-battery":"daily_battery_energy","node-grid":"grid_import_power","val-grid":"grid_import_power","label-grid":"grid_import_power","val-today-grid":"daily_grid_import_energy","node-home":"home_consumption_power","val-home":"home_consumption_power","val-autarky":"autarky_rate","val-today-home":"daily_home_energy","node-ev":"ev_power","val-ev":"ev_power","val-today-ev":"daily_ev_energy","val-inverter-status":"charging_state"};for(const[t,i]of Object.entries(e)){const e=this._getEntityId(i);if(!e)continue;const s=this.renderRoot.getElementById(t);s&&(s.setAttribute("data-entity",e),s.style.cursor="pointer")}const t=this.renderRoot.querySelector("svg");t&&!t._semClickBound&&(t._semClickBound=!0,t.addEventListener("click",e=>{let i=e.target;for(let e=0;e<5&&i&&i!==t;e++){const e=i.getAttribute?.("data-entity");if(e)return void this._fireMoreInfo(e);i=i.parentElement}}));const i=[{ids:["node-solar"],node:"solar",key:"solar_power"},{ids:["node-battery"],node:"battery",key:"battery_soc"},{ids:["node-grid"],node:"grid",key:"grid_import_power"},{ids:["node-home"],node:"home",key:"home_consumption_power"},{ids:["node-ev"],node:"ev",key:"ev_power"}];for(const{ids:e,node:t,key:s}of i){const i=this._getEntityId(s);if(i)for(const s of e){const e=this.renderRoot.getElementById(s);e&&!e._semActionsBound&&(e._semActionsBound=!0,e.classList.add("clickable-node"),this._setupNodeActions(e,t,i))}}}_setupNodeActions(e,t,i){let s=null,r=!1,a=0,o=null;e.style.cursor="pointer",e.addEventListener("pointerdown",()=>{r=!1,s=setTimeout(()=>{r=!0;const e=this._getActionConfig(t,"hold_action");"none"!==e.action&&this._handleAction(e,i)},500)}),e.addEventListener("pointerup",()=>clearTimeout(s)),e.addEventListener("pointercancel",()=>{clearTimeout(s),r=!1}),e.addEventListener("click",()=>{if(r)return void(r=!1);const e=this._getActionConfig(t,"double_tap_action");if(!e||"none"===e.action)return void this._handleAction(this._getActionConfig(t,"tap_action"),i);const s=Date.now();s-a<300?(clearTimeout(o),a=0,this._handleAction(e,i)):(a=s,o=setTimeout(()=>{a=0,this._handleAction(this._getActionConfig(t,"tap_action"),i)},300))})}_getActionConfig(e,t){const i=this._entities;if(!i)return{action:"tap_action"===t?"more-info":"none"};let s;if(e.startsWith("device_")){const t=parseInt(e.split("_")[1]);s=i.individual?.[t]}else{s={solar:i.solar,battery:i.battery,grid:i.grid,home:i.home,ev:i.ev||i.individual?.[0]}[e]}const r=s?.[t];return r?"string"==typeof r?{action:r}:r:{action:"tap_action"===t?"more-info":"none"}}_handleAction(e,t){switch(e||(e={action:"more-info"}),e.action){case"more-info":this._fireMoreInfo(e.entity||t);break;case"toggle":this._hass&&this._hass.callService("homeassistant","toggle",{entity_id:e.entity||t});break;case"navigate":e.navigation_path&&(window.history.pushState(null,"",e.navigation_path),window.dispatchEvent(new CustomEvent("location-changed")));break;case"call-service":if(e.service&&this._hass){const[t,i]=e.service.split(".");this._hass.callService(t,i,e.service_data||{})}break;case"url":e.url_path&&window.open(e.url_path,"_blank")}}_fireMoreInfo(e){e&&this.dispatchEvent(new CustomEvent("hass-more-info",{detail:{entityId:e},bubbles:!0,composed:!0}))}_setGlowIntensity(e,t,i){const s=this.renderRoot.querySelector(`#${e} .glow-ring`);if(!s)return;const r=Math.min(1,Math.abs(t)/i);s.style.opacity=(.15+.85*r).toFixed(2)}_animateValue(e,t,i=800,s=null){const r=this.renderRoot.getElementById(e);if(!r)return;this._animFrames[e]&&cancelAnimationFrame(this._animFrames[e]);const a=s||(e=>ge(e)),o=this._currentValues[e]||0;if(this._currentValues[e]=t,Math.abs(o-t)<.5)return void(r.textContent=a(t));const n=performance.now(),l=s=>{const c=Math.min(1,(s-n)/i),d=c<.5?2*c*c:1-Math.pow(-2*c+2,2)/2;r.textContent=a(o+(t-o)*d),c<1?this._animFrames[e]=requestAnimationFrame(l):delete this._animFrames[e]};this._animFrames[e]=requestAnimationFrame(l),setTimeout(()=>{this._currentValues[e]===t&&(this._animFrames[e]&&(cancelAnimationFrame(this._animFrames[e]),delete this._animFrames[e]),r.textContent=a(t))},i+250)}_setText(e,t){const i=this.renderRoot.getElementById(e);i&&(i.textContent=t)}_getState(e){if(!this._hass)return 0;const t="prefix"===this._mode?`${this._prefix}${e}`:this._resolveEntity(e);if(!t)return 0;const i=this._hass.states[t];if(!i)return 0;const s=parseFloat(i.state);return isNaN(s)?0:s}_powerSnapshot(){if("prefix"!==this._mode||!this._hass)return null;const e=this._hass.states[this._prefix+"home_consumption_power"],t=e&&e.attributes&&e.attributes.power_snapshot;return t&&"object"==typeof t?t:null}_getStateStr(e){if(!this._hass)return"";const t="prefix"===this._mode?`${this._prefix}${e}`:this._resolveEntity(e);if(!t)return"";const i=this._hass.states[t];return i?i.state:""}_getEntityId(e){return"prefix"===this._mode?`${this._prefix}${e}`:this._resolveEntity(e)}_resolveEntity(e){const t=this._entities;if(!t)return null;return{solar_power:t.solar?.entity,battery_power:t.battery?.entity,battery_charge_power:t.battery?.charge,battery_discharge_power:t.battery?.discharge,grid_power:t.grid?.entity,grid_import_power:t.grid?.consumption,grid_export_power:t.grid?.production,ev_power:t.ev?.entity||t.individual?.[0]?.entity,battery_soc:t.battery?.state_of_charge,home_consumption_power:t.home?.entity,charging_state:t.inverter?.entity,daily_solar_energy:t.solar?.daily_energy,daily_ev_energy:t.ev?.daily_energy||t.individual?.[0]?.daily_energy,daily_grid_import_energy:t.grid?.daily_import_energy,daily_grid_export_energy:t.grid?.daily_export_energy,daily_battery_energy:t.battery?.daily_energy,daily_home_energy:t.home?.daily_energy,autarky_rate:t.home?.autarky,ev_charger_count:t.ev?.charger_count||"sensor.sem_ev_charger_count"}[e]||null}_hasNode(e){if("ev"===e&&!this._showEv)return!1;if("battery"===e&&!this._showBattery)return!1;if("prefix"===this._mode)return!0;const t=this._entities;if(!t)return!1;return{solar:!!t.solar?.entity,battery:!!(t.battery?.entity||t.battery?.charge||t.battery?.discharge),grid:!(!t.grid?.consumption&&!t.grid?.entity),home:!0,ev:!(!t.ev?.entity&&!t.individual?.[0]?.entity),inverter:!!t.inverter?.entity||!!t.solar?.entity}[e]||!1}_getNodeColor(e){const t=this._entities,i={solar:Ot.solar.color,battery:Ot.battery.color,grid:Ot.grid.color_import,grid_import:Ot.grid.color_import,grid_export:Ot.grid.color_export,home:Ot.home.color,ev:Ot.ev.color,inverter:Ot.inverter.color};if(!t)return i[e]||"#888";return{solar:t.solar?.color,battery:t.battery?.color,grid:t.grid?.color_import,grid_import:t.grid?.color_import,grid_export:t.grid?.color_export,home:t.home?.color,ev:t.ev?.color||t.individual?.[0]?.color}[e]||i[e]||"#888"}_getNodeName(e){const t=this._entities,i=Ot[e]?.nameKey,s=i?this._t(i):e;if(!t)return s;return{solar:t.solar?.name,battery:t.battery?.name,grid:t.grid?.name,home:t.home?.name,ev:t.ev?.name||t.individual?.[0]?.name}[e]||s}_getLayout(){return this._compact?{vb:"0 0 500 1100",solar:{cx:250,cy:70,r:48},inverter:{cx:250,cy:225,r:20},battery:{cx:100,cy:340,r:48},grid:{cx:400,cy:340,r:48},home:{cx:250,cy:510,r:60},ev:{cx:100,cy:660,r:42},socR:33,autarkyR:48,paths:{solar:"M250,118 L250,205",home:"M250,245 L250,450",battery:"M230,230 C180,260 120,290 100,292",grid:"M270,230 C320,260 380,290 400,292",ev:"M230,240 C180,380 130,560 100,618"},font:{label:14,value:22,sub:12,homeVal:26},deviceY:810}:{vb:"0 0 1000 800",solar:{cx:500,cy:65,r:50},inverter:{cx:500,cy:210,r:20},battery:{cx:150,cy:270,r:50},grid:{cx:850,cy:270,r:50},home:{cx:500,cy:385,r:62},ev:{cx:150,cy:460,r:44},socR:40,autarkyR:50,paths:{solar:"M500,115 L500,190",home:"M500,230 L500,323",battery:"M480,215 C380,230 250,245 200,270",grid:"M520,215 C620,230 750,245 800,270",ev:"M480,225 C380,330 250,410 195,460"},font:{label:13,value:20,sub:11,homeVal:24},deviceY:590}}_glowFilter(e,t,i){return`<filter id="${e}" x="-30%" y="-30%" width="160%" height="160%">\n            <feGaussianBlur stdDeviation="${i}" result="blur"/>\n            <feFlood flood-color="${t}" flood-opacity="0.25"/>\n            <feComposite in2="blur" operator="in"/>\n            <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>\n        </filter>`}_glowRing(e,t,i=1.2){const s=e.r+5;return`<circle class="glow-ring" cx="${e.cx}" cy="${e.cy}" r="${s}" fill="none" stroke="${t}" stroke-width="${i}" opacity="0.3">\n            <animate attributeName="r" values="${s};${s+5};${s}" dur="3s" repeatCount="indefinite"/>\n            <animate attributeName="opacity" values="0.3;0.12;0.3" dur="3s" repeatCount="indefinite"/>\n        </circle>`}_track(e,t){return`<path d="${e}" fill="none" stroke="${t}" stroke-width="1.5" stroke-dasharray="4,6" opacity="0.18"/>`}_hexToRgba(e,t){const i=e.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);return i?`rgba(${parseInt(i[1],16)},${parseInt(i[2],16)},${parseInt(i[3],16)},${t})`:`rgba(128,128,128,${t})`}_autarkyColor(e){if((e=Math.max(0,Math.min(100,e)))<=50){const t=e/50;return`rgb(220,${Math.round(50+150*t)},50)`}const t=(e-50)/50;return`rgb(${Math.round(220-170*t)},200,50)`}_deviceIcon(e,t){const i=(t||"").toLowerCase();return"ev_charger"===(e||"").toLowerCase()||i.includes("keba")||i.includes("charger")||i.includes("wallbox")?'<rect x="-6" y="-10" width="12" height="16" rx="2"/><path d="M-2,-4 L0,2 L2,-4"/><line x1="0" y1="6" x2="0" y2="10"/>':i.includes("heiz")||i.includes("heat")||i.includes("warm")||i.includes("boiler")?'<path d="M-4,-10 C-4,-4 4,-4 4,-10"/><path d="M-4,-3 C-4,3 4,3 4,-3"/><path d="M-4,4 C-4,10 4,10 4,4"/>':i.includes("wash")||i.includes("spül")||i.includes("geschirr")||i.includes("wasch")?'<circle r="10" fill="none"/><circle r="5" fill="none"/><circle r="1.5" fill="currentColor" opacity="0.3" stroke="none"/>':i.includes("dryer")||i.includes("trockn")?'<circle r="10" fill="none"/><path d="M-4,-4 C0,-8 0,8 4,4" fill="none"/>':i.includes("pool")||i.includes("pump")?'<circle r="8" fill="none"/><path d="M-6,0 L6,0 M0,-6 L0,6" opacity="0.5"/><path d="M-4,-4 L4,4 M4,-4 L-4,4"/>':i.includes("klima")||i.includes("ac")||i.includes("cool")||i.includes("air")?'<rect x="-10" y="-6" width="20" height="12" rx="2"/><path d="M-6,6 C-6,10 -2,10 -2,6" fill="none"/><path d="M2,6 C2,10 6,10 6,6" fill="none"/>':i.includes("light")||i.includes("licht")||i.includes("lamp")?'<path d="M-5,-10 C-8,-2 -3,4 -2,6 L2,6 C3,4 8,-2 5,-10 C2,-14 -2,-14 -5,-10Z" fill="none"/><line x1="-2" y1="8" x2="2" y2="8"/>':i.includes("shelly")||i.includes("plug")||i.includes("switch")||i.includes("steckdose")?'<rect x="-8" y="-10" width="16" height="20" rx="3"/><circle cx="-3" cy="-2" r="2" fill="none"/><circle cx="3" cy="-2" r="2" fill="none"/><line x1="0" y1="4" x2="0" y2="7"/>':'<path d="M-3,-10 L-3,0 L-6,0 L0,10 L0,0 L3,0 L-3,-10Z" fill="none"/>'}getCardSize(){return 8}static async getConfigElement(){return document.createElement("sem-flow-card-editor")}static getStubConfig(e){const t=e?Object.keys(e.states):[],i=e=>{for(const i of e){const e=t.find(e=>e.includes(i));if(e)return e}return null};return{entities:{solar:{entity:i(["solar_power","pv_power"])||"sensor.solar_power"},grid:{consumption:i(["grid_import","grid_consumption"])||"sensor.grid_import_power",production:i(["grid_export","grid_feed"])||"sensor.grid_export_power"},battery:{entity:i(["battery_power","batt_power"])||"sensor.battery_power",state_of_charge:i(["battery_soc","battery_level"])||"sensor.battery_soc"},home:{entity:i(["home_consumption","house_power"])||"sensor.home_consumption_power"}}}}},{type:"sem-flow-card",name:"SEM Flow Card",description:"Animated energy flow diagram — works with any HA entities",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-flow-card"});const Ht=864e5,Wt=36e5;const jt="sensor.sem_",Gt=["solar_power","battery_power","grid_import_power","grid_export_power","ev_power","battery_soc","battery_temperature","charging_state","home_consumption_power","daily_solar_energy","daily_battery_charge_energy","daily_battery_discharge_energy","daily_ev_energy","daily_home_energy","daily_grid_import_energy","daily_grid_export_energy","forecast_today_kwh","controllable_devices_count"],Kt=2551442889.6,qt=Date.parse("2000-01-06T18:14:00Z"),Vt={new_moon:{k:0,waxing:!0},waxing_crescent:{k:.25,waxing:!0},first_quarter:{k:.5,waxing:!0},waxing_gibbous:{k:.75,waxing:!0},full_moon:{k:1,waxing:!0},waning_gibbous:{k:.75,waxing:!1},last_quarter:{k:.5,waxing:!1},waning_crescent:{k:.25,waxing:!1}};we("sem-system-diagram-card",class extends Se{static properties={_solarDisp:{state:!0},_battDisp:{state:!0},_homeDisp:{state:!0},_evDisp:{state:!0},_gridDisp:{state:!0},_gridDispMode:{state:!0},_sunTransform:{state:!0},_moonTransform:{state:!0},_sunPowerX:{state:!0},_sunPowerY:{state:!0},_sunPtX:{state:!0},_sunPtY:{state:!0}};static get watchedEntities(){return Gt.map(e=>`${jt}${e}`)}constructor(){super(),this._prefix=jt,this._mode="prefix",this._entities=null,this._compact=!1,this._visible=!0,this._resizeObserver=null,this._intersectionObserver=null,this._resizeTimeout=null,this._counterRaf=null,this._targets=null,this._lastDiagKey="",this._sunSparkProps=null,this._sunSparkSig="",this._sparkWaveD=""}setConfig(e){super.setConfig(e),e.entities&&!e.entity_prefix?(this._mode="entities",this._entities=e.entities):(this._mode="prefix",this._entities=null),this._prefix=e.entity_prefix||jt,this._showEv=!1!==e.show_ev,this._showBattery=!1!==e.show_battery}_eid(e){if("entities"!==this._mode)return`${this._prefix}${e}`;const t=this._entities;if(!t)return null;return{solar_power:t.solar?.entity,battery_power:t.battery?.entity,battery_charge_power:t.battery?.charge,battery_discharge_power:t.battery?.discharge,grid_power:t.grid?.entity,grid_import_power:t.grid?.consumption,grid_export_power:t.grid?.production,ev_power:t.ev?.entity||t.individual?.[0]?.entity,battery_soc:t.battery?.state_of_charge,battery_temperature:t.battery?.temperature,home_consumption_power:t.home?.entity,charging_state:t.inverter?.entity,daily_solar_energy:t.solar?.daily_energy,daily_ev_energy:t.ev?.daily_energy||t.individual?.[0]?.daily_energy,daily_grid_import_energy:t.grid?.daily_import_energy,daily_grid_export_energy:t.grid?.daily_export_energy,daily_battery_charge_energy:t.battery?.daily_charge_energy,daily_battery_discharge_energy:t.battery?.daily_discharge_energy,daily_home_energy:t.home?.daily_energy,autarky_rate:t.home?.autarky,self_consumption_rate:t.home?.self_consumption,forecast_today_kwh:t.solar?.forecast_remaining,controllable_devices_count:t.devices?.count_entity}[e]||null}_powerSnapshot(){if("prefix"!==this._mode||!this._hass)return null;const e=this._hass.states[this._prefix+"home_consumption_power"],t=e&&e.attributes&&e.attributes.power_snapshot;return t&&"object"==typeof t?t:null}_snapNum(e){const t=parseFloat(e);return isNaN(t)?0:t}_flowSolar(){const e=this._powerSnapshot();if(e)return this._snapNum(e.solar_w);const t=this._val("solar_power");return this._entities?.solar?.reverse?-t:t}_flowBattery(){const e=this._entities;if(e?.battery?.charge||e?.battery?.discharge)return this._val("battery_charge_power")-this._val("battery_discharge_power");const t=this._powerSnapshot();if(t&&null!==t.battery_soc&&void 0!==t.battery_soc)return this._snapNum(t.battery_w);const i=this._val("battery_power");return e?.battery?.reverse?-i:i}_flowGridPair(){const e=this._entities;if("entities"===this._mode&&e?.grid?.entity){const t=this._state(e.grid.entity,0),i=e.grid.reverse;return{gridImport:Math.max(0,i?-t:t),gridExport:Math.max(0,i?t:-t)}}const t=this._powerSnapshot();return t?{gridImport:this._snapNum(t.grid_import_w),gridExport:this._snapNum(t.grid_export_w)}:{gridImport:this._val("grid_import_power"),gridExport:this._val("grid_export_power")}}_flowEv(){const e=this._powerSnapshot();if(e)return this._snapNum(e.ev_w);const t=this._val("ev_power");return this._entities?.ev?.invert?-t:t}_flowHome(e,t,i,s,r,a){const o=this._powerSnapshot();if(o&&null!==o.home_w&&void 0!==o.home_w)return Math.max(0,this._snapNum(o.home_w));const n=this._eid("home_consumption_power"),l=n?this._hass?.states[n]:null;if(l&&"unavailable"!==l.state&&"unknown"!==l.state){let e=this._state(n,0);return this._entities?.home?.invert&&(e=-e),Math.max(0,e)}return Math.max(0,e+t+r-i-s-a)}set hass(e){this._hass=e;const t=e?.language,i="function"==typeof semLocalize;let s=!1;if((t!==this._lang||i&&!this._localizeReady)&&(this._lang=t,this._localizeReady=i,s=!0),this._isFrozen()&&!s)return;const r=this._eid("solar_power"),a=r?e?.states[r]?.state:void 0;if(("unavailable"===a||"unknown"===a)&&!s)return;const o=Gt.filter(e=>!(!this._showEv&&"ev_power"===e)&&!!(this._showBattery||"battery_power"!==e&&"battery_soc"!==e&&"battery_temperature"!==e));let n=o.map(t=>{const i=this._eid(t);return i&&e?.states[i]?.state||""}).join(",")+"|"+t;n+="|"+be(e,this._prefix),this._showEv&&(n+="|"+(e?.states["binary_sensor.sem_ev_connected"]?.state||""),n+="|"+(e?.states["binary_sensor.sem_ev_charging"]?.state||""));const l=e?.states["sun.sun"];if(n+="|"+(l?.attributes?.elevation??"")+":"+(l?.attributes?.next_rising||"")+":"+(l?.attributes?.next_setting||""),n+="|"+(e?.states["sensor.moon"]?.state||""),n===this._lastDiagKey&&!s)return;this._lastDiagKey=n;const c=this._flowSolar(),d=this._flowBattery(),p=Math.max(0,d),h=Math.max(0,-d),{gridImport:_,gridExport:g}=this._flowGridPair(),u=this._flowEv(),m=this._flowHome(c,_,g,p,h,u);this._targets={solar:c,batt:Math.abs(d),home:m,ev:u,grid:g>10?g:_>10?_:0,gridMode:g>10?"↑":_>10?"↓":null},this._startTickIfIdle(),this._scheduleUpdate()}get hass(){return this._hass}_val(e,t=0){const i=this._eid(e);return i?this._state(i,t):t}_valStr(e){const t=this._eid(e);return t?this._stateStr(t):""}_unitStr(e){const t=this._eid(e);return t?this._unitOf(t):""}_readWithHold(e,t,i){const s=this._eid(e),r=s?this._hass?.states[s]:void 0,a=r?.state,o=r&&"unavailable"!==a&&"unknown"!==a,n=Date.now(),l=t+"Ts",c=t.startsWith("this.")?t.slice(5):t,d=l.startsWith("this.")?l.slice(5):l;if(o){const e=parseFloat(a);if(!Number.isNaN(e))return this[c]=e,this[d]=n,{value:e,stale:!1}}return null!=this[c]&&n-(this[d]||0)<i?{value:this[c],stale:!1}:{value:0,stale:!0}}_startTickIfIdle(){if(this._counterRaf)return;const e=(e,t)=>{const i=e??0,s=t-i;return Math.abs(s)<.5?t:i+.18*s},t=()=>{if(!this._targets)return void(this._counterRaf=null);const i=this._targets,s=e(this._solarDisp,i.solar),r=e(this._battDisp,i.batt),a=e(this._homeDisp,i.home),o=e(this._evDisp,i.ev),n=e(this._gridDisp,i.grid),l=s===i.solar&&r===i.batt&&a===i.home&&o===i.ev&&n===i.grid&&this._gridDispMode===i.gridMode;this._solarDisp=s,this._battDisp=r,this._homeDisp=a,this._evDisp=o,this._gridDisp=n,this._gridDispMode=i.gridMode,this._counterRaf=l?null:requestAnimationFrame(t)};this._counterRaf=requestAnimationFrame(t)}firstUpdated(){this._resizeObserver=new ResizeObserver(e=>{this._resizeTimeout&&clearTimeout(this._resizeTimeout),this._resizeTimeout=setTimeout(()=>{for(const t of e){const e=t.contentRect.width<500;e!==this._compact&&(this._compact=e,this._sunSparkSig="",this._lastDiagKey="",this.requestUpdate())}},100)}),this._resizeObserver.observe(this),this._intersectionObserver=new IntersectionObserver(e=>{this._visible=e[0].isIntersecting;const t=this.renderRoot.querySelector("svg");t&&(t.style.animationPlayState=this._visible?"running":"paused")},{threshold:.01}),this._intersectionObserver.observe(this)}disconnectedCallback(){super.disconnectedCallback(),this._resizeObserver&&(this._resizeObserver.disconnect(),this._resizeObserver=null),this._intersectionObserver&&(this._intersectionObserver.disconnect(),this._intersectionObserver=null),clearTimeout(this._resizeTimeout),this._counterRaf&&(cancelAnimationFrame(this._counterRaf),this._counterRaf=null)}updated(e){if(super.updated(e),!this._hass)return;const t=this.renderRoot.querySelector("#sun-arc-path");if(!t)return;const i=this._getLayout(),s=this._computeSunPose();try{const e=t.getTotalLength(),r=t.getPointAtLength(s.pos*e),a=r.x-i.sunX,o=r.y-i.sunY,n=`translate(${a.toFixed(1)},${o.toFixed(1)}) translate(${i.sunX},${i.sunY}) scale(${s.scale.toFixed(2)}) translate(${(-i.sunX).toFixed(1)},${(-i.sunY).toFixed(1)})`,l=s.isNight?`translate(${a.toFixed(1)},${o.toFixed(1)})`:"",c=r.x.toFixed(1),d=(r.y+i.sunR*s.scale+16).toFixed(1),p=+r.x.toFixed(1),h=+r.y.toFixed(1);if(this._sunTransform===n&&this._moonTransform===l&&this._sunPowerX===c&&this._sunPowerY===d&&this._sunPtX===p&&this._sunPtY===h)return;this._sunTransform=n,this._moonTransform=l,this._sunPowerX=c,this._sunPowerY=d,this._sunPtX=p,this._sunPtY=h}catch(e){}}_computeSunPose(){const e=this._hass?.states["sun.sun"],t=(e&&parseFloat(e.attributes?.elevation)||-90)<0,i=this._val("solar_power"),s=e?.attributes;let r=.5;if(s){const e=s.next_rising?new Date(s.next_rising).getTime():0,i=s.next_setting?new Date(s.next_setting).getTime():0,a=Date.now();if(!t&&e&&i){const t=e-864e5,s=i-t;s>0&&(r=(a-t)/s)}else if(t&&e&&i){const t=function(e,t,i){if(!t||!i)return null;const s=i-e<Wt?i:i-Ht,r=t-e>828e5?t-Ht:t,a=r-s;return a<=0?Math.abs(e-r)<=Math.abs(e-s)?0:1:1-(e-s)/a}(a,e,i);null!==t&&(r=t)}else r=e&&a<e?0:1;r=Math.max(.06,Math.min(.94,r))}return{pos:r,scale:t?.7:.7+.6*Math.min(1,i/1e4),isNight:t,solar:i}}_computeMoonPhase(){const e=this._hass?.states["sensor.moon"]?.state;if(e&&Vt[e])return Vt[e];const t=((Date.now()-qt)%Kt+Kt)%Kt/Kt;return{k:(1-Math.cos(2*Math.PI*t))/2,waxing:t<.5}}_moonPhasePath(e,t,i){const s=i?1:0;return`M 0 ${-e} A ${e} ${e} 0 0 ${s} 0 ${e} A ${(e*Math.abs(1-2*t)).toFixed(2)} ${e} 0 0 ${t<.5?1-s:s} 0 ${-e} Z`}static get styles(){return a`
             :host { display: block; }
             ha-card { overflow: hidden; padding: 0; background: transparent !important; }
             svg { width: 100%; display: block; }
@@ -5312,12 +5581,12 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .flow-group { transition: none; }
                 animate, animateMotion { display: none; }
             }
-        `}render(){if(!this._config)return q;const e=this._getLayout(),t=this._compact,i="'Segoe UI','Roboto',sans-serif",s=e.font.label,r=e.font.value,a=e.font.sub,o=this._flowSolar(),{gridImport:n,gridExport:l}=this._flowGridPair(),c=this._flowEv();let d,p;this._entities?.battery?.charge||this._entities?.battery?.discharge?(d=this._flowBattery(),p=!1):(({value:d,stale:p}=this._readWithHold("battery_power","this._lastBattPower",6e4)),this._entities?.battery?.reverse&&(d=-d));const{value:h,stale:_}=this._readWithHold("battery_soc","this._lastBattSoc",6e4),g=p||_,u=Math.max(0,d),m=Math.max(0,-d),f=this._flowHome(o,n,l,u,m,c),v=this._computeSunPose(),{isNight:y}=v,b=y?this._computeMoonPhase():{k:0,waxing:!0},x=y?.3:.85,$=o>50?Math.min(1,.3+o/5e3):0,w=this._hass?.states["sun.sun"]?.attributes,k=this._hass?.config?.time_zone||void 0,S=w?.next_rising?ue(w.next_rising,k):"",C=w?.next_setting?ue(w.next_setting,k):"",z=ve(this).isDark,M=z?"#FCD170":"#a06a00",D=z?.45:.8,E=z?"#ff9800":"#b35c00",F=z?.4:.8,A=z?"#96CAEE":"#3d6e94",I=z?.6:.85,B=z?.35:.8,R=e.B.r/50,N=64*R,P=N-12*R,T=e.B.cy-N/2+8*R,L=Math.max(0,Math.min(P,P*(h/100))),U=T+P-L,O=u>10?"#f06292":"url(#battFillGrad)",H=u>10,j=l>n?"#8353d1":"#488fc2",K=l>10&&l>n?this._t("exporting"):n>10?this._t("importing"):"",V=l>10&&l>n?"#8353d1":"#488fc2",Y=u>10?"#f06292":"#4db6ac",X=u>10?this._t("charging"):m>10?this._t("discharging"):"",Z=u>10?"#f06292":"#4db6ac",J="on"===this._hass?.states["binary_sensor.sem_ev_connected"]?.state;let Q="",ee="#8DC892";"on"===this._hass?.states["binary_sensor.sem_ev_charging"]?.state||c>10?(Q=this._t("charging"),ee="#8DC892"):J&&(Q=this._t("connected")||"Verbunden",ee="rgba(141,200,146,0.6)");const te=this._t("today"),ie=`${te} ${this._valStr("daily_solar_energy")} kWh`,se=this._val("forecast_today_kwh"),re=se>0?`☀ ${se.toFixed(1)} kWh ${this._t("forecast")||"Forecast"}`:"",ae=`${te} ${this._valStr("daily_ev_energy")} kWh`,oe=`${te} ${this._val("daily_home_energy").toFixed(1)} kWh`,ne=`+${this._val("daily_battery_charge_energy").toFixed(1)} / -${this._val("daily_battery_discharge_energy").toFixed(1)} kWh`,le=`↓${this._val("daily_grid_import_energy").toFixed(1)} / ↑${this._val("daily_grid_export_energy").toFixed(1)} kWh`,ce=function(e,t,i={}){const{decimals:s=0,space:r=!1}=i;if(null==e||""===e||isNaN(parseFloat(e)))return"";const a=t||"°C";return`${parseFloat(e).toFixed(s)}${r?" ":""}${a}`}(this._valStr("inverter_temperature"),this._unitStr("inverter_temperature")),de=this._valStr("charging_state"),pe=t?22:30,he=de.length>pe?de.substring(0,pe-1)+"…":de,_e=[],fe=["solar_power","grid_import_power","grid_export_power"];this._showBattery&&fe.push("battery_power","battery_soc"),this._showEv&&fe.push("ev_power");for(const e of fe){const t=this._eid(e);if(!t){"prefix"===this._mode&&_e.push(e);continue}const i=this._hass?.states[t];i&&"unavailable"!==i.state&&"unknown"!==i.state||_e.push(e)}const ye=ge(this._solarDisp??0),be=(u>10?"↑ ":m>10?"↓ ":"")+ge(this._battDisp??0),we=ge(this._homeDisp??0),ke=ge(this._evDisp??0),Se=this._gridDispMode?`${this._gridDispMode} ${ge(this._gridDisp??0)}`:ge(0),Ce="↑"===this._gridDispMode?"#8353d1":"#488fc2",ze=xe(this._hass,this._prefix),Me=o>10,De=Math.abs(d)>10,Ee=d<0,Fe=u>10?"#f06292":"#4db6ac",Ae=n>10||l>10,Ie=n>l,Be=l>n?"#8353d1":"#488fc2",Re=f>10,Ne=c>10;return W`
+        `}render(){if(!this._config)return K;const e=this._getLayout(),t=this._compact,i="'Segoe UI','Roboto',sans-serif",s=e.font.label,r=e.font.value,a=e.font.sub,o=this._flowSolar(),{gridImport:n,gridExport:l}=this._flowGridPair(),c=this._flowEv();let d,p;this._entities?.battery?.charge||this._entities?.battery?.discharge?(d=this._flowBattery(),p=!1):(({value:d,stale:p}=this._readWithHold("battery_power","this._lastBattPower",6e4)),this._entities?.battery?.reverse&&(d=-d));const{value:h,stale:_}=this._readWithHold("battery_soc","this._lastBattSoc",6e4),g=p||_,u=Je(h,_),m=Math.max(0,d),f=Math.max(0,-d),v=this._flowHome(o,n,l,m,f,c),y=this._computeSunPose(),{isNight:b}=y,x=b?this._computeMoonPhase():{k:0,waxing:!0},$=b?.3:.85,w=o>50?Math.min(1,.3+o/5e3):0,k=this._hass?.states["sun.sun"]?.attributes,S=this._hass?.config?.time_zone||void 0,C=k?.next_rising?ue(k.next_rising,S):"",z=k?.next_setting?ue(k.next_setting,S):"",M=ve(this).isDark,D=M?"#FCD170":"#a06a00",E=M?.45:.8,F=M?"#ff9800":"#b35c00",I=M?.4:.8,A=M?"#96CAEE":"#3d6e94",N=M?.6:.85,B=M?.35:.8,T=e.B.r/50,R=64*T,P=R-12*T,L=e.B.cy-R/2+8*T,U=P*u.fraction,O=L+P-U,H=m>10?"#f06292":"url(#battFillGrad)",G=m>10,q=l>n?"#8353d1":"#488fc2",V=l>10&&l>n?this._t("exporting"):n>10?this._t("importing"):"",Y=l>10&&l>n?"#8353d1":"#488fc2",X=m>10?"#f06292":"#4db6ac",Z=m>10?this._t("charging"):f>10?this._t("discharging"):"",J=m>10?"#f06292":"#4db6ac",Q="on"===this._hass?.states["binary_sensor.sem_ev_connected"]?.state;let ee="",te="#8DC892";"on"===this._hass?.states["binary_sensor.sem_ev_charging"]?.state||c>10?(ee=this._t("charging"),te="#8DC892"):Q&&(ee=this._t("connected")||"Verbunden",te="rgba(141,200,146,0.6)");const ie=this._t("today"),se=`${ie} ${this._valStr("daily_solar_energy")} kWh`,re=this._val("forecast_today_kwh"),ae=re>0?`☀ ${re.toFixed(1)} kWh ${this._t("forecast")||"Forecast"}`:"",oe=`${ie} ${this._valStr("daily_ev_energy")} kWh`,ne=`${ie} ${this._val("daily_home_energy").toFixed(1)} kWh`,le=`+${this._val("daily_battery_charge_energy").toFixed(1)} / -${this._val("daily_battery_discharge_energy").toFixed(1)} kWh`,ce=`↓${this._val("daily_grid_import_energy").toFixed(1)} / ↑${this._val("daily_grid_export_energy").toFixed(1)} kWh`,de=function(e,t,i={}){const{decimals:s=0,space:r=!1}=i;if(null==e||""===e||isNaN(parseFloat(e)))return"";const a=t||"°C";return`${parseFloat(e).toFixed(s)}${r?" ":""}${a}`}(this._valStr("inverter_temperature"),this._unitStr("inverter_temperature")),pe=this._valStr("charging_state"),he=t?22:30,_e=pe.length>he?pe.substring(0,he-1)+"…":pe,fe=[],ye=["solar_power","grid_import_power","grid_export_power"];this._showBattery&&ye.push("battery_power","battery_soc"),this._showEv&&ye.push("ev_power");for(const e of ye){const t=this._eid(e);if(!t){"prefix"===this._mode&&fe.push(e);continue}const i=this._hass?.states[t];i&&"unavailable"!==i.state&&"unknown"!==i.state||fe.push(e)}const be=ge(this._solarDisp??0),we=(m>10?"↑ ":f>10?"↓ ":"")+ge(this._battDisp??0),ke=ge(this._homeDisp??0),Se=ge(this._evDisp??0),Ce=this._gridDispMode?`${this._gridDispMode} ${ge(this._gridDisp??0)}`:ge(0),ze="↑"===this._gridDispMode?"#8353d1":"#488fc2",Me=xe(this._hass,this._prefix),De=o>10,Ee=Math.abs(d)>10,Fe=d<0,Ie=m>10?"#f06292":"#4db6ac",Ae=n>10||l>10,Ne=n>l,Be=l>n?"#8353d1":"#488fc2",Te=v>10,Re=c>10;return W`
             <ha-card>
                 <style>${$e}</style>
-                ${ze.length>=2?W`
+                ${Me.length>=2?W`
                     <div class="pv-strings-row">
-                        ${ze.map(e=>W`
+                        ${Me.map(e=>W`
                             <div class="pv-chip"
                                  title="${e.entityId}"
                                  data-entity="${e.entityId}"
@@ -5327,7 +5596,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             </div>
                         `)}
                     </div>
-                `:q}
+                `:K}
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="${e.vb}"
                      style="background:transparent;overflow:hidden"
                      role="img" aria-label="Solar energy system power flow diagram">
@@ -5406,7 +5675,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <stop offset="100%" stop-color="#F7941E"/>
                         </radialGradient>
 
-                        ${null!=this._sunPtX&&o>50?this._sparkWavePath(e):q}
+                        ${null!=this._sunPtX&&o>50?this._sparkWavePath(e):K}
                     </defs>
 
                     <rect width="100%" height="100%" fill="url(#bgGrad)"/>
@@ -5418,12 +5687,12 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                               stroke-width="2" stroke-dasharray="4,8"/>
                         <text x="${e.sunRisingX}" y="${e.sunLabelY}"
                               text-anchor="middle" font-family="${i}" font-size="${a}"
-                              fill="${M}" opacity="${D}">${S}</text>
+                              fill="${D}" opacity="${E}">${C}</text>
                         <text x="${e.sunSettingX}" y="${e.sunLabelY}"
                               text-anchor="middle" font-family="${i}" font-size="${a}"
-                              fill="${M}" opacity="${D}">${C}</text>
+                              fill="${D}" opacity="${E}">${z}</text>
 
-                        <g filter="url(#glowSun)" style="opacity:${x}"
+                        <g filter="url(#glowSun)" style="opacity:${$}"
                            transform="${this._sunTransform??""}">
                             <circle cx="${e.sunX}" cy="${e.sunY}" r="${e.sunR+6}"
                                     fill="rgba(252,209,112,0.15)"/>
@@ -5435,22 +5704,22 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                      fill="rgba(255,255,255,0.35)"/>
                         </g>
 
-                        <g style="display:${y?"block":"none"}"
+                        <g style="display:${b?"block":"none"}"
                            transform="${this._moonTransform??""}">
                             <circle cx="${e.sunX}" cy="${e.sunY}" r="${e.sunR}" fill="#1a2540"/>
-                            ${b.k>.03?G`<circle cx="${e.sunX}" cy="${e.sunY}"
-                                    r="${(e.sunR+3+5*b.k).toFixed(1)}" fill="none"
-                                    stroke="rgba(240,236,216,${(.09*b.k).toFixed(2)})"
-                                    stroke-width="4"/>`:q}
+                            ${x.k>.03?j`<circle cx="${e.sunX}" cy="${e.sunY}"
+                                    r="${(e.sunR+3+5*x.k).toFixed(1)}" fill="none"
+                                    stroke="rgba(240,236,216,${(.09*x.k).toFixed(2)})"
+                                    stroke-width="4"/>`:K}
                             <g transform="translate(${e.sunX},${e.sunY})">
-                                <path d="${this._moonPhasePath(e.sunR,b.k,b.waxing)}"
+                                <path d="${this._moonPhasePath(e.sunR,x.k,x.waxing)}"
                                       fill="#f0ecd8"/>
                             </g>
                             <circle cx="${e.sunX}" cy="${e.sunY}" r="${e.sunR}"
                                     fill="none" stroke="rgba(200,220,255,0.5)" stroke-width="1"/>
                         </g>
 
-                        <g style="display:${y?"block":"none"}" fill="rgba(200,220,255,0.6)">
+                        <g style="display:${b?"block":"none"}" fill="rgba(200,220,255,0.6)">
                             <circle cx="${e.starX[0]}" cy="${e.starY[0]}" r="1.2"/>
                             <circle cx="${e.starX[1]}" cy="${e.starY[1]}" r="0.9"/>
                             <circle cx="${e.starX[2]}" cy="${e.starY[2]}" r="1.4"/>
@@ -5462,8 +5731,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                               text-anchor="middle" font-family="${i}" font-size="${a}"
                               fill="#FCD170" opacity="0.7" font-weight="600">${o>10?ge(o):""}</text>
 
-                        <g style="opacity:${$}">
-                            ${null!=this._sunPtX&&o>50?this._renderSunSpark(o):q}
+                        <g style="opacity:${w}">
+                            ${null!=this._sunPtX&&o>50?this._renderSunSpark(o):K}
                         </g>
                     </g>
 
@@ -5472,29 +5741,29 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                           stroke-dasharray="5,7" opacity="0.22"/>
                     <path d="${e.paths.home}"    fill="none" stroke="#5BC8D8" stroke-width="2"
                           stroke-dasharray="5,7" opacity="0.22"/>
-                    ${this._showBattery?G`<path d="${e.paths.battery}" fill="none" stroke="#4db6ac" stroke-width="2"
-                          stroke-dasharray="5,7" opacity="0.22"/>`:q}
+                    ${this._showBattery?j`<path d="${e.paths.battery}" fill="none" stroke="#4db6ac" stroke-width="2"
+                          stroke-dasharray="5,7" opacity="0.22"/>`:K}
                     <path d="${e.paths.grid}"    fill="none" stroke="#488fc2" stroke-width="2"
                           stroke-dasharray="5,7" opacity="0.22"/>
-                    ${this._showEv?G`<path d="${e.paths.ev}" fill="none" stroke="#8DC892" stroke-width="2"
-                          stroke-dasharray="5,7" opacity="0.22"/>`:q}
+                    ${this._showEv?j`<path d="${e.paths.ev}" fill="none" stroke="#8DC892" stroke-width="2"
+                          stroke-dasharray="5,7" opacity="0.22"/>`:K}
 
                     <!-- Flow animation groups -->
-                    <g class="flow-group" style="opacity:${Me?1:0}">
+                    <g class="flow-group" style="opacity:${De?1:0}">
                         ${this._renderFlow(!1,"#ff9800",me(o),e.paths.solar,2)}
                     </g>
-                    ${this._showBattery?G`<g class="flow-group" style="opacity:${De?1:0}">
-                        ${this._renderFlow(Ee,Fe,me(d),e.paths.battery,3)}
-                    </g>`:q}
+                    ${this._showBattery?j`<g class="flow-group" style="opacity:${Ee?1:0}">
+                        ${this._renderFlow(Fe,Ie,me(d),e.paths.battery,3)}
+                    </g>`:K}
                     <g class="flow-group" style="opacity:${Ae?1:0}">
-                        ${this._renderFlow(Ie,Be,me(n||l),e.paths.grid,3)}
+                        ${this._renderFlow(Ne,Be,me(n||l),e.paths.grid,3)}
                     </g>
-                    <g class="flow-group" style="opacity:${Re?1:0}">
-                        ${this._renderFlow(!1,"#5BC8D8",me(f),e.paths.home,2)}
+                    <g class="flow-group" style="opacity:${Te?1:0}">
+                        ${this._renderFlow(!1,"#5BC8D8",me(v),e.paths.home,2)}
                     </g>
-                    ${this._showEv?G`<g class="flow-group" style="opacity:${Ne?1:0}">
+                    ${this._showEv?j`<g class="flow-group" style="opacity:${Re?1:0}">
                         ${this._renderFlow(!1,"#8DC892",me(c),e.paths.ev,3)}
-                    </g>`:q}
+                    </g>`:K}
 
                     <!-- Solar panel -->
                     <g filter="url(#glowSolar)" class="clickable" @click=${()=>this._showMoreInfo("solar_power")}>
@@ -5506,15 +5775,15 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <text x="${e.S.cx}" y="${e.S.labelY+1.1*r}" class="clickable"
                           @click=${()=>this._showMoreInfo("solar_power")}
                           text-anchor="middle" font-family="${i}" font-size="${r}"
-                          font-weight="800" fill="#ff9800">${ye}</text>
+                          font-weight="800" fill="#ff9800">${be}</text>
                     <text x="${e.S.cx}" y="${e.S.labelY+1.1*r+a+3}" class="clickable"
                           @click=${()=>this._showMoreInfo("daily_solar_energy")}
                           text-anchor="middle" font-family="${i}" font-size="${a+1}"
-                          fill="#ff9800" opacity="0.6" font-weight="600">${ie}</text>
+                          fill="#ff9800" opacity="0.6" font-weight="600">${se}</text>
                     <text x="${e.S.cx}" y="${e.S.labelY+1.1*r+2*(a+3)}" class="clickable"
                           @click=${()=>this._showMoreInfo("forecast_today_kwh")}
                           text-anchor="middle" font-family="${i}" font-size="${a}"
-                          fill="${E}" opacity="${F}" font-weight="500">${re}</text>
+                          fill="${F}" opacity="${I}" font-weight="500">${ae}</text>
 
                     <!-- Inverter -->
                     <g filter="url(#glowInverter)">
@@ -5522,10 +5791,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </g>
                     <text x="${e.I.cx}" y="${e.I.cy+e.I.r+14}"
                           text-anchor="middle" font-family="${i}" font-size="${a}"
-                          fill="${A}" opacity="${I}" font-weight="600">${ce}</text>
+                          fill="${A}" opacity="${N}" font-weight="600">${de}</text>
                     <text x="${e.I.cx}" y="${e.I.cy+e.I.r+14+a+2}"
                           text-anchor="middle" font-family="${i}" font-size="${a-1}"
-                          fill="${A}" opacity="${B}">${he}</text>
+                          fill="${A}" opacity="${B}">${_e}</text>
 
                     <!-- Battery (omitted entirely when show_battery: false,
                          #614 — the ghost-node class's battery sibling).
@@ -5538,10 +5807,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                          backticks inside this lit template's COMMENTS:
                          they terminate the template literal and the whole
                          card renders blank, #488.) -->
-                    ${this._showBattery?G`<g filter="url(#glowBattery)" class="clickable"
+                    ${this._showBattery?j`<g filter="url(#glowBattery)" class="clickable"
                        opacity="${g?.35:1}"
                        @click=${()=>this._showMoreInfo("battery_soc")}>
-                        ${this._illustrationBattery(e.B.cx,e.B.cy,e.B.r,L,U,O,H,h)}
+                        ${this._illustrationBattery(e.B.cx,e.B.cy,e.B.r,U,O,H,G,u.label)}
                     </g>
                     <text x="${e.B.cx}" y="${e.B.labelY}" text-anchor="middle"
                           font-family="${i}" font-size="${s}" font-weight="700"
@@ -5549,15 +5818,15 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <text x="${e.B.cx}" y="${e.B.labelY+1*r}" class="clickable"
                           @click=${()=>this._showMoreInfo("battery_power")}
                           text-anchor="middle" font-family="${i}" font-size="${r}"
-                          font-weight="800" fill="${Y}"
-                          opacity="${g?.4:1}">${g?"— W":be}</text>
+                          font-weight="800" fill="${X}"
+                          opacity="${g?.4:1}">${g?"— W":we}</text>
                     <text x="${e.B.cx}" y="${e.B.labelY+1*r+s}"
                           text-anchor="middle" font-family="${i}" font-size="${s}"
-                          fill="${Z}" opacity="0.6">${g?this._t("sensor_unavailable"):X}</text>
+                          fill="${J}" opacity="0.6">${g?this._t("sensor_unavailable"):Z}</text>
                     <text x="${e.B.cx}" y="${e.B.labelY+1*r+s+a+2}" class="clickable"
                           @click=${()=>this._showMoreInfo("daily_battery_charge_energy")}
                           text-anchor="middle" font-family="${i}" font-size="${a+1}"
-                          fill="#4db6ac" opacity="0.6" font-weight="600">${ne}</text>`:q}
+                          fill="#4db6ac" opacity="0.6" font-weight="600">${le}</text>`:K}
 
                     <!-- Grid -->
                     <g filter="url(#glowGrid)" class="clickable" @click=${()=>this._showMoreInfo("grid_import_power")}>
@@ -5565,18 +5834,18 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </g>
                     <text x="${e.G.cx}" y="${e.G.labelY}" text-anchor="middle"
                           font-family="${i}" font-size="${s}" font-weight="700"
-                          fill="${j}" letter-spacing="0.5">${this._t("grid")}</text>
+                          fill="${q}" letter-spacing="0.5">${this._t("grid")}</text>
                     <text x="${e.G.cx}" y="${e.G.labelY+r}" class="clickable"
                           @click=${()=>this._showMoreInfo("grid_power")}
                           text-anchor="middle" font-family="${i}" font-size="${r}"
-                          font-weight="800" fill="${Ce}">${Se}</text>
+                          font-weight="800" fill="${ze}">${Ce}</text>
                     <text x="${e.G.cx}" y="${e.G.labelY+r+s+1}"
                           text-anchor="middle" font-family="${i}" font-size="${s}"
-                          fill="${V}" opacity="0.6">${K}</text>
+                          fill="${Y}" opacity="0.6">${V}</text>
                     <text x="${e.G.cx}" y="${e.G.labelY+r+s+a+4}" class="clickable"
                           @click=${()=>this._showMoreInfo("daily_grid_import_energy")}
                           text-anchor="middle" font-family="${i}" font-size="${a+1}"
-                          fill="#488fc2" opacity="0.6" font-weight="600">${le}</text>
+                          fill="#488fc2" opacity="0.6" font-weight="600">${ce}</text>
 
                     <!-- House -->
                     <g filter="url(#glowHome)" class="clickable" @click=${()=>this._showMoreInfo("home_consumption_power")}>
@@ -5588,14 +5857,14 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <text x="${e.H.cx}" y="${e.H.labelY+1.1*r}" class="clickable"
                           @click=${()=>this._showMoreInfo("home_consumption_power")}
                           text-anchor="middle" font-family="${i}" font-size="${r}"
-                          font-weight="800" fill="#5BC8D8">${we}</text>
+                          font-weight="800" fill="#5BC8D8">${ke}</text>
                     <text x="${e.H.cx}" y="${e.H.labelY+1.1*r+a+3}" class="clickable"
                           @click=${()=>this._showMoreInfo("daily_home_energy")}
                           text-anchor="middle" font-family="${i}" font-size="${a+1}"
-                          fill="#5BC8D8" opacity="0.6" font-weight="600">${oe}</text>
+                          fill="#5BC8D8" opacity="0.6" font-weight="600">${ne}</text>
 
                     <!-- EV (omitted entirely when show_ev: false, #595) -->
-                    ${this._showEv?G`<g filter="url(#glowEV)" class="clickable" @click=${()=>this._showMoreInfo("ev_power")}>
+                    ${this._showEv?j`<g filter="url(#glowEV)" class="clickable" @click=${()=>this._showMoreInfo("ev_power")}>
                         ${this._illustrationEV(e.E.cx,e.E.cy,e.E.r)}
                     </g>
                     <text x="${e.E.cx}" y="${e.E.labelY}" text-anchor="middle"
@@ -5604,33 +5873,33 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <text x="${e.E.cx}" y="${e.E.labelY+1*r}" class="clickable"
                           @click=${()=>this._showMoreInfo("ev_power")}
                           text-anchor="middle" font-family="${i}" font-size="${r}"
-                          font-weight="800" fill="#8DC892">${ke}</text>
+                          font-weight="800" fill="#8DC892">${Se}</text>
                     <text x="${e.E.cx}" y="${e.E.labelY+1*r+s}"
                           text-anchor="middle" font-family="${i}" font-size="${s}"
-                          fill="${ee}" opacity="0.6">${Q}</text>
+                          fill="${te}" opacity="0.6">${ee}</text>
                     <text x="${e.E.cx}" y="${e.E.labelY+1*r+s+a+2}" class="clickable"
                           @click=${()=>this._showMoreInfo("daily_ev_energy")}
                           text-anchor="middle" font-family="${i}" font-size="${a+1}"
-                          fill="#8DC892" opacity="0.6" font-weight="600">${ae}</text>`:q}
+                          fill="#8DC892" opacity="0.6" font-weight="600">${oe}</text>`:K}
 
                     <!-- Device strip (desktop only) -->
-                    ${t?q:this._renderDeviceStrip(e.H)}
+                    ${t?K:this._renderDeviceStrip(e.H)}
 
                     <!-- Entity status indicator -->
-                    ${_e.length>0?W`
+                    ${fe.length>0?W`
                         <foreignObject x="${t?8:10}" y="${e.statusY}" width="220" height="22">
                             <div xmlns="http://www.w3.org/1999/xhtml"
-                                 style="font-family:'Segoe UI','Roboto',sans-serif;font-size:11px;color:#ef5350;opacity:0.75;white-space:nowrap">⚠ ${_e.length} ${this._t("sensor_unavailable")}</div>
+                                 style="font-family:'Segoe UI','Roboto',sans-serif;font-size:11px;color:#ef5350;opacity:0.75;white-space:nowrap">⚠ ${fe.length} ${this._t("sensor_unavailable")}</div>
                         </foreignObject>
-                    `:q}
+                    `:K}
 
                     <text x="${e.wmX}" y="${e.wmY}" text-anchor="end"
                           font-family="${i}" font-size="9" font-weight="300"
                           letter-spacing="2.5" fill="rgba(255,255,255,0.06)">SEM</text>
                 </svg>
-                ${t?this._renderDeviceChips():q}
+                ${t?this._renderDeviceChips():K}
             </ha-card>
-        `}_illustrationSolarPanel(e,t,i){const s=i/50,r=86*s,a=58*s,o=e-r/2,n=t-a/2-4*s,l=r/3,c=a/2,d=6*s,p=12*s;return G`
+        `}_illustrationSolarPanel(e,t,i){const s=i/50,r=86*s,a=58*s,o=e-r/2,n=t-a/2-4*s,l=r/3,c=a/2,d=6*s,p=12*s;return j`
             <circle cx="${e}" cy="${t}" r="${i+4}" fill="none"
                     stroke="#ff9800" stroke-width="1.2" opacity="0.25"/>
 
@@ -5659,7 +5928,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             <line x1="${o+l}"   y1="${n}" x2="${o+l}"   y2="${n+a}" stroke="rgba(0,0,0,0.4)" stroke-width="${1.5*s}"/>
             <line x1="${o+2*l}" y1="${n}" x2="${o+2*l}" y2="${n+a}" stroke="rgba(0,0,0,0.4)" stroke-width="${1.5*s}"/>
             <line x1="${o}" y1="${n+c}" x2="${o+r}" y2="${n+c}" stroke="rgba(0,0,0,0.4)" stroke-width="${1.5*s}"/>
-            ${[0,1,2].map(e=>G`
+            ${[0,1,2].map(e=>j`
                 <line x1="${o+e*l+l/3}"   y1="${n}" x2="${o+e*l+l/3}"   y2="${n+a}" stroke="rgba(0,0,0,0.2)" stroke-width="${.7*s}"/>
                 <line x1="${o+e*l+2*l/3}" y1="${n}" x2="${o+e*l+2*l/3}" y2="${n+a}" stroke="rgba(0,0,0,0.2)" stroke-width="${.7*s}"/>
             `)}
@@ -5674,11 +5943,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
 
             <circle cx="${e}" cy="${n+a+p+3*s}" r="${3*s}"
                     fill="#ff9800" opacity="0.6"/>
-        `}_sunRays(e,t,i){const s=[];for(let r=0;r<8;r++){const a=45*r*Math.PI/180,o=i+3,n=i+.7*i,l=.18,c=a-l,d=a+l,p=e+Math.cos(c)*o,h=t+Math.sin(c)*o,_=e+Math.cos(a)*n,g=t+Math.sin(a)*n,u=e+Math.cos(d)*o,m=t+Math.sin(d)*o;s.push(G`<polygon points="${p},${h} ${_},${g} ${u},${m}"
-                                    fill="#FCD170" opacity="0.85"/>`)}return s}_illustrationInverter(e,t,i){const s=i/20,r=38*s,a=28*s,o=e-r/2,n=t-a/2;return G`
+        `}_sunRays(e,t,i){const s=[];for(let r=0;r<8;r++){const a=45*r*Math.PI/180,o=i+3,n=i+.7*i,l=.18,c=a-l,d=a+l,p=e+Math.cos(c)*o,h=t+Math.sin(c)*o,_=e+Math.cos(a)*n,g=t+Math.sin(a)*n,u=e+Math.cos(d)*o,m=t+Math.sin(d)*o;s.push(j`<polygon points="${p},${h} ${_},${g} ${u},${m}"
+                                    fill="#FCD170" opacity="0.85"/>`)}return s}_illustrationInverter(e,t,i){const s=i/20,r=38*s,a=28*s,o=e-r/2,n=t-a/2;return j`
             <rect x="${o}" y="${n}" width="${r}" height="${a}" rx="${4*s}"
                   fill="url(#invGrad)" stroke="#96CAEE" stroke-width="${1.5*s}" opacity="0.9"/>
-            ${[0,1,2].map(e=>G`
+            ${[0,1,2].map(e=>j`
                 <line x1="${o+4*s+5*e*s}" y1="${n+3*s}" x2="${o+4*s+5*e*s}" y2="${n+7*s}"
                       stroke="#96CAEE" stroke-width="${1*s}" stroke-linecap="round" opacity="0.4"/>
             `)}
@@ -5695,7 +5964,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             </circle>
             <rect x="${e-3*s}" y="${n+a}" width="${6*s}" height="${3*s}" rx="${1*s}"
                   fill="#96CAEE" opacity="0.4"/>
-        `}_illustrationBattery(e,t,i,s,r,a,o,n){const l=i/50,c=40*l,d=64*l,p=e-c/2,h=t-d/2,_=8*l,g=16*l,u=c-8*l,m=d-12*l,f=p+4*l,v=h+8*l;return G`
+        `}_illustrationBattery(e,t,i,s,r,a,o,n){const l=i/50,c=40*l,d=64*l,p=e-c/2,h=t-d/2,_=8*l,g=16*l,u=c-8*l,m=d-12*l,f=p+4*l,v=h+8*l;return j`
             <circle cx="${e}" cy="${t}" r="${i+4}" fill="none"
                     stroke="#4db6ac" stroke-width="1.2" opacity="0.25"/>
 
@@ -5717,7 +5986,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                   width="${u}" height="${s.toFixed(1)}"
                   rx="${3*l}" fill="${a}" opacity="0.85"/>
 
-            ${[1,2,3,4].map(e=>G`
+            ${[1,2,3,4].map(e=>j`
                 <line x1="${f}" y1="${v+m*e/5}"
                       x2="${f+u}" y2="${v+m*e/5}"
                       stroke="rgba(0,0,0,0.35)" stroke-width="${1.2*l}"/>
@@ -5726,19 +5995,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             <text x="${e}" y="${o?t+15*l:t+4*l}"
                   text-anchor="middle" font-family="'Segoe UI','Roboto',sans-serif"
                   font-size="${14*l}" font-weight="900" fill="#fff"
-                  stroke="rgba(0,0,0,0.6)" stroke-width="${1.5*l}" paint-order="stroke">${n.toFixed(0)}%</text>
+                  stroke="rgba(0,0,0,0.6)" stroke-width="${1.5*l}" paint-order="stroke">${n}</text>
 
-            ${o?G`
+            ${o?j`
                 <g>
                     <path d="M${e-4*l},${t-9*l-8*l} L${e-7*l},${t-9*l+2*l} L${e-1*l},${t-9*l+2*l}
                              L${e-1*l},${t-9*l+10*l} L${e+6*l},${t-9*l-2*l} L${e+1*l},${t-9*l-2*l} Z"
                           fill="#FCD170" opacity="0.95"/>
                 </g>
-            `:q}
+            `:K}
 
             <rect x="${e-10*l}" y="${h+d-5*l}" width="${20*l}" height="${5*l}"
                   rx="${2*l}" fill="#4db6ac" opacity="0.25"/>
-        `}_illustrationHouse(e,t,i){const s=i/62,r=80*s,a=52*s,o=e-r/2,n=t-a/2+8*s,l=n-38*s,c=e+18*s,d=l+8*s,p=10*s,h=18*s,_=16*s,g=14*s,u=n+12*s,m=o+10*s,f=o+r-10*s-_,v=14*s,y=24*s,b=e-v/2,x=n+a-y;return G`
+        `}_illustrationHouse(e,t,i){const s=i/62,r=80*s,a=52*s,o=e-r/2,n=t-a/2+8*s,l=n-38*s,c=e+18*s,d=l+8*s,p=10*s,h=18*s,_=16*s,g=14*s,u=n+12*s,m=o+10*s,f=o+r-10*s-_,v=14*s,y=24*s,b=e-v/2,x=n+a-y;return j`
             <circle cx="${e}" cy="${t}" r="${i+4}" fill="none"
                     stroke="#5BC8D8" stroke-width="1.2" opacity="0.25"/>
 
@@ -5789,7 +6058,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
 
             <line x1="${o+2*s}" y1="${n+4*s}" x2="${o+2*s}" y2="${n+a-2*s}"
                   stroke="rgba(255,255,255,0.06)" stroke-width="${1.5*s}"/>
-        `}_illustrationGrid(e,t,i){const s=i/50,r=72*s,a=4*s,o=t-r/2+4*s,n=o+.22*r,l=o+.42*r,c=44*s,d=32*s,p=3*s;return G`
+        `}_illustrationGrid(e,t,i){const s=i/50,r=72*s,a=4*s,o=t-r/2+4*s,n=o+.22*r,l=o+.42*r,c=44*s,d=32*s,p=3*s;return j`
             <circle cx="${e}" cy="${t}" r="${i+4}" fill="none"
                     stroke="#488fc2" stroke-width="1.2" opacity="0.25"/>
 
@@ -5842,7 +6111,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                      L${e},${l+14*s} L${e},${l+20*s}
                      L${e+4*s},${l+11*s} L${e},${l+11*s} Z"
                   fill="#FCD170" opacity="0.6"/>
-        `}_illustrationEV(e,t,i){const s=i/44,r=22*s,a=36*s,o=e-28*s,n=t-a/2,l=t+4*s,c=52*s,d=22*s,p=e+18*s-c/2,h=6*s;return G`
+        `}_illustrationEV(e,t,i){const s=i/44,r=22*s,a=36*s,o=e-28*s,n=t-a/2,l=t+4*s,c=52*s,d=22*s,p=e+18*s-c/2,h=6*s;return j`
             <circle cx="${e}" cy="${t}" r="${i+4}" fill="none"
                     stroke="#8DC892" stroke-width="1.2" opacity="0.25"/>
 
@@ -5903,26 +6172,26 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             <ellipse cx="${p+c-7*s}" cy="${l+d/2-6*s}"
                      rx="${4*s}" ry="${2.5*s}"
                      fill="#FFF9C4" opacity="0.6"/>
-        `}_renderFlow(e,t,i,s,r){const a=i.toFixed(1),o=String(e?28:-28),n=e?{kp:"1;0",kt:"0;1"}:null,l=[];for(let e=0;e<r;e++){const o=`-${(e/r*i).toFixed(2)}s`;l.push(G`
+        `}_renderFlow(e,t,i,s,r){const a=i.toFixed(1),o=String(e?28:-28),n=e?{kp:"1;0",kt:"0;1"}:null,l=[];for(let e=0;e<r;e++){const o=`-${(e/r*i).toFixed(2)}s`;l.push(j`
                 <circle r="5" fill="${t}" opacity="0.12">
                     <animateMotion path="${s}" dur="${a}s" repeatCount="indefinite" calcMode="paced"
-                                   keyPoints=${n?n.kp:q}
-                                   keyTimes=${n?n.kt:q}
+                                   keyPoints=${n?n.kp:K}
+                                   keyTimes=${n?n.kt:K}
                                    begin="${o}"/>
                 </circle>
                 <circle r="2.5" fill="${t}" opacity="0.95">
                     <animateMotion path="${s}" dur="${a}s" repeatCount="indefinite" calcMode="paced"
-                                   keyPoints=${n?n.kp:q}
-                                   keyTimes=${n?n.kt:q}
+                                   keyPoints=${n?n.kp:K}
+                                   keyTimes=${n?n.kt:K}
                                    begin="${o}"/>
                 </circle>
                 <circle r="1" fill="rgba(255,255,255,0.9)" opacity="0.85">
                     <animateMotion path="${s}" dur="${a}s" repeatCount="indefinite" calcMode="paced"
-                                   keyPoints=${n?n.kp:q}
-                                   keyTimes=${n?n.kt:q}
+                                   keyPoints=${n?n.kp:K}
+                                   keyTimes=${n?n.kt:K}
                                    begin="${o}"/>
                 </circle>
-            `)}return G`
+            `)}return j`
             <path d="${s}" fill="none" stroke="${t}" stroke-width="5"
                   stroke-dasharray="8,${20}" opacity="0.2" stroke-linecap="round">
                 <animate attributeName="stroke-dashoffset" from="0" to="${o}"
@@ -5939,14 +6208,14 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                          dur="${a}s" repeatCount="indefinite"/>
             </path>
             ${l}
-        `}_sparkWavePath(e){const t=this._sunPtX,i=this._sunPtY,s=e.S.cx-t,r=e.S.cy-e.S.r-i,a=Math.sqrt(s*s+r*r),o=Math.max(2,Math.round(a/30)),n=this._val("solar_power"),l=6+Math.min(8,n/1e3),c=Math.atan2(r,s),d=-Math.sin(c),p=Math.cos(c),h=8*o;let _=`M${t.toFixed(1)},${i.toFixed(1)}`;for(let e=1;e<=h;e++){const a=e/h,n=t+s*a,c=i+r*a,g=Math.sin(a*o*Math.PI*2)*l;_+=` L${(n+d*g).toFixed(1)},${(c+p*g).toFixed(1)}`}return this._sparkWaveD=_,G`<path id="spark-wave" d="${_}" fill="none"
+        `}_sparkWavePath(e){const t=this._sunPtX,i=this._sunPtY,s=e.S.cx-t,r=e.S.cy-e.S.r-i,a=Math.sqrt(s*s+r*r),o=Math.max(2,Math.round(a/30)),n=this._val("solar_power"),l=6+Math.min(8,n/1e3),c=Math.atan2(r,s),d=-Math.sin(c),p=Math.cos(c),h=8*o;let _=`M${t.toFixed(1)},${i.toFixed(1)}`;for(let e=1;e<=h;e++){const a=e/h,n=t+s*a,c=i+r*a,g=Math.sin(a*o*Math.PI*2)*l;_+=` L${(n+d*g).toFixed(1)},${(c+p*g).toFixed(1)}`}return this._sparkWaveD=_,j`<path id="spark-wave" d="${_}" fill="none"
                          stroke="rgba(255,200,60,0.12)" stroke-width="2.5" stroke-linecap="round"
-                         filter="url(#glowSun)"/>`}_renderSunSpark(e){const t=12-7*Math.min(1,e/1e4),i=3+Math.floor(Math.min(3,e/3e3)),s=`${t.toFixed(0)}:${i}`;if(this._sunSparkSig!==s){this._sunSparkSig=s,this._sunSparkProps=[];for(let e=0;e<i;e++)this._sunSparkProps.push({kind:e%2==0?"gold":"white",r:1.5+2*Math.random(),opacity:.4+.5*Math.random(),dur:t*(.7+.6*Math.random()),delay:Math.random()*t})}const r=this._sparkWaveD;return this._sunSparkProps.map(e=>"gold"===e.kind?G`
+                         filter="url(#glowSun)"/>`}_renderSunSpark(e){const t=12-7*Math.min(1,e/1e4),i=3+Math.floor(Math.min(3,e/3e3)),s=`${t.toFixed(0)}:${i}`;if(this._sunSparkSig!==s){this._sunSparkSig=s,this._sunSparkProps=[];for(let e=0;e<i;e++)this._sunSparkProps.push({kind:e%2==0?"gold":"white",r:1.5+2*Math.random(),opacity:.4+.5*Math.random(),dur:t*(.7+.6*Math.random()),delay:Math.random()*t})}const r=this._sparkWaveD;return this._sunSparkProps.map(e=>"gold"===e.kind?j`
             <circle r="${e.r.toFixed(1)}" fill="rgba(255,220,60,${e.opacity.toFixed(2)})" filter="url(#glowSun)">
                 <animateMotion path="${r}" dur="${e.dur.toFixed(1)}s" repeatCount="indefinite" calcMode="paced"
                                begin="-${e.delay.toFixed(1)}s"/>
             </circle>
-        `:G`
+        `:j`
             <circle r="${(.6*e.r).toFixed(1)}" fill="rgba(255,255,230,${e.opacity.toFixed(2)})">
                 <animateMotion path="${r}" dur="${e.dur.toFixed(1)}s" repeatCount="indefinite" calcMode="paced"
                                begin="-${e.delay.toFixed(1)}s"/>
@@ -5971,11 +6240,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <div style="font-size:11px;color:${i};font-weight:800;opacity:${s?1:.85}">
                                 ${s?ge(e.power):this._t("off")}</div>
                         </div>`})}
-            </div>`:q}_fireMoreInfo(e){this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:e}}))}_renderDeviceStrip(e){const t=this._collectDevices();if(!t.length)return q;const i="'Segoe UI','Roboto',sans-serif";return t.map((t,s)=>{let r=(t.name||t.id).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");r.length>22&&(r=r.substring(0,21)+"…");const a=_e,o=t.is_on||t.power>5,n=310+50*s,l=540,c=`M${e.cx+e.r},${e.cy+10+8*s} C${e.cx+e.r+40},${e.cy+30+15*s} 510,${n-10} 524,${n}`,d=t.power>5?G`
+            </div>`:K}_fireMoreInfo(e){this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:e}}))}_renderDeviceStrip(e){const t=this._collectDevices();if(!t.length)return K;const i="'Segoe UI','Roboto',sans-serif";return t.map((t,s)=>{let r=(t.name||t.id).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");r.length>22&&(r=r.substring(0,21)+"…");const a=_e,o=t.is_on||t.power>5,n=310+50*s,l=540,c=`M${e.cx+e.r},${e.cy+10+8*s} C${e.cx+e.r+40},${e.cy+30+15*s} 510,${n-10} 524,${n}`,d=t.power>5?j`
                 <circle r="1.5" fill="${a}" opacity="0.8">
                     <animateMotion path="${c}" dur="${me(t.power).toFixed(1)}s" repeatCount="indefinite" calcMode="paced"/>
                 </circle>
-            `:q;return G`
+            `:K;return j`
                 <path d="${c}" fill="none" stroke="${a}" stroke-width="1"
                       stroke-dasharray="3,5" opacity="${o?.3:.1}"/>
                 ${d}
@@ -5989,19 +6258,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                       font-weight="500" fill="${a}" opacity="0.85">${r}</text>
                 <text x="${560}" y="${n+11}" font-family="${i}" font-size="10"
                       font-weight="700" fill="${a}" opacity="${o?.95:.75}">${ge(t.power)}</text>
-            `})}_glowFilter(e,t,i){return G`<filter id="${e}" x="-35%" y="-35%" width="170%" height="170%">
+            `})}_glowFilter(e,t,i){return j`<filter id="${e}" x="-35%" y="-35%" width="170%" height="170%">
             <feGaussianBlur stdDeviation="${i}" result="blur"/>
             <feFlood flood-color="${t}" flood-opacity="0.28"/>
             <feComposite in2="blur" operator="in"/>
             <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>`}_showMoreInfo(e){const t=this._eid(e);t&&this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:t}}))}_getLayout(){return this._compact?{vb:"0 0 400 680",S:{cx:200,cy:100,r:44,labelY:154},I:{cx:200,cy:232,r:20},B:{cx:100,cy:360,r:44,labelY:414},G:{cx:300,cy:360,r:44,labelY:414},H:{cx:200,cy:540,r:48,labelY:598},E:{cx:84,cy:555,r:34,labelY:598},paths:{solar:"M200,144 L200,212",battery:"M188,242 C155,278 120,315 100,316",grid:"M212,242 C245,278 280,315 300,316",home:"M200,252 C200,390 200,460 200,492",ev:"M200,252 C200,400 140,490 84,521"},sunArc:"M30,68 Q200,6 370,68",sunX:200,sunY:20,sunR:12,sunRisingX:40,sunSettingX:360,sunLabelY:76,starX:[60,120,280,330,180],starY:[20,12,18,24,8],font:{label:11,value:15,sub:10},statusY:660,wmX:390,wmY:676}:{vb:"0 0 700 510",S:{cx:85,cy:140,r:48,labelY:200},I:{cx:220,cy:200,r:20},E:{cx:150,cy:390,r:42,labelY:442},B:{cx:340,cy:390,r:48,labelY:448},H:{cx:400,cy:230,r:52,labelY:292},G:{cx:570,cy:140,r:46,labelY:198},paths:{solar:"M118,148 C158,165 192,188 208,200",home:"M242,198 C300,200 350,210 360,218",battery:"M228,215 C260,280 320,340 338,342",grid:"M232,188 C320,130 450,110 524,130",ev:"M210,215 C180,275 162,330 150,348"},sunArc:"M20,52 Q330,2 640,52",sunX:330,sunY:12,sunR:12,sunRisingX:28,sunSettingX:632,sunLabelY:60,starX:[100,200,450,550,330],starY:[20,12,15,28,8],font:{label:11,value:16,sub:10},statusY:495,wmX:690,wmY:506}}_deviceIcon(e,t){const i=(t||"").toLowerCase();return"ev_charger"===(e||"").toLowerCase()||i.includes("keba")||i.includes("charger")||i.includes("wallbox")?G`<rect x="-5" y="-9" width="10" height="14" rx="2"/>
+        </filter>`}_showMoreInfo(e){const t=this._eid(e);t&&this.dispatchEvent(new CustomEvent("hass-more-info",{bubbles:!0,composed:!0,detail:{entityId:t}}))}_getLayout(){return this._compact?{vb:"0 0 400 680",S:{cx:200,cy:100,r:44,labelY:154},I:{cx:200,cy:232,r:20},B:{cx:100,cy:360,r:44,labelY:414},G:{cx:300,cy:360,r:44,labelY:414},H:{cx:200,cy:540,r:48,labelY:598},E:{cx:84,cy:555,r:34,labelY:598},paths:{solar:"M200,144 L200,212",battery:"M188,242 C155,278 120,315 100,316",grid:"M212,242 C245,278 280,315 300,316",home:"M200,252 C200,390 200,460 200,492",ev:"M200,252 C200,400 140,490 84,521"},sunArc:"M30,68 Q200,6 370,68",sunX:200,sunY:20,sunR:12,sunRisingX:40,sunSettingX:360,sunLabelY:76,starX:[60,120,280,330,180],starY:[20,12,18,24,8],font:{label:11,value:15,sub:10},statusY:660,wmX:390,wmY:676}:{vb:"0 0 700 510",S:{cx:85,cy:140,r:48,labelY:200},I:{cx:220,cy:200,r:20},E:{cx:150,cy:390,r:42,labelY:442},B:{cx:340,cy:390,r:48,labelY:448},H:{cx:400,cy:230,r:52,labelY:292},G:{cx:570,cy:140,r:46,labelY:198},paths:{solar:"M118,148 C158,165 192,188 208,200",home:"M242,198 C300,200 350,210 360,218",battery:"M228,215 C260,280 320,340 338,342",grid:"M232,188 C320,130 450,110 524,130",ev:"M210,215 C180,275 162,330 150,348"},sunArc:"M20,52 Q330,2 640,52",sunX:330,sunY:12,sunR:12,sunRisingX:28,sunSettingX:632,sunLabelY:60,starX:[100,200,450,550,330],starY:[20,12,15,28,8],font:{label:11,value:16,sub:10},statusY:495,wmX:690,wmY:506}}_deviceIcon(e,t){const i=(t||"").toLowerCase();return"ev_charger"===(e||"").toLowerCase()||i.includes("keba")||i.includes("charger")||i.includes("wallbox")?j`<rect x="-5" y="-9" width="10" height="14" rx="2"/>
                        <path d="M-1.5,-3.5 L0,1.5 L1.5,-3.5"/>
-                       <line x1="0" y1="5" x2="0" y2="9"/>`:i.includes("heiz")||i.includes("heat")||i.includes("warm")||i.includes("boiler")?G`<path d="M-3,-9 C-3,-3 3,-3 3,-9"/>
+                       <line x1="0" y1="5" x2="0" y2="9"/>`:i.includes("heiz")||i.includes("heat")||i.includes("warm")||i.includes("boiler")?j`<path d="M-3,-9 C-3,-3 3,-3 3,-9"/>
                        <path d="M-3,-2 C-3,4 3,4 3,-2"/>
-                       <path d="M-3,5 C-3,9 3,9 3,5"/>`:i.includes("wash")||i.includes("spül")||i.includes("geschirr")||i.includes("wasch")?G`<circle r="9"/><circle r="4.5"/><circle r="1.3" fill="currentColor" opacity="0.3" stroke="none"/>`:i.includes("pool")||i.includes("pump")?G`<circle r="7"/><path d="M-5,0 L5,0 M0,-5 L0,5" opacity="0.5"/>`:i.includes("klima")||i.includes("ac")||i.includes("cool")||i.includes("air")?G`<rect x="-9" y="-5" width="18" height="10" rx="2"/>
+                       <path d="M-3,5 C-3,9 3,9 3,5"/>`:i.includes("wash")||i.includes("spül")||i.includes("geschirr")||i.includes("wasch")?j`<circle r="9"/><circle r="4.5"/><circle r="1.3" fill="currentColor" opacity="0.3" stroke="none"/>`:i.includes("pool")||i.includes("pump")?j`<circle r="7"/><path d="M-5,0 L5,0 M0,-5 L0,5" opacity="0.5"/>`:i.includes("klima")||i.includes("ac")||i.includes("cool")||i.includes("air")?j`<rect x="-9" y="-5" width="18" height="10" rx="2"/>
                        <path d="M-5,5 C-5,9 -2,9 -2,5" fill="none"/>
-                       <path d="M2,5 C2,9 5,9 5,5" fill="none"/>`:i.includes("light")||i.includes("licht")||i.includes("lamp")?G`<path d="M-4,-9 C-7,-2 -2,3 -1.5,5 L1.5,5 C2,3 7,-2 4,-9 C2,-12 -2,-12 -4,-9Z"/>
-                       <line x1="-1.5" y1="6" x2="1.5" y2="6"/>`:G`<path d="M-2.5,-9 L-2.5,0 L-5,0 L0,9 L0,0 L2.5,0 L-2.5,-9Z"/>`}getCardSize(){return 7}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-system-diagram-card",name:"SEM System Diagram",description:"Power flow visualization with inline SVG illustrations for each energy component",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-system-diagram-card"});const Nt=["/local/custom_components/solar_energy_management/dashboard/card/vendor/chart.umd.min.js","https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"],Pt=["/local/custom_components/solar_energy_management/dashboard/card/vendor/chartjs-adapter-date-fns.bundle.min.js","https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"];function Tt(e,t,i){if(!e.length)return void i(new Error("all sources failed"));const s=document.createElement("script");s.src=e[0],s.onload=()=>t(),s.onerror=()=>Tt(e.slice(1),t,i),document.head.appendChild(s)}let Lt=null;const Ut=pe||{solar:"#ff9800",gridImport:"#488fc2",gridExport:"#8353d1",batteryOut:"#4db6ac",home:"#5BC8D8",ev:"#8DC892"},Ot={costs:{title:"energy_costs",y_label:"_currency_",stacked:!1,daily:[{suffix:"daily_costs",name:"Import",color:Ut.gridImport,type:"bar",negate:!0},{suffix:"daily_export_revenue",name:"export",color:Ut.gridExport,type:"bar"},{suffix:"daily_net_cost",name:"net",color:Ut.solar,type:"line",negate:!0}],monthly:[{suffix:"monthly_costs",name:"Import",color:Ut.gridImport,type:"bar",negate:!0},{suffix:"monthly_export_revenue",name:"export",color:Ut.gridExport,type:"bar"},{suffix:"monthly_net_cost",name:"net",color:Ut.solar,type:"line",negate:!0}]},savings:{title:"energy_savings",y_label:"_currency_",stacked:!0,daily:[{suffix:"daily_savings",name:"solar_savings",color:Ut.solar,type:"area"},{suffix:"daily_battery_savings",name:"battery_savings",color:Ut.batteryOut,type:"area"}],monthly:[{suffix:"monthly_savings",name:"solar_savings",color:Ut.solar,type:"area"},{suffix:"monthly_battery_savings",name:"battery_savings",color:Ut.batteryOut,type:"area"}]},energy:{title:"energy_balance",y_label:"kWh",stacked:!1,defaultPeriod:"7d",daily:[{suffix:"daily_solar_energy",name:"solar",color:Ut.solar,type:"bar"},{suffix:"daily_home_energy",name:"home",color:Ut.home,type:"bar"},{suffix:"daily_grid_import_energy",name:"grid_import",color:Ut.gridImport,type:"bar"},{suffix:"daily_grid_export_energy",name:"grid_export",color:Ut.gridExport,type:"bar"}],monthly:[{suffix:"monthly_solar_energy",name:"solar",color:Ut.solar,type:"bar"},{suffix:"monthly_home_energy",name:"home",color:Ut.home,type:"bar"},{suffix:"monthly_grid_import_energy",name:"grid_import",color:Ut.gridImport,type:"bar"},{suffix:"monthly_grid_export_energy",name:"grid_export",color:Ut.gridExport,type:"bar"}]},power:{title:"power_flow",y_label:"W",stacked:!1,hourly:[{suffix:"solar_power",name:"solar",color:Ut.solar,type:"area"},{suffix:"home_consumption_power",name:"home",color:Ut.home,type:"area"},{suffix:"grid_power",name:"grid",color:Ut.gridImport,type:"area"}]},forecast:{title:"forecast_vs_actual",y_label:"W",stacked:!1,hourly:[{suffix:"forecast_power_now_w",name:"forecast",color:Ut.solar,type:"area"},{suffix:"solar_power",name:"actual",color:Ut.batteryOut,type:"line"}]},battery:{title:"battery",y_label:"W",y2_label:"%",stacked:!1,hourly:[{suffix:"battery_power",name:"power",color:Ut.batteryOut,type:"area"},{suffix:"battery_soc",name:"soc",color:"#ff9800",type:"line",y_axis:1}]},ev:{title:"ev_charging",y_label:"W",stacked:!0,defaultPeriod:"today",y_min:0,y_suggested_max:2e3,hourly:[{suffix:"flow_solar_to_ev_power",name:"solar",color:Ut.solar,type:"area"},{suffix:"flow_battery_to_ev_power",name:"battery",color:Ut.batteryOut,type:"area"},{suffix:"flow_grid_to_ev_power",name:"grid",color:Ut.gridImport,type:"area"}],daily:[{suffix:"daily_ev_energy",name:"ev_energy",color:Ut.ev,type:"bar"}],monthly:[{suffix:"monthly_ev_energy",name:"ev_energy",color:Ut.ev,type:"bar"}]}};we("sem-chart-card",class extends Se{constructor(){super(),this._chart=null,this._period=null,this._fetchTimer=null,this._cachedChartTheme=null,this._boundPeriodHandler=e=>this._onPeriodChange(e.detail),this._prefix="sensor.sem_",this._preset=null,this._emptyMsg=""}setConfig(e){if(!e.preset&&!e.series)throw new Error("sem-chart-card requires either preset or series config");this._config=e,this._prefix=e.entity_prefix||"sensor.sem_",this._preset=e.preset?Ot[e.preset]:null,this.requestUpdate()}set hass(e){this._hass=e;const t=e?.language;if(t!==this._lang)return this._lang=t,void this.requestUpdate();this._period||this._setDefaultPeriod()}get hass(){return this._hass}connectedCallback(){super.connectedCallback(),document.addEventListener("sem-period-change",this._boundPeriodHandler),this._rollInterval=setInterval(()=>this._rollRelativePeriod(),3e5),this._boundVisibility=()=>{document.hidden||this._rollRelativePeriod()},document.addEventListener("visibilitychange",this._boundVisibility)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("sem-period-change",this._boundPeriodHandler),this._boundVisibility&&document.removeEventListener("visibilitychange",this._boundVisibility),clearInterval(this._rollInterval),this._chart&&(this._chart.destroy(),this._chart=null),clearTimeout(this._fetchTimer)}_rollRelativePeriod(){if(!this._period||!this._hass)return;const e=this._config?.default_period||this._preset?.defaultPeriod,t="24h"===e?"24h":"7d"===e?"7d":"today"===e?"today":"week";this._period.key===t&&this._setDefaultPeriod()}firstUpdated(){this._period||this._setDefaultPeriod()}static get styles(){return[ke,a`
+                       <path d="M2,5 C2,9 5,9 5,5" fill="none"/>`:i.includes("light")||i.includes("licht")||i.includes("lamp")?j`<path d="M-4,-9 C-7,-2 -2,3 -1.5,5 L1.5,5 C2,3 7,-2 4,-9 C2,-12 -2,-12 -4,-9Z"/>
+                       <line x1="-1.5" y1="6" x2="1.5" y2="6"/>`:j`<path d="M-2.5,-9 L-2.5,0 L-5,0 L0,9 L0,0 L2.5,0 L-2.5,-9Z"/>`}getCardSize(){return 7}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-system-diagram-card",name:"SEM System Diagram",description:"Power flow visualization with inline SVG illustrations for each energy component",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-system-diagram-card"});const Yt=["/local/custom_components/solar_energy_management/dashboard/card/vendor/chart.umd.min.js","https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"],Xt=["/local/custom_components/solar_energy_management/dashboard/card/vendor/chartjs-adapter-date-fns.bundle.min.js","https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"];function Zt(e,t,i){if(!e.length)return void i(new Error("all sources failed"));const s=document.createElement("script");s.src=e[0],s.onload=()=>t(),s.onerror=()=>Zt(e.slice(1),t,i),document.head.appendChild(s)}let Jt=null;const Qt=pe||{solar:"#ff9800",gridImport:"#488fc2",gridExport:"#8353d1",batteryOut:"#4db6ac",home:"#5BC8D8",ev:"#8DC892"},ei={costs:{title:"energy_costs",y_label:"_currency_",stacked:!1,daily:[{suffix:"daily_costs",name:"Import",color:Qt.gridImport,type:"bar",negate:!0},{suffix:"daily_export_revenue",name:"export",color:Qt.gridExport,type:"bar"},{suffix:"daily_net_cost",name:"net",color:Qt.solar,type:"line",negate:!0}],monthly:[{suffix:"monthly_costs",name:"Import",color:Qt.gridImport,type:"bar",negate:!0},{suffix:"monthly_export_revenue",name:"export",color:Qt.gridExport,type:"bar"},{suffix:"monthly_net_cost",name:"net",color:Qt.solar,type:"line",negate:!0}]},savings:{title:"energy_savings",y_label:"_currency_",stacked:!0,daily:[{suffix:"daily_savings",name:"solar_savings",color:Qt.solar,type:"area"},{suffix:"daily_battery_savings",name:"battery_savings",color:Qt.batteryOut,type:"area"}],monthly:[{suffix:"monthly_savings",name:"solar_savings",color:Qt.solar,type:"area"},{suffix:"monthly_battery_savings",name:"battery_savings",color:Qt.batteryOut,type:"area"}]},energy:{title:"energy_balance",y_label:"kWh",stacked:!1,defaultPeriod:"7d",daily:[{suffix:"daily_solar_energy",name:"solar",color:Qt.solar,type:"bar"},{suffix:"daily_home_energy",name:"home",color:Qt.home,type:"bar"},{suffix:"daily_grid_import_energy",name:"grid_import",color:Qt.gridImport,type:"bar"},{suffix:"daily_grid_export_energy",name:"grid_export",color:Qt.gridExport,type:"bar"}],monthly:[{suffix:"monthly_solar_energy",name:"solar",color:Qt.solar,type:"bar"},{suffix:"monthly_home_energy",name:"home",color:Qt.home,type:"bar"},{suffix:"monthly_grid_import_energy",name:"grid_import",color:Qt.gridImport,type:"bar"},{suffix:"monthly_grid_export_energy",name:"grid_export",color:Qt.gridExport,type:"bar"}]},power:{title:"power_flow",y_label:"W",stacked:!1,hourly:[{suffix:"solar_power",name:"solar",color:Qt.solar,type:"area"},{suffix:"home_consumption_power",name:"home",color:Qt.home,type:"area"},{suffix:"grid_power",name:"grid",color:Qt.gridImport,type:"area"}]},forecast:{title:"forecast_vs_actual",y_label:"W",stacked:!1,hourly:[{suffix:"forecast_power_now_w",name:"forecast",color:Qt.solar,type:"area"},{suffix:"solar_power",name:"actual",color:Qt.batteryOut,type:"line"}]},battery:{title:"battery",y_label:"W",y2_label:"%",stacked:!1,hourly:[{suffix:"battery_power",name:"power",color:Qt.batteryOut,type:"area"},{suffix:"battery_soc",name:"soc",color:"#ff9800",type:"line",y_axis:1}]},ev:{title:"ev_charging",y_label:"W",stacked:!0,defaultPeriod:"today",y_min:0,y_suggested_max:2e3,hourly:[{suffix:"flow_solar_to_ev_power",name:"solar",color:Qt.solar,type:"area"},{suffix:"flow_battery_to_ev_power",name:"battery",color:Qt.batteryOut,type:"area"},{suffix:"flow_grid_to_ev_power",name:"grid",color:Qt.gridImport,type:"area"}],daily:[{suffix:"daily_ev_energy",name:"ev_energy",color:Qt.ev,type:"bar"}],monthly:[{suffix:"monthly_ev_energy",name:"ev_energy",color:Qt.ev,type:"bar"}]}};we("sem-chart-card",class extends Se{constructor(){super(),this._chart=null,this._period=null,this._fetchTimer=null,this._cachedChartTheme=null,this._boundPeriodHandler=e=>this._onPeriodChange(e.detail),this._prefix="sensor.sem_",this._preset=null,this._emptyMsg=""}setConfig(e){if(!e.preset&&!e.series)throw new Error("sem-chart-card requires either preset or series config");this._config=e,this._prefix=e.entity_prefix||"sensor.sem_",this._preset=e.preset?ei[e.preset]:null,this.requestUpdate()}set hass(e){this._hass=e;const t=e?.language;if(t!==this._lang)return this._lang=t,void this.requestUpdate();this._period||this._setDefaultPeriod()}get hass(){return this._hass}connectedCallback(){super.connectedCallback(),document.addEventListener("sem-period-change",this._boundPeriodHandler),this._rollInterval=setInterval(()=>this._rollRelativePeriod(),3e5),this._boundVisibility=()=>{document.hidden||this._rollRelativePeriod()},document.addEventListener("visibilitychange",this._boundVisibility)}disconnectedCallback(){super.disconnectedCallback(),document.removeEventListener("sem-period-change",this._boundPeriodHandler),this._boundVisibility&&document.removeEventListener("visibilitychange",this._boundVisibility),clearInterval(this._rollInterval),this._chart&&(this._chart.destroy(),this._chart=null),clearTimeout(this._fetchTimer)}_rollRelativePeriod(){if(!this._period||!this._hass)return;const e=this._config?.default_period||this._preset?.defaultPeriod,t="24h"===e?"24h":"7d"===e?"7d":"today"===e?"today":"week";this._period.key===t&&this._setDefaultPeriod()}firstUpdated(){this._period||this._setDefaultPeriod()}static get styles(){return[ke,a`
             :host { display: block; }
             .sem-chart-wrap {
                 padding: 16px;
@@ -6053,7 +6322,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </ha-card>
-        `}_startOfDayInHaTz(e){return function(e,t){if(!t)return new Date(e.getFullYear(),e.getMonth(),e.getDate());try{const i=new Intl.DateTimeFormat("en-US",{timeZone:t,year:"numeric",month:"2-digit",day:"2-digit"}),s=Object.fromEntries(i.formatToParts(e).map(e=>[e.type,e.value])),r=new Date(Number(s.year),Number(s.month)-1,Number(s.day),0,0,0,0),a=new Intl.DateTimeFormat("en-US",{timeZone:t,hour:"2-digit",minute:"2-digit",hour12:!1}).formatToParts(r),o=Number(a.find(e=>"hour"===e.type).value),n=Number(a.find(e=>"minute"===e.type).value),l=(60*o+n)%1440,c=0===l?0:l<=720?-l:1440-l;return new Date(r.getTime()+60*c*1e3)}catch(t){return new Date(e.getFullYear(),e.getMonth(),e.getDate())}}(e,this._hass?.config?.time_zone)}_setDefaultPeriod(){const e=new Date,t=this._preset,i=this._config?.default_period||t&&t.defaultPeriod,s="today"===i;if(t&&(s||"24h"===i||t.hourly&&!t.daily)){const t=s?this._startOfDayInHaTz(e):new Date(e.getTime()-864e5),i=s?"period_today":"last_24h",r=s?"today":"24h";this._onPeriodChange({start:t,end:e,granularity:"hour",labelKey:i,key:r})}else if("7d"===i){const t=this._startOfDayInHaTz(e);t.setDate(t.getDate()-6),this._onPeriodChange({start:t,end:e,granularity:"day",labelKey:"last_7_days",key:"7d"})}else{const t=e.getDay()||7,i=this._startOfDayInHaTz(e);i.setDate(i.getDate()-(t-1)),this._onPeriodChange({start:i,end:e,granularity:"day",labelKey:"period_this_week",key:"week"})}}_onPeriodChange(e){this._period={...e,labelKey:e.labelKey||{today:"period_today",yesterday:"period_yesterday",week:"period_this_week",month:"period_this_month",year:"period_this_year","24h":"last_24h","7d":"last_7_days"}[e.key]},this.requestUpdate(),clearTimeout(this._fetchTimer),this._fetchTimer=setTimeout(()=>this._fetchAndRender(),150)}_resolveSeries(){if(this._config?.series)return this._config.series.map(e=>({entity:e.entity,name:e.name||e.entity,color:e.color||"#42A5F5",type:e.type||"bar",y_axis:e.y_axis||0}));const e=this._preset;if(!e)return[];const t=this._period?.granularity||"day";if(this._config?.per_charger&&"ev"===this._config?.preset&&"hour"===t)return this._discoverPerChargerSeries();const i="hour"===t&&e.hourly?e.hourly:"month"===t&&e.monthly?e.monthly:e.daily||e.hourly||[],s=i===e.daily||i===e.monthly;return i.map(e=>({entity:`${this._prefix}${e.suffix}`,name:this._t(e.name),color:e.color,type:e.type,y_axis:e.y_axis||0,negate:e.negate||!1,cumulative:s}))}_discoverPerChargerSeries(){const e=this._hass?.states||{},t=["#8DC892","#64B5F6","#FFB74D","#BA68C8","#4DB6AC","#F06292","#A1887F","#7986CB"],i=/^sensor\.sem_charger_(.+)_power$/,s=[];for(const t of Object.keys(e)){const r=t.match(i);if(!r)continue;const a=r[1],o=e[t]?.attributes?.friendly_name?.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")||a.replace(/_/g," ");s.push({id:a,eid:t,friendly:o})}return s.sort((e,t)=>e.id.localeCompare(t.id)),s.map((e,i)=>({entity:e.eid,name:e.friendly,color:t[i%t.length],type:"area",y_axis:0}))}async _fetchAndRender(){if(!this._hass||!this._period)return;const e=this._resolveSeries();if(!e.length)return;const{start:t,end:i,granularity:s}=this._period;let r;try{r=await this._fetchStatistics(e,t.toISOString(),i.toISOString(),s)}catch(e){return console.debug("sem-chart-card: fetch error",e),void this._showEmpty(this._t("data_unavailable"))}r&&!r.every(e=>!e.data.length)?(this._hideEmpty(),await this.updateComplete,await this._renderChart(r,e)):this._showEmpty(this._t("no_data_for_period"))}async _fetchStatistics(e,t,i,s){const r=e.map(e=>e.entity),a="month"===s?"month":"hour"===s?"hour":"day";let o;try{o=await this._hass.callWS({type:"recorder/statistics_during_period",start_time:t,end_time:i,statistic_ids:r,period:a,types:["state","mean","max"]})}catch{o=await this._hass.callWS({type:"history/statistics_during_period",start_time:t,end_time:i,statistic_ids:r,period:a})}const n=(this._config?.stacked??this._preset?.stacked??!1)&&"hour"===a;return e.map(e=>({data:(o[e.entity]||[]).map(t=>{let i=n?t.mean??t.state??0:t.max??t.state??t.mean??0;return e.negate&&(i=-i),{x:new Date(t.start),y:i}})}))}async _renderChart(e,t){const i=await(Lt||(Lt=new Promise((e,t)=>{const i=()=>Tt(Pt,()=>e(window.Chart),()=>e(window.Chart));if(window.Chart)return(()=>{try{return new window.Chart._adapters._date({}).formats(),!0}catch{return!1}})()?void e(window.Chart):void i();Tt(Nt,i,()=>t(new Error("Failed to load Chart.js")))}),Lt)),s=this.renderRoot.querySelector("canvas");if(!s)return;const r=this._theme(),a=this._preset||{},o=this._config?.stacked??a.stacked??!1;let n=this._config?.y_label||a.y_label||"";"_currency_"===n&&(n=fe(this._hass));const l=a.y2_label||"",c=t.some(e=>1===e.y_axis),d=this._period?.granularity||"day",p=s.getContext("2d"),h=t.map((t,i)=>{const s="area"===t.type,r="bar"===t.type;return{label:t.name,data:e[i].data,cumulative:!!t.cumulative,backgroundColor:r?t.color+"CC":s?t.color+"30":"transparent",borderColor:t.color,borderWidth:r?0:2,fill:!!s&&(o&&i>0?"-1":"origin"),type:r?"bar":"line",tension:.4,pointRadius:0,pointHitRadius:10,pointHoverRadius:4,pointHoverBorderWidth:2,pointHoverBackgroundColor:t.color,pointHoverBorderColor:"#fff",yAxisID:1===t.y_axis?"y1":"y",order:r?2:1,borderRadius:r?4:0,barPercentage:.7}}),_="hour"===d?"hour":"month"===d?"month":"day",g={id:"crosshair",afterDraw(e){if(e.tooltip?._active?.length){const t=e.tooltip._active[0].element.x,i=e.scales.y,s=e.ctx;s.save(),s.beginPath(),s.moveTo(t,i.top),s.lineTo(t,i.bottom),s.lineWidth=1,s.strokeStyle="rgba(255,255,255,0.15)",s.stroke(),s.restore()}}},u={type:"bar",data:{datasets:h},plugins:[g,{id:"gradientFill",beforeDatasetsDraw(e){const i=e.ctx;e.data.datasets.forEach((s,r)=>{if("area"!==t[r]?.type)return;if(e.getDatasetMeta(r).hidden)return;const a=e.scales[s.yAxisID||"y"];if(!a)return;const o=i.createLinearGradient(0,a.top,0,a.bottom);o.addColorStop(0,s.borderColor+"60"),o.addColorStop(.6,s.borderColor+"18"),o.addColorStop(1,s.borderColor+"02"),s.backgroundColor=o})}}],options:{responsive:!0,maintainAspectRatio:!1,animation:{duration:300,easing:"easeOutQuart"},interaction:{mode:"index",intersect:!1},plugins:{legend:{display:!0,position:"bottom",labels:{color:r.textSec||"#9e9e9e",font:{size:11,weight:"500",family:"'Segoe UI','Roboto',sans-serif"},boxWidth:12,boxHeight:12,borderRadius:3,useBorderRadius:!0,padding:14,generateLabels:e=>function(e,t,i){return e.map(e=>{const s=t[e.datasetIndex];if(!s)return e;const r=s.cumulative?s.data.reduce((e,t)=>e+(t?.y??0),0):s.data[s.data.length-1]?.y??0,a="y1"===s.yAxisID?"%":i||"",o=Math.abs(r),n=o>=1e3?(r/1e3).toFixed(1)+"k":o<10?r.toFixed(1):r.toFixed(0);return e.text=`${e.text}: ${n} ${a}`,e})}(i.defaults.plugins.legend.labels.generateLabels(e),e.data.datasets,n)}},tooltip:{backgroundColor:r.tooltipBg||"rgba(15,18,25,0.94)",titleColor:r.tooltipText||"#e0e0e0",titleFont:{family:"'Segoe UI','Roboto',sans-serif",weight:"600",size:12},bodyColor:r.textSec||"#b0b0b0",bodyFont:{family:"'Segoe UI','Roboto',sans-serif",size:11},borderColor:r.tooltipBorder||"rgba(255,255,255,0.08)",borderWidth:1,cornerRadius:10,padding:{top:10,bottom:10,left:14,right:14},bodySpacing:6,displayColors:!0,boxPadding:4,callbacks:{title:e=>{if(!e||!e.length)return"";const t=new Date(e[0].parsed.x);if(isNaN(t))return"";const i=this._hass?.language||"en",s=this._hass?.config?.time_zone||void 0;try{return"hour"===d?t.toLocaleTimeString(i,{hour:"2-digit",minute:"2-digit",timeZone:s}):"month"===d?t.toLocaleDateString(i,{month:"short",year:"numeric",timeZone:s}):t.toLocaleDateString(i,{day:"numeric",month:"short",timeZone:s})}catch(e){return"hour"===d?t.toLocaleTimeString(i):t.toLocaleDateString(i)}},label:e=>{const t=e.parsed.y,i="y1"===e.dataset.yAxisID?"%":n,s=Math.abs(t),r=s>=1e3?(t/1e3).toFixed(1)+"k":s<10?t.toFixed(2):t.toFixed(1);return` ${e.dataset.label}: ${r} ${i}`}}}},scales:{x:{type:"time",min:this._period.start.toISOString(),max:this._period.end.toISOString(),time:{unit:_,tooltipFormat:"hour"===d?"HH:mm":"month"===d?"MMM yyyy":"dd MMM",displayFormats:{hour:"HH:mm",day:"dd MMM",month:"MMM"}},grid:{color:"rgba(255,255,255,0.02)",drawBorder:!1,drawTicks:!1},ticks:{color:r.textSec||"#757575",font:{size:10,family:"'Segoe UI','Roboto',sans-serif"},maxRotation:0,padding:6,callback:(e,t,i)=>{const s=i[t];if(!s)return e;const r=new Date(s.value);if(isNaN(r))return e;const a=this._hass?.language||"en",o=this._hass?.config?.time_zone||void 0;try{return"hour"===_?r.toLocaleTimeString(a,{hour:"2-digit",minute:"2-digit",timeZone:o}):"month"===_?r.toLocaleDateString(a,{month:"short",timeZone:o}):r.toLocaleDateString(a,{day:"numeric",month:"short",timeZone:o})}catch(e){return"hour"===_?r.toLocaleTimeString(a,{hour:"2-digit",minute:"2-digit"}):r.toLocaleDateString(a,{day:"numeric",month:"short"})}}},stacked:o},y:{position:"left",grid:{color:"rgba(255,255,255,0.04)",drawBorder:!1,drawTicks:!1},ticks:{color:r.textSec||"#757575",font:{size:10,family:"'Segoe UI','Roboto',sans-serif"},padding:8,callback:e=>{const t=Math.abs(e);return t>=1e3?(e/1e3).toFixed(1)+"k":t<.01&&t>0?"":e%1==0?e:e.toFixed(1)}},title:{display:!!n,text:n,color:r.textSec||"#757575",font:{size:11,family:"'Segoe UI','Roboto',sans-serif"}},stacked:o,beginAtZero:"W"!==n||0===this._preset?.y_min,...null!=this._preset?.y_min?{min:this._preset.y_min}:{},...null!=this._preset?.y_suggested_max?{suggestedMax:this._preset.y_suggested_max}:{}}}}};c&&(u.options.scales.y1={position:"right",grid:{drawOnChartArea:!1,drawTicks:!1},ticks:{color:"#ff9800",font:{size:10},padding:8,callback:e=>e+"%"},title:{display:!!l,text:l,color:"#ff9800",font:{size:11}},min:0,max:100}),this._chart&&(this._chart.destroy(),this._chart=null),this._chart=new i(p,u)}_showEmpty(e){this._emptyMsg=e,this.requestUpdate()}_hideEmpty(){this._emptyMsg&&(this._emptyMsg="",this.requestUpdate())}getCardSize(){return 5}static getStubConfig(){return{preset:"costs"}}},{type:"sem-chart-card",name:"SEM Chart",description:"Period-reactive chart with glassmorphism styling and built-in presets",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-chart-card"});const{I:Ht}=oe,Wt=e=>e,Gt=()=>document.createComment(""),jt=(e,t,i)=>{const s=e._$AA.parentNode,r=void 0===t?e._$AB:t._$AA;if(void 0===i){const t=s.insertBefore(Gt(),r),a=s.insertBefore(Gt(),r);i=new Ht(t,a,e,e.options)}else{const t=i._$AB.nextSibling,a=i._$AM,o=a!==e;if(o){let t;i._$AQ?.(e),i._$AM=e,void 0!==i._$AP&&(t=e._$AU)!==a._$AU&&i._$AP(t)}if(t!==r||o){let e=i._$AA;for(;e!==t;){const t=Wt(e).nextSibling;Wt(s).insertBefore(e,r),e=t}}}return i},qt=(e,t,i=e)=>(e._$AI(t,i),e),Kt={},Vt=(e,t=Kt)=>e._$AH=t,Yt=e=>{e._$AR(),e._$AA.remove()},Xt=(e,t,i)=>{const s=new Map;for(let r=t;r<=i;r++)s.set(e[r],r);return s},Zt=wt(class extends kt{constructor(e){if(super(e),e.type!==$t)throw Error("repeat() can only be used in text expressions")}dt(e,t,i){let s;void 0===i?i=t:void 0!==t&&(s=t);const r=[],a=[];let o=0;for(const t of e)r[o]=s?s(t,o):o,a[o]=i(t,o),o++;return{values:a,keys:r}}render(e,t,i){return this.dt(e,t,i).values}update(e,[t,i,s]){const r=(e=>e._$AH)(e),{values:a,keys:o}=this.dt(t,i,s);if(!Array.isArray(r))return this.ut=o,a;const n=this.ut??=[],l=[];let c,d,p=0,h=r.length-1,_=0,g=a.length-1;for(;p<=h&&_<=g;)if(null===r[p])p++;else if(null===r[h])h--;else if(n[p]===o[_])l[_]=qt(r[p],a[_]),p++,_++;else if(n[h]===o[g])l[g]=qt(r[h],a[g]),h--,g--;else if(n[p]===o[g])l[g]=qt(r[p],a[g]),jt(e,l[g+1],r[p]),p++,g--;else if(n[h]===o[_])l[_]=qt(r[h],a[_]),jt(e,r[p],r[h]),h--,_++;else if(void 0===c&&(c=Xt(o,_,g),d=Xt(n,p,h)),c.has(n[p]))if(c.has(n[h])){const t=d.get(o[_]),i=void 0!==t?r[t]:null;if(null===i){const t=jt(e,r[p]);qt(t,a[_]),l[_]=t}else l[_]=qt(i,a[_]),jt(e,r[p],i),r[t]=null;_++}else Yt(r[h]),h--;else Yt(r[p]),p++;for(;_<=g;){const t=jt(e,l[g+1]);qt(t,a[_]),l[_++]=t}for(;p<=h;){const e=r[p++];null!==e&&Yt(e)}return this.ut=o,Vt(e,l),j}});function Jt(e){const t=[],i=new Set,s=r=>{var a;i.has(r.id)||(t.push(r),i.add(r.id),(a=r.id,e.filter(e=>(e.dependsOn||[]).includes(a)&&!i.has(e.id))).forEach(s))};return e.filter(e=>!(e.dependsOn||[]).length).forEach(s),e.forEach(e=>{i.has(e.id)||t.push(e)}),t}const Qt=["switch","current","input_boolean","service"],ei={switch:["switch"],current:["number","input_number"],input_boolean:["input_boolean"]};function ti(e){return String(e??"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}const ii="width:100%;padding:8px;margin:6px 0 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.2);color:inherit;box-sizing:border-box";const si="https://github.com/traktore-org/sem-community/blob/develop/docs/ENERGY_PLANNER.md#comfort-banking";we("sem-load-priority-card",class extends Se{constructor(){super(),this.devices=[],this.targetPeakLimit=5,this.peakLimitUnlimited=!1,this.currentPeak=0,this.loadManagementStatus="normal",this._sortable=null,this._interacting=!1,this._lastDeviceSig="",this._showHelp=!1,this._goalOpen={},this._goalDrag=null}setConfig(e){this._config=e,this.entityPrefix=e.entity_prefix||"sensor.sem_",this.requestUpdate()}set hass(e){this._hass,this._hass=e;const t=e?.language;if(t!==this._lang)return this._lang=t,this._lastDeviceSig="",void this.requestUpdate();if(this._interacting)return;if(this._isFrozen())return;if(this._priorityFrozenUntil&&Date.now()<this._priorityFrozenUntil)return;const i=e?.states[`${this.entityPrefix}controllable_devices_count`],s=e?.states[`${this.entityPrefix}consecutive_peak_15min`],r=e?.states[`${this.entityPrefix}load_management_status`],a=(i?.state||"")+"|"+(s?.state||"")+"|"+(r?.state||"");a!==this._lastKey&&(this._lastKey=a,this._updateDeviceData(),this.requestUpdate())}get hass(){return this._hass}disconnectedCallback(){super.disconnectedCallback(),this._drag&&(window.removeEventListener("pointermove",this._dragMoveBound),window.removeEventListener("pointerup",this._dragEndBound),window.removeEventListener("pointercancel",this._dragEndBound),this._drag=null,this._interacting=!1)}async firstUpdated(){this._bindEvents(),this._ensureEntityPicker()}async updated(e){const t=this.devices.map(e=>e.id).join(",");t!==this._lastDeviceSig&&(this._lastDeviceSig=t,this._bindEvents())}static get styles(){return a`
+        `}_startOfDayInHaTz(e){return function(e,t){if(!t)return new Date(e.getFullYear(),e.getMonth(),e.getDate());try{const i=new Intl.DateTimeFormat("en-US",{timeZone:t,year:"numeric",month:"2-digit",day:"2-digit"}),s=Object.fromEntries(i.formatToParts(e).map(e=>[e.type,e.value])),r=new Date(Number(s.year),Number(s.month)-1,Number(s.day),0,0,0,0),a=new Intl.DateTimeFormat("en-US",{timeZone:t,hour:"2-digit",minute:"2-digit",hour12:!1}).formatToParts(r),o=Number(a.find(e=>"hour"===e.type).value),n=Number(a.find(e=>"minute"===e.type).value),l=(60*o+n)%1440,c=0===l?0:l<=720?-l:1440-l;return new Date(r.getTime()+60*c*1e3)}catch(t){return new Date(e.getFullYear(),e.getMonth(),e.getDate())}}(e,this._hass?.config?.time_zone)}_setDefaultPeriod(){const e=new Date,t=this._preset,i=this._config?.default_period||t&&t.defaultPeriod,s="today"===i;if(t&&(s||"24h"===i||t.hourly&&!t.daily)){const t=s?this._startOfDayInHaTz(e):new Date(e.getTime()-864e5),i=s?"period_today":"last_24h",r=s?"today":"24h";this._onPeriodChange({start:t,end:e,granularity:"hour",labelKey:i,key:r})}else if("7d"===i){const t=this._startOfDayInHaTz(e);t.setDate(t.getDate()-6),this._onPeriodChange({start:t,end:e,granularity:"day",labelKey:"last_7_days",key:"7d"})}else{const t=e.getDay()||7,i=this._startOfDayInHaTz(e);i.setDate(i.getDate()-(t-1)),this._onPeriodChange({start:i,end:e,granularity:"day",labelKey:"period_this_week",key:"week"})}}_onPeriodChange(e){this._period={...e,labelKey:e.labelKey||{today:"period_today",yesterday:"period_yesterday",week:"period_this_week",month:"period_this_month",year:"period_this_year","24h":"last_24h","7d":"last_7_days"}[e.key]},this.requestUpdate(),clearTimeout(this._fetchTimer),this._fetchTimer=setTimeout(()=>this._fetchAndRender(),150)}_resolveSeries(){if(this._config?.series)return this._config.series.map(e=>({entity:e.entity,name:e.name||e.entity,color:e.color||"#42A5F5",type:e.type||"bar",y_axis:e.y_axis||0}));const e=this._preset;if(!e)return[];const t=this._period?.granularity||"day";if(this._config?.per_charger&&"ev"===this._config?.preset&&"hour"===t)return this._discoverPerChargerSeries();const i="hour"===t&&e.hourly?e.hourly:"month"===t&&e.monthly?e.monthly:e.daily||e.hourly||[],s=i===e.daily||i===e.monthly;return i.map(e=>({entity:`${this._prefix}${e.suffix}`,name:this._t(e.name),color:e.color,type:e.type,y_axis:e.y_axis||0,negate:e.negate||!1,cumulative:s}))}_discoverPerChargerSeries(){const e=this._hass?.states||{},t=["#8DC892","#64B5F6","#FFB74D","#BA68C8","#4DB6AC","#F06292","#A1887F","#7986CB"],i=/^sensor\.sem_charger_(.+)_power$/,s=[];for(const t of Object.keys(e)){const r=t.match(i);if(!r)continue;const a=r[1],o=e[t]?.attributes?.friendly_name?.replace(/^SEM\s+/i,"").replace(/\s+Power$/i,"")||a.replace(/_/g," ");s.push({id:a,eid:t,friendly:o})}return s.sort((e,t)=>e.id.localeCompare(t.id)),s.map((e,i)=>({entity:e.eid,name:e.friendly,color:t[i%t.length],type:"area",y_axis:0}))}async _fetchAndRender(){if(!this._hass||!this._period)return;const e=this._resolveSeries();if(!e.length)return;const{start:t,end:i,granularity:s}=this._period;let r;try{r=await this._fetchStatistics(e,t.toISOString(),i.toISOString(),s)}catch(e){return console.debug("sem-chart-card: fetch error",e),void this._showEmpty(this._t("data_unavailable"))}r&&!r.every(e=>!e.data.length)?(this._hideEmpty(),await this.updateComplete,await this._renderChart(r,e)):this._showEmpty(this._t("no_data_for_period"))}async _fetchStatistics(e,t,i,s){const r=e.map(e=>e.entity),a="month"===s?"month":"hour"===s?"hour":"day";let o;try{o=await this._hass.callWS({type:"recorder/statistics_during_period",start_time:t,end_time:i,statistic_ids:r,period:a,types:["state","mean","max"]})}catch{o=await this._hass.callWS({type:"history/statistics_during_period",start_time:t,end_time:i,statistic_ids:r,period:a})}const n=(this._config?.stacked??this._preset?.stacked??!1)&&"hour"===a;return e.map(e=>({data:(o[e.entity]||[]).map(t=>{let i=n?t.mean??t.state??0:t.max??t.state??t.mean??0;return e.negate&&(i=-i),{x:new Date(t.start),y:i}})}))}async _renderChart(e,t){const i=await(Jt||(Jt=new Promise((e,t)=>{const i=()=>Zt(Xt,()=>e(window.Chart),()=>e(window.Chart));if(window.Chart)return(()=>{try{return new window.Chart._adapters._date({}).formats(),!0}catch{return!1}})()?void e(window.Chart):void i();Zt(Yt,i,()=>t(new Error("Failed to load Chart.js")))}),Jt)),s=this.renderRoot.querySelector("canvas");if(!s)return;const r=this._theme(),a=this._preset||{},o=this._config?.stacked??a.stacked??!1;let n=this._config?.y_label||a.y_label||"";"_currency_"===n&&(n=fe(this._hass));const l=a.y2_label||"",c=t.some(e=>1===e.y_axis),d=this._period?.granularity||"day",p=s.getContext("2d"),h=t.map((t,i)=>{const s="area"===t.type,r="bar"===t.type;return{label:t.name,data:e[i].data,cumulative:!!t.cumulative,backgroundColor:r?t.color+"CC":s?t.color+"30":"transparent",borderColor:t.color,borderWidth:r?0:2,fill:!!s&&(o&&i>0?"-1":"origin"),type:r?"bar":"line",tension:.4,pointRadius:0,pointHitRadius:10,pointHoverRadius:4,pointHoverBorderWidth:2,pointHoverBackgroundColor:t.color,pointHoverBorderColor:"#fff",yAxisID:1===t.y_axis?"y1":"y",order:r?2:1,borderRadius:r?4:0,barPercentage:.7}}),_="hour"===d?"hour":"month"===d?"month":"day",g={id:"crosshair",afterDraw(e){if(e.tooltip?._active?.length){const t=e.tooltip._active[0].element.x,i=e.scales.y,s=e.ctx;s.save(),s.beginPath(),s.moveTo(t,i.top),s.lineTo(t,i.bottom),s.lineWidth=1,s.strokeStyle="rgba(255,255,255,0.15)",s.stroke(),s.restore()}}},u={type:"bar",data:{datasets:h},plugins:[g,{id:"gradientFill",beforeDatasetsDraw(e){const i=e.ctx;e.data.datasets.forEach((s,r)=>{if("area"!==t[r]?.type)return;if(e.getDatasetMeta(r).hidden)return;const a=e.scales[s.yAxisID||"y"];if(!a)return;const o=i.createLinearGradient(0,a.top,0,a.bottom);o.addColorStop(0,s.borderColor+"60"),o.addColorStop(.6,s.borderColor+"18"),o.addColorStop(1,s.borderColor+"02"),s.backgroundColor=o})}}],options:{responsive:!0,maintainAspectRatio:!1,animation:{duration:300,easing:"easeOutQuart"},interaction:{mode:"index",intersect:!1},plugins:{legend:{display:!0,position:"bottom",labels:{color:r.textSec||"#9e9e9e",font:{size:11,weight:"500",family:"'Segoe UI','Roboto',sans-serif"},boxWidth:12,boxHeight:12,borderRadius:3,useBorderRadius:!0,padding:14,generateLabels:e=>function(e,t,i){return e.map(e=>{const s=t[e.datasetIndex];if(!s)return e;const r=s.cumulative?s.data.reduce((e,t)=>e+(t?.y??0),0):s.data[s.data.length-1]?.y??0,a="y1"===s.yAxisID?"%":i||"",o=Math.abs(r),n=o>=1e3?(r/1e3).toFixed(1)+"k":o<10?r.toFixed(1):r.toFixed(0);return e.text=`${e.text}: ${n} ${a}`,e})}(i.defaults.plugins.legend.labels.generateLabels(e),e.data.datasets,n)}},tooltip:{backgroundColor:r.tooltipBg||"rgba(15,18,25,0.94)",titleColor:r.tooltipText||"#e0e0e0",titleFont:{family:"'Segoe UI','Roboto',sans-serif",weight:"600",size:12},bodyColor:r.textSec||"#b0b0b0",bodyFont:{family:"'Segoe UI','Roboto',sans-serif",size:11},borderColor:r.tooltipBorder||"rgba(255,255,255,0.08)",borderWidth:1,cornerRadius:10,padding:{top:10,bottom:10,left:14,right:14},bodySpacing:6,displayColors:!0,boxPadding:4,callbacks:{title:e=>{if(!e||!e.length)return"";const t=new Date(e[0].parsed.x);if(isNaN(t))return"";const i=this._hass?.language||"en",s=this._hass?.config?.time_zone||void 0;try{return"hour"===d?t.toLocaleTimeString(i,{hour:"2-digit",minute:"2-digit",timeZone:s}):"month"===d?t.toLocaleDateString(i,{month:"short",year:"numeric",timeZone:s}):t.toLocaleDateString(i,{day:"numeric",month:"short",timeZone:s})}catch(e){return"hour"===d?t.toLocaleTimeString(i):t.toLocaleDateString(i)}},label:e=>{const t=e.parsed.y,i="y1"===e.dataset.yAxisID?"%":n,s=Math.abs(t),r=s>=1e3?(t/1e3).toFixed(1)+"k":s<10?t.toFixed(2):t.toFixed(1);return` ${e.dataset.label}: ${r} ${i}`}}}},scales:{x:{type:"time",min:this._period.start.toISOString(),max:this._period.end.toISOString(),time:{unit:_,tooltipFormat:"hour"===d?"HH:mm":"month"===d?"MMM yyyy":"dd MMM",displayFormats:{hour:"HH:mm",day:"dd MMM",month:"MMM"}},grid:{color:"rgba(255,255,255,0.02)",drawBorder:!1,drawTicks:!1},ticks:{color:r.textSec||"#757575",font:{size:10,family:"'Segoe UI','Roboto',sans-serif"},maxRotation:0,padding:6,callback:(e,t,i)=>{const s=i[t];if(!s)return e;const r=new Date(s.value);if(isNaN(r))return e;const a=this._hass?.language||"en",o=this._hass?.config?.time_zone||void 0;try{return"hour"===_?r.toLocaleTimeString(a,{hour:"2-digit",minute:"2-digit",timeZone:o}):"month"===_?r.toLocaleDateString(a,{month:"short",timeZone:o}):r.toLocaleDateString(a,{day:"numeric",month:"short",timeZone:o})}catch(e){return"hour"===_?r.toLocaleTimeString(a,{hour:"2-digit",minute:"2-digit"}):r.toLocaleDateString(a,{day:"numeric",month:"short"})}}},stacked:o},y:{position:"left",grid:{color:"rgba(255,255,255,0.04)",drawBorder:!1,drawTicks:!1},ticks:{color:r.textSec||"#757575",font:{size:10,family:"'Segoe UI','Roboto',sans-serif"},padding:8,callback:e=>{const t=Math.abs(e);return t>=1e3?(e/1e3).toFixed(1)+"k":t<.01&&t>0?"":e%1==0?e:e.toFixed(1)}},title:{display:!!n,text:n,color:r.textSec||"#757575",font:{size:11,family:"'Segoe UI','Roboto',sans-serif"}},stacked:o,beginAtZero:"W"!==n||0===this._preset?.y_min,...null!=this._preset?.y_min?{min:this._preset.y_min}:{},...null!=this._preset?.y_suggested_max?{suggestedMax:this._preset.y_suggested_max}:{}}}}};c&&(u.options.scales.y1={position:"right",grid:{drawOnChartArea:!1,drawTicks:!1},ticks:{color:"#ff9800",font:{size:10},padding:8,callback:e=>e+"%"},title:{display:!!l,text:l,color:"#ff9800",font:{size:11}},min:0,max:100}),this._chart&&(this._chart.destroy(),this._chart=null),this._chart=new i(p,u)}_showEmpty(e){this._emptyMsg=e,this.requestUpdate()}_hideEmpty(){this._emptyMsg&&(this._emptyMsg="",this.requestUpdate())}getCardSize(){return 5}static getStubConfig(){return{preset:"costs"}}},{type:"sem-chart-card",name:"SEM Chart",description:"Period-reactive chart with glassmorphism styling and built-in presets",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-chart-card"});function ti(e){return`${String(e.getHours()).padStart(2,"0")}:${String(e.getMinutes()).padStart(2,"0")}`}function ii({targetKw:e,usedKwh:t,allowedW:i,now:s=new Date}){const r=function(e){const t=Number(e);return!Number.isFinite(t)||t<=0?null:.25*t}(e);if(null===r)return null;const a=null==t?NaN:Number(t);if(!Number.isFinite(a))return null;const{start:o,end:n}=function(e=new Date){const t=new Date(e);t.setMinutes(15*Math.floor(t.getMinutes()/15),0,0);const i=new Date(t.getTime()+9e5);return{start:t,end:i,elapsedS:Math.max(0,(e-t)/1e3)}}(s),l=null==i?NaN:Number(i);return{label:`${ti(o)}–${ti(n)}`,usedKwh:a,budgetKwh:r,fraction:Math.max(0,Math.min(1,a/r)),overBudget:a>=r,allowedKw:Number.isFinite(l)?l/1e3:null}}const{I:si}=oe,ri=e=>e,ai=()=>document.createComment(""),oi=(e,t,i)=>{const s=e._$AA.parentNode,r=void 0===t?e._$AB:t._$AA;if(void 0===i){const t=s.insertBefore(ai(),r),a=s.insertBefore(ai(),r);i=new si(t,a,e,e.options)}else{const t=i._$AB.nextSibling,a=i._$AM,o=a!==e;if(o){let t;i._$AQ?.(e),i._$AM=e,void 0!==i._$AP&&(t=e._$AU)!==a._$AU&&i._$AP(t)}if(t!==r||o){let e=i._$AA;for(;e!==t;){const t=ri(e).nextSibling;ri(s).insertBefore(e,r),e=t}}}return i},ni=(e,t,i=e)=>(e._$AI(t,i),e),li={},ci=(e,t=li)=>e._$AH=t,di=e=>{e._$AR(),e._$AA.remove()},pi=(e,t,i)=>{const s=new Map;for(let r=t;r<=i;r++)s.set(e[r],r);return s},hi=Tt(class extends Rt{constructor(e){if(super(e),e.type!==Bt)throw Error("repeat() can only be used in text expressions")}dt(e,t,i){let s;void 0===i?i=t:void 0!==t&&(s=t);const r=[],a=[];let o=0;for(const t of e)r[o]=s?s(t,o):o,a[o]=i(t,o),o++;return{values:a,keys:r}}render(e,t,i){return this.dt(e,t,i).values}update(e,[t,i,s]){const r=(e=>e._$AH)(e),{values:a,keys:o}=this.dt(t,i,s);if(!Array.isArray(r))return this.ut=o,a;const n=this.ut??=[],l=[];let c,d,p=0,h=r.length-1,_=0,g=a.length-1;for(;p<=h&&_<=g;)if(null===r[p])p++;else if(null===r[h])h--;else if(n[p]===o[_])l[_]=ni(r[p],a[_]),p++,_++;else if(n[h]===o[g])l[g]=ni(r[h],a[g]),h--,g--;else if(n[p]===o[g])l[g]=ni(r[p],a[g]),oi(e,l[g+1],r[p]),p++,g--;else if(n[h]===o[_])l[_]=ni(r[h],a[_]),oi(e,r[p],r[h]),h--,_++;else if(void 0===c&&(c=pi(o,_,g),d=pi(n,p,h)),c.has(n[p]))if(c.has(n[h])){const t=d.get(o[_]),i=void 0!==t?r[t]:null;if(null===i){const t=oi(e,r[p]);ni(t,a[_]),l[_]=t}else l[_]=ni(i,a[_]),oi(e,r[p],i),r[t]=null;_++}else di(r[h]),h--;else di(r[p]),p++;for(;_<=g;){const t=oi(e,l[g+1]);ni(t,a[_]),l[_++]=t}for(;p<=h;){const e=r[p++];null!==e&&di(e)}return this.ut=o,ci(e,l),G}});function _i(e){const t=[],i=new Set,s=r=>{var a;i.has(r.id)||(t.push(r),i.add(r.id),(a=r.id,e.filter(e=>(e.dependsOn||[]).includes(a)&&!i.has(e.id))).forEach(s))};return e.filter(e=>!(e.dependsOn||[]).length).forEach(s),e.forEach(e=>{i.has(e.id)||t.push(e)}),t}const gi=["switch","current","input_boolean","service"],ui={switch:["switch"],current:["number","input_number"],input_boolean:["input_boolean"]};function mi(e){return String(e??"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}const fi="width:100%;padding:8px;margin:6px 0 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.2);color:inherit;box-sizing:border-box";const vi="https://github.com/traktore-org/sem-community/blob/develop/docs/ENERGY_PLANNER.md#comfort-banking";we("sem-load-priority-card",class extends Se{constructor(){super(),this.devices=[],this.targetPeakLimit=5,this.peakLimitUnlimited=!1,this.currentPeak=0,this.gridImportKw=null,this.slotAllowedW=null,this.slotUsedKwh=null,this.loadManagementStatus="normal",this._sortable=null,this._interacting=!1,this._lastDeviceSig="",this._showHelp=!1,this._goalOpen={},this._goalDrag=null}setConfig(e){this._config=e,this.entityPrefix=e.entity_prefix||"sensor.sem_",this.requestUpdate()}set hass(e){this._hass,this._hass=e;const t=e?.language;if(t!==this._lang)return this._lang=t,this._lastDeviceSig="",void this.requestUpdate();if(this._interacting)return;if(this._isFrozen())return;if(this._priorityFrozenUntil&&Date.now()<this._priorityFrozenUntil)return;const i=e?.states[`${this.entityPrefix}controllable_devices_count`],s=e?.states[`${this.entityPrefix}consecutive_peak_15min`],r=e?.states[`${this.entityPrefix}load_management_status`],a=(i?.state||"")+"|"+(s?.state||"")+"|"+(r?.state||"");a!==this._lastKey&&(this._lastKey=a,this._updateDeviceData(),this.requestUpdate())}get hass(){return this._hass}disconnectedCallback(){super.disconnectedCallback(),this._drag&&(window.removeEventListener("pointermove",this._dragMoveBound),window.removeEventListener("pointerup",this._dragEndBound),window.removeEventListener("pointercancel",this._dragEndBound),this._drag=null,this._interacting=!1)}async firstUpdated(){this._bindEvents(),this._ensureEntityPicker()}async updated(e){const t=this.devices.map(e=>e.id).join(",");t!==this._lastDeviceSig&&(this._lastDeviceSig=t,this._bindEvents())}static get styles(){return a`
+            /* (#913 follow-up) a refused service call, in the modal's error voice */
+            .svc-error { margin: 6px 0 8px; padding: 6px 10px; border-radius: 6px;
+                         background: rgba(244, 67, 54, .12); color: #f44336;
+                         font-size: 0.85em; }
             :host { display: block; }
             ha-card {
                 overflow: visible;
@@ -6280,14 +6553,14 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             .ov-opt:last-child { border-right:none; }
             .ov-opt.on { background:#4db6ac; color:#fff; font-weight:600; }
             .empty { text-align:center; padding:20px 0; opacity:0.4; font-size:1em; }
-        `}_updateDeviceData(){if(!this._hass)return;const e=this._hass.states[`${this.entityPrefix}target_peak_limit`],t=this._hass.states[`${this.entityPrefix}consecutive_peak_15min`],i=this._hass.states[`${this.entityPrefix}load_management_status`],s=this._hass.states[`${this.entityPrefix}controllable_devices_count`];e&&(this.targetPeakLimit=parseFloat(e.state)||5),e&&(this.peakLimitUnlimited=e.attributes?.peak_limit_unlimited||!1),t&&(this.currentPeak=parseFloat(t.state)||0),i&&(this.loadManagementStatus=i.state||"normal"),s?.attributes?.devices&&(this.devices=Object.entries(s.attributes.devices).map(([e,t])=>({id:e,name:t.name||e.replace(/^(load_device_|energy_dashboard_)/,"").replace(/_/g," "),power:(t.power_entity&&this._hass?.states?.[t.power_entity]?parseFloat(this._hass.states[t.power_entity].state)||0:t.current_power||0)/1e3,rating:t.power_rating||0,priority:t.priority||5,isOn:t.is_on||!1,isShed:t.is_shed||!1,shedReason:t.shed_reason||null,hasControlHandle:void 0!==t.has_control_handle?!1!==t.has_control_handle:!1!==t.is_controllable,isControllable:void 0!==t.user_hands_off?!0!==t.user_hands_off:!1!==t.is_controllable,isCritical:t.is_critical||!1,deviceType:t.device_type||"unknown",isAvailable:t.is_available||!1,hasManualMapping:t.has_manual_mapping||!1,energySensor:t.energy_sensor||"",control:t.control||null,controlEntity:t.control?.entity||t.switch_entity||"",controlType:t.control?.type||"switch",controlMode:t.control_mode||"peak_only",dependsOn:t.depends_on||[],goals:t.goals||null,progress:t.progress||null,comfort:t.comfort||null,blockedBy:t.blocked_by||null,soc:t.soc,icon:this._resolveDeviceIcon(t)})).sort((e,t)=>e.priority-t.priority))}render(){if(!this._config)return q;const e=this.peakLimitUnlimited,t=this._getPeakColor(),i=this.targetPeakLimit-this.currentPeak,s=e?0:this.targetPeakLimit>0?Math.min(this.currentPeak/this.targetPeakLimit*100,100):0;return W`
+        `}_updateDeviceData(){if(!this._hass)return;const e=this._hass.states[`${this.entityPrefix}target_peak_limit`],t=this._hass.states[`${this.entityPrefix}consecutive_peak_15min`],i=this._hass.states[`${this.entityPrefix}load_management_status`],s=this._hass.states[`${this.entityPrefix}controllable_devices_count`];e&&(this.targetPeakLimit=parseFloat(e.state)||5),e&&(this.peakLimitUnlimited=e.attributes?.peak_limit_unlimited||!1),t&&(this.currentPeak=parseFloat(t.state)||0),e&&(this.slotAllowedW=e.attributes?.peak_slot_allowed_w??null,this.slotUsedKwh=e.attributes?.peak_slot_used_kwh??null);const r=this._hass.states[`${this.entityPrefix}grid_power`];this.gridImportKw=r?function(e){const t=Number(e);return Number.isFinite(t)?Math.max(0,-t)/1e3:null}(r.state):null,i&&(this.loadManagementStatus=i.state||"normal"),s?.attributes?.devices&&(this.devices=Object.entries(s.attributes.devices).map(([e,t])=>({id:e,name:t.name||e.replace(/^(load_device_|energy_dashboard_)/,"").replace(/_/g," "),power:(t.power_entity&&this._hass?.states?.[t.power_entity]?parseFloat(this._hass.states[t.power_entity]?.state)||0:t.current_power||0)/1e3,rating:t.power_rating||0,priority:t.priority||5,isOn:t.is_on||!1,isShed:t.is_shed||!1,shedReason:t.shed_reason||null,hasControlHandle:void 0!==t.has_control_handle?!1!==t.has_control_handle:!1!==t.is_controllable,isControllable:void 0!==t.user_hands_off?!0!==t.user_hands_off:!1!==t.is_controllable,isCritical:t.is_critical||!1,deviceType:t.device_type||"unknown",isAvailable:t.is_available||!1,hasManualMapping:t.has_manual_mapping||!1,energySensor:t.energy_sensor||"",control:t.control||null,controlEntity:t.control?.entity||t.switch_entity||"",controlType:t.control?.type||"switch",controlMode:t.control_mode||"peak_only",dependsOn:t.depends_on||[],goals:t.goals||null,progress:t.progress||null,comfort:t.comfort||null,blockedBy:t.blocked_by||null,soc:t.soc,icon:this._resolveDeviceIcon(t)})).sort((e,t)=>e.priority-t.priority))}render(){if(!this._config)return K;const e=this.peakLimitUnlimited,t=this._getPeakColor(),i=this.targetPeakLimit-this.currentPeak,s=e?0:this.targetPeakLimit>0?Math.min(this.currentPeak/this.targetPeakLimit*100,100):0,r=e?null:ii({targetKw:this.targetPeakLimit,usedKwh:this.slotUsedKwh,allowedW:this.slotAllowedW});return W`
             <ha-card>
                 <div class="card-content">
                     <div class="status-bar">
                         <div class="peak-dot" style="background:${t};box-shadow:0 0 8px ${t}"></div>
                         <span id="lm-status" class="status-text">${this._t(this.loadManagementStatus||"normal").toUpperCase()}</span>
                         <div class="spacer"></div>
-                        <span class="dim">${this._t("peak")}</span>
+                        <span class="dim">${this._t("peak_15min_avg")}</span>
                         <span id="peak-current" class="mono">${this.currentPeak.toFixed(2)} kW</span>
                         <span class="dim">/ ${e?this._t("uncapped"):this.targetPeakLimit.toFixed(1)}</span>
                         <button class="help-btn ${this._showHelp?"active":""}" data-action="toggle-help"
@@ -6296,14 +6569,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
 
                     <div class="peak-box">
                         <div class="peak-row">
-                            <span class="dim">${this._t("current_peak")}</span>
+                            <span class="dim">${this._t("peak_15min_avg")}</span>
                             <span id="peak-current2" class="mono">${this.currentPeak.toFixed(2)} kW</span>
                         </div>
+                        ${null===this.gridImportKw?K:W`
+                        <div class="peak-row">
+                            <span class="dim">${this._t("peak_right_now")}</span>
+                            <span id="peak-now" class="mono dim">${this.gridImportKw.toFixed(2)} kW</span>
+                        </div>`}
                         <div class="peak-row">
                             <span class="dim">${this._t("target_limit")}</span>
                             <span id="peak-target" class="mono">${e?this._t("uncapped"):this.targetPeakLimit.toFixed(2)+" kW"}</span>
                         </div>
-                        ${e?q:W`
+                        ${e?K:W`
                         <div class="peak-row">
                             <span class="dim">${this._t("margin")}</span>
                             <span id="peak-margin" class="mono" style="color:${i>0?"#4caf50":"#f44336"}">${i.toFixed(2)} kW</span>
@@ -6311,6 +6589,20 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="bar">
                             <div id="peak-bar" class="bar-fill" style="width:${s}%;background:${t}"></div>
                         </div>
+                        ${null===r?K:W`
+                        <div class="peak-row" style="margin-top:10px">
+                            <span class="dim">${this._t("peak_slot")} ${r.label}</span>
+                            <span id="peak-slot-used" class="mono">${r.usedKwh.toFixed(2)} / ${r.budgetKwh.toFixed(2)} kWh</span>
+                        </div>
+                        <div class="bar">
+                            <div id="peak-slot-bar" class="bar-fill"
+                                 style="width:${100*r.fraction}%;background:${r.overBudget?"#f44336":t}"></div>
+                        </div>
+                        ${null===r.allowedKw?K:W`
+                        <div class="peak-row">
+                            <span class="dim">${this._t("peak_slot_allows")}</span>
+                            <span id="peak-slot-allows" class="mono dim">${r.allowedKw.toFixed(2)} kW</span>
+                        </div>`}`}
                     </div>
 
                     <div class="peak-box" style="margin-bottom:16px">
@@ -6327,9 +6619,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="help-item"><b>${this._t("priority")}</b> — ${this._t("help_device_priority")}</div>
                         <div class="help-item"><b>${this._t("requires")}</b> — ${this._t("help_device_requires")}</div>
                         <div class="help-item"><b>${this._t("configure")}</b> — ${this._t("help_device_configure")}</div>
+                        <div class="help-item"><b>${this._t("peak_15min_avg")}</b> — ${this._t("help_peak_15min_avg")}</div>
+                        <div class="help-item"><b>${this._t("peak_slot")}</b> — ${this._t("help_peak_slot")}</div>
                         <div class="help-item"><b>${this._t("target_limit")}</b> — ${this._t("help_device_peak")}</div>
                         <div class="help-item"><b>${this._t("daily_target")}</b> — ${this._t("help_device_target")}</div>
-                    </div>`:q}
+                    </div>`:K}
 
                     <div class="section-label">
                         <ha-icon icon="mdi:drag-vertical" style="--mdc-icon-size:18px"></ha-icon>
@@ -6337,10 +6631,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
 
                     <div id="device-list" class="device-list">
-                        ${0===this.devices.length?W`<div class="empty">${this._t("no_devices_yet")}</div>`:Zt(this.devices,e=>e.id,(e,t)=>this._renderDevice(e,t+1))}
+                        ${0===this.devices.length?W`<div class="empty">${this._t("no_devices_yet")}</div>`:hi(this.devices,e=>e.id,(e,t)=>this._renderDevice(e,t+1))}
                     </div>
 
-                    ${this.devices.length>0?W`<div class="hint">${this._t("drag_hint")}</div>`:q}
+                    ${this.devices.length>0?W`<div class="hint">${this._t("drag_hint")}</div>`:K}
 
                     <div class="hint" style="margin-top:12px;padding:10px;background:rgba(128,128,128,0.06);border-radius:10px">
                         ${this._t("devices_auto_discovered").replace(/<br\s*\/?>/g," — ")}
@@ -6356,10 +6650,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             <div class="device-body">
                 <div class="device-top">
                     <div class="device-name">
-                        ${r?W`<span style="color:#ff9800;font-size:12px;margin-right:4px">&#8618;</span>`:q}
+                        ${r?W`<span style="color:#ff9800;font-size:12px;margin-right:4px">&#8618;</span>`:K}
                         <ha-icon icon="${e.icon}" style="--mdc-icon-size:20px;color:${i?"#ff9800":"#666"}"></ha-icon>
                         <span>${e.name}</span>
-                        ${s?q:W`
+                        ${s?K:W`
                         <span class="configure-btn" data-action="configure" data-device="${e.id}" data-name="${e.name}">
                             <ha-icon icon="mdi:${e.hasManualMapping?"wrench":"cog"}" style="--mdc-icon-size:14px"></ha-icon> ${e.isControllable?this._t("configure_device"):this._t("configure")}
                         </span>`}
@@ -6368,17 +6662,17 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         ${s?W`<span style="opacity:0.7">${null!=e.soc?e.soc+"% · ":""}${i?ge(1e3*e.power):this._t("off")}</span>`:i?ge(1e3*e.power):e.isShed?this._t("shed_label"):e.rating>0?W`<span style="opacity:0.5" title="${this._t("rated_power_hint")}">~${ge(e.rating)}</span>`:this._t("off")}
                     </div>
                 </div>
-                ${e.blockedBy?W`<div style="font-size:13px;color:#ff9800;padding:2px 0 0 28px">&#9203; Waiting for: ${e.blockedBy}</div>`:q}
-                ${e.dependsOn.length?W`<div style="font-size:13px;opacity:0.55;padding:0 0 0 28px">&#8618; ${this._t("requires")}: ${e.dependsOn.join(", ")}</div>`:q}
-                ${e.isShed&&e.shedReason?W`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${"emergency"===e.shedReason?this._t("shed_emergency"):this._t("shed_peak")}</div>`:q}
+                ${e.blockedBy?W`<div style="font-size:13px;color:#ff9800;padding:2px 0 0 28px">&#9203; Waiting for: ${e.blockedBy}</div>`:K}
+                ${e.dependsOn.length?W`<div style="font-size:13px;opacity:0.55;padding:0 0 0 28px">&#8618; ${this._t("requires")}: ${e.dependsOn.join(", ")}</div>`:K}
+                ${e.isShed&&e.shedReason?W`<div style="font-size:13px;color:#f44336;padding:2px 0 0 28px">${this._t((n=e.shedReason,"EMERGENCY"===String(n||"").toUpperCase()?"shed_emergency":"shed_peak"))}</div>`:K}
                 <div class="device-bottom">
                     <div class="status-dot ${i?"on":e.isShed?"shed":""}" data-field="status-${e.id}"></div>
                     <span class="dim" data-field="onoff-${e.id}">${i?this._t("on"):e.isShed?this._t("shed_label"):this._t("off")}</span>
                     <span class="badge priority" data-field="pri-${e.id}">${t}</span>
-                    ${s?q:this._renderControlVerdict(e)}
+                    ${s?K:this._renderControlVerdict(e)}
                     <div class="spacer"></div>
-                    ${s?W`<span class="dim" title="${this._t("battery_role_help")}">${this._t("battery_role_label")}</span>`:q}
-                    ${"ev_charger"===e.deviceType||"ev_charging"===e.deviceType||s?q:W`
+                    ${s?W`<span class="dim" title="${this._t("battery_role_help")}">${this._t("battery_role_label")}</span>`:K}
+                    ${"ev_charger"===e.deviceType||"ev_charging"===e.deviceType||s?K:W`
                     <label class="toggle-label" title="${this._t("mode_tooltip")}">
                         <span class="dim">${this._t("mode")}</span>
                         <select class="mode-select" data-action="combined_mode" data-device="${e.id}">
@@ -6388,7 +6682,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <option value="solar_battery" ?selected="${"solar_battery"===this._mergedMode(e)}">${this._t("mode_solar_battery")}</option>
                         </select>
                     </label>`}
-                    ${s?q:W`
+                    ${s?K:W`
                     <label class="toggle-label" title="${this._t("requires_tooltip")}">
                         <span class="dim">${this._t("requires")}</span>
                         <select class="mode-select" data-action="depends_on" data-device="${e.id}">
@@ -6400,7 +6694,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <button class="arrow-btn" data-action="move-up"   data-device="${e.id}" title="${this._t("move_up")}">&#9650;</button>
                         <button class="arrow-btn" data-action="move-down" data-device="${e.id}" title="${this._t("move_down")}">&#9660;</button>
                     </div>
-                    ${"ev_charger"===e.deviceType||"ev_charging"===e.deviceType||s||"solar_only"!==this._mergedMode(e)&&"solar_battery"!==this._mergedMode(e)?q:W`
+                    ${"ev_charger"===e.deviceType||"ev_charging"===e.deviceType||s||"solar_only"!==this._mergedMode(e)&&"solar_battery"!==this._mergedMode(e)?K:W`
                     <button class="goal-btn ${this._goalOpen[e.id]?"active":""}"
                             data-action="toggle-goal" data-device="${e.id}"
                             title="${this._t("daily_target")}">
@@ -6409,10 +6703,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 </div>
                 ${this._renderComfortChip(e)}
                 ${this._renderGoalProgress(e)}
-                ${this._goalOpen[e.id]?this._renderGoalEditor(e):q}
+                ${this._goalOpen[e.id]?this._renderGoalEditor(e):K}
             </div>
-        </div>`}_mergedMode(e){const t=e.controlMode||"peak_only";return"surplus"!==t?t:(e.goals||{}).battery_assist_enabled?"solar_battery":"solar_only"}_mergedModeLabel(e){const t=this._mergedMode(e),i={off:"off",peak_only:"peak_only",solar_only:"mode_solar_only",solar_battery:"mode_solar_battery"}[t]||t;return this._t(i)}_applyMergedMode(e,t){const i="off"===t||"peak_only"===t?t:"surplus";if(e.controlMode=i,this._sendDeviceUpdate(e.id,"control_mode",i),"surplus"===i){const i="solar_battery"===t;e.goals=e.goals||{},e.goals.battery_assist_enabled=i,this._sendDeviceUpdate(e.id,"battery_assist_enabled",String(i)),"always"===e.goals.top_up_policy&&(e.goals.top_up_policy="solar_only",this._sendDeviceUpdate(e.id,"top_up_policy","solar_only"))}this.requestUpdate()}_hasTarget(e){return parseFloat((e.goals||{}).daily_min_runtime_min)>0}_goalPct(e){const t=e.goals,i=e.progress;if(!t||!i)return null;const s=parseFloat(t.daily_min_runtime_min);return s>0?Math.min(100,i.runtime_today_min/s*100):null}_renderGoalSlider(e){const t=e.goals||{},i=this._goalDrag;let s=(parseFloat(t.daily_min_runtime_min)||0)/60,r=parseFloat(t.daily_max_runtime_min)||0,a=r>0?r/60:12;i&&i.id===e.id&&("min"===i.handle?s=i.value:a=i.value),a<s&&(a=s);const o=Math.min(100,s/12*100),n=Math.min(100,a/12*100),l=a>=11.999999,c=e=>e%1==0?String(e):e.toFixed(1),d=a-s<.499999;return W`
+        </div>`;var n}_mergedMode(e){const t=e.controlMode||"peak_only";return"surplus"!==t?t:(e.goals||{}).battery_assist_enabled?"solar_battery":"solar_only"}_mergedModeLabel(e){const t=this._mergedMode(e),i={off:"off",peak_only:"peak_only",solar_only:"mode_solar_only",solar_battery:"mode_solar_battery"}[t]||t;return this._t(i)}_applyMergedMode(e,t){const i="off"===t||"peak_only"===t?t:"surplus";if(e.controlMode=i,this._sendDeviceUpdate(e.id,"control_mode",i),"surplus"===i){const i="solar_battery"===t;e.goals=e.goals||{},e.goals.battery_assist_enabled=i,this._sendDeviceUpdate(e.id,"battery_assist_enabled",String(i)),"always"===e.goals.top_up_policy&&(e.goals.top_up_policy="solar_only",this._sendDeviceUpdate(e.id,"top_up_policy","solar_only"))}this.requestUpdate()}_hasTarget(e){return parseFloat((e.goals||{}).daily_min_runtime_min)>0}_goalPct(e){const t=e.goals,i=e.progress;if(!t||!i)return null;const s=parseFloat(t.daily_min_runtime_min);return s>0?Math.min(100,i.runtime_today_min/s*100):null}_renderGoalSlider(e){const t=e.goals||{},i=this._goalDrag;let s=(parseFloat(t.daily_min_runtime_min)||0)/60,r=parseFloat(t.daily_max_runtime_min)||0,a=r>0?r/60:12;i&&i.id===e.id&&("min"===i.handle?s=i.value:a=i.value),a<s&&(a=s);const o=Math.min(100,s/12*100),n=Math.min(100,a/12*100),l=a>=11.999999,c=e=>e%1==0?String(e):e.toFixed(1),d=a-s<.499999;return W`
             <div class="range-wrap">
+                ${this._serviceError?W`<div class="svc-error" role="alert">${this._serviceError}</div>`:K}
                 <div class="range-labels">
                     <span>${this._t("at_least")} <b style="color:#8DC892">${s<=0?this._t("no_target"):c(s)+" h"}</b></span>
                     <span>${this._t("up_to")} <b style="color:#ff9800">${l?this._t("uncapped"):c(a)+" h"}</b></span>
@@ -6428,7 +6723,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                               title="${this._t("separate_handles")}"
                               @click=${t=>this._splitGoalHandles(t,e,s,a)}>
                             <ha-icon icon="mdi:arrow-split-vertical" style="--mdc-icon-size:14px"></ha-icon>
-                        </span>`:q}
+                        </span>`:K}
                 </div>
             </div>`}_splitGoalHandles(e,t,i,s){e.stopPropagation();const r=.5,a=t.goals=t.goals||{};if(i-r>=0){const e=Math.round(60*(i-r));a.daily_min_runtime_min=e,this._sendDeviceUpdate(t.id,"daily_min_runtime_min",String(e))}else{const e=Math.min(11.5,s-r),i=Math.round(60*e);a.daily_max_runtime_min=i,this._sendDeviceUpdate(t.id,"daily_max_runtime_min",String(i))}this.requestUpdate()}_goalSliderStart(e,t,i){e.stopPropagation(),e.preventDefault();const s=e.currentTarget.parentElement,r=t.goals=t.goals||{},a=s.getBoundingClientRect(),o=(parseFloat(r.daily_min_runtime_min)||0)/60,n=parseFloat(r.daily_max_runtime_min)||0,l=n>0?n/60:12,c=e=>{let t=(e-a.left)/(a.width||1);t=Math.max(0,Math.min(1,t));let s=.5*Math.round(12*t/.5);return s="min"===i?Math.min(s,l):Math.max(s,o),s},d=e=>{this._goalDrag={id:t.id,handle:i,value:c(e)},this.requestUpdate()};d(e.clientX);const p=e=>d(e.clientX),h=e=>{window.removeEventListener("pointermove",p),window.removeEventListener("pointerup",h),window.removeEventListener("pointercancel",h);const s=c(e.clientX);if(this._goalDrag=null,"min"===i){const e=Math.round(60*s);r.daily_min_runtime_min=e,this._sendDeviceUpdate(t.id,"daily_min_runtime_min",String(e))}else{const e=s>=11.999999?0:Math.round(60*s);r.daily_max_runtime_min=e,this._sendDeviceUpdate(t.id,"daily_max_runtime_min",String(e))}this.requestUpdate()};window.addEventListener("pointermove",p),window.addEventListener("pointerup",h),window.addEventListener("pointercancel",h)}_renderPeakSlider(){const e=this._peakDrag;let t=this.peakLimitUnlimited?80:Math.min(80,Math.max(1,this.targetPeakLimit||1));null!=e&&(t=e);const i=(t-1)/79*100,s=t>=79.999999?this._t("uncapped"):`${t.toFixed(1)} kW`;return W`
             <div class="range-wrap">
@@ -6453,11 +6748,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ${i("grid",this._t("overnight_grid"))}
                 </span>
             </div>
-            <div class="ge-hint">${this._t("overnight_"+t+"_hint")}</div>`}_setOvernightSource(e,t){const i=e.goals=e.goals||{},s="battery"===t,r="grid"===t?"cheap_hours":"solar_only";i.battery_eligible_overnight=s,i.top_up_policy=r,this._sendDeviceUpdate(e.id,"battery_eligible_overnight",String(s)),this._sendDeviceUpdate(e.id,"top_up_policy",r),this.requestUpdate()}_renderGoalProgress(e){const t=this._mergedMode(e);if("solar_only"!==t&&"solar_battery"!==t)return q;const i=this._goalPct(e);if(null===i)return q;const s=e.goals,r=e.progress,a=r.targets_met||i>=100,o=e=>{const t=e/60;return t%1==0?String(t):t.toFixed(1)},n=o(r.runtime_today_min)+"/"+o(parseFloat(s.daily_min_runtime_min))+" "+this._t("hours_on_solar_today");return W`
+            <div class="ge-hint">${this._t("overnight_"+t+"_hint")}</div>`}_setOvernightSource(e,t){const i=e.goals=e.goals||{},s="battery"===t,r="grid"===t?"cheap_hours":"solar_only";i.battery_eligible_overnight=s,i.top_up_policy=r,this._sendDeviceUpdate(e.id,"battery_eligible_overnight",String(s)),this._sendDeviceUpdate(e.id,"top_up_policy",r),this.requestUpdate()}_renderGoalProgress(e){const t=this._mergedMode(e);if("solar_only"!==t&&"solar_battery"!==t)return K;const i=this._goalPct(e);if(null===i)return K;const s=e.goals,r=e.progress,a=r.targets_met||i>=100,o=e=>{const t=e/60;return t%1==0?String(t):t.toFixed(1)},n=o(r.runtime_today_min)+"/"+o(parseFloat(s.daily_min_runtime_min))+" "+this._t("hours_on_solar_today");return W`
             <div class="goal-progress" style="padding:2px 0 0 28px">
                 <div class="goal-bar"><div class="goal-bar-fill" style="width:${i}%;background:#8DC892"></div></div>
                 <span class="goal-progress-text">${n}${a?" ✓":""}</span>
-            </div>`}_renderGoalEditor(e){const t=this._mergedMode(e);if("solar_only"!==t&&"solar_battery"!==t)return q;const i=e.goals||{};return W`
+            </div>`}_renderGoalEditor(e){const t=this._mergedMode(e);if("solar_only"!==t&&"solar_battery"!==t)return K;const i=e.goals||{};return W`
             <div class="goal-editor">
                 <div class="ge-title">
                     <ha-icon icon="mdi:target" style="--mdc-icon-size:14px;color:#8DC892"></ha-icon>
@@ -6494,10 +6789,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             <span class="dim" style="display:inline-flex;align-items:center;gap:3px;color:${r}"
                   title="${this._t("control_verdict_help")}">
                 <ha-icon icon="${s}" style="--mdc-icon-size:14px"></ha-icon>${this._t(i)}
-            </span>`}_renderComfortChip(e){const t=this._comfortChipMeta(e);if(!t)return q;const i=this._displayTemp(e.comfort.reading_c);return W`
+            </span>`}_renderComfortChip(e){const t=this._comfortChipMeta(e);if(!t)return K;const i=this._displayTemp(e.comfort.reading_c);return W`
             <div class="comfort-chip" style="border-color:${t.color}55;color:${t.color}">
-                <span>${t.icon}</span> ${t.label}${i?W` \u00B7 ${i}`:q}
-            </div>`}_renderComfortBand(e){const t=!["ev_charger","ev_charging","battery"].includes(e.deviceType);if(!e.comfort&&!t)return q;const i=e.goals||{},s=this.hass?.config?.unit_system?.temperature||"°C",r=parseFloat(i.comfort_target)||0,a=parseFloat(i.comfort_offset)||0,o=parseFloat(i.comfort_limit)||0,n=r>0&&o>0,l=n?Math.min(r-a,o)-3:18,c=n?Math.max(r,o)+3:30,d=e=>Math.max(0,Math.min(100,(e-l)/(c-l)*100)),p=e.comfort?e.comfort.reading_c:null,h=null==p?null:"°F"===s?9*p/5+32:p,_=(t,i,s)=>W`
+                <span>${t.icon}</span> ${t.label}${i?W` \u00B7 ${i}`:K}
+            </div>`}_renderComfortBand(e){const t=!["ev_charger","ev_charging","battery"].includes(e.deviceType);if(!e.comfort&&!t)return K;const i=e.goals||{},s=this.hass?.config?.unit_system?.temperature||"°C",r=parseFloat(i.comfort_target)||0,a=parseFloat(i.comfort_offset)||0,o=parseFloat(i.comfort_limit)||0,n=r>0&&o>0,l=n?Math.min(r-a,o)-3:18,c=n?Math.max(r,o)+3:30,d=e=>Math.max(0,Math.min(100,(e-l)/(c-l)*100)),p=e.comfort?e.comfort.reading_c:null,h=null==p?null:"°F"===s?9*p/5+32:p,_=(t,i,s)=>W`
             <input type="number" step="${s}" style="width:56px"
                    .value="${i?String(i):""}" placeholder="\u2014"
                    @change=${i=>{const s=i.target.value;""!==s&&null!=s&&(e.goals={...e.goals||{},[t]:s},this._sendDeviceUpdate(e.id,t,String(s)))}}
@@ -6505,7 +6800,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             <div class="ge-title" style="margin-top:10px">
                 <ha-icon icon="mdi:thermometer" style="--mdc-icon-size:14px;color:#4db6ac"></ha-icon>
                 ${this._t("comfort_section")}
-                <a class="ge-docs" href="${si}" target="_blank"
+                <a class="ge-docs" href="${vi}" target="_blank"
                    rel="noopener" title="${this._t("config_docs")}"
                    @click=${e=>e.stopPropagation()}>
                     <ha-icon icon="mdi:book-open-variant" style="--mdc-icon-size:12px"></ha-icon>
@@ -6537,8 +6832,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <div class="cs-mark" style="left:${d(r-a)}%;background:#8DC892" title="bank"></div>
                 <div class="cs-mark" style="left:${d(r)}%;background:#4db6ac" title="target"></div>
                 <div class="cs-mark" style="left:${d(o)}%;background:#ffc107" title="limit"></div>
-                ${null!=h?W`<div class="cs-read" style="left:${d(h)}%" title="${this._displayTemp(p)}">\u25B2</div>`:q}
-            </div>`:q}
+                ${null!=h?W`<div class="cs-read" style="left:${d(h)}%" title="${this._displayTemp(p)}">\u25B2</div>`:K}
+            </div>`:K}
             <div class="ge-row">
                 <span class="ge-label">${this._t("comfort_keep_at")}</span>
                 <span class="ge-ctl">${_("comfort_target",r,.5)}
@@ -6554,27 +6849,29 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <span class="ge-ctl">${_("comfort_limit",o,.5)}
                     <span class="ge-unit">${s}</span></span>
             </div>
-            <div class="ge-hint">${this._t("comfort_hint")}</div>`}_renderAntiCycle(e){const t=e.goals||{},i=t=>i=>{const s=i.target.value;""===s||null==s||Number(s)<1||(e.goals={...e.goals||{},[t]:s},this._sendDeviceUpdate(e.id,t,String(s)))},s=(e,s)=>W`
-            <input type="number" min="1" max="120" step="1" style="width:56px"
+            <div class="ge-hint">${this._t("comfort_hint")}</div>`}_antiCycleBounds(){const e=this._hass?.states?.[`${this._prefix}controllable_devices_count`];return function(e){const t=e&&e.anti_cycle_bounds;if(!t)return null;const i=Number(t.min),s=Number(t.max);return Number.isFinite(i)&&Number.isFinite(s)?{min:i,max:s}:null}(e?.attributes)}_renderAntiCycle(e){const t=e.goals||{},i=t=>i=>{const s=i.target.value;""===s||null==s||Number(s)<1||(e.goals={...e.goals||{},[t]:s},this._sendDeviceUpdate(e.id,t,String(s)))},s=this._antiCycleBounds(),r=e=>function(e,t){const i=(e||{})[t];if(null==i)return"—";const s=Number(i);return Number.isFinite(s)?String(s):"—"}(t,e),a=(e,a)=>W`
+            <input type="number" step="1" style="width:56px"
+                   min=${s?s.min:K}
+                   max=${s?s.max:K}
                    .value="${null!=t[e]&&""!==t[e]?String(t[e]):""}"
-                   placeholder="${s}"
+                   placeholder="${r(a)}"
                    @change=${i(e)}
                    @click=${e=>e.stopPropagation()}>`;return W`
             <div class="ge-row">
                 <span class="ge-label">${this._t("anti_cycle_min_run")}</span>
                 <span class="ge-ctl">
-                    ${s("min_on_time_min","5")}
+                    ${a("min_on_time_min","min_on_effective_min")}
                     <span class="ge-unit">${this._t("minutes_short")}</span>
                 </span>
             </div>
             <div class="ge-row">
                 <span class="ge-label">${this._t("anti_cycle_min_pause")}</span>
                 <span class="ge-ctl">
-                    ${s("min_off_time_min","5")}
+                    ${a("min_off_time_min","min_off_effective_min")}
                     <span class="ge-unit">${this._t("minutes_short")}</span>
                 </span>
             </div>
-            <div class="ge-hint">${this._t("anti_cycle_hint")}</div>`}_dragStart(e,t){const i=this.devices.find(e=>e.id===t);if(!i||i.dependsOn&&i.dependsOn.length)return;if(null!=e.button&&0!==e.button)return;e.preventDefault();const s=e.currentTarget,r=s.closest(".device"),a=this.renderRoot.getElementById("device-list");if(!r||!a)return;const o=Array.from(a.querySelectorAll(".device")),n=o.map(e=>{const t=e.getBoundingClientRect();return t.top+t.height/2});this._interacting=!0;const l=o.indexOf(r);this._drag={id:t,handle:s,row:r,rows:o,centres:n,pointerY0:e.clientY,fromIndex:l,dropIndex:l,pointerId:e.pointerId},r.classList.add("dragging-row");try{s.setPointerCapture(e.pointerId)}catch(e){}this._dragMoveBound=this._dragMoveBound||this._dragMove.bind(this),this._dragEndBound=this._dragEndBound||this._dragEnd.bind(this),window.addEventListener("pointermove",this._dragMoveBound),window.addEventListener("pointerup",this._dragEndBound),window.addEventListener("pointercancel",this._dragEndBound)}_dragMove(e){const t=this._drag;if(!t)return;e.preventDefault(),t.row.style.transform=`translateY(${e.clientY-t.pointerY0}px)`;const i=function(e,t,i){let s=0;for(let r=0;r<e.length;r++)r!==t&&i>e[r]&&s++;return s}(t.centres,t.fromIndex,e.clientY);i!==t.dropIndex&&(t.dropIndex=i,this._paintDropLine(t,i))}_paintDropLine(e,t){e.rows.forEach(e=>e.classList.remove("drop-above","drop-below"));const i=e.rows[t<e.fromIndex?t:t+1];i&&i!==e.row?i.classList.add("drop-above"):e.rows[e.rows.length-1]?.classList.add("drop-below")}_dragEnd(e){const t=this._drag;if(t){window.removeEventListener("pointermove",this._dragMoveBound),window.removeEventListener("pointerup",this._dragEndBound),window.removeEventListener("pointercancel",this._dragEndBound);try{t.handle.releasePointerCapture(t.pointerId)}catch(e){}t.row.style.transform="",t.row.classList.remove("dragging-row"),t.rows.forEach(e=>e.classList.remove("drop-above","drop-below")),this._interacting=!1,this._drag=null,"pointercancel"!==e.type&&t.dropIndex!==t.fromIndex&&this._moveDeviceToIndex(t.id,t.dropIndex)}}_moveDeviceToIndex(e,t){this.devices=function(e,t,i){const s=e.slice(),r=s.findIndex(e=>e.id===t);if(-1===r)return s;const[a]=s.splice(r,1),o=Math.max(0,Math.min(i,s.length));return s.splice(o,0,a),function(e){return e.forEach((e,t)=>{e.priority=t+1}),e}(Jt(s))}(this.devices,e,t),this.requestUpdate(),this._sendPriorityUpdate()}_bindEvents(){const e=e=>{const t=e.target.closest("[data-action]");if(!t)return;const i=t.dataset.action,s=t.dataset.device;if("controllable"===i){const e=this.devices.find(e=>e.id===s);e&&(e.isControllable=!e.isControllable,this._sendDeviceUpdate(s,"controllable",e.isControllable),this.requestUpdate())}else if("move-up"===i||"move-down"===i)this._moveDevice(s,"move-up"===i?-1:1);else if("configure"===i)this._showConfigureModal(s,t.dataset.name);else if("toggle-help"===i)this._showHelp=!this._showHelp,this.requestUpdate();else if("toggle-goal"===i)this._goalOpen[s]=!this._goalOpen[s],this.requestUpdate();else if("set-overnight"===i){const e=this.devices.find(e=>e.id===s);e&&this._setOvernightSource(e,t.dataset.overnight)}},t=e=>{const t=e.target.closest('[data-action="combined_mode"]');if(t){const e=t.dataset.device,i=this.devices.find(t=>t.id===e);return void(i&&this._applyMergedMode(i,t.value))}const i=e.target.closest("[data-goal]");if(i){const e=i.dataset.device,t=i.dataset.goal;let s=i.value;const r=this.devices.find(t=>t.id===e);return r&&(r.goals=r.goals||{},r.goals[t]=s),void this._sendDeviceUpdate(e,t,String(s))}const s=e.target.closest('[data-action="depends_on"]');if(s){const e=s.dataset.device,t=this.devices.find(t=>t.id===e);if(t){const i=s.value;t.dependsOn=i?[i]:[],this._sendDeviceUpdate(e,"depends_on",i),this._regroupChildren(),this.devices.forEach((e,t)=>{e.priority=t+1}),this.requestUpdate(),this._sendPriorityUpdate()}}},i=this.renderRoot.querySelector("ha-card");i&&!i._semEvtBound&&(i._semEvtBound=!0,i.addEventListener("click",e),i.addEventListener("change",t))}_moveDevice(e,t){const i=this.devices.findIndex(t=>t.id===e);if(-1===i)return;const s=i+t;s<0||s>=this.devices.length||this.devices[i].dependsOn.length||this._moveDeviceToIndex(e,s)}_getDependencyDepth(e){let t=0,i=e;const s=new Set;for(;i.dependsOn.length>0&&t<5;){s.add(i.id);const e=i.dependsOn[0];if(s.has(e))break;const r=this.devices.find(t=>t.id===e);if(!r)break;t++,i=r}return t}_regroupChildren(){this.devices=Jt(this.devices)}_sendPriorityUpdate(){this._hass&&(this._hass.callService("solar_energy_management","update_device_priorities",{priorities:this.devices.map(e=>({device_id:e.id,priority:e.priority}))}),this._priorityFrozenUntil=Date.now()+15e3)}_sendDeviceUpdate(e,t,i){this._hass&&this._hass.callService("solar_energy_management","update_device_config",{device_id:e,property:t,value:i})}_sendTargetPeakUpdate(e,t=!1){this._hass&&this._hass.callService("solar_energy_management","update_target_peak",{target_peak_limit:e,peak_limit_unlimited:t})}async _ensureEntityPicker(){if(!customElements.get("ha-entity-picker"))try{const e=await(window.loadCardHelpers?.());if(e?.createCardElement){const t=await e.createCardElement({type:"entities",entities:[]});await(t.constructor?.getConfigElement?.())}}catch(e){}}async _showConfigureModal(e,t){const i=this.renderRoot.getElementById("sem-config-modal");i&&i.remove();const s=function(e,t){return(e||[]).find(e=>e.id===t)||null}(this.devices,e),r=s?.energySensor||"",a=function(e){const t=e||{};return{type:Qt.includes(t.type)?t.type:"switch",entity:t.entity||"",service:t.service||"",param:t.param||"current",shed_value:null!=t.shed_value?t.shed_value:0,restore_value:null!=t.restore_value?t.restore_value:16}}(s?.control),o="manual_mapping"===s?.control?.discovered_via;await this._ensureEntityPicker();const n=document.createElement("div");n.id="sem-config-modal",n.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999;display:flex;align-items:center;justify-content:center",n.innerHTML=function({deviceName:e,values:t,t:i,hasManual:s=!1}){const r=t,a="service"===r.type,o=(e,t)=>`<option value="${e}" ${r.type===e?"selected":""}>${t}</option>`;return`\n        <div style="background:var(--card-background-color,#1e1e2e);border-radius:12px;padding:24px;min-width:320px;max-width:90vw;color:var(--primary-text-color,#e0e0e0)">\n            <div style="font-weight:700;margin-bottom:16px">${i("configure_device")}: ${ti(e)}</div>\n            <label style="font-size:13px;opacity:0.7">${i("control_type")}</label>\n            <select id="cfg-type" style="${ii}">\n                ${o("switch",i("mode_switch"))}\n                ${o("current",i("mode_current"))}\n                ${o("input_boolean",i("mode_input_boolean"))}\n                ${o("service",i("mode_service"))}\n            </select>\n            <div id="cfg-entity-group" style="display:${a?"none":"block"}">\n                <label style="font-size:13px;opacity:0.7">${i("control_entity")}</label>\n                <input id="cfg-entity" type="text" placeholder="switch.example" value="${ti(r.entity)}" style="${ii}">\n            </div>\n            <div id="cfg-service-group" style="display:${a?"block":"none"}">\n                <label style="font-size:13px;opacity:0.7">${i("svc_service")}</label>\n                <input id="cfg-service" type="text" placeholder="keba.set_current" value="${ti(r.service)}" style="${ii}">\n                <label style="font-size:13px;opacity:0.7">${i("svc_param")}</label>\n                <input id="cfg-param" type="text" placeholder="current" value="${ti(r.param)}" style="${ii}">\n                <div style="display:flex;gap:8px">\n                    <div style="flex:1">\n                        <label style="font-size:13px;opacity:0.7">${i("svc_shed_value")}</label>\n                        <input id="cfg-shed" type="number" value="${ti(r.shed_value)}" style="${ii}">\n                    </div>\n                    <div style="flex:1">\n                        <label style="font-size:13px;opacity:0.7">${i("svc_restore_value")}</label>\n                        <input id="cfg-restore" type="number" value="${ti(r.restore_value)}" style="${ii}">\n                    </div>\n                </div>\n            </div>\n            <div class="cfg-error" style="color:#f44336;font-size:13px;margin:4px 0 8px;display:none"></div>\n            <div style="display:flex;gap:8px;align-items:center">\n                ${s?`<button id="cfg-remove" style="padding:8px 12px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:#f44336">${i("clear_mapping")}</button>`:""}\n                <div style="flex:1"></div>\n                <button id="cfg-cancel" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;background:rgba(255,255,255,0.1);color:inherit">${i("cancel")}</button>\n                <button id="cfg-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;background:#4caf50;color:white">${i("save")}</button>\n            </div>\n        </div>`}({deviceName:t,values:a,t:e=>this._t(e),hasManual:o}),this.renderRoot.appendChild(n);const l=n.querySelector("#cfg-type"),c=n.querySelector("#cfg-entity-group"),d=n.querySelector("#cfg-service-group"),p=n.querySelector("#cfg-entity"),h=n.querySelector(".cfg-error"),_=e=>{h.textContent=e,h.style.display="block"};let g=null;customElements.get("ha-entity-picker")&&(g=document.createElement("ha-entity-picker"),g.hass=this._hass,g.allowCustomEntity=!0,g.value=p.value,g.includeDomains=ei[l.value],g.style.cssText="display:block;margin:6px 0 12px",g.addEventListener("value-changed",e=>{p.value=e.detail.value||""}),p.style.display="none",p.parentNode.insertBefore(g,p));l.addEventListener("change",()=>{const e="service"===l.value;c.style.display=e?"none":"block",d.style.display=e?"block":"none",g&&!e&&(g.includeDomains=ei[l.value])}),n.addEventListener("click",e=>{e.target===n&&n.remove()}),n.querySelector("#cfg-cancel").addEventListener("click",()=>n.remove());const u=n.querySelector("#cfg-remove");u&&u.addEventListener("click",()=>{this._hass.callService("solar_energy_management","remove_device_control_mapping",{energy_sensor:r}).then(()=>{s&&(s.control=null,this.requestUpdate()),n.remove()}).catch(e=>_(e.message))}),n.querySelector("#cfg-save").addEventListener("click",()=>{const e=function(e){const t=t=>e.querySelector("#"+t);return{type:t("cfg-type")?.value||"switch",entity:(t("cfg-entity")?.value||"").trim(),service:(t("cfg-service")?.value||"").trim(),param:(t("cfg-param")?.value||"").trim()||"current",shed_value:t("cfg-shed")?.value,restore_value:t("cfg-restore")?.value}}(n);let t;g&&(e.entity=(g.value||"").trim());try{t=function(e,t){const i=Qt.includes(t.type)?t.type:"switch";if("service"===i){if(!t.service)throw new Error("mapping_service_required");return{energy_sensor:e,control_type:"service",service:t.service,param:t.param||"current",shed_value:Number(t.shed_value),restore_value:Number(t.restore_value)}}if(!t.entity)throw new Error("mapping_entity_required");return{energy_sensor:e,control_type:i,control_entity:t.entity}}(r,e)}catch(e){return void _(this._t(e.message))}this._hass.callService("solar_energy_management","set_device_control_mapping",t).then(()=>{s&&(s.control="service"===t.control_type?{type:"service",service:t.service,param:t.param,shed_value:t.shed_value,restore_value:t.restore_value,discovered_via:"manual_mapping"}:{type:t.control_type,entity:t.control_entity,discovered_via:"manual_mapping"},this.requestUpdate()),n.remove()}).catch(e=>_(e.message))})}_getPeakColor(){if(this.peakLimitUnlimited)return"#4caf50";const e=this.targetPeakLimit>0?this.currentPeak/this.targetPeakLimit*100:0;return e>=100?"#f44336":e>=90?"#ff9800":e>=70?"#2196f3":"#4caf50"}_resolveDeviceIcon(e){for(const t of[e.switch_entity,e.power_entity,e.control?.entity])if(t){const e=this._hass?.states[t];if(e?.attributes?.icon)return e.attributes.icon}return{ev_charger:"mdi:ev-station",ev_charging:"mdi:ev-station",battery:"mdi:home-battery",heating:"mdi:radiator",heat_pump:"mdi:heat-pump",water_heater:"mdi:water-boiler",hot_water:"mdi:water-boiler",pool_pump:"mdi:pool",appliance:"mdi:washing-machine",climate:"mdi:thermostat",light:"mdi:lightbulb",printer:"mdi:printer",computer:"mdi:desktop-classic",network:"mdi:network",fan:"mdi:fan",dryer:"mdi:tumble-dryer",dishwasher:"mdi:dishwasher",freezer:"mdi:fridge",refrigerator:"mdi:fridge"}[e.device_type]||"mdi:power-plug"}getCardSize(){return Math.max(5,3+this.devices.length)}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-load-priority-card",name:"SEM Load Priority Card",description:"Drag and drop interface for managing load shedding priorities",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-load-priority-card",preview:!0});const ri=[{id:"surplus",icon:"mdi:solar-power",color:"#ff9800",titleKey:"surplus_control",subtitleFn:e=>{const t=e._valNum("surplus_active_devices").toFixed(0),i=e._valNum("surplus_total_devices").toFixed(0),s=e._valNum("surplus_allocated_w").toFixed(0);return`${t}/${i} ${e._t("devices")} · ${s}W`}},{id:"battery",icon:"mdi:battery-medium",color:"#4db6ac",titleKey:"battery_management",subtitleFn:e=>{const t=e._valNum("battery_soc").toFixed(0),i=e._val("battery_status")||"";return`SOC ${t}% · ${i?e._t(i.toLowerCase()):"—"}`}},{id:"hotwater",icon:"mdi:water-thermometer",color:"#f06292",titleKey:"hot_water_title",subtitleFn:()=>""},{id:"heatpump",icon:"mdi:heat-pump",color:"#4db6ac",titleKey:"heat_pump_title",subtitleFn:e=>{if(!e._bin("heat_pump_registered"))return"";const t=e._val("heat_pump_sg_ready_state"),i=e._val("heat_pump_mode");return t?`${i||"—"} · ${t}`:""}},{id:"tariff",icon:"mdi:cash-multiple",color:"#96CAEE",titleKey:"tariff_pricing",subtitleFn:e=>{const t=e._val("tariff_provider")||"—",i=e._val("tariff_price_level")||"";return i?`${t} · ${e._t(i.toLowerCase())}`:t}},{id:"peak",icon:"mdi:flash-alert",color:"#ff9800",titleKey:"peak_load_management",subtitleFn:e=>{const t=e._valNum("consecutive_peak_15min").toFixed(1),i=e._valNum("monthly_consecutive_peak").toFixed(1);return`${e._t("peak")} ${t} kW · ${e._t("monthly_peak")} ${i} kW`}}],ai=["sensor.sem_surplus_active_devices","sensor.sem_surplus_total_devices","sensor.sem_surplus_allocated_w","sensor.sem_surplus_total_w","sensor.sem_surplus_distributable_w","sensor.sem_surplus_unallocated_w","sensor.sem_battery_soc","sensor.sem_battery_status","sensor.sem_diag_battery_capacity","number.sem_legionella_target_temp","binary_sensor.sem_heat_pump_registered","sensor.sem_heat_pump_sg_ready_state","sensor.sem_heat_pump_mode","binary_sensor.sem_heat_pump_solar_boost","sensor.sem_tariff_provider","sensor.sem_tariff_price_level","sensor.sem_tariff_current_import_rate","sensor.sem_consecutive_peak_15min","sensor.sem_monthly_consecutive_peak","sensor.sem_current_vs_peak_percentage","sensor.sem_load_management_status","sensor.sem_load_management_recommendation","sensor.sem_peak_margin","sensor.sem_available_load_reduction","sensor.sem_controllable_devices_count","switch.sem_observer_mode"];we("sem-control-card",class extends Se{static get watchedEntities(){return ai}static get properties(){return{...super.properties}}constructor(){super(),this._collapsed={surplus:!0,battery:!1,hotwater:!0,heatpump:!0,tariff:!1,peak:!0}}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_"}_val(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_valNum(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_numVal(e,t=0){const i=this._hass?.states[`number.sem_${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_switchOn(e){return"on"===this._hass?.states[`switch.sem_${e}`]?.state}_bin(e){return"on"===this._hass?.states[`binary_sensor.sem_${e}`]?.state}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_renderStepper(e,t,i,s){const r=this._hass?.states[e];if(!r)return q;const a=this._frozenEntities[e],o=a?a.value:parseFloat(r.state)||0,n=parseFloat(r.attributes.step)||1,l=r.attributes.unit_of_measurement||"",c=n<1?1:0,d=o.toFixed(c)+(l?" "+l:"");return W`
+            <div class="ge-hint">${this._t("anti_cycle_hint")}</div>`}_dragStart(e,t){const i=this.devices.find(e=>e.id===t);if(!i||i.dependsOn&&i.dependsOn.length)return;if(null!=e.button&&0!==e.button)return;e.preventDefault();const s=e.currentTarget,r=s.closest(".device"),a=this.renderRoot.getElementById("device-list");if(!r||!a)return;const o=Array.from(a.querySelectorAll(".device")),n=o.map(e=>{const t=e.getBoundingClientRect();return t.top+t.height/2});this._interacting=!0;const l=o.indexOf(r);this._drag={id:t,handle:s,row:r,rows:o,centres:n,pointerY0:e.clientY,fromIndex:l,dropIndex:l,pointerId:e.pointerId},r.classList.add("dragging-row");try{s.setPointerCapture(e.pointerId)}catch(e){}this._dragMoveBound=this._dragMoveBound||this._dragMove.bind(this),this._dragEndBound=this._dragEndBound||this._dragEnd.bind(this),window.addEventListener("pointermove",this._dragMoveBound),window.addEventListener("pointerup",this._dragEndBound),window.addEventListener("pointercancel",this._dragEndBound)}_dragMove(e){const t=this._drag;if(!t)return;e.preventDefault(),t.row.style.transform=`translateY(${e.clientY-t.pointerY0}px)`;const i=function(e,t,i){let s=0;for(let r=0;r<e.length;r++)r!==t&&i>e[r]&&s++;return s}(t.centres,t.fromIndex,e.clientY);i!==t.dropIndex&&(t.dropIndex=i,this._paintDropLine(t,i))}_paintDropLine(e,t){e.rows.forEach(e=>e.classList.remove("drop-above","drop-below"));const i=e.rows[t<e.fromIndex?t:t+1];i&&i!==e.row?i.classList.add("drop-above"):e.rows[e.rows.length-1]?.classList.add("drop-below")}_dragEnd(e){const t=this._drag;if(t){window.removeEventListener("pointermove",this._dragMoveBound),window.removeEventListener("pointerup",this._dragEndBound),window.removeEventListener("pointercancel",this._dragEndBound);try{t.handle.releasePointerCapture(t.pointerId)}catch(e){}t.row.style.transform="",t.row.classList.remove("dragging-row"),t.rows.forEach(e=>e.classList.remove("drop-above","drop-below")),this._interacting=!1,this._drag=null,"pointercancel"!==e.type&&t.dropIndex!==t.fromIndex&&this._moveDeviceToIndex(t.id,t.dropIndex)}}_moveDeviceToIndex(e,t){this.devices=function(e,t,i){const s=e.slice(),r=s.findIndex(e=>e.id===t);if(-1===r)return s;const[a]=s.splice(r,1),o=Math.max(0,Math.min(i,s.length));return s.splice(o,0,a),function(e){return e.forEach((e,t)=>{e.priority=t+1}),e}(_i(s))}(this.devices,e,t),this.requestUpdate(),this._sendPriorityUpdate()}_bindEvents(){const e=e=>{const t=e.target.closest("[data-action]");if(!t)return;const i=t.dataset.action,s=t.dataset.device;if("controllable"===i){const e=this.devices.find(e=>e.id===s);e&&(e.isControllable=!e.isControllable,this._sendDeviceUpdate(s,"controllable",e.isControllable),this.requestUpdate())}else if("move-up"===i||"move-down"===i)this._moveDevice(s,"move-up"===i?-1:1);else if("configure"===i)this._showConfigureModal(s,t.dataset.name);else if("toggle-help"===i)this._showHelp=!this._showHelp,this.requestUpdate();else if("toggle-goal"===i)this._goalOpen[s]=!this._goalOpen[s],this.requestUpdate();else if("set-overnight"===i){const e=this.devices.find(e=>e.id===s);e&&this._setOvernightSource(e,t.dataset.overnight)}},t=e=>{const t=e.target.closest('[data-action="combined_mode"]');if(t){const e=t.dataset.device,i=this.devices.find(t=>t.id===e);return void(i&&this._applyMergedMode(i,t.value))}const i=e.target.closest("[data-goal]");if(i){const e=i.dataset.device,t=i.dataset.goal;let s=i.value;const r=this.devices.find(t=>t.id===e);return r&&(r.goals=r.goals||{},r.goals[t]=s),void this._sendDeviceUpdate(e,t,String(s))}const s=e.target.closest('[data-action="depends_on"]');if(s){const e=s.dataset.device,t=this.devices.find(t=>t.id===e);if(t){const i=s.value;t.dependsOn=i?[i]:[],this._sendDeviceUpdate(e,"depends_on",i),this._regroupChildren(),this.devices.forEach((e,t)=>{e.priority=t+1}),this.requestUpdate(),this._sendPriorityUpdate()}}},i=this.renderRoot.querySelector("ha-card");i&&!i._semEvtBound&&(i._semEvtBound=!0,i.addEventListener("click",e),i.addEventListener("change",t))}_moveDevice(e,t){const i=this.devices.findIndex(t=>t.id===e);if(-1===i)return;const s=i+t;s<0||s>=this.devices.length||this.devices[i].dependsOn.length||this._moveDeviceToIndex(e,s)}_getDependencyDepth(e){let t=0,i=e;const s=new Set;for(;i.dependsOn.length>0&&t<5;){s.add(i.id);const e=i.dependsOn[0];if(s.has(e))break;const r=this.devices.find(t=>t.id===e);if(!r)break;t++,i=r}return t}_regroupChildren(){this.devices=_i(this.devices)}_showServiceError(e){const t=e&&e.message?String(e.message):String(e||"");this._serviceError=t,this.requestUpdate(),clearTimeout(this._serviceErrorTimer),this._serviceErrorTimer=setTimeout(()=>{this._serviceError="",this.requestUpdate()},12e3)}_sendPriorityUpdate(){this._hass&&(this._hass.callService("solar_energy_management","update_device_priorities",{priorities:this.devices.map(e=>({device_id:e.id,priority:e.priority}))}).catch(e=>this._showServiceError(e)),this._priorityFrozenUntil=Date.now()+15e3)}_sendDeviceUpdate(e,t,i){this._hass&&this._hass.callService("solar_energy_management","update_device_config",{device_id:e,property:t,value:i}).catch(e=>this._showServiceError(e))}_sendTargetPeakUpdate(e,t=!1){this._hass&&this._hass.callService("solar_energy_management","update_target_peak",{target_peak_limit:e,peak_limit_unlimited:t}).catch(e=>this._showServiceError(e))}async _ensureEntityPicker(){if(!customElements.get("ha-entity-picker"))try{const e=await(window.loadCardHelpers?.());if(e?.createCardElement){const t=await e.createCardElement({type:"entities",entities:[]});await(t.constructor?.getConfigElement?.())}}catch(e){}}async _showConfigureModal(e,t){const i=this.renderRoot.getElementById("sem-config-modal");i&&i.remove();const s=function(e,t){return(e||[]).find(e=>e.id===t)||null}(this.devices,e),r=s?.energySensor||"",a=function(e){const t=e||{};return{type:gi.includes(t.type)?t.type:"switch",entity:t.entity||"",service:t.service||"",param:t.param||"current",shed_value:null!=t.shed_value?t.shed_value:0,restore_value:null!=t.restore_value?t.restore_value:16}}(s?.control),o="manual_mapping"===s?.control?.discovered_via;await this._ensureEntityPicker();const n=document.createElement("div");n.id="sem-config-modal",n.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999;display:flex;align-items:center;justify-content:center",n.innerHTML=function({deviceName:e,values:t,t:i,hasManual:s=!1}){const r=t,a="service"===r.type,o=(e,t)=>`<option value="${e}" ${r.type===e?"selected":""}>${t}</option>`;return`\n        <div style="background:var(--card-background-color,#1e1e2e);border-radius:12px;padding:24px;min-width:320px;max-width:90vw;color:var(--primary-text-color,#e0e0e0)">\n            <div style="font-weight:700;margin-bottom:16px">${i("configure_device")}: ${mi(e)}</div>\n            <label style="font-size:13px;opacity:0.7">${i("control_type")}</label>\n            <select id="cfg-type" style="${fi}">\n                ${o("switch",i("mode_switch"))}\n                ${o("current",i("mode_current"))}\n                ${o("input_boolean",i("mode_input_boolean"))}\n                ${o("service",i("mode_service"))}\n            </select>\n            <div id="cfg-entity-group" style="display:${a?"none":"block"}">\n                <label style="font-size:13px;opacity:0.7">${i("control_entity")}</label>\n                <input id="cfg-entity" type="text" placeholder="switch.example" value="${mi(r.entity)}" style="${fi}">\n            </div>\n            <div id="cfg-service-group" style="display:${a?"block":"none"}">\n                <label style="font-size:13px;opacity:0.7">${i("svc_service")}</label>\n                <input id="cfg-service" type="text" placeholder="keba.set_current" value="${mi(r.service)}" style="${fi}">\n                <label style="font-size:13px;opacity:0.7">${i("svc_param")}</label>\n                <input id="cfg-param" type="text" placeholder="current" value="${mi(r.param)}" style="${fi}">\n                <div style="display:flex;gap:8px">\n                    <div style="flex:1">\n                        <label style="font-size:13px;opacity:0.7">${i("svc_shed_value")}</label>\n                        <input id="cfg-shed" type="number" value="${mi(r.shed_value)}" style="${fi}">\n                    </div>\n                    <div style="flex:1">\n                        <label style="font-size:13px;opacity:0.7">${i("svc_restore_value")}</label>\n                        <input id="cfg-restore" type="number" value="${mi(r.restore_value)}" style="${fi}">\n                    </div>\n                </div>\n            </div>\n            <div class="cfg-error" style="color:#f44336;font-size:13px;margin:4px 0 8px;display:none"></div>\n            <div style="display:flex;gap:8px;align-items:center">\n                ${s?`<button id="cfg-remove" style="padding:8px 12px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:#f44336">${i("clear_mapping")}</button>`:""}\n                <div style="flex:1"></div>\n                <button id="cfg-cancel" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;background:rgba(255,255,255,0.1);color:inherit">${i("cancel")}</button>\n                <button id="cfg-save" style="padding:8px 16px;border-radius:6px;border:none;cursor:pointer;background:#4caf50;color:white">${i("save")}</button>\n            </div>\n        </div>`}({deviceName:t,values:a,t:e=>this._t(e),hasManual:o}),this.renderRoot.appendChild(n);const l=n.querySelector("#cfg-type"),c=n.querySelector("#cfg-entity-group"),d=n.querySelector("#cfg-service-group"),p=n.querySelector("#cfg-entity"),h=n.querySelector(".cfg-error"),_=e=>{h.textContent=e,h.style.display="block"};let g=null;customElements.get("ha-entity-picker")&&(g=document.createElement("ha-entity-picker"),g.hass=this._hass,g.allowCustomEntity=!0,g.value=p.value,g.includeDomains=ui[l.value],g.style.cssText="display:block;margin:6px 0 12px",g.addEventListener("value-changed",e=>{p.value=e.detail.value||""}),p.style.display="none",p.parentNode.insertBefore(g,p));l.addEventListener("change",()=>{const e="service"===l.value;c.style.display=e?"none":"block",d.style.display=e?"block":"none",g&&!e&&(g.includeDomains=ui[l.value])}),n.addEventListener("click",e=>{e.target===n&&n.remove()}),n.querySelector("#cfg-cancel").addEventListener("click",()=>n.remove());const u=n.querySelector("#cfg-remove");u&&u.addEventListener("click",()=>{this._hass.callService("solar_energy_management","remove_device_control_mapping",{energy_sensor:r}).then(()=>{s&&(s.control=null,this.requestUpdate()),n.remove()}).catch(e=>_(e.message))}),n.querySelector("#cfg-save").addEventListener("click",()=>{const e=function(e){const t=t=>e.querySelector("#"+t);return{type:t("cfg-type")?.value||"switch",entity:(t("cfg-entity")?.value||"").trim(),service:(t("cfg-service")?.value||"").trim(),param:(t("cfg-param")?.value||"").trim()||"current",shed_value:t("cfg-shed")?.value,restore_value:t("cfg-restore")?.value}}(n);let t;g&&(e.entity=(g.value||"").trim());try{t=function(e,t){const i=gi.includes(t.type)?t.type:"switch";if("service"===i){if(!t.service)throw new Error("mapping_service_required");return{energy_sensor:e,control_type:"service",service:t.service,param:t.param||"current",shed_value:Number(t.shed_value),restore_value:Number(t.restore_value)}}if(!t.entity)throw new Error("mapping_entity_required");return{energy_sensor:e,control_type:i,control_entity:t.entity}}(r,e)}catch(e){return void _(this._t(e.message))}this._hass.callService("solar_energy_management","set_device_control_mapping",t).then(()=>{s&&(s.control="service"===t.control_type?{type:"service",service:t.service,param:t.param,shed_value:t.shed_value,restore_value:t.restore_value,discovered_via:"manual_mapping"}:{type:t.control_type,entity:t.control_entity,discovered_via:"manual_mapping"},this.requestUpdate()),n.remove()}).catch(e=>_(e.message))})}_getPeakColor(){if(this.peakLimitUnlimited)return"#4caf50";const e=this.targetPeakLimit>0?this.currentPeak/this.targetPeakLimit*100:0;return e>=100?"#f44336":e>=90?"#ff9800":e>=70?"#2196f3":"#4caf50"}_resolveDeviceIcon(e){for(const t of[e.switch_entity,e.power_entity,e.control?.entity])if(t){const e=this._hass?.states[t];if(e?.attributes?.icon)return e.attributes.icon}return{ev_charger:"mdi:ev-station",ev_charging:"mdi:ev-station",battery:"mdi:home-battery",heating:"mdi:radiator",heat_pump:"mdi:heat-pump",water_heater:"mdi:water-boiler",hot_water:"mdi:water-boiler",pool_pump:"mdi:pool",appliance:"mdi:washing-machine",climate:"mdi:thermostat",light:"mdi:lightbulb",printer:"mdi:printer",computer:"mdi:desktop-classic",network:"mdi:network",fan:"mdi:fan",dryer:"mdi:tumble-dryer",dishwasher:"mdi:dishwasher",freezer:"mdi:fridge",refrigerator:"mdi:fridge"}[e.device_type]||"mdi:power-plug"}getCardSize(){return Math.max(5,3+this.devices.length)}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-load-priority-card",name:"SEM Load Priority Card",description:"Drag and drop interface for managing load shedding priorities",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-load-priority-card",preview:!0});const yi=[{id:"surplus",icon:"mdi:solar-power",color:"#ff9800",titleKey:"surplus_control",subtitleFn:e=>{const t=e._valNum("surplus_active_devices").toFixed(0),i=e._valNum("surplus_total_devices").toFixed(0),s=e._valNum("surplus_allocated_w").toFixed(0);return`${t}/${i} ${e._t("devices")} · ${s}W`}},{id:"battery",icon:"mdi:battery-medium",color:"#4db6ac",titleKey:"battery_management",subtitleFn:e=>{const t=e._valNum("battery_soc").toFixed(0),i=e._val("battery_status")||"";return`SOC ${t}% · ${i?e._t(i.toLowerCase()):"—"}`}},{id:"hotwater",icon:"mdi:water-thermometer",color:"#f06292",titleKey:"hot_water_title",subtitleFn:()=>""},{id:"heatpump",icon:"mdi:heat-pump",color:"#4db6ac",titleKey:"heat_pump_title",subtitleFn:e=>{if(!e._bin("heat_pump_registered"))return"";const t=e._val("heat_pump_sg_ready_state"),i=e._val("heat_pump_mode");return t?`${i||"—"} · ${t}`:""}},{id:"tariff",icon:"mdi:cash-multiple",color:"#96CAEE",titleKey:"tariff_pricing",subtitleFn:e=>{const t=e._val("tariff_provider")||"—",i=e._val("tariff_price_level")||"";return i?`${t} · ${e._t(at(i))}`:t}},{id:"peak",icon:"mdi:flash-alert",color:"#ff9800",titleKey:"peak_load_management",subtitleFn:e=>{const t=e._valNum("consecutive_peak_15min").toFixed(1),i=e._valNum("monthly_consecutive_peak").toFixed(1);return`${e._t("peak")} ${t} kW · ${e._t("monthly_peak")} ${i} kW`}}],bi=["sensor.sem_surplus_active_devices","sensor.sem_surplus_total_devices","sensor.sem_surplus_allocated_w","sensor.sem_surplus_total_w","sensor.sem_surplus_distributable_w","sensor.sem_surplus_unallocated_w","sensor.sem_battery_soc","sensor.sem_battery_status","sensor.sem_diag_battery_capacity","number.sem_legionella_target_temp","binary_sensor.sem_heat_pump_registered","sensor.sem_heat_pump_sg_ready_state","sensor.sem_heat_pump_mode","binary_sensor.sem_heat_pump_solar_boost","sensor.sem_tariff_provider","sensor.sem_tariff_price_level","sensor.sem_tariff_current_import_rate","sensor.sem_consecutive_peak_15min","sensor.sem_monthly_consecutive_peak","sensor.sem_current_vs_peak_percentage","sensor.sem_load_management_status","sensor.sem_load_management_recommendation","sensor.sem_peak_margin","sensor.sem_available_load_reduction","sensor.sem_controllable_devices_count","switch.sem_observer_mode"];we("sem-control-card",class extends Se{static get watchedEntities(){return bi}static get properties(){return{...super.properties}}constructor(){super(),this._collapsed={surplus:!0,battery:!1,hotwater:!0,heatpump:!0,tariff:!1,peak:!0}}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_"}_val(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_valNum(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_numVal(e,t=0){const i=this._hass?.states[`number.sem_${e}`];return i&&"unavailable"!==i.state&&"unknown"!==i.state?parseFloat(i.state)??t:t}_switchOn(e){return"on"===this._hass?.states[`switch.sem_${e}`]?.state}_bin(e){return"on"===this._hass?.states[`binary_sensor.sem_${e}`]?.state}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_renderStepper(e,t,i,s){const r=this._hass?.states[e];if(!r)return K;const a=this._frozenEntities[e],o=a?a.value:parseFloat(r.state)||0,n=parseFloat(r.attributes.step)||1,l=r.attributes.unit_of_measurement||"",c=n<1?1:0,d=o.toFixed(c)+(l?" "+l:"");return W`
             <div class="stepper-cell">
                 <div class="stepper-row">
                     <span class="stepper-label">${this._t(t)}</span>
@@ -6596,9 +6893,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         >+</button>
                     </div>
                 </div>
-                ${this._showHelp&&s?W`<div class="setting-help-text">${this._t(s)}</div>`:q}
+                ${this._showHelp&&s?W`<div class="setting-help-text">${this._t(s)}</div>`:K}
             </div>
-        `}_renderSelect(e,t,i){const s=this._hass?.states[e];if(!s)return q;const r=this._frozenEntities[e],a=r?r.value:s.state,o=s.attributes.options||[];return W`
+        `}_renderSelect(e,t,i){const s=this._hass?.states[e];if(!s)return K;const r=this._frozenEntities[e],a=r?r.value:s.state,o=s.attributes.options||[];return W`
             <div class="ctrl-row">
                 <span class="ctrl-label">${this._t(t)}</span>
                 <select
@@ -6727,7 +7024,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </div>
-        `}render(){if(!this._config)return q;const e=this._theme(),t=!1!==e.isDark,i=e.accent||"#42a5f5",s=this._switchOn("observer_mode"),r={surplus:e=>this._renderSurplusSection(e),battery:e=>this._renderBatterySection(e),hotwater:e=>this._renderHotWaterSection(e),heatpump:e=>this._renderHeatPumpSection(e),tariff:e=>this._renderTariffSection(e),peak:e=>this._renderPeakSection(e)};return W`
+        `}render(){if(!this._config)return K;const e=this._theme(),t=!1!==e.isDark,i=e.accent||"#42a5f5",s=this._switchOn("observer_mode"),r={surplus:e=>this._renderSurplusSection(e),battery:e=>this._renderBatterySection(e),hotwater:e=>this._renderHotWaterSection(e),heatpump:e=>this._renderHeatPumpSection(e),tariff:e=>this._renderTariffSection(e),peak:e=>this._renderPeakSection(e)};return W`
             <style>
                 :host { display: block; contain: layout style paint; }
                 .wrap {
@@ -6972,9 +7269,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <ha-icon icon="mdi:eye-outline" style="--mdc-icon-size:20px;color:#f44336"></ha-icon>
                     <span>${this._t("observer_mode_active")} — ${this._t("observer_mode_readonly")}</span>
                 </div>
-                ${ri.map(t=>this._renderSection(t,r[t.id],e))}
+                ${yi.map(t=>this._renderSection(t,r[t.id],e))}
             </div>
-        `}getCardSize(){return 12}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-control-card",name:"SEM Control Card",description:"Live controls — peak management, load shedding, heat pump SG-Ready, observer mode",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-control-card",preview:!1});class oi extends ce{static get properties(){return{hass:{type:Object},entryId:{type:String,attribute:"entry-id"},optionKey:{type:String,attribute:"option-key"},chargerIndex:{type:Number,attribute:"charger-index"},chargerKey:{type:String,attribute:"charger-key"},domain:{type:String},includeDeviceClass:{type:String,attribute:"include-device-class"},label:{type:String},_saving:{state:!0},_error:{state:!0}}}constructor(){super(),this.entryId="",this.optionKey="",this.chargerIndex=-1,this.chargerKey="",this.domain="",this.includeDeviceClass="",this.label="",this._saving=!1,this._error=""}static get styles(){return a`
+        `}getCardSize(){return 12}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-control-card",name:"SEM Control Card",description:"Live controls — peak management, load shedding, heat pump SG-Ready, observer mode",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-control-card",preview:!1});class xi extends ce{static get properties(){return{hass:{type:Object},entryId:{type:String,attribute:"entry-id"},optionKey:{type:String,attribute:"option-key"},chargerIndex:{type:Number,attribute:"charger-index"},chargerKey:{type:String,attribute:"charger-key"},domain:{type:String},includeDeviceClass:{type:String,attribute:"include-device-class"},label:{type:String},_saving:{state:!0},_error:{state:!0}}}constructor(){super(),this.entryId="",this.optionKey="",this.chargerIndex=-1,this.chargerKey="",this.domain="",this.includeDeviceClass="",this.label="",this._saving=!1,this._error=""}static get styles(){return a`
             :host { display: block; padding: 6px 0; }
             .picker-row { display: flex; align-items: center; gap: 8px; }
             .picker-label {
@@ -6989,9 +7286,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             }
             .status.error { color: var(--error-color, #d33); }
             .status.ok { color: var(--success-color, #8DC892); }
-        `}_entry(){return this.hass&&this.entryId&&(this.hass.config_entries||[]).find(e=>e.entry_id===this.entryId)||null}_currentValue(){const e=this._entry();if(!e||!e.options)return"";if(this.chargerKey&&this.chargerIndex>=0){const t=e.options.ev_chargers||[];return t[this.chargerIndex]?.[this.chargerKey]||""}return e.options[this.optionKey]||""}async _onChange(e){const t=e.detail?.value||"",i=this._entry();if(!i)return void(this._error="config entry not found");let s;if(this._saving=!0,this._error="",this.chargerKey&&this.chargerIndex>=0){const e=(i.options?.ev_chargers||[]).map(e=>({...e}));e[this.chargerIndex]||(e[this.chargerIndex]={}),e[this.chargerIndex][this.chargerKey]=t,s={...i.options,ev_chargers:e}}else s={...i.options,[this.optionKey]:t};try{await this.hass.callWS({type:"config_entries/update",entry_id:this.entryId,options:s}),this._saving=!1}catch(e){this._saving=!1,this._error=e?.message||String(e),console.error("[sem-entity-picker] save failed",e)}}render(){if(!this.hass)return q;const e=this._currentValue();return this.domain&&this.domain,this.includeDeviceClass&&this.includeDeviceClass,W`
+        `}_entry(){return this.hass&&this.entryId&&(this.hass.config_entries||[]).find(e=>e.entry_id===this.entryId)||null}_currentValue(){const e=this._entry();if(!e||!e.options)return"";if(this.chargerKey&&this.chargerIndex>=0){const t=e.options.ev_chargers||[];return t[this.chargerIndex]?.[this.chargerKey]||""}return e.options[this.optionKey]||""}async _onChange(e){const t=e.detail?.value||"",i=this._entry();if(!i)return void(this._error="config entry not found");let s;if(this._saving=!0,this._error="",this.chargerKey&&this.chargerIndex>=0){const e=(i.options?.ev_chargers||[]).map(e=>({...e}));e[this.chargerIndex]||(e[this.chargerIndex]={}),e[this.chargerIndex][this.chargerKey]=t,s={...i.options,ev_chargers:e}}else s={...i.options,[this.optionKey]:t};try{await this.hass.callWS({type:"config_entries/update",entry_id:this.entryId,options:s}),this._saving=!1}catch(e){this._saving=!1,this._error=e?.message||String(e),console.error("[sem-entity-picker] save failed",e)}}render(){if(!this.hass)return K;const e=this._currentValue();return this.domain&&this.domain,this.includeDeviceClass&&this.includeDeviceClass,W`
             <div class="picker-row">
-                ${this.label?W`<span class="picker-label">${this.label}</span>`:q}
+                ${this.label?W`<span class="picker-label">${this.label}</span>`:K}
                 <ha-entity-picker
                     .hass=${this.hass}
                     .value=${e}
@@ -7001,11 +7298,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     @value-changed=${this._onChange}>
                 </ha-entity-picker>
             </div>
-            ${this._error?W`<div class="status error">⚠ ${this._error}</div>`:this._saving?W`<div class="status">saving…</div>`:q}
-        `}}customElements.get("sem-entity-picker")||customElements.define("sem-entity-picker",oi);const ni=new Set(["overview","tariff","ev_chargers","battery_zones"]),li=new Set(["tariff_mode","electricity_import_rate","electricity_export_rate","dynamic_tariff_entity","battery_discharge_protection_enabled"]),ci="sem_config_advanced_v1",di=[{id:"overview",icon:"mdi:check-decagram",color:"#8DC892",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/README.md",titleKey:"config_section_overview",subtitleFn:e=>e._overviewSubtitle(),expanded:!0},{id:"sensor_sources",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#sensor-source-overrides",icon:"mdi:transmission-tower",color:"#488fc2",titleKey:"config_section_sensor_sources",subtitleFn:e=>e._sensorSourcesSubtitle()},{id:"detected_hardware",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SUPPORTED_HARDWARE.md",icon:"mdi:radar",color:"#8DC892",titleKey:"config_section_detected_hardware",subtitleFn:e=>e._detectedHardwareSubtitle()},{id:"ev_chargers",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/EV_CHARGING_LOGIC.md#the-five-charge-modes",icon:"mdi:ev-station",color:"#5BC8D8",titleKey:"config_section_ev_chargers",subtitleFn:e=>e._evChargersSubtitle()},{id:"battery_zones",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#6-soc-zone-strategy",icon:"mdi:battery-charging-medium",color:"#4db6ac",titleKey:"config_section_battery_zones",subtitleFn:e=>e._batteryZonesSubtitle()},{id:"tariff",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#tariff-and-pricing-settings",icon:"mdi:cash-multiple",color:"#96CAEE",titleKey:"config_section_tariff",subtitleFn:e=>e._tariffSubtitle()},{id:"heat_pump",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#10-heat-pump-and-hot-water",icon:"mdi:heat-pump",color:"#4db6ac",titleKey:"config_section_heat_pump",subtitleFn:e=>e._heatPumpSubtitle()},{id:"hot_water",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#hot-water-boiler-separate-from-heat-pump",icon:"mdi:water-boiler",color:"#5BC8D8",titleKey:"config_section_hot_water",subtitleFn:e=>e._hotWaterSubtitle()},{id:"battery_scheduler",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#9-battery-charge-scheduler",icon:"mdi:calendar-clock",color:"#f06292",titleKey:"config_section_battery_scheduler",subtitleFn:()=>""},{id:"load_management",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/USER_GUIDE.md#load-management-settings",icon:"mdi:flash-alert",color:"#ff9800",titleKey:"config_section_load_management",subtitleFn:e=>e._loadMgmtSubtitle()},{id:"forecast",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#forecast-settings",icon:"mdi:weather-partly-cloudy",color:"#ff9800",titleKey:"config_section_forecast",subtitleFn:e=>e._forecastSubtitle()},{id:"pv_strings",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/PV_STRINGS.md#what-you-get",icon:"mdi:solar-panel",color:"#ff9800",titleKey:"config_section_pv_strings",subtitleFn:e=>e._pvStringsSubtitle()},{id:"notifications",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#notification-settings",icon:"mdi:bell-outline",color:"#96CAEE",titleKey:"config_section_notifications",subtitleFn:()=>""},{id:"advanced",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#advanced-settings",icon:"mdi:cog-outline",color:"#888",titleKey:"config_section_advanced",subtitleFn:()=>""}],pi=["binary_sensor.sem_heat_pump_registered","sensor.sem_heat_pump_mode","sensor.sem_heat_pump_sg_ready_state","number.sem_heat_pump_boost_offset","sensor.sem_tariff_provider","sensor.sem_tariff_price_level","sensor.sem_tariff_current_import_rate","sensor.sem_forecast_source","sensor.sem_load_management_status","sensor.sem_battery_soc","sensor.sem_battery_status","number.sem_battery_priority_soc","number.sem_battery_buffer_soc","number.sem_battery_auto_start_soc","number.sem_battery_assist_min_surplus","number.sem_battery_assist_max_power","number.sem_cheap_price_threshold","number.sem_expensive_price_threshold","number.sem_minimum_solar_power","number.sem_update_interval","number.sem_ev_enable_delay_seconds","number.sem_ev_disable_delay_seconds","number.sem_regulation_offset","switch.sem_observer_mode","sensor.sem_diag_grid_sign","sensor.sem_diag_battery_sign"],hi=new Set(["battery_soc_sensor","grid_power_sensor","solar_production_sensor","battery_power_sensor","heat_pump_relay1_entity","heat_pump_relay2_entity","heat_pump_climate_entity","heat_pump_power_sensor","heat_pump_temperature_sensor","heat_pump_invert_sg_ready","hot_water_entity","hot_water_power_sensor","hot_water_temperature_sensor","battery_force_discharge_control_entity","battery_strategy_control_entity","battery_discharge_control_entity","battery_discharge_protection_enabled","battery_setpoint_bidirectional"]);we("sem-config-card",class extends Se{static get watchedEntities(){return pi}static get properties(){return{...super.properties,_retentionBusy:{state:!0},_retentionMsg:{state:!0},_showHelp:{state:!0},_advanced:{state:!0},_lmAdvancedOpen:{state:!0},_entryId:{state:!0},_saveStatus:{state:!0},_signBusy:{state:!0},_signMsg:{state:!0},_battSignBusy:{state:!0},_battSignMsg:{state:!0},_pending:{state:!0},_applying:{state:!0},_pendingRemove:{state:!0},_chargerBusy:{state:!0},_staged:{state:!0},_secApplying:{state:!0},_helpOpen:{state:!0}}}constructor(){super(),this._collapsed={overview:!1,ev_chargers:!0,battery_zones:!0,tariff:!0,heat_pump:!0,hot_water:!0,battery_scheduler:!0,load_management:!0,forecast:!0,pv_strings:!0,notifications:!0,advanced:!0},this._showHelp=!1,this._advanced=(()=>{try{return"1"===localStorage.getItem(ci)}catch(e){return!1}})(),this._lmAdvancedOpen=!1,this._entryId="",this._saveStatus={},this._statusTimers=new Set,this._signBusy=!1,this._signMsg="",this._battSignBusy=!1,this._battSignMsg="",this._pending={},this._applying=!1,this._pendingRemove="",this._chargerBusy=!1,this._staged={},this._secApplying="",this._helpOpen={},this._secOf={},this._sec=null}disconnectedCallback(){super.disconnectedCallback();for(const e of this._statusTimers)clearTimeout(e);this._statusTimers.clear()}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_",e.entry_id&&(this._entryId=e.entry_id)}async _ensureEntryId(){if(this._entryId||!this._hass)return this._entryId;try{const e=await this._hass.callWS({type:"config_entries/get",domain:"solar_energy_management"});Array.isArray(e)&&e.length>0&&(this._entryId=e[0].entry_id,this.requestUpdate())}catch(e){console.warn("[sem-config-card] entry lookup failed",e)}return this._entryId}async _saveOption(e,t,i){const s=await this._ensureEntryId();this._saveStatus={...this._saveStatus,[i||e]:"saving"};try{await this._hass.callService("solar_energy_management","set_option",{options:{[e]:t},...s?{entry_id:s}:{}}),this._saveStatus={...this._saveStatus,[i||e]:"ok"},this._options={...this._options,[e]:t},this.requestUpdate();const r=setTimeout(()=>{this._statusTimers.delete(r),this._saveStatus={...this._saveStatus},delete this._saveStatus[i||e],this.requestUpdate()},1200);this._statusTimers.add(r)}catch(t){console.error("[sem-config-card] save failed",e,t),this._saveStatus={...this._saveStatus,[i||e]:t?.message||"save failed"},this.requestUpdate()}}_options={};async _refreshOptions(){if(this._hass)try{const e=await this._hass.callService("solar_energy_management","get_config",{},void 0,void 0,!0),t=e?.response?.config||{};this._options=t,e?.response?.entry_id&&!this._entryId&&(this._entryId=e.response.entry_id),this.requestUpdate()}catch(e){console.warn("[sem-config-card] get_config failed",e)}}connectedCallback(){super.connectedCallback(),this._hass?this._ensureEntryId().then(()=>this._refreshOptions()):this._needsEntryLookup=!0}set hass(e){super.hass=e,this._needsEntryLookup&&e&&(this._needsEntryLookup=!1,this._ensureEntryId().then(()=>this._refreshOptions()))}get hass(){return super.hass}_toggleHelp(){this._showHelp=!this._showHelp}_toggleAdvanced(){this._advanced=!this._advanced;try{localStorage.setItem(ci,this._advanced?"1":"0")}catch(e){}}_showsControl(e){if(this._advanced)return!0;const t=String(e||"").replace(/^[a-z_]+\.sem_/,"");return li.has(t)}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_val(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_bin(e){return"on"===this._hass?.states[`binary_sensor.sem_${e}`]?.state}_valNum(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];if(!i||"unavailable"===i.state||"unknown"===i.state)return t;const s=parseFloat(i.state);return Number.isNaN(s)?t:s}_switchOn(e){const t=this._hass?.states[`switch.sem_${e}`];return"on"===t?.state}async _toggleSwitch(e){const t=this._hass?.states[e];t&&await this._hass.callService("switch","on"===t.state?"turn_off":"turn_on",{entity_id:e})}async _stepNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.step)||1,r=parseFloat(i.attributes.min)??0,a=parseFloat(i.attributes.max)??100;let o=(parseFloat(i.state)||0)+t*s;o=Math.max(r,Math.min(a,o)),await this._hass.callService("number","set_value",{entity_id:e,value:o})}async _selectOption(e,t){await this._hass.callService("select","select_option",{entity_id:e,option:t})}async _setNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.min),r=parseFloat(i.attributes.max);let a=t;Number.isNaN(s)||(a=Math.max(s,a)),Number.isNaN(r)||(a=Math.min(r,a)),await this._hass.callService("number","set_value",{entity_id:e,value:a})}_num(e,t=null){const i=this._hass?.states[e];if(!i||"unavailable"===i.state||"unknown"===i.state)return t;const s=parseFloat(i.state);return Number.isNaN(s)?t:s}_overviewSubtitle(){const e=this._chargersList().length,t=this._bin("heat_pump_registered"),i=[];return i.push(`${e} ${this._t("config_subtitle_chargers")}`),t&&i.push(this._t("config_subtitle_heatpump_on")),i.join(" · ")}_evChargersSubtitle(){return`${this._chargersList().length}`}_batteryZonesSubtitle(){const e=this._valNum("battery_soc");return`${this._t("soc")} ${e.toFixed(0)}%`}_tariffSubtitle(){const e=this._val("tariff_provider")||"—",t=this._val("tariff_price_level")||"";return t?`${e} · ${this._t(t.toLowerCase())||t}`:e}_heatPumpSubtitle(){return this._bin("heat_pump_registered")?this._t("configured"):this._t("not_configured")}_hotWaterSubtitle(){return(this._options||{}).hot_water_entity?this._t("configured"):this._t("not_configured")}_loadMgmtSubtitle(){return this._val("load_management_status")||""}_forecastSubtitle(){const e=this._forecastProviderLabel(this._val("forecast_source"));return e||this._t("not_configured")}_chargersList(){const e=new Set;for(const t of Object.keys(this._hass?.states||{})){const i=t.match(/^number\.sem_charger_(.+)_minimum_current$/);i&&e.add(i[1])}return Array.from(e).sort()}_openHaSettings(e=""){window.history.pushState(null,"","/config/integrations/integration/solar_energy_management"),window.dispatchEvent(new PopStateEvent("popstate"))}_renderStepper(e,t,i,s){return this._showsControl(e)?this._renderZoneKnob(e,t,i,s):q}_renderToggle(e,t,i,s){const r=this._hass?.states[e];if(!r)return q;this._reg(e);const a=this._isDirty(e),o="on"===String(this._stagedVal(e,r.state));return W`
+            ${this._error?W`<div class="status error">⚠ ${this._error}</div>`:this._saving?W`<div class="status">saving…</div>`:K}
+        `}}customElements.get("sem-entity-picker")||customElements.define("sem-entity-picker",xi);const $i=new Set(["overview","tariff","ev_chargers","battery_zones"]),wi=new Set(["tariff_mode","electricity_import_rate","electricity_export_rate","dynamic_tariff_entity","battery_discharge_protection_enabled","load_management_enabled","target_peak_limit"]),ki="sem_config_advanced_v1",Si=[{id:"overview",icon:"mdi:check-decagram",color:"#8DC892",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/README.md",titleKey:"config_section_overview",subtitleFn:e=>e._overviewSubtitle(),expanded:!0},{id:"sensor_sources",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#sensor-source-overrides",icon:"mdi:transmission-tower",color:"#488fc2",titleKey:"config_section_sensor_sources",subtitleFn:e=>e._sensorSourcesSubtitle()},{id:"detected_hardware",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SUPPORTED_HARDWARE.md",icon:"mdi:radar",color:"#8DC892",titleKey:"config_section_detected_hardware",subtitleFn:e=>e._detectedHardwareSubtitle()},{id:"ev_chargers",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/EV_CHARGING_LOGIC.md#the-five-charge-modes",icon:"mdi:ev-station",color:"#5BC8D8",titleKey:"config_section_ev_chargers",subtitleFn:e=>e._evChargersSubtitle()},{id:"battery_zones",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#6-soc-zone-strategy",icon:"mdi:battery-charging-medium",color:"#4db6ac",titleKey:"config_section_battery_zones",subtitleFn:e=>e._batteryZonesSubtitle()},{id:"tariff",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#tariff-and-pricing-settings",icon:"mdi:cash-multiple",color:"#96CAEE",titleKey:"config_section_tariff",subtitleFn:e=>e._tariffSubtitle()},{id:"heat_pump",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#10-heat-pump-and-hot-water",icon:"mdi:heat-pump",color:"#4db6ac",titleKey:"config_section_heat_pump",subtitleFn:e=>e._heatPumpSubtitle()},{id:"hot_water",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#hot-water-boiler-separate-from-heat-pump",icon:"mdi:water-boiler",color:"#5BC8D8",titleKey:"config_section_hot_water",subtitleFn:e=>e._hotWaterSubtitle()},{id:"battery_scheduler",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#9-battery-charge-scheduler",icon:"mdi:calendar-clock",color:"#f06292",titleKey:"config_section_battery_scheduler",subtitleFn:()=>""},{id:"battery_intelligence",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/USER_GUIDE.md#forecast-led-spending-v21",titleKey:"config_section_battery_intelligence",subtitleFn:e=>e._batteryIntelligenceSubtitle()},{id:"load_management",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/USER_GUIDE.md#load-management-settings",icon:"mdi:flash-alert",color:"#ff9800",titleKey:"config_section_load_management",subtitleFn:e=>e._loadMgmtSubtitle()},{id:"forecast",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#forecast-settings",icon:"mdi:weather-partly-cloudy",color:"#ff9800",titleKey:"config_section_forecast",subtitleFn:e=>e._forecastSubtitle()},{id:"pv_strings",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/PV_STRINGS.md#what-you-get",icon:"mdi:solar-panel",color:"#ff9800",titleKey:"config_section_pv_strings",subtitleFn:e=>e._pvStringsSubtitle()},{id:"notifications",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#notification-settings",icon:"mdi:bell-outline",color:"#96CAEE",titleKey:"config_section_notifications",subtitleFn:()=>""},{id:"advanced",docs:"https://github.com/traktore-org/sem-community/blob/develop/docs/SETUP_GUIDE.md#advanced-settings",icon:"mdi:cog-outline",color:"#888",titleKey:"config_section_advanced",subtitleFn:()=>""}],Ci=["binary_sensor.sem_heat_pump_registered","sensor.sem_heat_pump_mode","sensor.sem_heat_pump_sg_ready_state","number.sem_heat_pump_boost_offset","sensor.sem_tariff_provider","sensor.sem_tariff_price_level","sensor.sem_tariff_current_import_rate","sensor.sem_forecast_source","sensor.sem_load_management_status","sensor.sem_battery_soc","sensor.sem_battery_status","number.sem_battery_priority_soc","number.sem_battery_buffer_soc","number.sem_battery_auto_start_soc","number.sem_battery_assist_min_surplus","number.sem_battery_assist_max_power","switch.sem_export_guard_enabled","switch.sem_export_guard_override_external","switch.sem_battery_house_sink_enabled","switch.sem_ev_morning_window_enabled","number.sem_export_guard_engage_s","number.sem_export_guard_release_s","number.sem_ev_morning_window_hours","number.sem_battery_morning_drain_floor_soc","number.sem_cheap_price_threshold","number.sem_expensive_price_threshold","number.sem_minimum_solar_power","number.sem_update_interval","number.sem_ev_enable_delay_seconds","number.sem_ev_disable_delay_seconds","number.sem_regulation_offset","switch.sem_observer_mode","sensor.sem_diag_grid_sign","sensor.sem_diag_battery_sign"],zi=new Set(["text","input_text","number","input_number","select","input_select"]),Mi=["switch","input_boolean",...zi],Di=new Set(["battery_soc_sensor","grid_power_sensor","solar_production_sensor","battery_power_sensor","house_power_sensor","heat_pump_relay1_entity","heat_pump_relay2_entity","heat_pump_relay1_on_value","heat_pump_relay1_off_value","heat_pump_relay2_on_value","heat_pump_relay2_off_value","heat_pump_climate_entity","heat_pump_power_sensor","heat_pump_temperature_sensor","heat_pump_invert_sg_ready","hot_water_entity","hot_water_power_sensor","hot_water_temperature_sensor","battery_force_discharge_control_entity","battery_strategy_control_entity","battery_discharge_control_entity","battery_discharge_protection_enabled","battery_setpoint_bidirectional","battery_setpoint_model","battery_power_direction_entity","battery_direction_discharge_value","battery_direction_charge_value"]);we("sem-config-card",class extends Se{static get watchedEntities(){return Ci}static get properties(){return{...super.properties,_retentionBusy:{state:!0},_retentionMsg:{state:!0},_showHelp:{state:!0},_advanced:{state:!0},_lmAdvancedOpen:{state:!0},_entryId:{state:!0},_saveStatus:{state:!0},_signBusy:{state:!0},_signMsg:{state:!0},_battSignBusy:{state:!0},_battSignMsg:{state:!0},_pending:{state:!0},_applying:{state:!0},_pendingRemove:{state:!0},_chargerBusy:{state:!0},_staged:{state:!0},_secApplying:{state:!0},_helpOpen:{state:!0}}}constructor(){super(),this._collapsed={overview:!1,ev_chargers:!0,battery_zones:!0,tariff:!0,heat_pump:!0,hot_water:!0,battery_scheduler:!0,load_management:!0,forecast:!0,pv_strings:!0,notifications:!0,advanced:!0},this._showHelp=!1,this._advanced=(()=>{try{return"1"===localStorage.getItem(ki)}catch(e){return!1}})(),this._lmAdvancedOpen=!1,this._entryId="",this._saveStatus={},this._statusTimers=new Set,this._signBusy=!1,this._signMsg="",this._battSignBusy=!1,this._battSignMsg="",this._pending={},this._applying=!1,this._pendingRemove="",this._chargerBusy=!1,this._staged={},this._secApplying="",this._helpOpen={},this._secOf={},this._sec=null}disconnectedCallback(){super.disconnectedCallback();for(const e of this._statusTimers)clearTimeout(e);this._statusTimers.clear()}setConfig(e){super.setConfig(e),this._prefix=e.entity_prefix||"sensor.sem_",e.entry_id&&(this._entryId=e.entry_id)}async _ensureEntryId(){if(this._entryId||!this._hass)return this._entryId;try{const e=await this._hass.callWS({type:"config_entries/get",domain:"solar_energy_management"});Array.isArray(e)&&e.length>0&&(this._entryId=e[0].entry_id,this.requestUpdate())}catch(e){console.warn("[sem-config-card] entry lookup failed",e)}return this._entryId}async _saveOption(e,t,i){const s=await this._ensureEntryId();this._saveStatus={...this._saveStatus,[i||e]:"saving"};try{await this._hass.callService("solar_energy_management","set_option",{options:{[e]:t},...s?{entry_id:s}:{}}),this._saveStatus={...this._saveStatus,[i||e]:"ok"},this._options={...this._options,[e]:t},this.requestUpdate();const r=setTimeout(()=>{this._statusTimers.delete(r),this._saveStatus={...this._saveStatus},delete this._saveStatus[i||e],this.requestUpdate()},1200);this._statusTimers.add(r)}catch(t){console.error("[sem-config-card] save failed",e,t),this._saveStatus={...this._saveStatus,[i||e]:t?.message||"save failed"},this.requestUpdate()}}_options={};_revealed=new Set;async _refreshOptions(){if(this._hass)try{const e=await this._hass.callService("solar_energy_management","get_config",{},void 0,void 0,!0),t=e?.response?.config||{};this._options=t,e?.response?.entry_id&&!this._entryId&&(this._entryId=e.response.entry_id),this.requestUpdate()}catch(e){console.warn("[sem-config-card] get_config failed",e)}}connectedCallback(){super.connectedCallback(),this._hass?this._ensureEntryId().then(()=>this._refreshOptions()):this._needsEntryLookup=!0}set hass(e){super.hass=e,this._needsEntryLookup&&e&&(this._needsEntryLookup=!1,this._ensureEntryId().then(()=>this._refreshOptions()))}get hass(){return super.hass}_toggleHelp(){this._showHelp=!this._showHelp}_toggleAdvanced(){this._advanced=!this._advanced;try{localStorage.setItem(ki,this._advanced?"1":"0")}catch(e){}}_isValueContact(e){const t=String(e||"");return zi.has(t.split(".")[0])}_showsControl(e){if(this._advanced)return!0;const t=String(e||"").replace(/^[a-z_]+\.sem_/,"");return wi.has(t)}_toggleSection(e){this._collapsed={...this._collapsed,[e]:!this._collapsed[e]},this.requestUpdate()}_val(e){const t=this._hass?.states[`${this._prefix}${e}`];return t&&"unavailable"!==t.state&&"unknown"!==t.state?t.state:""}_bin(e){return"on"===this._hass?.states[`binary_sensor.sem_${e}`]?.state}_valNum(e,t=0){const i=this._hass?.states[`${this._prefix}${e}`];if(!i||"unavailable"===i.state||"unknown"===i.state)return t;const s=parseFloat(i.state);return Number.isNaN(s)?t:s}_switchOn(e){const t=this._hass?.states[`switch.sem_${e}`];return"on"===t?.state}async _toggleSwitch(e){const t=this._hass?.states[e];t&&await this._hass.callService("switch","on"===t.state?"turn_off":"turn_on",{entity_id:e})}async _stepNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.step)||1,r=parseFloat(i.attributes.min)??0,a=parseFloat(i.attributes.max)??100;let o=(parseFloat(i.state)||0)+t*s;o=Math.max(r,Math.min(a,o)),await this._hass.callService("number","set_value",{entity_id:e,value:o})}async _selectOption(e,t){await this._hass.callService("select","select_option",{entity_id:e,option:t})}async _setNumber(e,t){const i=this._hass?.states[e];if(!i)return;const s=parseFloat(i.attributes.min),r=parseFloat(i.attributes.max);let a=t;Number.isNaN(s)||(a=Math.max(s,a)),Number.isNaN(r)||(a=Math.min(r,a)),await this._hass.callService("number","set_value",{entity_id:e,value:a})}_num(e,t=null){const i=this._hass?.states[e];if(!i||"unavailable"===i.state||"unknown"===i.state)return t;const s=parseFloat(i.state);return Number.isNaN(s)?t:s}_overviewSubtitle(){const e=this._chargersList().length,t=this._bin("heat_pump_registered"),i=[];return i.push(`${e} ${this._t("config_subtitle_chargers")}`),t&&i.push(this._t("config_subtitle_heatpump_on")),i.join(" · ")}_evChargersSubtitle(){return`${this._chargersList().length}`}_batteryZonesSubtitle(){const e=this._valNum("battery_soc");return`${this._t("soc")} ${e.toFixed(0)}%`}_tariffSubtitle(){const e=this._val("tariff_provider")||"—",t=this._val("tariff_price_level")||"";return t?`${e} · ${this._t(at(t))||t}`:e}_heatPumpSubtitle(){return this._bin("heat_pump_registered")?this._t("configured"):this._t("not_configured")}_hotWaterSubtitle(){return(this._options||{}).hot_water_entity?this._t("configured"):this._t("not_configured")}_loadMgmtSubtitle(){return this._val("load_management_status")||""}_forecastSubtitle(){const e=this._forecastProviderLabel(this._val("forecast_source"));return e||this._t("not_configured")}_chargersList(){const e=new Set;for(const t of Object.keys(this._hass?.states||{})){const i=t.match(/^number\.sem_charger_(.+)_minimum_current$/);i&&e.add(i[1])}return Array.from(e).sort()}_openHaSettings(e=""){window.history.pushState(null,"","/config/integrations/integration/solar_energy_management"),window.dispatchEvent(new PopStateEvent("popstate"))}_renderStepper(e,t,i,s){return this._showsControl(e)?this._renderZoneKnob(e,t,i,s):K}_renderToggle(e,t,i,s){const r=this._hass?.states[e];if(!r)return K;this._reg(e);const a=this._isDirty(e),o="on"===String(this._stagedVal(e,r.state));return W`
             <div class="stepper-cell ${a?"dirty":""}">
                 <div class="toggle-row">
-                    <span class="toggle-label">${this._t(t)}${a?W`<span class="dirty-dot">●</span>`:q}${this._helpBtn(s)}</span>
+                    <span class="toggle-label">${this._t(t)}${a?W`<span class="dirty-dot">●</span>`:K}${this._helpBtn(s)}</span>
                     <div class="toggle-track ${o?"on":""}"
                          @click=${()=>this._stage(e,"switch",o?"off":"on")}>
                         <div class="toggle-thumb"></div>
@@ -7013,10 +7310,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 </div>
                 ${this._helpBlock(s)}
             </div>
-        `}_renderSelect(e,t,i,s){const r=this._hass?.states[e];if(!r)return q;this._reg(e);const a=this._isDirty(e),o=String(this._stagedVal(e,r.state)),n=r.attributes.options||[];return W`
+        `}_renderSelect(e,t,i,s){const r=this._hass?.states[e];if(!r)return K;this._reg(e);const a=this._isDirty(e),o=String(this._stagedVal(e,r.state)),n=r.attributes.options||[];return W`
             <div class="stepper-cell ${a?"dirty":""}">
                 <div class="ctrl-row">
-                    <span class="ctrl-label">${this._t(t)}${a?W`<span class="dirty-dot">●</span>`:q}${this._helpBtn(s)}</span>
+                    <span class="ctrl-label">${this._t(t)}${a?W`<span class="dirty-dot">●</span>`:K}${this._helpBtn(s)}</span>
                     <select class="sem-select" .value=${o}
                             @change=${t=>this._stage(e,"select",t.target.value)}>
                         ${n.map(e=>W`<option value="${e}" ?selected=${e===o}>${this._t(e.toLowerCase())||e}</option>`)}
@@ -7029,7 +7326,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <ha-icon icon="mdi:cog-outline" style="--mdc-icon-size:14px"></ha-icon>
                 ${this._t(e)}
             </button>
-        `}_setupItems(){const e=this._options||{};return[{key:"energy",labelKey:"config_overview_energy_dashboard",icon:"mdi:flash",color:"#ff9800",sectionId:"overview",done:!!this._hass?.states["sensor.sem_charging_state"]},{key:"ev",labelKey:"config_overview_chargers",icon:"mdi:ev-station",color:"#5BC8D8",sectionId:"ev_chargers",done:this._chargersList().length>0},{key:"hp",labelKey:"heat_pump_title",icon:"mdi:heat-pump",color:"#4db6ac",sectionId:"heat_pump",done:this._bin("heat_pump_registered")},{key:"hw",labelKey:"config_section_hot_water",icon:"mdi:water-boiler",color:"#5BC8D8",sectionId:"hot_water",done:!!e.hot_water_entity},{key:"tariff",labelKey:"config_section_tariff",icon:"mdi:cash-multiple",color:"#8353d1",sectionId:"tariff",done:"dynamic"===e.tariff_mode?!!e.dynamic_tariff_entity:!!e.electricity_import_rate},{key:"battery",labelKey:"config_section_battery_zones",icon:"mdi:battery-charging",color:"#4db6ac",sectionId:"battery_zones",done:this._hasBattery()},{key:"loads",labelKey:"config_section_load_management",icon:"mdi:flash-alert",color:"#ff9800",sectionId:"load_management",optional:!0,done:!!e.load_management_enabled}]}_sectionConfigured(e){const t=this._setupItems().find(t=>t.sectionId===e);if(t)return!!t.done;const i=this._options||{};return"battery_scheduler"===e?!!i.battery_charge_scheduler_enabled:"notifications"===e&&!!i.enable_mobile_notifications}_openSection(e){this._collapsed={...this._collapsed,[e]:!1},this.requestUpdate()}_renderOverview(e){const t=this._setupItems(),i=t.filter(e=>!e.optional),s=i.filter(e=>e.done).length,r=i.length,a=s===r,o=r?Math.round(s/r*100):100;return W`
+        `}_setupItems(){const e=this._options||{};return[{key:"energy",labelKey:"config_overview_energy_dashboard",icon:"mdi:flash",color:"#ff9800",sectionId:"overview",done:!!this._hass?.states["sensor.sem_charging_state"]},{key:"ev",labelKey:"config_overview_chargers",icon:"mdi:ev-station",color:"#5BC8D8",sectionId:"ev_chargers",done:this._chargersList().length>0},{key:"hp",labelKey:"heat_pump_title",icon:"mdi:heat-pump",color:"#4db6ac",sectionId:"heat_pump",done:this._bin("heat_pump_registered")},{key:"hw",labelKey:"config_section_hot_water",icon:"mdi:water-boiler",color:"#5BC8D8",sectionId:"hot_water",done:!!e.hot_water_entity},{key:"tariff",labelKey:"config_section_tariff",icon:"mdi:cash-multiple",color:"#8353d1",sectionId:"tariff",done:"dynamic"===e.tariff_mode?!!e.dynamic_tariff_entity:!!e.electricity_import_rate},{key:"battery",labelKey:"config_section_battery_zones",icon:"mdi:battery-charging",color:"#4db6ac",sectionId:"battery_zones",done:this._hasBattery()},{key:"loads",labelKey:"config_section_load_management",icon:"mdi:flash-alert",color:"#ff9800",sectionId:"load_management",optional:!0,done:!!e.load_management_enabled}]}_sectionConfigured(e){const t=this._setupItems().find(t=>t.sectionId===e);if(t)return!!t.done;const i=this._options||{};return"battery_scheduler"===e?!!i.battery_charge_scheduler_enabled:"notifications"===e&&!!i.enable_mobile_notifications}_openSection(e){this._revealed=new Set([...this._revealed,e]),this._collapsed={...this._collapsed,[e]:!1},this.requestUpdate()}_renderOverview(e){const t=this._setupItems(),i=t.filter(e=>!e.optional),s=i.filter(e=>e.done).length,r=i.length,a=s===r,o=r?Math.round(s/r*100):100;return W`
             <div class="setup-progress">
                 <div class="setup-progress-top">
                     <span class="setup-progress-label">
@@ -7071,7 +7368,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <div class="charger-block-title">
                         <ha-icon icon="mdi:ev-station" style="--mdc-icon-size:18px;color:#5BC8D8"></ha-icon>
                         <span style="flex:1">${this._chargerFriendlyName(a)}</span>
-                        ${this._pendingRemove===a?q:W`
+                        ${this._pendingRemove===a?K:W`
                             <button class="charger-remove-x" title="${this._t("config_ev_remove")}"
                                 ?disabled=${this._chargerBusy}
                                 @click=${()=>{this._chargerBusy||(this._pendingRemove=a,this.requestUpdate())}}>✕</button>`}
@@ -7081,7 +7378,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <span>${this._t("config_ev_remove_confirm")}</span>
                             <button class="charger-remove-cancel" @click=${()=>{this._pendingRemove="",this.requestUpdate()}}>${this._t("config_discard")}</button>
                             <button class="charger-remove-go" @click=${()=>this._removeCharger(a)}>${this._t("config_ev_remove")}</button>
-                        </div>`:q}
+                        </div>`:K}
                     ${""}
                     ${this._renderPickerNested(r,a,"ev_connected_sensor","config_ev_connected_sensor",["binary_sensor","sensor"],null,t,"config_help_ev_connected_sensor")}
                     ${this._renderPickerNested(r,a,"ev_charging_power_sensor","config_ev_charging_power","sensor","power",t,"config_help_ev_charging_power")}
@@ -7089,10 +7386,16 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     ${""}
                     ${this._renderPickerNested(r,a,"ev_start_stop_entity","config_ev_start_stop",["switch","button"],null,t,"config_help_ev_start_stop")}
                     ${""}
+                    ${this._renderToggleNested(r,a,"ev_phase_switching_enabled","config_ev_phase_switching",t,"config_help_ev_phase_switching")}
                     ${this._renderPickerNested(r,a,"ev_phase_switch_entity","config_ev_phase_switch",["select","number","switch","input_select","input_number","input_boolean"],null,t,"config_help_ev_phase_switch")}
                     ${i.ev_phase_switch_entity?W`
                         ${this._renderTextNested(r,a,"ev_phase_switch_value_1p","config_ev_phase_1p",t,"config_help_ev_phase_values","1 / off / einphasig")}
-                        ${this._renderTextNested(r,a,"ev_phase_switch_value_3p","config_ev_phase_3p",t,"config_help_ev_phase_values","3 / on / dreiphasig")}`:q}
+                        ${this._renderTextNested(r,a,"ev_phase_switch_value_3p","config_ev_phase_3p",t,"config_help_ev_phase_values","3 / on / dreiphasig")}`:K}
+                    ${""}
+                    ${this._renderPickerNested(r,a,"ev_charge_mode_entity","config_ev_charge_mode",["select","input_select"],null,t,"config_help_ev_charge_mode")}
+                    ${i.ev_charge_mode_entity?W`
+                        ${this._renderTextNested(r,a,"ev_charge_mode_start","config_ev_charge_mode_start",t,"config_help_ev_charge_mode","On / 2")}
+                        ${this._renderTextNested(r,a,"ev_charge_mode_stop","config_ev_charge_mode_stop",t,"config_help_ev_charge_mode","Off / 1")}`:K}
                     ${this._renderPickerNested(r,a,"vehicle_soc_entity","config_ev_vehicle_soc","sensor",null,t,"config_help_ev_vehicle_soc")}
                     ${this._renderTargetTypeSelectNested(r,a,i,t)}
                     ${""}
@@ -7120,18 +7423,18 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         ${this._renderStepper(`number.sem_charger_${a}_ev_phases`,"config_ev_phases",e,"config_help_ev_phases")}
                     </div>
                 </div>
-            `:q})}
+            `:K})}
             <div class="section-footer">
                 <button class="add-charger-btn" ?disabled=${this._chargerBusy} @click=${()=>this._addCharger()}>
                     <ha-icon icon="mdi:plus" style="--mdc-icon-size:16px"></ha-icon>
                     ${this._t("config_ev_add_charger")}
                 </button>
             </div>
-        `}_chargerFriendlyName(e){return(this._hass?.states[`number.sem_charger_${e}_minimum_current`]?.attributes?.friendly_name||e).replace(/\s+Min Amps$/i,"")}_renderZoneKnob(e,t,i,s){const r=this._hass?.states[e];if(!r)return q;this._reg(e);const a=parseFloat(r.state)||0,o=this._isDirty(e),n=Number(this._stagedVal(e,a)),l=parseFloat(r.attributes.min),c=parseFloat(r.attributes.max),d=Number.isNaN(l)?0:l,p=Number.isNaN(c)?100:c,h=parseFloat(r.attributes.step)||1,_=r.attributes.unit_of_measurement||"",g=h<1?1:0,u=p>d?Math.round((n-d)/(p-d)*100):0,m=t=>{const i=Math.max(d,Math.min(p,n+t*h));this._stage(e,"number",i)};return W`
+        `}_chargerFriendlyName(e){return(this._hass?.states[`number.sem_charger_${e}_minimum_current`]?.attributes?.friendly_name||e).replace(/\s+Min Amps$/i,"")}_renderZoneKnob(e,t,i,s){const r=this._hass?.states[e];if(!r)return K;this._reg(e);const a=parseFloat(r.state)||0,o=this._isDirty(e),n=Number(this._stagedVal(e,a)),l=parseFloat(r.attributes.min),c=parseFloat(r.attributes.max),d=Number.isNaN(l)?0:l,p=Number.isNaN(c)?100:c,h=parseFloat(r.attributes.step)||1,_=r.attributes.unit_of_measurement||"",g=h<1?1:0,u=p>d?Math.round((n-d)/(p-d)*100):0,m=t=>{const i=Math.max(d,Math.min(p,n+t*h));this._stage(e,"number",i)};return W`
             <div class="zone-knob ${o?"dirty":""}">
                 <div class="zone-knob-top">
                     <span class="zone-knob-label">${this._t(t)}${this._helpBtn(s)}</span>
-                    <span class="zone-chip">${o?W`<span class="dirty-dot">●</span>`:q}${n.toFixed(g)}${_?" "+_:""}</span>
+                    <span class="zone-chip">${o?W`<span class="dirty-dot">●</span>`:K}${n.toFixed(g)}${_?" "+_:""}</span>
                 </div>
                 <div class="zone-knob-slider">
                     <button class="zone-mini" @click=${()=>m(-1)}>−</button>
@@ -7143,14 +7446,14 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 </div>
                 ${this._helpBlock(s,r.attributes.sem_default,_,e,"number")}
             </div>
-        `}_renderSocZoneStrip(e){const t=this._num("number.sem_battery_priority_soc"),i=this._num("number.sem_battery_buffer_soc"),s=this._num("number.sem_battery_auto_start_soc");if(null==t||null==i||null==s)return q;const r=this._num("sensor.sem_battery_soc"),a=e=>Math.max(0,Math.min(100,e));return W`
+        `}_renderSocZoneStrip(e){const t=this._num("number.sem_battery_priority_soc"),i=this._num("number.sem_battery_buffer_soc"),s=this._num("number.sem_battery_auto_start_soc");if(null==t||null==i||null==s)return K;const r=this._num("sensor.sem_battery_soc"),a=e=>Math.max(0,Math.min(100,e));return W`
             <div class="soc-strip">
                 <div class="soc-bar">
                     <div class="soc-zone" style=${`width:${a(t)}%;background:#e57373`}></div>
                     <div class="soc-zone" style=${`width:${a(i-t)}%;background:#ffb74d`}></div>
                     <div class="soc-zone" style=${`width:${a(s-i)}%;background:#81c784`}></div>
                     <div class="soc-zone" style=${`width:${a(100-s)}%;background:#64b5f6`}></div>
-                    ${null!=r?W`<div class="soc-now" style=${`left:${a(r)}%`} title="SOC ${r}%"></div>`:q}
+                    ${null!=r?W`<div class="soc-now" style=${`left:${a(r)}%`} title="SOC ${r}%"></div>`:K}
                     <div class="soc-tick" style=${`left:${a(t)}%`}><span>${t}</span></div>
                     <div class="soc-tick" style=${`left:${a(i)}%`}><span>${i}</span></div>
                     <div class="soc-tick" style=${`left:${a(s)}%`}><span>${s}</span></div>
@@ -7162,8 +7465,46 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <span><i style="background:#64b5f6"></i>${this._t("zone_legend_surplus")}</span>
                 </div>
             </div>
-        `}_detectionReport(){const e=this._hass?.states?.["sensor.sem_diag_charger_control"];return e?.attributes?.detection_report||null}_detectedHardwareSubtitle(){const e=this._detectionReport();if(!e)return this._t("config_detect_none");const t=(e.chargers||[]).length,i=(e.near_misses||[]).length,s=`${t} ${this._t("config_detect_chargers")}`;return i?`${s} · ${i} ${this._t("config_detect_near_misses")}`:s}_renderDetectedHardware(e){const t=this._detectionReport();if(!t)return W`<div class="setting-help-text">${this._t("config_detect_none")}</div>`;const i=t.chargers||[],s=t.near_misses||[],r=t.prober_candidates||[],a=t.disagreements||[];return W`
+        `}_detectionReport(){const e=this._hass?.states?.["sensor.sem_diag_charger_control"];return e?.attributes?.detection_report||null}_detectedHardwareSubtitle(){const e=this._detectionReport();if(!e)return this._t("config_detect_none");const t=(e.chargers||[]).length,i=(e.near_misses||[]).length,s=((e.census||{}).unknown_energy_domains||[]).length+((e.census||{}).rows_matched_nothing||[]).length;let r=`${t} ${this._t("config_detect_chargers")}`;return i&&(r+=` · ${i} ${this._t("config_detect_near_misses")}`),s&&(r+=` · ${s} ${this._t("config_census_gaps")}`),r}_renderDetectedHardware(e){const t=this._detectionReport();if(!t)return W`<div class="setting-help-text">${this._t("config_detect_none")}</div>`;const i=t.chargers||[],s=t.near_misses||[],r=t.roster_proposals||[],a=(e,t)=>Object.entries(t).reduce((e,[t,i])=>e.split("{"+t+"}").join(i),this._t(e)),o=e=>{switch(e.action){case"observe_only":return this._t("config_proposed_observe_only");case"not_loaded":return this._t("config_proposed_not_loaded");case"no_unit":return a("config_proposed_no_unit",{wanted:e.unit_wanted||""});case"unit_mismatch":return a("config_proposed_unit_mismatch",{seen:e.unit_seen||"?",wanted:e.unit_wanted||""});case"options_unmapped":return a("config_proposed_options_unmapped",{missing:(e.values_missing||[]).join(", "),options:(e.options||[]).join(", ")});case"pair_incomplete":return a("config_proposed_pair_incomplete",{missing:(e.missing_role||[]).join(", ")});case"per_charger":return this._t("config_proposed_per_charger");default:return e.reason||""}},n=(e,t,i)=>{const s=this._saveStatus?.[i];return W`
+                <button class="sem-btn" ?disabled=${"saving"===s}
+                    @click=${()=>this._saveOption(e.config_key,t,i)}>
+                    ${"saving"===s?this._t("config_proposed_using"):this._t("config_proposed_use")}
+                </button>
+                ${"ok"===s?W`<span style="opacity:.7"> ✓</span>`:K}
+                ${s&&"ok"!==s&&"saving"!==s?W`<span style="opacity:.7"> ${s}</span>`:K}`},l=(e,t)=>{const i=t.entity||t.service||(t.candidates||[]).join(" / ")||"",s=this._options?.[t.config_key]===t.entity,r=o(t),a=(t.alternatives||[]).filter(e=>e&&e.entity);return W`
+            <div class="row">
+                <span class="lbl">${e}</span>
+                <span style="font-family:monospace;font-size:0.85em">${i}
+                    <span style="opacity:.6"> · ${t.matched_key}</span>
+                </span>
+            </div>
+            <div class="row" style="margin:-6px 0 6px">
+                <span class="lbl"></span>
+                <span>
+                    ${"set_option"!==t.action||s?K:n(t,t.entity,"prop_"+e)}
+                    ${s?W`<span style="opacity:.7">${this._t("config_proposed_already")}</span>`:K}
+                    ${r?W`<span style="opacity:.7">${r}</span>`:K}
+                </span>
+            </div>
+            ${a.map((i,s)=>W`
+                <div class="row" style="margin:-6px 0 6px">
+                    <span class="lbl" style="opacity:.6">${this._t("config_proposed_or")}</span>
+                    <span style="font-family:monospace;font-size:0.85em">${i.entity}
+                        <span style="opacity:.6"> · ${i.matched_key}</span>
+                        ${"set_option"===t.action&&t.config_key&&this._options?.[t.config_key]!==i.entity?W` ${n(t,i.entity,"prop_"+e+"_alt"+s)}`:K}
+                    </span>
+                </div>`)}`},c=t.prober_candidates||[],d=t.disagreements||[],p=t.census||{},h=p.unknown_energy_domains||[],_=p.rows_matched_nothing||[],g=p.unknown_energy_domains_named||[];return W`
             <div class="setting-help-text" style="margin:0 0 6px">${this._t("config_detect_intro")}</div>
+            ${h.length?W`
+                <div class="row" style="color:var(--warning-color,#ffa726)">
+                    <span class="lbl">${this._t("config_census_unknown")}</span>
+                    <span style="font-family:monospace">${h.map(e=>{const t=g.find(t=>t&&t.domain===e);if(!t||!t.name)return e;const i=t.installs?` · ${t.installs} ${this._t("config_census_installs")}`:"";return`${t.name}${i}`}).join(", ")}</span>
+                </div>`:K}
+            ${_.length?W`
+                <div class="row" style="color:var(--warning-color,#ffa726)">
+                    <span class="lbl">${this._t("config_census_nomatch")}</span>
+                    <span style="font-family:monospace">${_.join(", ")}</span>
+                </div>`:K}
             ${i.map(e=>W`
                 <div class="row" style="font-weight:600">
                     <span class="lbl">${this._t("config_detect_charger")}: ${e.platform}</span>
@@ -7172,25 +7513,62 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 ${Object.entries(e.mapped||{}).map(([e,t])=>((e,t)=>W`
             <div class="row"><span class="lbl">${e}</span>
                 <span style="font-family:monospace;font-size:0.85em">${t.entity||t.value||"—"}
-                    ${t.device_class?W`<span style="opacity:.6"> · ${t.domain}/${t.device_class}</span>`:q}
+                    ${t.device_class?W`<span style="opacity:.6"> · ${t.domain}/${t.device_class}</span>`:K}
                 </span></div>`)(e,t))}
                 ${(e.unmapped||[]).length?W`
                     <div class="setting-help-text" style="margin:2px 0 8px">
                         ${this._t("config_detect_unmapped")}: ${(e.unmapped||[]).map(e=>e.entity).join(", ")}
-                    </div>`:q}
+                    </div>`:K}
             `)}
             ${s.map(t=>W`
                 <div class="row" style="color:${e.warn||"#ffb74d"}">
-                    <span class="lbl">⚠ ${t.platform}</span>
+                    <span class="lbl">⚠ ${t.roster?.name||t.platform}</span>
                     <span>${this._t("config_detect_near_miss")}</span>
                 </div>
                 <div class="setting-help-text" style="margin:-2px 0 8px">
                     ${(t.entities||[]).map(e=>e.entity).join(", ")}
-                </div>`)}
-            ${a.filter(e=>"prober_only"===e.kind).map(e=>W`
+                </div>
+                ${t.suggested_charger?.id?W`
+                    <div class="row" style="margin:-2px 0 8px">
+                        <span class="lbl"></span>
+                        <span>
+                            <button class="sem-btn" ?disabled=${this._chargerBusy}
+                                @click=${()=>this._addSuggestedCharger(t.suggested_charger)}>
+                                ${this._t("config_near_miss_add")}
+                            </button>
+                        </span>
+                    </div>`:W`
+                    <div class="row" style="margin:-2px 0 8px">
+                        <span class="lbl"></span>
+                        <span><a class="sem-btn" target="_blank" rel="noopener"
+                                 href=${this._reportNearMissUrl(t)}>
+                            ${this._t("config_near_miss_report")}
+                        </a></span>
+                    </div>`}
+                ${Object.keys(t.proposed_roles||{}).length?W`
+                    <div class="row" style="font-weight:600">
+                        <span class="lbl">${this._t("config_proposed_roles")}</span>
+                        <span style="opacity:.7">${this._t("config_proposed_unconfirmed")}</span>
+                    </div>
+                    ${Object.entries(t.proposed_roles).map(([e,t])=>l(e,t))}
+                    <div class="setting-help-text" style="margin:2px 0 8px">
+                        ${this._t("config_proposed_help")}
+                    </div>`:K}`)}
+            ${r.map(e=>W`
+                <div class="row" style="font-weight:600">
+                    <span class="lbl">🧩 ${e.roster?.name||e.domain}</span>
+                    <span style="opacity:.7">${this._t("config_proposed_unconfirmed")}</span>
+                </div>
+                ${Object.entries(e.proposed_roles||{}).map(([e,t])=>l(e,t))}
+            `)}
+            ${r.length?W`
+                <div class="setting-help-text" style="margin:2px 0 8px">
+                    ${this._t("config_proposed_help")}
+                </div>`:K}
+            ${d.filter(e=>"prober_only"===e.kind).map(e=>W`
                 <div class="row"><span class="lbl">🔎 ${e.platform}</span>
                     <span>${this._t("config_detect_prober_only")}</span></div>`)}
-            ${i.length||s.length||r.length?q:W`
+            ${i.length||s.length||c.length?K:W`
                 <div class="setting-help-text">${this._t("config_detect_nothing")}</div>`}
         `}_renderSensorSources(e){const t=this._options||{};return W`
             <div class="setting-help-text" style="margin:0 0 6px">
@@ -7201,7 +7579,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             ${this._sourceUnavailableWarning("solar_production_sensor",t,e)}
             ${this._renderPicker("battery_power_sensor","config_battery_power_sensor","sensor","power",t,"config_help_battery_power_sensor")}
             ${this._sourceUnavailableWarning("battery_power_sensor",t,e)}
-        `}_sensorSourcesSubtitle(){const e=this._options||{},t=["grid_power_sensor","solar_production_sensor","battery_power_sensor"].filter(t=>e[t]).length;return t?`${t} ${this._t("config_sources_overridden")}`:this._t("config_sources_all_auto")}_sourceUnavailableWarning(e,t,i){const s=t[e];if(!s||!this._hass)return q;const r=this._hass.states[s];return r&&"unavailable"!==r.state&&"unknown"!==r.state?q:W`<div class="setting-help-text"
+            ${""}
+            ${this._renderPicker("house_power_sensor","config_house_power_sensor","sensor","power",t,"config_help_house_power_sensor")}
+            ${this._sourceUnavailableWarning("house_power_sensor",t,e)}
+        `}_sensorSourcesSubtitle(){const e=this._options||{},t=["grid_power_sensor","solar_production_sensor","battery_power_sensor","house_power_sensor"].filter(t=>e[t]).length;return t?`${t} ${this._t("config_sources_overridden")}`:this._t("config_sources_all_auto")}_sourceUnavailableWarning(e,t,i){const s=t[e];if(!s||!this._hass)return K;const r=this._hass.states[s];return r&&"unavailable"!==r.state&&"unknown"!==r.state?K:W`<div class="setting-help-text"
             style="color:${i.warn||"#ffb74d"};margin:-2px 0 6px">
             ⚠ ${s} — ${this._t("config_source_unavailable")}</div>`}_renderBatteryZones(e){const t=this._options||{};return W`
             ${this._renderSocZoneStrip(e)}
@@ -7226,7 +7607,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                        placeholder="${r||""}"
                        @keydown=${e=>{"Enter"===e.key&&e.target.blur()}}
                        @blur=${t=>{const i=t.target.value.trim();i!==String(a)&&this._saveOption(e,i,e)}} />
-                ${"saving"===o?W`<span class="sv">…</span>`:"ok"===o?W`<span class="sv ok">✓</span>`:"err"===o?W`<span class="sv err">!</span>`:q}
+                ${"saving"===o?W`<span class="sv">…</span>`:"ok"===o?W`<span class="sv ok">✓</span>`:"err"===o?W`<span class="sv err">!</span>`:K}
             </div>
         `}_renderTariff(e){const t=this._options||{},i=this._hass?.states["sensor.sem_tariff_current_import_rate"],s=i?i.state:"—",r=i?.attributes?.unit_of_measurement||"",a=this._hass?.config?.currency||"EUR",o=[{value:"static",label:this._t("config_tariff_mode_static")},{value:"dynamic",label:this._t("config_tariff_mode_dynamic")},{value:"calendar",label:this._t("config_tariff_mode_calendar")}],n=[{value:"percentile",label:this._t("config_tariff_class_percentile")},{value:"static",label:this._t("config_tariff_class_static")}],l=t.tariff_mode||"static";return W`
             <div class="readonly-row tariff-rate-row">
@@ -7240,7 +7621,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 ${this._renderPicker("dynamic_forecast_entity","config_dynamic_forecast_entity","sensor",null,t,"config_help_dynamic_forecast_entity")}
                 ${this._renderPicker("dynamic_feedin_entity","config_dynamic_feedin_entity","sensor",null,t,"config_help_dynamic_feedin_entity")}
                 ${this._renderOptionSelect("tariff_classification_mode","config_tariff_class_mode",n,t,"config_help_tariff_class_mode","percentile")}
-            `:q}
+            `:K}
             <div class="stepper-pair">
                 ${this._renderStepper("number.sem_cheap_price_threshold","cheap_threshold",e,"setting_help_cheap_threshold")}
                 ${this._renderStepper("number.sem_expensive_price_threshold","expensive_threshold",e,"setting_help_expensive_threshold")}
@@ -7249,6 +7630,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             ${this._renderOptionNumberInput("electricity_import_rate","config_import_rate",{min:0,max:1e4,step:.001,unit:`${a}/kWh`,default:.3387},t,"config_help_import_rate")}
             ${this._renderOptionNumberInput("electricity_off_peak_rate","config_off_peak_rate",{min:0,max:1e4,step:.001,unit:`${a}/kWh`,default:.3387},t,"config_help_off_peak_rate")}
             ${this._renderOptionNumberInput("electricity_export_rate","config_export_rate",{min:0,max:1e4,step:.001,unit:`${a}/kWh`,default:.075},t,"config_help_export_rate")}
+            ${this._renderOptionNumberInput("grid_import_surcharge","config_import_surcharge",{min:0,max:10,step:.001,unit:`${a}/kWh`,default:0},t,"config_help_import_surcharge")}
             ${this._renderOptionNumberInput("demand_charge_rate","config_demand_charge_rate",{min:0,max:1e5,step:.01,unit:`${a}/kW/Mt`,default:4.32},t,"config_help_demand_charge_rate")}
             ${this._renderPicker("grid_import_power_entity","config_grid_import_entity","sensor","power",t,"config_help_grid_import_entity")}
             ${this._renderPicker("grid_export_power_entity","config_grid_export_entity","sensor","power",t,"config_help_grid_export_entity")}
@@ -7267,9 +7649,16 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             ${this._renderTextOption("battery_strategy_idle_value","config_strategy_val_idle",t,"config_help_strategy_values","eco")}
                             ${this._renderTextOption("battery_strategy_self_consume_value","config_strategy_val_selfc",t,"config_help_strategy_values","nom")}
                             ${this._renderTextOption("battery_strategy_off_value","config_strategy_val_off",t,"config_help_strategy_values","idle")}
-                        `:q}`})()}
+                        `:K}`})()}
                 ${this._renderOptionToggle("battery_setpoint_bidirectional","config_battery_bidirectional",t,"config_help_battery_bidirectional",!1)}
-            `:q}
+                ${""}
+                ${this._renderTextOption("battery_setpoint_model","config_setpoint_model",t,"config_help_setpoint_model","signed")}
+                ${"direction_select"===t.battery_setpoint_model?W`
+                    ${this._renderPicker("battery_power_direction_entity","config_direction_entity","select",null,t,"config_help_direction_entity")}
+                    ${this._renderTextOption("battery_direction_discharge_value","config_direction_val_discharge",t,"config_help_direction_values","discharge")}
+                    ${this._renderTextOption("battery_direction_charge_value","config_direction_val_charge",t,"config_help_direction_values","charge")}
+                `:K}
+            `:K}
             ${""}
         `}_renderHeatPump(e){const t=this._bin("heat_pump_registered"),i=this._options||{},s=t?W`
             <div class="hp-status">
@@ -7289,8 +7678,15 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
         `;return W`
             ${s}
             <div class="hp-form">
-                ${this._renderPicker("heat_pump_relay1_entity","config_hp_relay1",["switch","input_boolean"],null,i,"config_help_hp_relay")}
-                ${this._renderPicker("heat_pump_relay2_entity","config_hp_relay2",["switch","input_boolean"],null,i,"config_help_hp_relay")}
+                ${""}
+                ${this._renderPicker("heat_pump_relay1_entity","config_hp_relay1",Mi,null,i,"config_help_hp_relay")}
+                ${this._isValueContact(i.heat_pump_relay1_entity)?W`
+                    ${this._renderOptionTextInput("heat_pump_relay1_on_value","config_hp_relay1_on",i,"config_help_hp_contact_values","100000000000")}
+                    ${this._renderOptionTextInput("heat_pump_relay1_off_value","config_hp_relay1_off",i,"config_help_hp_contact_values","000000000000")}`:K}
+                ${this._renderPicker("heat_pump_relay2_entity","config_hp_relay2",Mi,null,i,"config_help_hp_relay")}
+                ${this._isValueContact(i.heat_pump_relay2_entity)?W`
+                    ${this._renderOptionTextInput("heat_pump_relay2_on_value","config_hp_relay2_on",i,"config_help_hp_contact_values","100000000000")}
+                    ${this._renderOptionTextInput("heat_pump_relay2_off_value","config_hp_relay2_off",i,"config_help_hp_contact_values","000000000000")}`:K}
                 ${""}
                 ${this._renderOptionToggle("heat_pump_invert_sg_ready","config_hp_invert_sg_ready",i,"config_help_hp_invert_sg_ready",!1)}
                 ${this._renderPicker("heat_pump_climate_entity","config_hp_climate","climate",null,i,"config_help_hp_climate")}
@@ -7326,19 +7722,19 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <span class="ctrl-label">${this._t("hot_water_temperature_reading_path")}</span>
                         <span class="readonly-value">${n}</span>
                     </div>
-                `:q}
+                `:K}
                 ${l&&"uninitialized"!==l?W`
                     <div class="readonly-row">
                         <span class="ctrl-label">${this._t("hot_water_temperature_safety_path")}</span>
                         <span class="readonly-value">${l}</span>
                     </div>
-                `:q}
+                `:K}
                 ${c&&"uninitialized"!==c?W`
                     <div class="readonly-row">
                         <span class="ctrl-label">${this._t("hot_water_activation_path")}</span>
                         <span class="readonly-value">${c}</span>
                     </div>
-                `:q}
+                `:K}
             </div>
         `:W`
             <div class="setup-intro">
@@ -7360,7 +7756,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 ${this._renderOptionSlider("hot_water_minimum_temperature","config_hw_min_temperature",{min:30,max:55,step:1,unit:"°C",default:40},t,"config_help_hw_min_temperature")}
                 ${""}
             </div>
-        `}async _saveChargerField(e,t,i,s,r,a){const o=(a.ev_chargers||[]).map(e=>({...e}));o[e]||(o[e]={}),!o[e].id&&t&&(o[e].id=t),o[e][i]=s,await this._saveOption("ev_chargers",o,r)}async _addCharger(){if(this._chargerBusy)return;const e=this._options.ev_chargers||[],t=new Set([...e.map(e=>e&&e.id).filter(Boolean),...this._chargersList()]);let i="ev_charger",s=1;for(;t.has(i);)i="ev_charger_"+s++;const r={id:i,name:`${this._t("config_ev_new_charger")} ${e.length+1}`,ev_min_current:6,ev_surplus_priority:e.length+3};this._chargerBusy=!0,this.requestUpdate();try{await this._saveOption("ev_chargers",[r],"ev_chargers_add"),await this._refreshOptions()}finally{this._chargerBusy=!1,this.requestUpdate()}}async _removeCharger(e){if(!this._chargerBusy&&e){this._chargerBusy=!0,this._pendingRemove="",this.requestUpdate();try{await this._hass.callService("solar_energy_management","remove_charger",{charger_id:e}),await this._refreshOptions()}catch(e){console.error("[sem-config-card] remove_charger failed",e)}finally{this._chargerBusy=!1,this.requestUpdate()}}}_renderTargetTypeSelectNested(e,t,i,s){const r=i.ev_target_type||"kwh",a=!!i.vehicle_soc_entity,o=`ev_chargers.${e}.ev_target_type`,n=this._saveStatus[o];return W`
+        `}async _saveChargerField(e,t,i,s,r,a){const o=(a.ev_chargers||[]).map(e=>({...e}));o[e]||(o[e]={}),!o[e].id&&t&&(o[e].id=t),o[e][i]=s,await this._saveOption("ev_chargers",o,r)}async _addSuggestedCharger(e){if(this._chargerBusy||!e||!e.id)return;const t=this._options.ev_chargers||[],i=new Set([...t.map(e=>e&&e.id).filter(Boolean),...this._chargersList()]);let s=e.id,r=1;for(;i.has(s);)s=`${e.id}_${r++}`;const a={...e,id:s,ev_min_current:6,ev_surplus_priority:t.length+3};this._chargerBusy=!0,this.requestUpdate();try{await this._saveOption("ev_chargers",[a],"ev_chargers_add"),await this._refreshOptions()}finally{this._chargerBusy=!1,this.requestUpdate()}}_reportNearMissUrl(e){const t=(e.entities||[]).map(e=>`- \`${e.entity}\` (${e.domain}${e.device_class?"/"+e.device_class:""})`).join("\n"),i=["**Detected hardware — no role matched**","",`Integration: ${e.roster?.name?`${e.roster.name} (\`${e.platform}\`)`:`\`${e.platform}\``}`,e.roster?.installs?`Installs (HA analytics): ${e.roster.installs}`:"","","Entities on this device:",t,"","What the device is and which entity does what:","(please fill in)"].filter(Boolean).join("\n");return"https://github.com/traktore-org/sem-community/issues/new?labels=enhancement&title="+encodeURIComponent(`Detected hardware: ${e.platform} — no role matched`)+"&body="+encodeURIComponent(i)}async _addCharger(){if(this._chargerBusy)return;const e=this._options.ev_chargers||[],t=new Set([...e.map(e=>e&&e.id).filter(Boolean),...this._chargersList()]);let i="ev_charger",s=1;for(;t.has(i);)i="ev_charger_"+s++;const r={id:i,name:`${this._t("config_ev_new_charger")} ${e.length+1}`,ev_min_current:6,ev_surplus_priority:e.length+3};this._chargerBusy=!0,this.requestUpdate();try{await this._saveOption("ev_chargers",[r],"ev_chargers_add"),await this._refreshOptions()}finally{this._chargerBusy=!1,this.requestUpdate()}}async _removeCharger(e){if(!this._chargerBusy&&e){this._chargerBusy=!0,this._pendingRemove="",this.requestUpdate();try{await this._hass.callService("solar_energy_management","remove_charger",{charger_id:e}),await this._refreshOptions()}catch(e){console.error("[sem-config-card] remove_charger failed",e)}finally{this._chargerBusy=!1,this.requestUpdate()}}}_renderTargetTypeSelectNested(e,t,i,s){const r=i.ev_target_type||"kwh",a=!!i.vehicle_soc_entity,o=`ev_chargers.${e}.ev_target_type`,n=this._saveStatus[o];return W`
             <div class="stepper-cell">
                 <div class="ctrl-row">
                     <span class="ctrl-label">${this._t("config_ev_target_type")}</span>
@@ -7374,9 +7770,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         </option>
                     </select>
                 </div>
-                ${"saving"===n?W`<div class="save-status">${this._t("config_saving")}…</div>`:q}
-                ${"ok"===n?W`<div class="save-status ok">✓</div>`:q}
-                ${this._showHelp?W`<div class="setting-help-text">${this._t("config_help_ev_target_type")}</div>`:q}
+                ${"saving"===n?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===n?W`<div class="save-status ok">✓</div>`:K}
+                ${this._showHelp?W`<div class="setting-help-text">${this._t("config_help_ev_target_type")}</div>`:K}
             </div>
         `}_renderTextNested(e,t,i,s,r,a,o){const n=r.ev_chargers||[],l=n[e]?.[i]??"",c=`ev_chargers.${e}.${i}`,d=this._saveStatus[c];return W`
             <div class="picker-cell">
@@ -7387,9 +7783,22 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                            @keydown=${e=>{"Enter"===e.key&&e.target.blur()}}
                            @blur=${s=>{const a=s.target.value.trim();a!==String(l)&&this._saveChargerField(e,t,i,a,c,r)}} />
                 </div>
-                ${"saving"===d?W`<div class="save-status">${this._t("config_saving")}…</div>`:q}
-                ${"ok"===d?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:q}
-                ${this._showHelp&&a?W`<div class="setting-help-text">${this._t(a)}</div>`:q}
+                ${"saving"===d?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===d?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:K}
+                ${this._showHelp&&a?W`<div class="setting-help-text">${this._t(a)}</div>`:K}
+            </div>
+        `}_renderToggleNested(e,t,i,s,r,a){const o=r.ev_chargers||[],n=!!o[e]?.[i],l=`ev_chargers.${e}.${i}`,c=this._saveStatus[l];return W`
+            <div class="picker-cell">
+                <div class="toggle-row">
+                    <span class="toggle-label">${this._t(s)}${this._helpBtn(a)}</span>
+                    <div class="toggle-track ${n?"on":""}"
+                         @click=${()=>this._saveChargerField(e,t,i,!n,l,r)}>
+                        <div class="toggle-thumb"></div>
+                    </div>
+                </div>
+                ${"saving"===c?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===c?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:K}
+                ${this._helpBlock(a)}
             </div>
         `}_renderPickerNested(e,t,i,s,r,a,o,n){const l=o.ev_chargers||[],c=l[e]?.[i]||"",d=`ev_chargers.${e}.${i}`,p=this._saveStatus[d],h=s=>this._saveChargerField(e,t,i,s,d,o);return W`
             <div class="picker-cell">
@@ -7404,9 +7813,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         @value-changed=${e=>h(e.detail?.value||"")}>
                     </ha-entity-picker>
                 </div>
-                ${"saving"===p?W`<div class="save-status">${this._t("config_saving")}…</div>`:q}
-                ${"ok"===p?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:q}
-                ${this._showHelp&&n?W`<div class="setting-help-text">${this._t(n)}</div>`:q}
+                ${"saving"===p?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===p?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:K}
+                ${this._showHelp&&n?W`<div class="setting-help-text">${this._t(n)}</div>`:K}
             </div>
         `}_batteryCount(){if(!this._hass)return 0;const e=new Set;for(const t of Object.keys(this._hass.states)){const i=t.match(/^sensor\.sem_battery_(b\d+)_power$/);i&&e.add(i[1])}return e.size}_hasBattery(){return!!this._hass&&(this._batteryCount()>0||("sensor.sem_battery_soc"in this._hass.states||"sensor.sem_battery_power"in this._hass.states))}_renderBatteryStrategyPicker(e,t,i){const s="battery_strategy_entities",r=(Array.isArray(i[s])?i[s]:[])[e]||"",a=`${s}.${e}`,o=this._saveStatus[a];return W`
             <div class="picker-cell">
@@ -7420,8 +7829,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         @value-changed=${i=>this._saveListField(s,e,i.detail?.value||"",t)}>
                     </ha-entity-picker>
                 </div>
-                ${"saving"===o?W`<div class="save-status">${this._t("config_saving")}…</div>`:q}
-                ${"ok"===o?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:q}
+                ${"saving"===o?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===o?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:K}
             </div>
         `}async _saveListField(e,t,i,s){const r=Array.isArray(this._options[e])?[...this._options[e]]:[];for(;r.length<s;)r.push(null);r[t]=i||null,await this._saveOption(e,r,`${e}.${t}`)}_renderBatteryDischargePicker(e,t,i){const s="battery_force_discharge_entities",r=(Array.isArray(i[s])?i[s]:[])[e]||"",a=`${s}.${e}`,o=this._saveStatus[a];return W`
             <div class="picker-cell">
@@ -7435,13 +7844,13 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         @value-changed=${i=>this._saveListField(s,e,i.detail?.value||"",t)}>
                     </ha-entity-picker>
                 </div>
-                ${"saving"===o?W`<div class="save-status">${this._t("config_saving")}…</div>`:q}
-                ${"ok"===o?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:q}
+                ${"saving"===o?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===o?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:K}
             </div>
-        `}_renderPicker(e,t,i,s,r,a){if(!this._showsControl(e))return q;const o=this._saveStatus[e],n=hi.has(e),l=n&&Object.prototype.hasOwnProperty.call(this._pending,e),c=l?this._pending[e]:r[e]||"",d=t=>{n?(this._pending={...this._pending,[e]:t||""},this.requestUpdate()):this._saveOption(e,t,e)};return W`
+        `}_renderPicker(e,t,i,s,r,a){if(!this._showsControl(e))return K;const o=this._saveStatus[e],n=Di.has(e),l=n&&Object.prototype.hasOwnProperty.call(this._pending,e),c=l?this._pending[e]:r[e]||"",d=t=>{n?(this._pending={...this._pending,[e]:t||""},this.requestUpdate()):this._saveOption(e,t,e)};return W`
             <div class="picker-cell">
                 <div class="picker-row">
-                    <span class="picker-label">${this._t(t)}${l?W`<span class="pending-dot" title="${this._t("config_pending_hint")}">●</span>`:q}</span>
+                    <span class="picker-label">${this._t(t)}${l?W`<span class="pending-dot" title="${this._t("config_pending_hint")}">●</span>`:K}</span>
                     <ha-entity-picker
                         .hass=${this._hass}
                         .value=${c}
@@ -7451,28 +7860,28 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         @value-changed=${e=>d(e.detail?.value||"")}>
                     </ha-entity-picker>
                 </div>
-                ${"saving"===o?W`<div class="save-status">${this._t("config_saving")}…</div>`:q}
-                ${"ok"===o?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:q}
-                ${o&&"saving"!==o&&"ok"!==o?W`<div class="save-status err">⚠ ${o}</div>`:q}
-                ${this._showHelp&&a?W`<div class="setting-help-text">${this._t(a)}</div>`:q}
+                ${"saving"===o?W`<div class="save-status">${this._t("config_saving")}…</div>`:K}
+                ${"ok"===o?W`<div class="save-status ok">✓ ${this._t("config_saved")}</div>`:K}
+                ${o&&"saving"!==o&&"ok"!==o?W`<div class="save-status err">⚠ ${o}</div>`:K}
+                ${this._showHelp&&a?W`<div class="setting-help-text">${this._t(a)}</div>`:K}
             </div>
-        `}async _applyPending(){if(!Object.keys(this._pending).length||this._applying)return;const e=await this._ensureEntryId();this._applying=!0;const t={...this._saveStatus};delete t._apply,this._saveStatus=t,this.requestUpdate();try{const t={...this._pending};await this._hass.callService("solar_energy_management","set_option",{options:t,...e?{entry_id:e}:{}}),this._options={...this._options,...t},this._pending={}}catch(e){console.error("[sem-config-card] apply failed",e),this._saveStatus={...this._saveStatus,_apply:e?.message||"apply failed"}}finally{this._applying=!1,this.requestUpdate()}}_discardPending(){this._pending={},this.requestUpdate()}_renderApplyBar(){const e=Object.keys(this._pending).length;if(!e&&!this._applying)return q;const t=this._saveStatus._apply;return W`
+        `}async _applyPending(){if(!Object.keys(this._pending).length||this._applying)return;const e=await this._ensureEntryId();this._applying=!0;const t={...this._saveStatus};delete t._apply,this._saveStatus=t,this.requestUpdate();try{const t={...this._pending};await this._hass.callService("solar_energy_management","set_option",{options:t,...e?{entry_id:e}:{}}),this._options={...this._options,...t},this._pending={}}catch(e){console.error("[sem-config-card] apply failed",e),this._saveStatus={...this._saveStatus,_apply:e?.message||"apply failed"}}finally{this._applying=!1,this.requestUpdate()}}_discardPending(){this._pending={},this.requestUpdate()}_renderApplyBar(){const e=Object.keys(this._pending).length;if(!e&&!this._applying)return K;const t=this._saveStatus._apply;return W`
             <div class="apply-bar ${t?"apply-err":""}">
                 <span class="apply-msg">
                     ${this._applying?W`<span class="apply-spin"></span>${this._t("config_applying")}`:t?W`⚠ ${t}`:this._t("config_pending_changes").replace(/\{n\}/g,String(e))}
                 </span>
-                ${this._applying?q:W`
+                ${this._applying?K:W`
                     <button class="apply-discard" @click=${()=>this._discardPending()}>${this._t("config_discard")}</button>
                     <button class="apply-btn" @click=${()=>this._applyPending()}>${this._t("config_apply")}</button>
                 `}
             </div>
         `}_reg(e){this._sec&&(this._secOf[e]=this._sec)}_liveOf(e,t){if("option"===t){return(this._options||{})[e.slice(4)]}const i=this._hass?.states[e];if(i)return"number"===t?parseFloat(i.state):i.state}_stage(e,t,i){const s=this._liveOf(e,t),r="number"===t?Number(s)===Number(i):String(s)===String(i),a={...this._staged};r?delete a[e]:a[e]={kind:t,value:i},this._staged=a}_isDirty(e){return Object.prototype.hasOwnProperty.call(this._staged,e)}_stagedVal(e,t){const i=this._staged[e];return void 0===i?t:i.value}_sectionStaged(e){return Object.keys(this._staged).filter(t=>this._secOf[t]===e)}_revertSection(e){const t={...this._staged};this._sectionStaged(e).forEach(e=>delete t[e]),this._staged=t}async _applySection(e){const t=this._sectionStaged(e);if(t.length&&!this._secApplying){this._secApplying=e;try{const e={};for(const i of t){const t=this._staged[i];"option"===t.kind?e[i.slice(4)]=t.value:"number"===t.kind?await this._hass.callService("number","set_value",{entity_id:i,value:Number(t.value)}):"select"===t.kind?await this._hass.callService("select","select_option",{entity_id:i,option:String(t.value)}):"switch"===t.kind&&await this._hass.callService("switch","on"===t.value?"turn_on":"turn_off",{entity_id:i})}if(Object.keys(e).length){const t=await this._ensureEntryId();await this._hass.callService("solar_energy_management","set_option",{options:e,...t?{entry_id:t}:{}}),this._options={...this._options,...e}}const i={...this._staged};t.forEach(e=>delete i[e]),this._staged=i}catch(t){console.error("[sem-config-card] section apply failed",t),this._saveStatus={...this._saveStatus,["_sec_"+e]:t?.message||"apply failed"}}finally{this._secApplying="",this.requestUpdate()}}}_helpVisible(e){return!(!e||!this._showHelp&&!this._helpOpen[e])}_helpBtn(e){return e?W`<ha-icon class="row-help-btn ${this._helpOpen[e]?"on":""}"
             icon="mdi:information-outline" style="--mdc-icon-size:14px"
-            @click=${t=>{t.stopPropagation(),this._helpOpen={...this._helpOpen,[e]:!this._helpOpen[e]}}}></ha-icon>`:q}_helpBlock(e,t,i,s,r){if(!this._helpVisible(e))return q;const a=null!=t&&""!==t,o=a&&s&&r;return W`<div class="setting-help-text">${this._t(e)}${a?W` <span class="help-default">${this._t("config_default_label")}: ${t}${i?" "+i:""}</span>`:q}${o?W` <button class="help-reset-btn" title="${this._t("config_reset_default")}"
-                  @click=${e=>{e.stopPropagation(),this._stage(s,r,t)}}>↺ ${this._t("config_reset_default")}</button>`:q}</div>`}_renderOptionSelect(e,t,i,s,r,a){if(!this._showsControl(e))return q;const o="opt:"+e;this._reg(o);const n=null!=s[e]?s[e]:a,l=this._isDirty(o),c=this._stagedVal(o,n);return W`
+            @click=${t=>{t.stopPropagation(),this._helpOpen={...this._helpOpen,[e]:!this._helpOpen[e]}}}></ha-icon>`:K}_helpBlock(e,t,i,s,r){if(!this._helpVisible(e))return K;const a=null!=t&&""!==t,o=a&&s&&r;return W`<div class="setting-help-text">${this._t(e)}${a?W` <span class="help-default">${this._t("config_default_label")}: ${t}${i?" "+i:""}</span>`:K}${o?W` <button class="help-reset-btn" title="${this._t("config_reset_default")}"
+                  @click=${e=>{e.stopPropagation(),this._stage(s,r,t)}}>↺ ${this._t("config_reset_default")}</button>`:K}</div>`}_renderOptionSelect(e,t,i,s,r,a){if(!this._showsControl(e))return K;const o="opt:"+e;this._reg(o);const n=null!=s[e]?s[e]:a,l=this._isDirty(o),c=this._stagedVal(o,n);return W`
             <div class="stepper-cell ${l?"dirty":""}">
                 <div class="ctrl-row">
-                    <span class="ctrl-label">${this._t(t)}${l?W`<span class="dirty-dot">●</span>`:q}${this._helpBtn(r)}</span>
+                    <span class="ctrl-label">${this._t(t)}${l?W`<span class="dirty-dot">●</span>`:K}${this._helpBtn(r)}</span>
                     <select class="sem-select"
                             .value=${c}
                             @change=${e=>this._stage(o,"option",e.target.value)}>
@@ -7483,10 +7892,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 </div>
                 ${this._helpBlock(r,a,void 0,o,"option")}
             </div>
-        `}_renderOptionToggle(e,t,i,s,r){if(!this._showsControl(e))return q;const a=hi.has(e),o="opt:"+e;a||this._reg(o);const n=a&&Object.prototype.hasOwnProperty.call(this._pending,e),l=null!=i[e]?!!i[e]:!!r,c=n||!a&&this._isDirty(o),d=n?!!this._pending[e]:!a&&this._isDirty(o)?!!this._staged[o].value:l;return W`
+        `}_renderOptionToggle(e,t,i,s,r){if(!this._showsControl(e))return K;const a=Di.has(e),o="opt:"+e;a||this._reg(o);const n=a&&Object.prototype.hasOwnProperty.call(this._pending,e),l=null!=i[e]?!!i[e]:!!r,c=n||!a&&this._isDirty(o),d=n?!!this._pending[e]:!a&&this._isDirty(o)?!!this._staged[o].value:l;return W`
             <div class="stepper-cell ${c?"dirty":""}">
                 <div class="toggle-row">
-                    <span class="toggle-label">${this._t(t)}${c?W`<span class="dirty-dot" title="${this._t("config_pending_hint")}">●</span>`:q}${this._helpBtn(s)}</span>
+                    <span class="toggle-label">${this._t(t)}${c?W`<span class="dirty-dot" title="${this._t("config_pending_hint")}">●</span>`:K}${this._helpBtn(s)}</span>
                     <div class="toggle-track ${d?"on":""}"
                          @click=${()=>{a?(this._pending={...this._pending,[e]:!d},this.requestUpdate()):this._stage(o,"option",!d)}}>
                         <div class="toggle-thumb"></div>
@@ -7494,10 +7903,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 </div>
                 ${this._helpBlock(s)}
             </div>
-        `}_renderOptionNumberInput(e,t,i,s,r){if(!this._showsControl(e))return q;const a="opt:"+e;this._reg(a);const o=null!=s[e]?s[e]:i.default,n=this._isDirty(a),l=this._stagedVal(a,o),c=e=>{const t=parseFloat(e);if(Number.isNaN(t))return;const s=Math.max(i.min,Math.min(i.max,t));this._stage(a,"option",s)};return W`
+        `}_renderOptionNumberInput(e,t,i,s,r){if(!this._showsControl(e))return K;const a="opt:"+e;this._reg(a);const o=null!=s[e]?s[e]:i.default,n=this._isDirty(a),l=this._stagedVal(a,o),c=e=>{const t=parseFloat(e);if(Number.isNaN(t))return;const s=Math.max(i.min,Math.min(i.max,t));this._stage(a,"option",s)};return W`
             <div class="stepper-cell ${n?"dirty":""}">
                 <div class="ctrl-row">
-                    <span class="ctrl-label">${this._t(t)}${n?W`<span class="dirty-dot">●</span>`:q}${this._helpBtn(r)}</span>
+                    <span class="ctrl-label">${this._t(t)}${n?W`<span class="dirty-dot">●</span>`:K}${this._helpBtn(r)}</span>
                     <div class="num-input-wrap">
                         <input class="sem-num-input" type="number"
                                .value=${String(l)}
@@ -7505,16 +7914,27 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                @change=${e=>c(e.target.value)}
                                @blur=${e=>c(e.target.value)}
                                @keydown=${e=>{"Enter"===e.key&&e.target.blur()}}>
-                        ${i.unit?W`<span class="num-unit">${i.unit}</span>`:q}
+                        ${i.unit?W`<span class="num-unit">${i.unit}</span>`:K}
                     </div>
                 </div>
                 ${this._helpBlock(r,i.default,i.unit,a,"option")}
             </div>
-        `}_renderOptionSlider(e,t,i,s,r){if(!this._showsControl(e))return q;const a="opt:"+e;this._reg(a);const o=parseFloat(null!=s[e]?s[e]:i.default)||0,n=this._isDirty(a),l=Number(this._stagedVal(a,o)),c=i.step<1?1:0,d=i.unit||"",p=i.max>i.min?Math.round((l-i.min)/(i.max-i.min)*100):0,h=e=>{const t=Math.min(i.max,Math.max(i.min,l+e*i.step));this._stage(a,"option",t)};return W`
+        `}_renderOptionTextInput(e,t,i,s,r){if(!this._showsControl(e))return K;const a="opt:"+e;this._reg(a);const o=null!=i[e]?i[e]:"",n=this._isDirty(a),l=this._stagedVal(a,o);return W`
+            <div class="picker-cell ${n?"dirty":""}">
+                <div class="picker-row">
+                    <span class="picker-label">${this._t(t)}${n?W`<span class="dirty-dot">●</span>`:K}${this._helpBtn(s)}</span>
+                    <input type="text" class="txt-opt" .value=${String(l??"")}
+                           placeholder="${r||""}"
+                           @keydown=${e=>{"Enter"===e.key&&e.target.blur()}}
+                           @blur=${e=>{const t=e.target.value.trim();t!==String(l??"")&&this._stage(a,"option",t)}} />
+                </div>
+                ${this._helpBlock(s,null,null,a,"option")}
+            </div>
+        `}_renderOptionSlider(e,t,i,s,r){if(!this._showsControl(e))return K;const a="opt:"+e;this._reg(a);const o=parseFloat(null!=s[e]?s[e]:i.default)||0,n=this._isDirty(a),l=Number(this._stagedVal(a,o)),c=i.step<1?1:0,d=i.unit||"",p=i.max>i.min?Math.round((l-i.min)/(i.max-i.min)*100):0,h=e=>{const t=Math.min(i.max,Math.max(i.min,l+e*i.step));this._stage(a,"option",t)};return W`
             <div class="zone-knob ${n?"dirty":""}">
                 <div class="zone-knob-top">
                     <span class="zone-knob-label">${this._t(t)}${this._helpBtn(r)}</span>
-                    <span class="zone-chip">${n?W`<span class="dirty-dot">●</span>`:q}${l.toFixed(c)}${d?" "+d:""}</span>
+                    <span class="zone-chip">${n?W`<span class="dirty-dot">●</span>`:K}${l.toFixed(c)}${d?" "+d:""}</span>
                 </div>
                 <div class="zone-knob-slider">
                     <button class="zone-mini" @click=${()=>h(-1)}>−</button>
@@ -7540,12 +7960,34 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             ${this._renderOptionNumberInput("battery_min_deficit_kwh","config_bs_min_deficit",{min:.5,max:10,step:.5,unit:"kWh",default:2},t,"config_help_bs_min_deficit")}
             ${this._renderOptionSlider("battery_pessimism_weight","config_bs_pessimism",{min:0,max:1,step:.1,unit:"",default:.3},t,"config_help_bs_pessimism")}
             ${this._renderOptionToggle("battery_force_charge_negative_price","config_bs_force_neg",t,"config_help_bs_force_neg",!0)}
+        `}_batteryIntelligenceSubtitle(){const e=this._hass?.states?.["sensor.sem_battery_spendable_kwh"],t=e?.attributes?.phase;return t?this._t(`planning_phase_${t}`):""}_renderBatteryIntelligence(e){const t=this._options||{},i="deye"===t.battery_charge_platform;return W`
+            ${this._renderToggle("switch.sem_forecast_spending_enabled","forecast_spending",e,"config_help_forecast_spending")}
+            ${this._renderToggle("switch.sem_battery_may_export","battery_may_export",e,"config_help_battery_may_export")}
+            ${this._renderToggle("switch.sem_battery_may_assist_ev","battery_may_assist_ev",e,"config_help_battery_may_assist_ev")}
+            <div style="margin-top:6px;border-top:1px solid ${e.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle("switch.sem_battery_charge_pacing_enabled","battery_charge_pacing",e,"config_help_battery_charge_pacing")}
+            ${this._renderPicker("battery_charge_power_limit_entity","config_charge_power_limit_entity","number",null,t,"config_help_charge_power_limit_entity")}
+            ${this._renderOptionNumberInput("inverter_ac_limit_w","config_inverter_ac_limit",{min:0,max:1e5,step:100,unit:"W",default:0},t,"config_help_inverter_ac_limit")}
+            ${""}
+            <div style="margin-top:6px;border-top:1px solid ${e.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle("switch.sem_export_guard_enabled","export_guard",e,"config_help_export_guard")}
+            ${this._renderStepper("number.sem_export_guard_engage_s","export_guard_engage_s",e,"config_help_export_guard_engage_s")}
+            ${this._renderStepper("number.sem_export_guard_release_s","export_guard_release_s",e,"config_help_export_guard_release_s")}
+            ${this._renderToggle("switch.sem_export_guard_override_external","export_guard_override",e,"config_help_export_guard_override")}
+            ${this._renderToggle("switch.sem_battery_house_sink_enabled","battery_house_sink",e,"config_help_battery_house_sink")}
+            ${this._renderToggle("switch.sem_ev_morning_window_enabled","ev_morning_window",e,"config_help_ev_morning_window")}
+            ${this._renderStepper("number.sem_ev_morning_window_hours","ev_morning_window_hours",e,"config_help_ev_morning_window_hours")}
+            ${this._renderStepper("number.sem_battery_morning_drain_floor_soc","battery_morning_drain_floor_soc",e,"config_help_battery_morning_drain_floor_soc")}
+            ${i?W`
+                <div style="margin-top:6px;border-top:1px solid ${e.surfaceBorder};padding-top:4px"></div>
+                ${this._renderOptionToggle("deye_system_work_mode_control","config_deye_system_work_mode",t,"config_help_deye_system_work_mode",!1)}
+                ${this._renderPicker("deye_system_work_mode_entity","config_deye_system_work_mode_entity","select",null,t,"config_help_deye_system_work_mode_entity")}`:K}
         `}_renderLoadManagement(e){const t=this._options||{},i="opt:peak_limit_unlimited",s=this._isDirty(i)?!!this._staged[i].value:!!t.peak_limit_unlimited;return W`
             <div class="readonly-row">
                 <span class="ctrl-label">${this._t("load_management_status")}</span>
                 <span class="readonly-value">${this._val("load_management_status")||"—"}</span>
             </div>
-            ${this._renderOptionToggle("load_management_enabled","config_lm_enabled",t,"config_help_lm_enabled",!0)}
+            ${this._renderOptionToggle("load_management_enabled","config_lm_enabled",t,"config_help_lm_enabled",!1)}
             ${this._renderOptionToggle("peak_limit_unlimited","config_lm_unlimited",t,"config_help_lm_unlimited",!1)}
             ${s?W`
                 <div class="readonly-row">
@@ -7562,7 +8004,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 ${this._lmAdvancedOpen?W`
                     ${this._renderOptionNumberInput("warning_peak_level","config_lm_warning_peak",{min:1,max:80,step:.1,unit:"kW",default:4.5},t,"config_help_lm_warning_peak")}
                     ${this._renderOptionNumberInput("emergency_peak_level","config_lm_emergency_peak",{min:1,max:80,step:.1,unit:"kW",default:6},t,"config_help_lm_emergency_peak")}
-                `:q}
+                `:K}
             `}
         `}_renderForecast(e){const t=this._val("forecast_source")||"none",i="none"===t?this._t("none"):this._forecastProviderLabel(t),s=this._options||{},r=this._hass?.states?.["sensor.sem_forecast_source"]?.attributes?.sources_available||[],a=e=>!Array.isArray(r)||r.includes(e),o=s.solar_forecast_source||"auto",n=[{value:"auto",label:this._t("config_forecast_source_auto")},...[{value:"solcast",label:"Solcast PV Solar"},{value:"forecast_solar",label:"Forecast.Solar"},{value:"open_meteo",label:"Open-Meteo Solar Forecast"}].filter(e=>a(e.value)||e.value===o).map(e=>a(e.value)?e:{...e,label:`${e.label} — ${this._t("config_forecast_source_missing")}`})],l=this._hass?.states?.["sensor.sem_forecast_source"]?.attributes||{};return W`
             <div class="readonly-row">
@@ -7571,8 +8013,33 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             </div>
             ${this._renderPlanesToday(l)}
             ${this._renderOptionSelect("solar_forecast_source","config_solar_forecast_source",n,s,"config_help_solar_forecast_source","auto")}
-            ${"none"===t?W`<div class="overview-help">${this._t("config_forecast_install_hint")}</div>`:q}
-        `}_renderPlanesToday(e){const t=e.planes_today||[];if(!Array.isArray(t)||t.length<2)return q;const i=t.reduce((e,t)=>e+Number(t.today_kwh||0),0);return W`
+            ${this._renderForecastComparison(l,t)}
+            ${"none"===t?W`<div class="overview-help">${this._t("config_forecast_install_hint")}</div>`:K}
+        `}_renderForecastComparison(e,t){const i=e.sources_now||{},s=e.source_accuracy||{},r=Object.keys(i);if(r.length<2)return K;const a=e=>null==e?this._t("forecast_still_learning"):`${Math.round(100*Number(e))}%`;return W`
+            <div class="readonly-row" style="margin-top:8px">
+                <span class="ctrl-label">${this._t("forecast_compare_title")}</span>
+            </div>
+            <div class="overview-help">${this._t("forecast_compare_help")}</div>
+            <table class="sem-planes">
+                <tr>
+                    <th>${this._t("forecast_compare_source")}</th>
+                    <th>${this._t("forecast_compare_today")}</th>
+                    <th>${this._t("forecast_compare_accuracy")}</th>
+                </tr>
+                ${r.map(e=>{const r=i[e]||{},o=s[e]||{},n=Number(o.settled_days||0);return W`
+                        <tr class="${e===t?"is-total":""}">
+                            <td>
+                                ${this._forecastProviderLabel(e)}
+                                ${e===t?W`<span style="font-size:10px;opacity:.75;margin-left:6px">${this._t("forecast_in_use")}</span>`:K}
+                                ${Number(r.planes||0)>1?W`<span style="font-size:10px;opacity:.6;margin-left:4px">${r.planes}×</span>`:K}
+                            </td>
+                            <td class="num">${Number(r.today_kwh||0).toFixed(1)} kWh</td>
+                            <td class="num" title="${n} ${this._t("forecast_days_of_evidence")}">
+                                ${a(o.trust_today)}
+                            </td>
+                        </tr>`})}
+            </table>
+        `}_renderPlanesToday(e){const t=e.planes_today||[];if(!Array.isArray(t)||t.length<2)return K;const i=t.reduce((e,t)=>e+Number(t.today_kwh||0),0);return W`
             <table class="sem-planes">
                 <tr>
                     <th>${this._t("forecast_per_string_title")}</th>
@@ -7594,7 +8061,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <div class="pv-name-row">
                         <div class="pv-name-meta">
                             <span class="pv-name-slot">${e.slot.toUpperCase()}</span>
-                            ${r?W`<span class="pv-name-power">${r}</span>`:q}
+                            ${r?W`<span class="pv-name-power">${r}</span>`:K}
                         </div>
                         <input type="text" class="pv-name-input"
                             placeholder=${e.slot.toUpperCase()}
@@ -7602,7 +8069,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             @input=${t=>this._onPvNameInput(e.slot,t.target.value)} />
                     </div>`})}
             <div class="section-footer">
-                ${"ok"===r?W`<span class="pv-save-ok">✓</span>`:q}
+                ${"ok"===r?W`<span class="pv-save-ok">✓</span>`:K}
                 <button class="pv-save-btn" ?disabled=${"saving"===r}
                         @click=${()=>this._savePvNames()}>
                     ${"saving"===r?"…":this._t("config_pv_strings_save")}
@@ -7667,8 +8134,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         ${this._t("reset_sign_detection")}
                     </button>
                 </div>
-                ${this._signMsg?W`<div class="sign-feedback">${this._signMsg}</div>`:q}
-                ${this._showHelp?W`<div class="setting-help-text">${this._t("fix_grid_sign_help")}</div>`:q}
+                ${this._signMsg?W`<div class="sign-feedback">${this._signMsg}</div>`:K}
+                ${this._showHelp?W`<div class="setting-help-text">${this._t("fix_grid_sign_help")}</div>`:K}
                 <div class="readonly-row" style="margin-top:8px">
                     <span class="ctrl-label">${this._t("battery_sign")}</span>
                     <span class="readonly-value">${i}</span>
@@ -7680,8 +8147,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         ${this._t("fix_battery_sign")}
                     </button>
                 </div>
-                ${this._battSignMsg?W`<div class="sign-feedback">${this._battSignMsg}</div>`:q}
-                ${this._showHelp?W`<div class="setting-help-text">${this._t("fix_battery_sign_help")}</div>`:q}
+                ${this._battSignMsg?W`<div class="sign-feedback">${this._battSignMsg}</div>`:K}
+                ${this._showHelp?W`<div class="setting-help-text">${this._t("fix_battery_sign_help")}</div>`:K}
             </div>
         `}_resetSignDetection(){this._hass&&(this._hass.callService("solar_energy_management","reset_sign_detection",{}),this._signMsg=this._t("sign_relearn_started"),this.requestUpdate(),setTimeout(()=>{this._signMsg="",this.requestUpdate()},4e3))}async _flipGridSign(){if(!this._hass||this._signBusy)return;this._signBusy=!0,this._signMsg="",this.requestUpdate();let e=null;try{const t=await this._hass.callService("solar_energy_management","flip_grid_sign",{},void 0,!1,!0);e=t&&t.response?t.response:t}catch(t){e=null}const t=this._buildSignReport(e);let i=!1;try{await navigator.clipboard.writeText(t),i=!0}catch(e){i=!1}this._signBusy=!1,this._signMsg=i?this._t("sign_flipped_copied"):this._t("sign_flipped"),this.requestUpdate(),setTimeout(()=>{this._signMsg="",this.requestUpdate()},6e3)}async _flipBatterySign(){if(!this._hass||this._battSignBusy)return;this._battSignBusy=!0,this._battSignMsg="",this.requestUpdate();let e=null;try{const t=await this._hass.callService("solar_energy_management","flip_battery_sign",{},void 0,!1,!0);e=t&&t.response?t.response:t}catch(t){e=null}const t=this._buildBatterySignReport(e);let i=!1;try{await navigator.clipboard.writeText(t),i=!0}catch(e){i=!1}this._battSignBusy=!1,this._battSignMsg=i?this._t("sign_flipped_copied"):this._t("sign_flipped"),this.requestUpdate(),setTimeout(()=>{this._battSignMsg="",this.requestUpdate()},6e3)}_buildBatterySignReport(e){const t=e&&e.diagnostics||{},i=e&&"boolean"==typeof e.user_flip?String(e.user_flip):"?",s=e=>null==e?"?":String(e),r=e=>Array.isArray(e)&&e.length?e.join(", "):"(none)",a=String.fromCharCode(96),o=e=>a+e+a,n=t.per_bid||{},l=Object.entries(n).map(([e,t])=>"  "+e+": "+s(t.inverted?"negated":"normal")+" (detected="+s(t.detected)+", confidence="+s(t.confidence)+", samples="+s(t.samples)+")");return["### SEM battery-sign report (#588)","","I tapped **Fix battery sign** in the Configuration tab.","battery_sign_user_flip is now "+o(i)+".","","- Battery sensor: "+o(s(t.battery_power_sensor))+" = "+s(t.battery_power_raw_state)+" (raw)","- Battery integration: "+s(t.battery_platform)+" (brand-seeded: "+s(t.brand_seeded)+")","- Per-battery sign state:",...l,"- Charge counters: "+r(t.charge_counters),"- Discharge counters: "+r(t.discharge_counters),"","My hardware (please fill in): inverter / battery brand.","After the flip, does battery charge/discharge show the correct direction?"].join("\n")}_buildSignReport(e){const t=e&&e.diagnostics||{},i=e&&"boolean"==typeof e.user_flip?String(e.user_flip):"?",s=e=>null==e?"?":String(e),r=e=>Array.isArray(e)&&e.length?e.join(", "):"(none)",a=String.fromCharCode(96),o=e=>a+e+a;return["### SEM grid-sign report (#461)","","I tapped **Fix grid sign** in the Configuration tab.","grid_sign_user_flip is now "+o(i)+".","","- Meter sensor: "+o(s(t.grid_power_sensor))+" = "+s(t.grid_power_raw_state)+" (raw)","- Meter integration: "+s(t.grid_platform)+" (brand-seeded: "+s(t.brand_seeded)+")","- Auto-detect: detected="+s(t.auto_detected)+", inverted="+s(t.auto_inverted),"- Manual grid_sign_invert: "+s(t.manual_grid_sign_invert),"- Counter correlation: confidence="+s(t.confidence)+", evidence="+s(t.evidence)+", samples="+s(t.samples),"- Solar correlation: confidence="+s(t.solar_confidence)+", evidence="+s(t.solar_evidence)+", samples="+s(t.solar_samples),"- Seen import="+s(t.seen_import)+", export="+s(t.seen_export),"- Import counters: "+r(t.import_counters),"- Export counters: "+r(t.export_counters),"","My hardware (please fill in): inverter / grid meter / battery brand.","After the flip, do the Home-tab import vs export arrows now point the right way?"].join("\n")}_renderSectionHeader(e,t){const i=this._collapsed[e.id]?"rotate(-90deg)":"rotate(0deg)",s=e.subtitleFn(this),r="overview"===e.id?"all":e.id;return W`
             <div class="section-header" @click=${()=>this._toggleSection(e.id)}>
@@ -7689,12 +8156,12 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <ha-icon icon="${e.icon}" style="--mdc-icon-size:20px;color:${e.color}"></ha-icon>
                 <span class="section-title-text">${this._t(e.titleKey)}</span>
                 ${this._sectionStaged(e.id).length?W`
-                    <span class="header-dirty-badge" title="${this._t("config_pending_hint")}">● ${this._sectionStaged(e.id).length}</span>`:q}
+                    <span class="header-dirty-badge" title="${this._t("config_pending_hint")}">● ${this._sectionStaged(e.id).length}</span>`:K}
                 ${e.docs?W`
                     <a class="section-docs-link" href="${e.docs}" target="_blank" rel="noopener"
                        title="${this._t("config_docs")}" @click=${e=>e.stopPropagation()}>
                         <ha-icon icon="mdi:book-open-variant" style="--mdc-icon-size:15px"></ha-icon>
-                    </a>`:q}
+                    </a>`:K}
                 <span class="section-subtitle" style="color:${s?e.color:""}">${s}</span>
                 <sem-diagnose-button
                     .hass=${this._hass}
@@ -7708,12 +8175,12 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
         `}_renderSection(e,t,i){const s=this._collapsed[e.id];this._sec=e.id;const r=t(i);this._sec=null;const a=this._sectionStaged(e.id),o=this._secApplying===e.id,n=this._saveStatus["_sec_"+e.id],l=a.length?W`
             <div class="section-stage-bar">
                 <span class="stage-count">● ${a.length} ${this._t("config_unsaved")}</span>
-                ${n?W`<span class="stage-err">⚠ ${n}</span>`:q}
+                ${n?W`<span class="stage-err">⚠ ${n}</span>`:K}
                 <button class="stage-btn revert" ?disabled=${o}
                         @click=${()=>this._revertSection(e.id)}>↩ ${this._t("config_revert")}</button>
                 <button class="stage-btn apply" ?disabled=${o}
                         @click=${()=>this._applySection(e.id)}>${o?W`${this._t("config_saving")}…`:W`✓ ${this._t("config_apply_section")}`}</button>
-            </div>`:q;return W`
+            </div>`:K;return W`
             <div class="section ${s?"":"expanded"}"
                  style="--section-accent: ${e.color}">
                 ${this._renderSectionHeader(e,i)}
@@ -7724,7 +8191,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </div>
                 </div>
             </div>
-        `}render(){if(!this._config)return q;const e=this._theme(),t=!1!==e.isDark,i=e.accent||"#42a5f5",s={overview:e=>this._renderOverview(e),sensor_sources:e=>this._renderSensorSources(e),detected_hardware:e=>this._renderDetectedHardware(e),ev_chargers:e=>this._renderEvChargers(e),battery_zones:e=>this._renderBatteryZones(e),tariff:e=>this._renderTariff(e),heat_pump:e=>this._renderHeatPump(e),hot_water:e=>this._renderHotWater(e),battery_scheduler:e=>this._renderBatteryScheduler(e),load_management:e=>this._renderLoadManagement(e),forecast:e=>this._renderForecast(e),pv_strings:e=>this._renderPvStrings(e),notifications:e=>this._renderNotifications(e),advanced:e=>this._renderAdvanced(e)};return W`
+        `}render(){if(!this._config)return K;const e=this._theme(),t=!1!==e.isDark,i=e.accent||"#42a5f5",s={overview:e=>this._renderOverview(e),sensor_sources:e=>this._renderSensorSources(e),detected_hardware:e=>this._renderDetectedHardware(e),ev_chargers:e=>this._renderEvChargers(e),battery_zones:e=>this._renderBatteryZones(e),tariff:e=>this._renderTariff(e),heat_pump:e=>this._renderHeatPump(e),hot_water:e=>this._renderHotWater(e),battery_scheduler:e=>this._renderBatteryScheduler(e),battery_intelligence:e=>this._renderBatteryIntelligence(e),load_management:e=>this._renderLoadManagement(e),forecast:e=>this._renderForecast(e),pv_strings:e=>this._renderPvStrings(e),notifications:e=>this._renderNotifications(e),advanced:e=>this._renderAdvanced(e)};return W`
             <style>
                 :host { display: block; contain: layout style paint; }
                 .wrap {
@@ -8230,6 +8697,20 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .ha-settings-btn:hover { background: ${e.surfaceHover}; border-color: ${i}; }
 
+                /* (#915) accept a proposed role — the same affordance,
+                   smaller, because it sits inside a row rather than under a
+                   section heading. */
+                .sem-btn {
+                    display: inline-flex; align-items: center; gap: 4px;
+                    padding: 3px 10px; border-radius: 7px;
+                    background: ${e.surface}; border: 1px solid ${e.surfaceBorder};
+                    color: var(--primary-text-color, ${e.text});
+                    font-size: 12px; cursor: pointer;
+                    transition: background 0.15s, border-color 0.15s;
+                }
+                .sem-btn:hover:not([disabled]) { background: ${e.surfaceHover}; border-color: ${i}; }
+                .sem-btn[disabled] { opacity: 0.55; cursor: default; }
+
                 /* ── #605 staged-changes UI ── */
                 .zone-knob.dirty, .stepper-cell.dirty {
                     border-left: 3px solid var(--section-accent, ${i});
@@ -8321,10 +8802,10 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         </span>
                     </div>
                     ${this._renderApplyBar()}
-                    ${di.filter(e=>"pv_strings"!==e.id||this._pvStrings().length>=2).filter(e=>this._advanced||ni.has(e.id)||this._sectionConfigured(e.id)).map(t=>this._renderSection(t,s[t.id],e))}
+                    ${Si.filter(e=>"pv_strings"!==e.id||this._pvStrings().length>=2).filter(e=>this._advanced||$i.has(e.id)||this._sectionConfigured(e.id)||this._revealed.has(e.id)).map(t=>this._renderSection(t,s[t.id],e))}
                 </div>
             </ha-card>
-        `}getCardSize(){return 12}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-config-card",name:"SEM Configuration Card",description:"In-dashboard SEM configuration surface (replaces the Settings → SEM → Configure flow for most users)",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-config-card",preview:!1});const _i="sem-config-tab-introduced-v1";we("sem-onboarding-banner",class extends Se{static get watchedEntities(){return[]}static get properties(){return{...super.properties,_dismissed:{state:!0}}}constructor(){super(),this._dismissed=this._isDismissed()}setConfig(e){super.setConfig(e),this._configPath=e.config_tab_path||"/config"}_isDismissed(){try{return"1"===localStorage.getItem(_i)}catch(e){return!1}}_dismiss(){try{localStorage.setItem(_i,"1")}catch(e){}this._dismissed=!0}_openConfig(){const e=window.location.pathname.split("/").filter(Boolean);if(e.length>=2){const t="/"+e.slice(0,-1).join("/");window.history.pushState(null,"",`${t}/config`)}else window.history.pushState(null,"",this._configPath);window.dispatchEvent(new Event("location-changed",{composed:!0})),this._dismiss()}render(){if(this._dismissed)return q;if(!this._config)return q;const e=this._theme(),t="#8DC892";return W`
+        `}getCardSize(){return 12}static getStubConfig(){return{entity_prefix:"sensor.sem_"}}},{type:"sem-config-card",name:"SEM Configuration Card",description:"In-dashboard SEM configuration surface (replaces the Settings → SEM → Configure flow for most users)",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-config-card",preview:!1});const Ei="sem-config-tab-introduced-v1";we("sem-onboarding-banner",class extends Se{static get watchedEntities(){return[]}static get properties(){return{...super.properties,_dismissed:{state:!0}}}constructor(){super(),this._dismissed=this._isDismissed()}setConfig(e){super.setConfig(e),this._configPath=e.config_tab_path||"/config"}_isDismissed(){try{return"1"===localStorage.getItem(Ei)}catch(e){return!1}}_dismiss(){try{localStorage.setItem(Ei,"1")}catch(e){}this._dismissed=!0}_openConfig(){const e=window.location.pathname.split("/").filter(Boolean);if(e.length>=2){const t="/"+e.slice(0,-1).join("/");window.history.pushState(null,"",`${t}/config`)}else window.history.pushState(null,"",this._configPath);window.dispatchEvent(new Event("location-changed",{composed:!0})),this._dismiss()}render(){if(this._dismissed)return K;if(!this._config)return K;const e=this._theme(),t="#8DC892";return W`
             <style>
                 :host { display: block; }
                 .banner {
@@ -8391,7 +8872,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     </button>
                 </div>
             </div>
-        `}getCardSize(){return 1}static getStubConfig(){return{}}},{type:"sem-onboarding-banner",name:"SEM Onboarding Banner",description:"One-time welcome banner pointing existing users to the new Configuration tab",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-onboarding-banner",preview:!1});class gi extends Se{static get properties(){return{...super.properties,section:{type:String},label:{type:String},_open:{state:!0},_busy:{state:!0},_payload:{state:!0},_error:{state:!0},_copied:{state:!0}}}constructor(){super(),this.section="all",this.label="",this._open=!1,this._busy=!1,this._payload=null,this._error=null,this._copied=!1,this._copiedTimer=null}disconnectedCallback(){super.disconnectedCallback(),this._copiedTimer&&(clearTimeout(this._copiedTimer),this._copiedTimer=null)}static get watchedEntities(){return[]}async _click(){if(this._hass){this._open=!0,this._busy=!0,this._error=null,this._payload=null;try{const e=await this._hass.callService("solar_energy_management","diagnose",{section:this.section||"all"},void 0,void 0,!0);this._payload=e?.response||e}catch(e){this._error=e?.message||String(e),console.error("[sem-diagnose-button] failed",e)}finally{this._busy=!1}}}_close(){this._open=!1,this._copied=!1,this._payload=null,this._error=null}async _copy(){if(!this._payload)return;const e=JSON.stringify(this._payload,null,2),t=()=>{this._copied=!0,this._error=null,this._copiedTimer&&clearTimeout(this._copiedTimer),this._copiedTimer=setTimeout(()=>{this._copiedTimer=null,this._copied=!1},1500)};if(navigator?.clipboard?.writeText&&!1!==window.isSecureContext)try{return await navigator.clipboard.writeText(e),void t()}catch(e){console.warn("[sem-diagnose-button] modern clipboard refused, falling back to execCommand",e)}try{const i=document.createElement("textarea");i.value=e,i.setAttribute("readonly",""),i.style.position="fixed",i.style.top="0",i.style.left="0",i.style.width="1px",i.style.height="1px",i.style.opacity="0",document.body.appendChild(i),i.focus(),i.select();const s=document.execCommand("copy");if(document.body.removeChild(i),s)return void t();console.error('[sem-diagnose-button] execCommand("copy") returned false')}catch(e){console.error("[sem-diagnose-button] legacy clipboard fallback threw",e)}this._error=this._t("config_diagnose_clipboard_failed")}render(){const e=this._theme(),t=e.accent||"#5BC8D8",i=this.label||this._t("config_diagnose");return W`
+        `}getCardSize(){return 1}static getStubConfig(){return{}}},{type:"sem-onboarding-banner",name:"SEM Onboarding Banner",description:"One-time welcome banner pointing existing users to the new Configuration tab",documentationURL:"https://github.com/traktore-org/sem-community/blob/develop/docs/DASHBOARD_GUIDE.md#sem-onboarding-banner",preview:!1});class Fi extends Se{static get properties(){return{...super.properties,section:{type:String},label:{type:String},_open:{state:!0},_busy:{state:!0},_payload:{state:!0},_error:{state:!0},_copied:{state:!0}}}constructor(){super(),this.section="all",this.label="",this._open=!1,this._busy=!1,this._payload=null,this._error=null,this._copied=!1,this._copiedTimer=null}disconnectedCallback(){super.disconnectedCallback(),this._copiedTimer&&(clearTimeout(this._copiedTimer),this._copiedTimer=null)}static get watchedEntities(){return[]}async _click(){if(this._hass){this._open=!0,this._busy=!0,this._error=null,this._payload=null;try{const e=await this._hass.callService("solar_energy_management","diagnose",{section:this.section||"all"},void 0,void 0,!0);this._payload=e?.response||e}catch(e){this._error=e?.message||String(e),console.error("[sem-diagnose-button] failed",e)}finally{this._busy=!1}}}_close(){this._open=!1,this._copied=!1,this._payload=null,this._error=null}async _copy(){if(!this._payload)return;const e=JSON.stringify(this._payload,null,2),t=()=>{this._copied=!0,this._error=null,this._copiedTimer&&clearTimeout(this._copiedTimer),this._copiedTimer=setTimeout(()=>{this._copiedTimer=null,this._copied=!1},1500)};if(navigator?.clipboard?.writeText&&!1!==window.isSecureContext)try{return await navigator.clipboard.writeText(e),void t()}catch(e){console.warn("[sem-diagnose-button] modern clipboard refused, falling back to execCommand",e)}try{const i=document.createElement("textarea");i.value=e,i.setAttribute("readonly",""),i.style.position="fixed",i.style.top="0",i.style.left="0",i.style.width="1px",i.style.height="1px",i.style.opacity="0",document.body.appendChild(i),i.focus(),i.select();const s=document.execCommand("copy");if(document.body.removeChild(i),s)return void t();console.error('[sem-diagnose-button] execCommand("copy") returned false')}catch(e){console.error("[sem-diagnose-button] legacy clipboard fallback threw",e)}this._error=this._t("config_diagnose_clipboard_failed")}render(){const e=this._theme(),t=e.accent||"#5BC8D8",i=this.label||this._t("config_diagnose");return W`
             <style>
                 :host { display: inline-flex; }
                 .btn {
@@ -8497,9 +8978,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             </button>
                         </div>
                         <div class="modal-body">
-                            ${this._busy?W`<div class="busy">${this._t("config_diagnose_busy")||"Collecting diagnostics…"}</div>`:q}
-                            ${this._error?W`<div class="error">${this._error}</div>`:q}
-                            ${this._busy||this._error||!this._payload?q:W`${JSON.stringify(this._payload,null,2)}`}
+                            ${this._busy?W`<div class="busy">${this._t("config_diagnose_busy")||"Collecting diagnostics…"}</div>`:K}
+                            ${this._error?W`<div class="error">${this._error}</div>`:K}
+                            ${this._busy||this._error||!this._payload?K:W`${JSON.stringify(this._payload,null,2)}`}
                         </div>
                         <div class="modal-footer">
                             <button class="footer-btn secondary" @click=${this._close}>
@@ -8509,9 +8990,9 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 <button class="footer-btn ${this._copied?"copied":"primary"}" @click=${this._copy}>
                                     ${this._copied?this._t("copied"):this._t("config_diagnose_copy")||"Copy to clipboard"}
                                 </button>
-                            `:q}
+                            `:K}
                         </div>
                     </div>
                 </div>
-            `:q}
-        `}}customElements.get("sem-diagnose-button")||customElements.define("sem-diagnose-button",gi),console.info("%c SEM Cards %c Lit Bundle ","color: #4db6ac; font-weight: bold; background: #1e232d; padding: 2px 6px; border-radius: 4px 0 0 4px;","color: #ff9800; background: #1e232d; padding: 2px 6px; border-radius: 0 4px 4px 0;");
+            `:K}
+        `}}customElements.get("sem-diagnose-button")||customElements.define("sem-diagnose-button",Fi),console.info("%c SEM Cards %c Lit Bundle ","color: #4db6ac; font-weight: bold; background: #1e232d; padding: 2px 6px; border-radius: 4px 0 0 4px;","color: #ff9800; background: #1e232d; padding: 2px 6px; border-radius: 0 4px 4px 0;");

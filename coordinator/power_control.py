@@ -11,6 +11,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from ..utils.log_gate import log_on_change
 from .units import (
     is_battery_control_power_unit,
     normalize_unit,
@@ -62,7 +63,8 @@ def _native_power_scale(
     unit = normalize_unit(state)
     if unit:
         if not is_battery_control_power_unit(state):
-            _LOGGER.warning(
+            log_on_change(
+                _LOGGER, f"power_control:{entity_id}", logging.WARNING,
                 "Battery power control %s rejected: unit %r is not a supported "
                 "power-control unit",
                 entity_id,
@@ -72,7 +74,8 @@ def _native_power_scale(
         return power_unit_scale(state)
 
     if require_explicit_unit or _looks_like_current(entity_id):
-        _LOGGER.warning(
+        log_on_change(
+            _LOGGER, f"power_control:{entity_id}", logging.WARNING,
             "Battery power control %s rejected: explicit power unit required",
             entity_id,
         )
@@ -133,7 +136,8 @@ def prepare_power_setpoint(
         current_value = float(state.state)
         native_value = float(watts) / scale_to_watts
     except (TypeError, ValueError, OverflowError):
-        _LOGGER.warning(
+        log_on_change(
+            _LOGGER, f"power_control:{entity_id}", logging.WARNING,
             "Battery power control %s rejected: unreadable state or setpoint",
             entity_id,
         )
@@ -141,7 +145,8 @@ def prepare_power_setpoint(
     if not all(math.isfinite(value) for value in (
         current_value, native_value, scale_to_watts,
     )):
-        _LOGGER.warning(
+        log_on_change(
+            _LOGGER, f"power_control:{entity_id}", logging.WARNING,
             "Battery power control %s rejected: non-finite state or setpoint",
             entity_id,
         )
@@ -162,14 +167,16 @@ def prepare_power_setpoint(
             except (TypeError, ValueError, OverflowError):
                 continue
             if not math.isfinite(bound):
-                _LOGGER.warning(
+                log_on_change(
+                    _LOGGER, f"power_control:{entity_id}", logging.WARNING,
                     "Battery power control %s rejected: non-finite %s bound",
                     entity_id,
                     key,
                 )
                 return None
             if compare(native_value, bound):
-                _LOGGER.warning(
+                log_on_change(
+                    _LOGGER, f"power_control:{entity_id}", logging.WARNING,
                     "Battery power control %s rejected: %.3f is outside %s=%s",
                     entity_id,
                     native_value,
@@ -180,7 +187,8 @@ def prepare_power_setpoint(
 
     domain = entity_id.split(".", 1)[0]
     if domain not in {"number", "input_number"}:
-        _LOGGER.warning(
+        log_on_change(
+            _LOGGER, f"power_control:{entity_id}", logging.WARNING,
             "Battery power control %s rejected: unsupported domain %s",
             entity_id,
             domain,
@@ -196,17 +204,36 @@ def prepare_power_setpoint(
     )
 
 
-async def async_write_power_setpoint(
+async def async_write_power_setpoint_verbose(
     hass,
     entity_id: str,
     watts: float,
     *,
     context: str,
-) -> bool:
-    """Validate, convert, and write a watt setpoint. Return success."""
+) -> tuple:
+    """Validate, convert, and write a watt setpoint.
+
+    Returns ``(ok, wrote)``: ``ok`` is success as before; ``wrote`` is True
+    only when a service call actually went out. The idempotent same-value
+    skip (#900/#538) is ``(True, False)`` — and that distinction is what the
+    #915 read-back needs: noting a "write" that never happened re-armed its
+    grace timer every cycle and no verdict could ever be reached (06.09
+    audit).
+    """
     prepared = prepare_power_setpoint(hass, entity_id, watts)
     if prepared is None:
-        return False
+        return False, False
+    # (#900) Idempotency for EVERY writer, not one adapter (#538 had it on
+    # the Huawei path only; the generic adapter — where the wizard had pinned
+    # a Huawei install — wrote its max every cycle). Compare in native units
+    # to the LIVE entity state, so an external change is still re-asserted;
+    # one native unit is the resolution the entity can express.
+    if abs(prepared.current_value - prepared.value) < 1.0 / prepared.scale_to_watts:
+        log_on_change(
+            _LOGGER, f"setpoint-skip:{entity_id}", logging.DEBUG,
+            "%s: %s already at %.3f — no write", context, entity_id, prepared.value,
+        )
+        return True, False
     try:
         await hass.services.async_call(
             prepared.domain,
@@ -215,6 +242,22 @@ async def async_write_power_setpoint(
             blocking=True,
         )
     except Exception as err:  # noqa: BLE001 - HA service exceptions vary
-        _LOGGER.warning("%s: failed to set %s: %s", context, entity_id, err)
-        return False
-    return True
+        log_on_change(
+            _LOGGER, f"power_control:set:{entity_id}", logging.WARNING,
+            "%s: failed to set %s: %s", context, entity_id, err,
+        )
+        return False, False
+    return True, True
+
+
+async def async_write_power_setpoint(
+    hass,
+    entity_id: str,
+    watts: float,
+    *,
+    context: str,
+) -> bool:
+    """Validate, convert, and write a watt setpoint. Return success."""
+    ok, _wrote = await async_write_power_setpoint_verbose(
+        hass, entity_id, watts, context=context)
+    return ok

@@ -68,6 +68,18 @@ SOLCAST_UNIQUE_IDS = {
     "power_next_hour": ("power_next_hour",),
     "peak_power_today": ("peak_w_today",),
     "peak_time_today": ("peak_w_time_today",),
+    #: (#884) SOLCAST COUNTS TODAY AS DAY 1, so its ``day_3`` is our **d2**.
+    #: Mapping ``day_2`` here would read TOMORROW and quietly train the
+    #: ledger's day-after-tomorrow horizon on the wrong day — a wrong number
+    #: is worse than the missing one this issue started as. Note the sensor
+    #: ships ``disabled_by=integration``: SEM cannot read it until the user
+    #: enables it, which is a different message from "unsupported".
+    #: Verified on the rig, because the obvious guess was wrong: the
+    #: entity is ``sensor.solcast_pv_forecast_forecast_day_3`` but its
+    #: unique_id is ``total_kwh_forecast_d3`` — "day_3" in the entity id,
+    #: "d3" in the unique id. The grouper matches unique_ids EXACTLY, so the
+    #: guessed name would never have resolved even with the sensor enabled.
+    "forecast_d2": ("total_kwh_forecast_d3", "forecast_d3"),
 }
 FORECAST_SOLAR_PLATFORM = "forecast_solar"
 FORECAST_SOLAR_UNIQUE_SUFFIXES = {
@@ -75,6 +87,18 @@ FORECAST_SOLAR_UNIQUE_SUFFIXES = {
     "forecast_tomorrow": "_energy_production_tomorrow",
     "forecast_remaining": "_energy_production_today_remaining",
     "power_now": "_power_production_now",
+    # (#867) The peak TIME is on every Forecast.Solar / Open-Meteo install
+    # and was simply not mapped, so the card's peak row sat blank on every
+    # non-Solcast system. Verified on a real install:
+    # ``sensor.power_highest_peak_time_today = 2026-08-30T12:00:00+00``.
+    #
+    # There is deliberately NO ``peak_power_today`` here. These integrations
+    # publish no peak-power sensor and no hourly series to derive one from
+    # (checked: neither power_production_now nor energy_production_today
+    # carries a series attribute). Mapping it to a guess would put a
+    # confident wrong number where an honest absence belongs — see
+    # ``peak_power_path``.
+    "peak_time_today": "_power_highest_peak_time_today",
 }
 # (#687) Open-Meteo Solar Forecast (rany2/ha-open-meteo-solar-forecast)
 # deliberately mirrors core Forecast.Solar: unique_id = ``{entry_id}_{key}``
@@ -85,6 +109,23 @@ FORECAST_SOLAR_UNIQUE_SUFFIXES = {
 # registry path is the only detection route (an empty fallback dict is
 # passed to _locate_integration).
 OPEN_METEO_SOLAR_PLATFORM = "open_meteo_solar_forecast"
+
+#: (#884) Open-Meteo's own unique-id suffixes. It was detected with an EMPTY
+#: role map — ``_locate_integration(OPEN_METEO_SOLAR_PLATFORM, {})`` — which
+#: worked for the roles that happen to share Forecast.Solar's naming and
+#: silently supplied nothing for the one that does not. Its day-after-tomorrow
+#: figure is published and ENABLED (verified on the rig:
+#: ``sensor.<device>_energy_production_d2``, alongside d3–d7) and SEM never
+#: asked for it, then told the user the provider does not publish it.
+OPEN_METEO_UNIQUE_SUFFIXES = {
+    "forecast_today": "_energy_production_today",
+    "forecast_tomorrow": "_energy_production_tomorrow",
+    "forecast_remaining": "_energy_production_today_remaining",
+    "power_now": "_power_production_now",
+    "peak_time_today": "_power_highest_peak_time_today",
+    #: The role this issue is about.
+    "forecast_d2": "_energy_production_d2",
+}
 
 # (#819) The ladder below is an ORDER, not a preference. Someone running
 # several forecast integrations side by side to compare accuracy could
@@ -116,6 +157,12 @@ class ForecastData:
     # Energy forecasts (kWh)
     forecast_today_kwh: float = 0.0
     forecast_tomorrow_kwh: float = 0.0
+    #: (#884) Day after tomorrow. 0.0 means UNREAD, which is not the
+    #: same as unpublished — see ``forecast_d2_path``.
+    forecast_d2_kwh: float = 0.0
+    #: read | disabled_by_integration | unsupported_by_source
+    #: Default "unknown", never a real verdict — see types.py.
+    forecast_d2_path: str = "unknown"
     forecast_remaining_today_kwh: float = 0.0
 
     # Power forecasts (W)
@@ -123,6 +170,14 @@ class ForecastData:
     power_next_hour_w: float = 0.0
     peak_power_today_w: float = 0.0
     peak_time_today: Optional[str] = None
+    #: (#867) WHY the peak power reads what it reads. ``0.0`` on its own
+    #: asserts "the peak is zero watts", which is how a row that is merely
+    #: unsupported came to look broken beside populated neighbours.
+    #: One of: ``read`` (a real value), ``unsupported_by_source`` (this
+    #: forecast integration publishes no peak power — Forecast.Solar and
+    #: Open-Meteo do not, and expose no series to derive it from), or
+    #: ``no_entity`` (the source should have it and it was not found).
+    peak_power_path: str = "unsupported_by_source"
 
     # Source info
     source: str = "none"
@@ -136,12 +191,15 @@ class ForecastData:
         return {
             "forecast_today_kwh": round(self.forecast_today_kwh, 2),
             "forecast_tomorrow_kwh": round(self.forecast_tomorrow_kwh, 2),
+            "forecast_d2_kwh": round(self.forecast_d2_kwh, 2),
+            "forecast_d2_path": self.forecast_d2_path,
             "forecast_remaining_today_kwh": round(self.forecast_remaining_today_kwh, 2),
             # (#575) forecast_power_now_w restored — consumed by the "Forecast vs
             # Actual" chart. forecast_power_next_hour_w stays removed (orphan).
             "forecast_power_now_w": round(self.power_now_w, 0),
             "forecast_peak_power_today_w": round(self.peak_power_today_w, 0),
             "forecast_peak_time_today": self.peak_time_today,
+            "forecast_peak_power_path": self.peak_power_path,
             "forecast_source": self.source,
             "forecast_available": self.available,
         }
@@ -202,6 +260,8 @@ class ForecastReader:
         self._no_forecast_logged: bool = False
         self._no_forecast_since_mono: Optional[float] = None
         self._no_forecast_repair_raised: bool = False
+        # (#933) has this reader reconciled the persistent Repair once?
+        self._no_forecast_reconciled: bool = False
         self._mono_time = _time.monotonic
         # (#562) 60 s cache for entity-registry scans: {platform: (mono_ts, entities)}
         self._registry_cache: Dict[str, tuple] = {}
@@ -225,16 +285,22 @@ class ForecastReader:
 
     def _clear_no_forecast_repair(self) -> None:
         """Reset detection-failure state + drop the Repair issue when
-        a forecast integration appears after a previous absence."""
+        a forecast integration appears after a previous absence.
+
+        (#933) …and on this reader's first detection: the Repair is
+        persistent and ``_no_forecast_repair_raised`` is not, so one filed
+        before a restart (Solcast installed, then HA restarted) was never
+        dropped."""
         self._no_forecast_logged = False
         self._no_forecast_since_mono = None
-        if self._no_forecast_repair_raised:
+        if self._no_forecast_repair_raised or not self._no_forecast_reconciled:
             try:
                 from . import repair_issues as _ri
                 _ri.clear_no_forecast_integration(self.hass)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("Could not clear no_forecast Repair: %s", e)
             self._no_forecast_repair_raised = False
+        self._no_forecast_reconciled = True
 
     def _registry_entity_groups(self, platform: str) -> Dict[str, list]:
         """All matching entities per role for a platform (registry scan).
@@ -286,7 +352,17 @@ class ForecastReader:
                     if unique_id in keys and role not in resolved:
                         resolved[role] = [entity_id]
             else:
-                for role, suffix in FORECAST_SOLAR_UNIQUE_SUFFIXES.items():
+                # (#884) Open-Meteo shares most of Forecast.Solar's suffix
+                # naming, which is why it worked at all — and why the one
+                # role it does NOT share was invisible. Forecast.Solar has no
+                # day-2 sensor and must not gain a phantom one, so the maps
+                # are separate rather than merged.
+                _suffixes = (
+                    OPEN_METEO_UNIQUE_SUFFIXES
+                    if platform == OPEN_METEO_SOLAR_PLATFORM
+                    else FORECAST_SOLAR_UNIQUE_SUFFIXES
+                )
+                for role, suffix in _suffixes.items():
                     # Suffix-match per-plane sensor: collect EVERY plane so
                     # the read path can sum them (#838).
                     if unique_id.endswith(suffix) and entity_id not in resolved.get(role, ()):
@@ -708,6 +784,23 @@ class ForecastReader:
 
         # Read forecast tomorrow
         data.forecast_tomorrow_kwh = self._read_role_energy("forecast_tomorrow", 0.0)
+        # (#884) Day after tomorrow, and the REASON when there is none. Three
+        # states, because the user can act on two of them and not the third:
+        #   read                    — a live figure
+        #   disabled_by_integration — the sensor exists but ships disabled
+        #                             (Solcast's forecast_day_3); the fix is
+        #                             one toggle in HA, so say so
+        #   unsupported_by_source   — the provider genuinely has none
+        #                             (Forecast.Solar stops at tomorrow)
+        data.forecast_d2_kwh = self._read_role_energy("forecast_d2", 0.0)
+        if data.forecast_d2_kwh:
+            data.forecast_d2_path = "read"
+        elif self._d2_entity_disabled():
+            data.forecast_d2_path = "disabled_by_integration"
+        elif self._entities.get("forecast_d2"):
+            data.forecast_d2_path = "no_entity"
+        else:
+            data.forecast_d2_path = "unsupported_by_source"
 
         # Read remaining today
         remaining_entity = self._entities.get("forecast_remaining")
@@ -731,6 +824,15 @@ class ForecastReader:
         data.power_next_hour_w = self._read_role_power_w("power_next_hour", 0.0)
         # (#841) NOT _read_role_power_w: that sums, and peaks do not add.
         data.peak_power_today_w = self._read_role_peak_w("peak_power_today", 0.0)
+        # (#867) Say WHICH kind of zero this is. Only Solcast publishes a
+        # peak-power sensor; on the others the honest answer is that the
+        # source cannot supply it, not that the peak is 0 W.
+        if not self._entities.get("peak_power_today"):
+            data.peak_power_path = "unsupported_by_source"
+        elif data.peak_power_today_w > 0:
+            data.peak_power_path = "read"
+        else:
+            data.peak_power_path = "no_entity"
 
         # Peak time — Solcast exposes a full ISO datetime; coordinator
         # and dashboard consumers expect "HH:MM" local time.
@@ -751,6 +853,56 @@ class ForecastReader:
         self._last_data = data
         self._last_read_path = "read_complete"
         return data
+
+    def _d2_entity_disabled(self) -> bool:
+        """(#884) Does a day-2 sensor EXIST but ship disabled?
+
+        Solcast registers ``forecast_day_3`` … ``day_7`` with
+        ``disabled_by=integration``. SEM cannot read a disabled entity, but
+        "your integration ships this switched off" is a different sentence
+        from "your provider does not publish it" — the first is one toggle
+        away, the second is nothing the user can do. Telling someone to give
+        up when a checkbox would fix it is the failure this issue is about.
+        """
+        # Both spellings, because Solcast uses different ones in the two
+        # places: "day_3" in the entity_id, "d3" in the unique_id. Matching
+        # only the guessed unique_id found nothing on a rig where the sensor
+        # was sitting right there, disabled.
+        needles = ("forecast_day_3", "forecast_d3", "_energy_production_d2")
+        seen = 0
+        # The WHOLE probe is guarded, iteration included. Guarding only the
+        # registry lookup left `reg.entities` outside the net, and a stub
+        # registry without that attribute took the forecast read down with
+        # it — 8 tests, caught by the suite before this shipped. A diagnostic
+        # may never break the thing it is diagnosing.
+        try:
+            from homeassistant.helpers import entity_registry as er
+            reg = er.async_get(self.hass)
+            for entry in (getattr(reg, "entities", None) or {}).values():
+                if not entry.disabled_by:
+                    continue
+                seen += 1
+                hay = f"{entry.unique_id or ''} {entry.entity_id or ''}"
+                if any(n in hay for n in needles):
+                    return True
+        except Exception as e:  # noqa: BLE001 — a hint never costs a read
+            # Previously `self._hass` (the reader has `self.hass`), and this
+            # handler turned that AttributeError into a silent False — the
+            # probe that separates "disabled" from "unsupported" quietly
+            # reporting "not disabled". It leaves a trace now.
+            if not getattr(self, "_d2_probe_warned", False):
+                self._d2_probe_warned = True
+                _LOGGER.debug("d2 disabled-probe unavailable: %s", e)
+            return False
+        # One line, once: this probe decides between two very different
+        # sentences shown to the user, and it failed silently twice while
+        # being built (wrong attribute, then a guessed unique_id).
+        if not getattr(self, "_d2_probe_logged", False):
+            self._d2_probe_logged = True
+            _LOGGER.debug(
+                "#884 d2 probe: no disabled day-2 sensor among %d disabled "
+                "entities (needles=%s)", seen, needles)
+        return False
 
     def _read_role_energy(self, role: str, default: float) -> float:
         """Read an energy role, summing across planes when the source
@@ -773,6 +925,59 @@ class ForecastReader:
         if group and len(group) > 1:
             return self._sum_power_w(group, default)
         return self._read_power_w(self._entities.get(role), default)
+
+    @staticmethod
+    def _role_ids(groups: Dict[str, list], fallback: Dict[str, str],
+                  role: str) -> list:
+        """Registry group for a role, or the hardcoded fallback's single id
+        (#822)."""
+        found = groups.get(role) or []
+        if found:
+            return list(found)
+        single = fallback.get(role)
+        return [single] if single else []
+
+    def peek_sources(self) -> Dict[str, Dict[str, float]]:
+        """(#822) What EVERY installed forecast integration says right now.
+
+        Read-only: it never re-points the reader, so the source in use is
+        unaffected by being compared. Each entry is that source's own total —
+        summed across its planes exactly as the active path sums them (#838),
+        so a two-plane Forecast.Solar is compared as one roof and not as one
+        of its planes.
+
+        This exists because the obvious comparison is the wrong one. Two
+        integrations disagreeing does NOT mean one forecasts badly: on the
+        dev rig Solcast said 125.6 kWh, Forecast.Solar 47.2 and Open-Meteo
+        20.0 for the same day — a 6x spread that turned out to be three
+        DIFFERENT CONFIGURED ARRAYS (8 kWp against a 15 kW inverter against a
+        cloud site), not three opinions about one roof. SEM cannot see how a
+        third-party integration was configured, so it cannot normalise them
+        and must not pretend to.
+
+        What it CAN do is score each against what the roof actually produced,
+        which is what the #778 ledger already does for the active source. A
+        source configured for the wrong array simply scores badly and says
+        so — no normalisation required, and the answer is measured rather
+        than assumed.
+        """
+        out: Dict[str, Dict[str, float]] = {}
+        for name, (platform, entity_map) in FORECAST_SOURCES.items():
+            fallback = globals().get(entity_map) or {}
+            if not self._locate_integration(platform, fallback):
+                continue
+            groups = self._registry_entity_groups(platform)
+            today_ids = self._role_ids(groups, fallback, "forecast_today")
+            today = self._sum_floats(today_ids, None)
+            if today is None:
+                continue
+            entry = {"today_kwh": round(today, 3), "planes": len(today_ids)}
+            tomorrow = self._sum_floats(
+                self._role_ids(groups, fallback, "forecast_tomorrow"), None)
+            if tomorrow is not None:
+                entry["tomorrow_kwh"] = round(tomorrow, 3)
+            out[name] = entry
+        return out
 
     def plane_breakdown(self) -> list:
         """(#841) Today's forecast per PLANE, for the card.

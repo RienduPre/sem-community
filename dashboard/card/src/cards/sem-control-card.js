@@ -16,6 +16,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
+import { priceLevelKey } from '../util/price-level.js';
 
 // EV section removed in #282 audit: every control (charging mode, night
 // charging, smart night, target, currents, phases, stall cooldown) is
@@ -70,7 +71,7 @@ const SECTIONS = [
         subtitleFn: (c) => {
             const provider = c._val('tariff_provider') || '—';
             const level = c._val('tariff_price_level') || '';
-            return level ? `${provider} · ${c._t(level.toLowerCase())}` : provider;
+            return level ? `${provider} · ${c._t(priceLevelKey(level))}` : provider;
         },
     },
     {

@@ -22,9 +22,75 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from ..charger_types import BatteryIntent
+from ..charger_types import BatteryIntent, ExportIntent
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def unload_release_reason(adapter, was_observer: bool) -> Optional[str]:
+    """(#936) Why THIS adapter must be commanded once more on unload — or
+    ``None``: leave the battery exactly as found.
+
+    Unload used to run ``command_normal()`` ("restore discharge to max") on
+    every adapter, whatever SEM had or had not done. On 08.09.2026 the .46
+    test rig — observer mode ON, so SEM had commanded nothing, ever — wrote
+    the SHARED Huawei discharge-limit register from 750 to 5000 W on its
+    way out, while PROD was holding it at 750. The #908 rule for loads
+    applies here word for word: release what SEM started, leave the rest.
+
+    - observer was on → nothing. Observer commands nothing, including on
+      the way out.
+    - a forcible charge / discharge SEM started is still active → stop it
+      (the inverter must not be left in a forced mode nobody manages).
+    - a discharge limit SEM wrote in this lifetime is still in force → hand
+      it back (``command_normal`` restores the maximum; the same-value skip
+      makes it a no-op when it already is).
+    - otherwise → nothing. SEM never commanded this battery.
+    """
+    if was_observer:
+        return None
+    if getattr(adapter, "_forcible_charging", False) or getattr(adapter, "_forcible_discharging", False):
+        return "a forcible operation SEM started is still active"
+    charge = getattr(adapter, "_charge_adapter", None)
+    if charge is not None and bool(getattr(charge, "is_active", False)):
+        return "a forced charge SEM started is still active"
+    try:
+        last = float(getattr(adapter, "_last_discharge_limit_w", -1.0))
+    except (TypeError, ValueError):
+        last = -1.0
+    if last >= 0:
+        return f"a discharge limit SEM wrote ({last:.0f} W) is still in force"
+    return None
+
+
+async def async_release_batteries_on_unload(coordinator) -> dict:
+    """(#936 — Guido, 08.09.2026: *"on uninstall SEM should go to observation
+    mode on and then uninstall"*.) Flip the coordinator to observer mode
+    FIRST, so no cycle still in flight commands anything, then hand back only
+    what SEM itself commanded (see :func:`unload_release_reason`).
+
+    Returns ``{battery_id: what happened}`` for the caller to log. Never
+    raises: a flaky Modbus must not block an unload.
+    """
+    was_observer = bool(getattr(coordinator, "_observer_mode", False))
+    try:
+        coordinator._observer_mode = True
+    except Exception:  # noqa: BLE001 — a read-only stand-in in tests
+        pass
+    outcome: dict = {}
+    adapters = getattr(coordinator, "_battery_adapters", {}) or {}
+    for bid, adapter in adapters.items():
+        why = unload_release_reason(adapter, was_observer)
+        if why is None:
+            outcome[bid] = ("observer mode — nothing was ever commanded, nothing written"
+                            if was_observer else "nothing commanded in this lifetime — left as found")
+            continue
+        try:
+            await adapter.command_normal()
+            outcome[bid] = f"released: {why}"
+        except Exception as e:  # noqa: BLE001
+            outcome[bid] = f"release failed (non-blocking): {e}"
+    return outcome
 
 
 class BatteryControlAdapter(ABC):
@@ -52,6 +118,131 @@ class BatteryControlAdapter(ABC):
     #: into six, none of them logged — while still letting a device that
     #: recovers do so without the user having to restart SEM to find out.
     FORCE_DISCHARGE_RETRY_S: float = 600.0
+
+    @classmethod
+    def expected_operating_modes(cls):
+        """(#845) The inverter operating-policy states SEM's model assumes,
+        or ``None`` when this brand has no known expectation (the watch then
+        publishes the mode and never judges it). Observe-only: nothing in
+        SEM may ever WRITE a policy selector — that boundary is the user's."""
+        return None
+
+    #: (#915) Read-back after a control write. The generic adapter — the one
+    #: a roster proposal lands on — implements it; brands with their own
+    #: read-back (Deye) or none report "nothing pending" and are unchanged.
+    write_not_taken_strikes: int = 0
+    #: (#933) the entity the last REFLECTED write proved — a Repair raised
+    #: against it before a restart/reload can go on this lifetime's proof.
+    last_verified_entity: str = ""
+    last_unverified_entity: str = ""
+    last_unverified_wanted: str = ""
+    last_unverified_seen: str = ""
+
+    # ── (#915) did the write TAKE? ────────────────────────────────────
+    # A declared key says what a register is CALLED; it cannot say whether
+    # the register accepts a write, expires it after sixty minutes, or is a
+    # global setting the vendor says to leave alone (@Azlinon named four such
+    # on EG4). That answer only exists after the first write — so the write
+    # is recorded here and judged on the NEXT cycle, non-blocking, in the
+    # entity's own unit. Not error handling: a register that ignores a write
+    # raises nothing (#824's lesson, from the other side of the wire).
+    _WRITE_GRACE_S: float = 8.0
+    _WRITE_TOLERANCE_NATIVE: float = 1.0
+    #: (06.09 audit) A clock is the wrong witness. Huawei's own adapter
+    #: documents that the HA entity shows the STALE commanded value until
+    #: huawei_solar next polls it (30-60 s) — longer than any fixed grace,
+    #: so a correct write would have been judged "not reflected" and three
+    #: changed writes would have raised a Repair on a working battery. The
+    #: verdict therefore waits until the entity has been REPORTED since the
+    #: write (HA's ``last_reported`` / ``last_updated``), and only gives up
+    #: on an integration that stays silent this long — which is its own
+    #: fault, and the sensor-unavailable Repair's business, not this one's.
+    _WRITE_REPORT_WAIT_S: float = 180.0
+
+    def _note_pending_write(self, entity_id: str, watts: float) -> None:
+        import time as _time
+        pending = getattr(self, "_pending_write", None)
+        # A write already waiting to be judged is not re-armed by an
+        # identical one: re-noting reset the grace every cycle and the
+        # verdict never came (06.09 audit).
+        if (pending and pending[0] == entity_id
+                and abs(pending[1] - float(watts)) < 1e-6):
+            return
+        # monotonic for the grace, wall-clock to compare with HA's
+        # ``last_reported`` (a datetime); both taken at the same instant
+        self._pending_write = (entity_id, float(watts), _time.monotonic(),
+                               _time.time())
+
+    def verify_pending_write(self):
+        import time as _time
+        pending = getattr(self, "_pending_write", None)
+        if not pending:
+            return None
+        entity_id, watts, at = pending[0], pending[1], pending[2]
+        wrote_wall = pending[3] if len(pending) > 3 else None
+        elapsed = _time.monotonic() - at
+        if elapsed < self._WRITE_GRACE_S:
+            return None          # not yet judged; integrations poll
+        from ..units import power_state_to_watts, power_unit_scale
+        st = self._hass.states.get(entity_id)
+        # Has the integration REPORTED the entity since the write? Until it
+        # has, the state is the stale pre-write value by definition and there
+        # is nothing to judge (06.09 audit — Huawei polls every 30-60 s).
+        reported = (getattr(st, "last_reported", None)
+                    or getattr(st, "last_updated", None)) if st is not None else None
+        try:
+            # (07.09 re-audit) A NAIVE datetime is read by Python as LOCAL
+            # time, so `.timestamp()` would shift by the host's UTC offset
+            # and a fresh report could look older than the write. HA's own
+            # State is always tz-aware; a helper or a test double may not be.
+            if reported is not None and reported.tzinfo is None:
+                import datetime as _dt
+                reported = reported.replace(tzinfo=_dt.timezone.utc)
+            reported_ts = float(reported.timestamp()) if reported is not None else None
+        except (AttributeError, TypeError, ValueError):
+            reported_ts = None
+        if (reported_ts is not None and wrote_wall is not None
+                and reported_ts < wrote_wall
+                and elapsed < self._WRITE_REPORT_WAIT_S):
+            return None          # no report since the write yet — wait
+        self._pending_write = None
+        attrs = getattr(st, "attributes", None) or {}
+        # Compared in WATTS through the one canonical converter (#641): the
+        # entity's own unit decides the scale, and one native unit of it is
+        # the tolerance — the resolution the register can express.
+        scale = power_unit_scale(st) if st is not None else 1.0
+        seen_w = power_state_to_watts(st) if st is not None else None
+        tol_w = self._WRITE_TOLERANCE_NATIVE * scale
+        # the entity may clamp to its own max — a reflected write is one
+        # that landed within tolerance OR at the entity's ceiling
+        ceiling = attrs.get("max")
+        ceiling_w = float(ceiling) * scale if ceiling is not None else None
+        reflected = seen_w is not None and (
+            abs(seen_w - watts) <= tol_w
+            or (ceiling_w is not None and watts >= ceiling_w
+                and abs(seen_w - ceiling_w) <= tol_w))
+        if reflected:
+            self.write_not_taken_strikes = 0
+            self.last_unverified_entity = ""
+            self.last_verified_entity = entity_id
+            return True
+        self.write_not_taken_strikes += 1
+        self.last_unverified_entity = entity_id
+        label = str(attrs.get("unit_of_measurement") or "W")
+        self.last_unverified_wanted = f"{watts / scale:g} {label}"
+        self.last_unverified_seen = (f"{seen_w / scale:g} {label}"
+                                     if seen_w is not None
+                                     else str(getattr(st, "state", "missing")))
+        self._last_error = (
+            f"write not reflected by {entity_id}: wanted "
+            f"{self.last_unverified_wanted}, reads {self.last_unverified_seen}")
+        return False
+
+    @property
+    def last_discharge_limit_w(self) -> float:
+        """(#900) The discharge limit this adapter last commanded, -1 when
+        none yet — the anchor the actuator quantises the next one against."""
+        return float(getattr(self, "_last_discharge_limit_w", -1.0))
 
     def __init__(self, hass, config: dict) -> None:
         self._hass = hass
@@ -87,11 +278,23 @@ class BatteryControlAdapter(ABC):
         # update or corrected entity gets another chance without the user
         # needing to know SEM had given up.
         self._force_discharge_failures: int = 0
+        # (#933) The Repair is persistent; the count above is not. A reload
+        # builds this adapter at zero, so "recovered from refusals" never
+        # fires for a Repair its predecessor raised — the first accepted
+        # discharge setpoint of this adapter's life clears it, once.
+        self._force_discharge_repair_reconciled: bool = False
         # (#840) The last value whose write was REFUSED. Distinct from
         # ``_last_force_discharge_w``, which records what actually landed.
         self._last_force_discharge_attempt_w: "Optional[float]" = None
         #: Monotonic deadline before the next silent probe (#840).
         self._force_discharge_retry_after: float = 0.0
+        #: (#872) How often SEM's OWN unit check refused a write, as opposed
+        #: to the device refusing one. These are different faults with
+        #: different fixes, and the withdrawal message used to know only
+        #: about the second — so it blamed firmware for a flaky entity.
+        #: Latched-bool logging is fine for volume; a bool is useless as
+        #: evidence, and this is evidence.
+        self._fd_unit_refusals: int = 0
         # de-dup writes. None = never written (so the first write of any sign
         # always goes through; a plain -1.0 sentinel would alias a real
         # negative charge setpoint on a bidirectional entity, #523).
@@ -120,12 +323,20 @@ class BatteryControlAdapter(ABC):
         """True if this brand has a forced-charge service.
         ``Sonnen`` would return False — protection-only adapter."""
 
-    def _raise_force_discharge_repair(self, error: str) -> None:
-        """(#840) Surface the withdrawn capability outside the log."""
+    def _raise_force_discharge_repair(
+        self, error: str, *, unstable: bool = False,
+    ) -> None:
+        """(#840) Surface the withdrawn capability outside the log.
+
+        (#872) ``unstable`` carries the same suspicion the log line now
+        makes — the Repair is the surface, and a surface that contradicts
+        the log is worse than no surface at all.
+        """
         try:
             from ..repair_issues import raise_battery_force_discharge_unsupported
             raise_battery_force_discharge_unsupported(
-                self._hass, self._force_discharge_entity, error=error)
+                self._hass, self._force_discharge_entity, error=error,
+                unstable=unstable)
         except Exception as e:  # noqa: BLE001 — a repair never costs a cycle
             _LOGGER.debug("force-discharge repair not raised: %s", e)
 
@@ -220,7 +431,7 @@ class BatteryControlAdapter(ABC):
         Both writes must succeed to record STOP_FORCE_DISCHARGE — a
         partial failure leaves ``_last_intent`` unchanged so the next
         cycle retries."""
-        ok = await self._write_force_discharge(0.0)
+        ok = await self._zero_setpoint()
         if not ok:
             self._last_error = "write_force_discharge(0) failed on stop"
             return
@@ -228,6 +439,78 @@ class BatteryControlAdapter(ABC):
         # command_normal sets _last_intent = NORMAL; override to STOP.
         self._last_error = None
         self._last_intent = BatteryIntent.STOP_FORCE_DISCHARGE
+
+    # ── (#955) export control: the dialect is per brand ──────────────────
+    #: What the adapter last wrote as an export cap; None = released / never.
+    _last_export_limit_w: Optional[float] = None
+    #: The export axis's OWN #538 de-dup marker. Never ``_last_intent``: that
+    #: one belongs to the battery axis, and a shared marker means an export
+    #: write silently un-de-dups the next discharge limit (and vice versa) —
+    #: two axes, two markers, or the register gets rewritten every cycle.
+    _last_export_intent: Optional["ExportIntent"] = None
+
+    async def command_limit_export(self, watts: float) -> None:
+        """Cap grid feed-in at ``watts`` (0 = zero export). Brands without an
+        export control raise ``NotImplementedError`` — the guard records the
+        refusal; it is a state, not a crash."""
+        raise NotImplementedError("this battery adapter has no export control")
+
+    async def command_release_export(self) -> None:
+        """Put the feed-in limit back to what SEM found."""
+        raise NotImplementedError("this battery adapter has no export control")
+
+    def export_release_recipe(self):
+        """(#955) How to undo THIS adapter's export cut without the adapter —
+        ``{"domain","service","data"}`` — persisted so a restart can adopt the
+        cut and a removal can replay the release. None = nothing to undo."""
+        return None
+
+    #: A restore recipe adopted from a previous lifetime's store. It is the
+    #: ONLY record of what that lifetime found, so it outranks anything this
+    #: one can read back — by the time we adopt, the inverter is already
+    #: showing SEM's own cut.
+    _adopted_recipe = None
+
+    def adopt_export_prior(self, recipe) -> None:
+        """(#955) A previous lifetime engaged the cut; take over its prior so
+        ``command_release_export`` restores what SEM originally found.
+
+        KEEP THE RECIPE. It carries the mode the previous lifetime captured,
+        and a brand whose restore is mode-dependent (Huawei) cannot recompute
+        it: reading the inverter now returns SEM's own "Zero Power". Dropping
+        it made the restart path fall back to "Unlimited" — the very defect
+        the capture was added to fix, one lifetime later.
+        """
+        self._last_export_limit_w = 0.0
+        self._last_export_intent = ExportIntent.LIMIT
+        if isinstance(recipe, dict) and recipe.get("service"):
+            self._adopted_recipe = dict(recipe)
+
+    def holds_export_cut(self) -> bool:
+        """(#908) Is THIS adapter holding a cut SEM itself made?
+
+        Not the same question as :meth:`export_release_recipe`, which answers
+        "how would I undo one" — Huawei can always answer that (the
+        integration owns the reset), so on a mixed fleet the recipe said yes
+        for an inverter SEM had never touched, and a teardown would have
+        reset a feed-in limit the OWNER set. One cut is made through one
+        adapter; only that one may be handed back.
+        """
+        return self._last_export_intent is ExportIntent.LIMIT
+
+    def export_dry_run(self, intent, watts: float) -> dict:
+        """(#955) What the export verb WOULD send this cycle, without sending.
+
+        The export axis's half of #855: an observer rig is judged on what
+        would hit the wire, so the wire must be readable. Returns one row in
+        the ``withheld_commands`` shape — ``{"service": "domain.service",
+        "data": {...}, "why": None}`` — or, when the real verb would refuse
+        before writing, ``{"service": None, "data": None, "why": "<the
+        refusal, in the verb's own words>"}``. Pure: no write, no capture, no
+        marker touched. Brands override; the default is the base refusal.
+        """
+        return {"service": None, "data": None,
+                "why": "this battery adapter has no export control"}
 
     async def command_off(self) -> None:
         """#523 (RienduPre): SEM hands-off this battery.
@@ -277,6 +560,108 @@ class BatteryControlAdapter(ABC):
             and not getattr(self, "_forcible_charging", False)
         )
 
+    # ── (#809/#869) the setpoint model: how SEM's signed watts reach the wire ──
+    SETPOINT_MODELS = ("signed", "inverted", "direction_select")
+
+    def _setpoint_model(self) -> str:
+        m = str((self._config or {}).get("battery_setpoint_model") or "signed")
+        return m if m in self.SETPOINT_MODELS else "signed"
+
+    def _setpoint_to_wire(self, watts: float) -> float:
+        m = self._setpoint_model()
+        if m == "inverted":
+            return -watts
+        if m == "direction_select":
+            return abs(watts)
+        return watts
+
+    def _setpoint_from_wire(self, wire: float, sign: float) -> float:
+        m = self._setpoint_model()
+        if m == "inverted":
+            return -wire
+        if m == "direction_select":
+            return sign * abs(wire)
+        return wire
+
+    async def _direction_ready(self, watts: float) -> bool:
+        """``direction_select`` only: True when the select READS the
+        direction ``watts`` needs. Otherwise write it (once per wanted
+        value) and answer False — the number waits for the next cycle,
+        which is when a Modbus-backed select shows what it took (#978)."""
+        if self._setpoint_model() != "direction_select" or watts == 0:
+            return True
+        ent = str(self._config.get("battery_power_direction_entity") or "")
+        if not ent:
+            if not getattr(self, "_direction_missing_said", False):
+                self._direction_missing_said = True
+                _LOGGER.warning(
+                    "Battery: setpoint model is direction_select but no "
+                    "direction select is configured "
+                    "(battery_power_direction_entity) — nothing written",
+                )
+            return False
+        want = str(self._config.get(
+            "battery_direction_discharge_value" if watts > 0
+            else "battery_direction_charge_value")
+            or ("discharge" if watts > 0 else "charge"))
+        st = self._hass.states.get(ent)
+        if st is not None and str(getattr(st, "state", "")) == want:
+            return True
+        sent = getattr(self, "_direction_sent", None)
+        if sent is None:
+            sent = self._direction_sent = {}
+        if sent.get(ent) != want:
+            try:
+                await self._hass.services.async_call(
+                    "select", "select_option",
+                    {"entity_id": ent, "option": want}, blocking=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = f"direction select write failed: {exc}"
+                return False
+            sent[ent] = want
+        self._last_error = f"waiting for {ent} to read {want}"
+        return False
+
+    def _setpoint_is_inert(self) -> bool:
+        """(#1005) True when the power setpoint controls nothing right now.
+
+        A DC battery's setpoint is always live, so this is False here. An
+        AC-coupled battery gates it behind a power-strategy mode and ignores
+        the setpoint in every other mode — see the override in
+        ``generic.py``.
+        """
+        return False
+
+    async def _zero_setpoint(self) -> bool:
+        """The #523 mutual-exclusion zero — the ONE door for it (#1005).
+
+        Every mode change zeroes the setpoint so the battery cannot keep
+        selling into the next mode. When the setpoint is inert the write
+        lands nowhere: the device refuses it, the refusal spends the #840
+        strikes that withdraw battery-to-grid, and the caller reads the
+        refusal as a transient fault and repeats it every cycle for ever
+        (@RienduPre, 2× Sessy — 165 refusals in 28 h). Nothing to zero is
+        done, not failed.
+
+        SEM hands control back in this order — zero the setpoint, THEN leave
+        the active mode — so the zero still lands on the cycle that matters.
+        Only the cycles after it, where the register already controls
+        nothing, are skipped.
+
+        A skip FORGETS the register (``_last_force_discharge_w = None``).
+        That marker is the de-dup's whole evidence that the register already
+        holds a value, and SEM may only claim that for a write it made. If
+        the hand-back cycle's zero were dropped and the skip then kept the
+        marker at the old power, the next force op at the same power would be
+        de-dup'd away — no write, no error, no strike, and a battery that
+        does nothing while SEM reports it selling (found in review).
+        """
+        if self._setpoint_is_inert():
+            self._last_force_discharge_w = None
+            return True
+        return await self._write_force_discharge(0.0)
+
     async def _write_force_discharge(self, watts: float) -> bool:
         """De-dup'd write of the battery power setpoint. ``watts`` is a
         SIGNED setpoint on a bidirectional control entity: ``> 0`` =
@@ -301,6 +686,7 @@ class BatteryControlAdapter(ABC):
         from ..power_control import native_power_scale
         scale = native_power_scale(self._hass, self._force_discharge_entity)
         if scale is None or scale <= 0:
+            self._fd_unit_refusals += 1
             if not getattr(self, "_fd_unit_refused_logged", False):
                 self._fd_unit_refused_logged = True
                 _LOGGER.warning(
@@ -321,16 +707,26 @@ class BatteryControlAdapter(ABC):
         st = self._hass.states.get(self._force_discharge_entity)
         attrs = getattr(st, "attributes", None) if st is not None else None
         _requested = watts
+        # (#809/#869) SEM's sign is + = discharge, − = charge. The WIRE
+        # value is what the entity takes: the same (``signed``), its mirror
+        # (``inverted`` — Victron's ESS grid setpoint, + = import), or a
+        # magnitude behind a charge/discharge select (``direction_select``
+        # — Anker Solix). The clamp applies to the wire value: an unsigned
+        # entity has min 0, and clamping SEM's −4400 against that is the
+        # bug this exists to avoid.
+        sign = 1.0 if watts >= 0 else -1.0
+        wire = self._setpoint_to_wire(watts)
         if isinstance(attrs, dict):
             # (#749) the entity's min/max are NATIVE units — scale them to
             # watts so the clamp, the de-dup and every log stay in W; only
             # the service-call value converts back at the boundary.
             lo = attrs.get("min")
             if isinstance(lo, (int, float)):
-                watts = max(float(lo) * scale, watts)
+                wire = max(float(lo) * scale, wire)
             hi = attrs.get("max")
             if isinstance(hi, (int, float)):
-                watts = min(float(hi) * scale, watts)
+                wire = min(float(hi) * scale, wire)
+        watts = self._setpoint_from_wire(wire, sign)
         # #531: a silent clamp hides a real mismatch (fleet power > a single
         # unit's setpoint range). Surface it once per clamped write so the
         # cause is visible in the log instead of a mysteriously-capped battery.
@@ -388,11 +784,16 @@ class BatteryControlAdapter(ABC):
             domain = self._force_discharge_entity.split(".", 1)[0]
             if domain not in ("number", "input_number"):
                 domain = "number"
+            # (#869) a direction select is written first and READ back
+            # before the number goes out — the #978 rule, the strategy's
+            # shape. Until it reads, the write is withheld, not sent blind.
+            if not await self._direction_ready(watts):
+                return False
             await self._hass.services.async_call(
                 domain, "set_value",
                 # (#749) the one place watts become the entity's native unit.
                 {"entity_id": self._force_discharge_entity,
-                 "value": watts / scale},
+                 "value": wire / scale},
                 blocking=True,
             )
             self._last_force_discharge_w = watts
@@ -408,6 +809,13 @@ class BatteryControlAdapter(ABC):
                 )
                 self._force_discharge_failures = 0
                 self._clear_force_discharge_repair()
+            elif watts > 0 and not self._force_discharge_repair_reconciled:
+                # (#933) once, on an accepted DISCHARGE setpoint — the
+                # capability the Repair names. The routine 0 W proves nothing:
+                # a register can take 0 and refuse every real setpoint.
+                self._clear_force_discharge_repair()
+            if watts > 0:
+                self._force_discharge_repair_reconciled = True
             if watts > 0:
                 _LOGGER.info(
                     "Battery: forcible-discharge %.0f W → %s (arbitrage)",
@@ -438,19 +846,58 @@ class BatteryControlAdapter(ABC):
             else:
                 # The last word on the subject. Everything after this is
                 # silence, because the answer will not change (#840).
-                _LOGGER.warning(
-                    "Battery: %s refused the forcible-discharge setpoint %d "
-                    "times (%s). Treating battery-to-grid export as "
-                    "unsupported on this device and no longer attempting it. "
-                    "If this is wrong — a renamed entity, or firmware that "
-                    "gained the register — restart SEM to try again.",
-                    self._force_discharge_entity, limit, e,
-                )
+                #
+                # (#872) But say WHICH answer. Two different things refuse a
+                # write in this function, on different cycles: our own unit
+                # check (entity unreadable / wrong unit — returns early, no
+                # strike) and the device (a real exception — one strike). If
+                # BOTH have refused, the device is almost certainly not the
+                # fault: an entity that is readable on some cycles and dark
+                # on others produces exactly this pair. RienduPre read his
+                # log and said so ("a misdirected entity reference rather
+                # than a real hardware limitation") — and our message, which
+                # could see only its own counter, argued him out of it.
+                if self._fd_unit_refusals:
+                    detail = (
+                        f"{e} — but SEM's own unit check ALSO refused "
+                        f"{self._fd_unit_refusals} write(s) to "
+                        f"{self._force_discharge_entity} on other cycles "
+                        f"(unit unreadable or not a power unit). An "
+                        f"INTERMITTENTLY UNAVAILABLE entity produces exactly "
+                        f"this pair, so check the entity before the firmware"
+                    )
+                    _LOGGER.warning(
+                        "Battery: %s refused the forcible-discharge setpoint "
+                        "%d times (%s). Withdrawing battery-to-grid export "
+                        "and no longer attempting it. The likely fault is "
+                        "the ENTITY, not the device: SEM's own unit check "
+                        "refused %d further write(s) to it on other cycles "
+                        "because its unit or state was unreadable — an "
+                        "intermittently unavailable entity looks exactly "
+                        "like this. Check %s stays available with a W/kW "
+                        "unit; restart SEM to try again.",
+                        self._force_discharge_entity, limit, e,
+                        self._fd_unit_refusals, self._force_discharge_entity,
+                    )
+                else:
+                    detail = str(e)
+                    _LOGGER.warning(
+                        "Battery: %s refused the forcible-discharge setpoint "
+                        "%d times (%s). Treating battery-to-grid export as "
+                        "unsupported on this device and no longer attempting "
+                        "it. If this is wrong — a renamed entity, or firmware "
+                        "that gained the register — restart SEM to try again.",
+                        self._force_discharge_entity, limit, e,
+                    )
                 # Start the backoff HERE, at the moment of withdrawal —
                 # otherwise the deadline is still 0.0 and the very next cycle
                 # fires a probe, spending a strike for nothing.
                 import time as _time
                 self._force_discharge_retry_after = (
                     _time.monotonic() + self.FORCE_DISCHARGE_RETRY_S)
-                self._raise_force_discharge_repair(str(e))
+                # (#799) The Repair is the surface, so it carries the same
+                # suspicion — a Repair that says "unsupported device" while
+                # the log says "flaky entity" is worse than no Repair.
+                self._raise_force_discharge_repair(
+                    detail, unstable=bool(self._fd_unit_refusals))
             return False

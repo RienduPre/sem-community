@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Dict
 
 from .plan_verdict import PlanVerdict
 
@@ -73,6 +73,14 @@ class ChargerIntent(Enum):
     """No charging; contactor open. Distinct from DISABLE in that
     IDLE is a temporary state (waiting for surplus), DISABLE is a
     permanent user-explicit OFF intent."""
+
+    RELEASE = "release"
+    """(#898) Hands-off. Charge mode *Off* means SEM sends NOTHING to
+    this charger: no stop, no park-on-disconnect, no failsafe, no
+    stop-war. The one exception is the transition INTO Off while SEM's
+    own session runs — one DISABLE ends that session, then silence. A
+    session the user started elsewhere is never touched (DigitalOptics,
+    Fronius: SEM stopped a manual charge within a cycle while "Off")."""
 
     CHARGE_AT_AMPS = "charge_at_amps"
     """Charge at a specific amperage. The amps value comes from
@@ -328,6 +336,34 @@ class BatteryIntent(Enum):
     ``decide_battery`` (highest precedence)."""
 
 
+class ExportIntent(Enum):
+    """(#955) What ``actuate_export`` should ask the inverter to do.
+
+    A HOUSE axis, not a per-battery one: the meter is one meter, and no
+    per-device decider owns net export — it is solar, battery, EV and loads
+    together. That is why this is its own intent rather than a field on
+    :class:`BatteryDecision`.
+    """
+
+    NONE = "none"
+    """Nothing to write this cycle — the guard is idle, holding, or off."""
+
+    LIMIT = "limit_export"
+    """Cap grid feed-in at ``watts`` (0.0 for a closed meter)."""
+
+    RELEASE = "release_export"
+    """Put the feed-in limit back to what SEM found."""
+
+
+@dataclass(frozen=True)
+class ExportDecision:
+    """One cycle's export intent — the output of ``decide_export(fleet)``."""
+
+    intent: ExportIntent = ExportIntent.NONE
+    watts: float = 0.0
+    reason: str = ""
+
+
 @dataclass(frozen=True)
 class BatteryDecision:
     """The output of ``decide_battery(view)`` for ONE battery this
@@ -380,6 +416,24 @@ class BatteryView:
     steady through a bursty car's on/off pulses instead of flickering
     with ``ev_charging`` — which would let the battery drain between
     bursts and then feed the next pull. See decide_battery."""
+
+    # (#778) The forecast budget and its dynamic floor, for the export
+    # sink. Defaults keep every existing install untouched: no master
+    # switch, no budget, and a dynamic floor of None contributes nothing
+    # to the max() rather than being read as a floor of zero.
+    ev_wants_pack: bool = False
+    """(03.09) A CONNECTED charger in *Solar + battery* mode — the consent
+    the charger side already acts on (``_battery_assist_split``), so the
+    discharge clamp reads the same one instead of a separate master switch."""
+    battery_spendable_kwh: float = 0.0
+    forecast_spending_enabled: bool = False
+    dynamic_floor_pct: float = None
+    battery_permissions: "Any" = None
+    """(#778) The user's per-permission choices, tri-state: a key absent means
+    UNSET and the legacy rule decides. ``None`` here is the same as an empty
+    mapping — every existing install keeps today's behaviour. Carried on the
+    view rather than read from config inside ``decide_battery`` because that
+    function is pure: everything it decides on arrives through the view."""
     scheduler_decision: "Any" = None
     """The output of today's ``BatteryChargeScheduler.evaluate()``.
     Typed as ``Any`` so importing scheduler types in this module
@@ -405,6 +459,19 @@ class BatteryView:
     ``(in_block, per_battery_power_w)`` from ``arbitrage_sell_gate``,
     already fleet-split by the pipeline. ``None``/closed ⇒ no sell this
     cycle regardless of the live economics verdict."""
+
+    forecast_sell: "Any" = None
+    #: (arc #921) the cycle's sink verdicts — {sink: SinkVerdict}; None/{} = every sink OPEN.
+    sink_verdicts: "Any" = None
+    #: (#892) the morning window is genuinely OPEN this cycle: the switch is on
+    #: AND the verdict is open. decide_battery reads THIS, never the raw verdict —
+    #: the disabled sentinel is also "open" (legacy rule) and must not lift the
+    #: EV protection clamp (review of the first cut: it did, on every install).
+    morning_window_open: bool = False
+    """(#778) ``(in_block, per_battery_power_w)`` from ``forecast_sell_gate``
+    — the SPEND twin of ``arbitrage_sell``, fleet-split by the pipeline.
+    decide_battery consults THIS gate when the verdict carries
+    ``from_forecast_spend``; arbitrage verdicts never read it."""
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -480,6 +547,25 @@ class ChargerDecision:
     'off mode — explicit user disable', 'night mode + min_plus_solar
     floor, deadline 06:00'."""
 
+    capped_by_limit: bool = False
+    """(#905) True when a LIMIT — the #864 slot guard, a peak shed — bounded
+    ``commanded_amps`` below what the mode asked for. The stability layer
+    lands a capped DOWNWARD move in the same cycle (no ramp, no debounce,
+    never held above it by a blind-cycle hold): a limit is not a preference.
+    PROD 02.09: the guard said 10 A, the wire carried 14→12 A for two more
+    minutes and the slot set the month's peak."""
+    redirect_w: float = 0.0
+    """(#899) Battery-charge watts this decision credited to the car
+    ("redirect"). Carried so the loop can check it against the meter
+    next cycle — sustained grid import with a redirect in the budget means
+    the pack did not yield, and the redirect is dropped for the session.
+
+    ALL of them, by whichever route: the forecast redirect and the #576
+    position reclaim both spend the pack's charging watts on the same bet,
+    and round 1 recorded only the first. The reclaim is the route a stock
+    install takes (charger seeds at priority 3, pack at 100), so the check
+    ran for a year on the rarer of the two and read zero on the common one.
+    A route that adds pack watts here and does not say so is the bug."""
     bridgeable: bool = True
     """For an IDLE decision: is this a TRANSIENT dip worth holding the
     contactor through (a passing cloud while real surplus / battery
@@ -494,6 +580,34 @@ class ChargerDecision:
     idles (the bridge stops on the short grace). Honours the dataclass
     contract: 'All fields are computed once in decide … no re-derivation
     downstream.'"""
+
+    assist_w: float = 0.0
+    """(#885) The share of ``budget_w`` the home BATTERY is funding —
+    the post-netting Zone 3/4 assist potential, 0.0 everywhere else.
+
+    Carried here because the coordinator has to know what this charger
+    took out of the one pack allowance, so the next charger and the
+    load pass both see a budget net of it. It was briefly RE-DERIVED at
+    the call site (commitment minus the solar this charger could see),
+    which is exactly the second-implementation-drifts class ``#282``
+    exists to prevent: ``decide`` already computed this number, so
+    ``decide`` reports it. Honours the dataclass contract: 'All fields
+    are computed once in decide … no re-derivation downstream.'"""
+
+    safety_stop: bool = False
+    """(#940) This stop is a SAFETY stop and must not wait.
+
+    #940 gave a switch-controlled charger's contactor a minimum ON — once
+    SEM closes the relay it stays closed for a few minutes, so a decision
+    that flaps cannot toggle it every 20 s. A guarantee the house makes to
+    itself must be senior to that comfort: the peak EMERGENCY shed and the
+    VPP export pause set this, and the reconciler opens the contactor on
+    the cycle they ask. Everything else — a mode change, a cloud, a target
+    reached — waits out the floor.
+
+    Deliberately NOT derived from ``bridgeable``: that field answers "is
+    this dip transient", which a max-SOC stop also answers False, and a
+    full car is not an emergency. One flag, one meaning."""
 
 
 def solar_commitment_w(
@@ -566,6 +680,11 @@ def commanded_power_w(
     mode publishes. A charger that would pull 6.9 kW must say 6.9 kW in
     both, or a two-charger simulation hands the junior charger phantom
     headroom.
+
+    A third caller asks the same arithmetic a COUNTERFACTUAL question:
+    ``ev_control._power_on_offer_w`` passes ``phases=3`` to price what an
+    Always (max) charger could draw IF it were on three phases, which is
+    the question the #804 auto planner has to answer (#1008).
     """
     if decision.intent is ChargerIntent.CHARGE_AT_AMPS:
         return max(
@@ -619,6 +738,8 @@ class FleetContext:
     """Solar production this cycle (W)."""
 
     inputs_degraded: bool = False
+    #: (#992) the names behind that flag — see PowerReadings.dark_inputs.
+    dark_inputs: tuple = ()
     """#818 — one or more of the shared inputs above was UNAVAILABLE this
     cycle, so its number is ``_read_sensor``'s 0.0 fallback rather than a
     measurement. On PROD the Huawei modbus blips 8-15 % of the time, which
@@ -637,6 +758,23 @@ class FleetContext:
     production. Added to the surplus exactly like measured solar;
     0.0 whenever the probe is off/idle."""
 
+    sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    """(arc #921) the cycle's sink verdicts — ``{sink: SinkVerdict}``. Empty
+    until computed, and an empty dict reads as "every sink OPEN" everywhere."""
+
+    export_command: Any = None
+    """(#955) this cycle's ``ExportCommand`` from the tracker, or None. The
+    house's meter limit is decided from THIS by ``decide_export(fleet)`` — no
+    per-battery view owns net export."""
+
+    export_guard_enabled: bool = False
+    """(#955) the user's switch, carried beside the command so the decider
+    needs nothing but the fleet."""
+
+    ev_morning_window_open: bool = False
+    """(#892) the ev sink verdict is OPEN this cycle — the pack may feed the
+    car below the solar gate, down to the drain floor."""
+
     home_w: float = 0.0
     """Home consumption (W). Pre-priority-attribution this was
     the slack variable; post-#349 it's a first-class demand."""
@@ -654,6 +792,25 @@ class FleetContext:
     surplus-only chargers; above ``auto_start_soc`` enables
     battery-assist."""
 
+    battery_soc_known: bool = True
+    """(#875) False while the SOC has never been read this process —
+    the restart-to-first-report window. Then ``battery_soc`` is 0.0
+    because nothing was measured, not because the pack is empty, and
+    an UNKNOWN battery is neither a source nor a blocker: the charger
+    charges the car on surplus (Zone 2), gets no assist, reclaims
+    nothing, and the discharge clamp protects the pack. Carried the
+    way ``BatteryRuntime.available`` carries the per-unit read."""
+
+    @property
+    def soc_label(self) -> str:
+        """(#875) The SOC as a word for a reason string — ``"65%"``, or
+        ``"unknown"`` while it was never read. Every reason that prints
+        the SOC goes through here so none can quote the 0.0 that is not
+        a measurement (the line #875 was reported from)."""
+        if not self.battery_soc_known:
+            return "unknown"
+        return f"{float(self.battery_soc):.0f}%"
+
     battery_count: int = 1
     """How many batteries SEM controls. #531: a per-battery
     LIMIT_DISCHARGE must split the home-consumption budget across the
@@ -662,15 +819,46 @@ class FleetContext:
 
     grid_import_w: float = 0.0
     grid_export_w: float = 0.0
+    home_residual_clamped_w: float = 0.0
+    """(#660/#1003) How much the energy balance had to clamp away to keep
+    ``home_w`` at or above zero. Zero on a healthy house; anything else says
+    the inputs do not add up — a stale sensor, or a sign the autodetect got
+    wrong — and then ``home_w`` is not a measurement. The peak floor reads it
+    for exactly that: a house figure that lost import is the one reading that
+    would let a hold sit through a breach."""
+    grid_import_known: bool = True
+    """(#906) False when the grid sensor was unreadable this cycle — then
+    ``grid_import_w`` is the reader's 0.0 fallback, not a measurement. The
+    slot guard must not credit a house that "vanished": it charges the
+    house's own draw against the allowance instead of reading it as 0."""
 
     is_night: bool = False
     """``time_manager.is_night_mode()``."""
+
+    peak_slot_allowed_w: Optional[float] = None
+    """(#864) The PREVENTIVE peak bound: average import (W) the rest of
+    the current 15-minute billing slot may carry so the slot lands on the
+    target. Computed once per cycle from ``coordinator/peak_guard.py``;
+    ``None`` when no target peak limit is configured (absence of a
+    ceiling is not a ceiling of zero). decide() bounds the EV offer with
+    it BEFORE the wire — the reactive ``peak_state`` machinery stays
+    untouched and senior."""
 
     peak_budget_w: float = 5000.0
     """Total peak-import budget for the fleet (target_peak_limit).
     The multi-charger loop subtracts higher-priority chargers'
     commits before each charger's decide() runs."""
 
+    #: (#864) Slot allowance already offered to HIGHER-PRIORITY chargers
+    #: this cycle. One slot budget serves the whole house, so a second
+    #: charger must see what the first took — mirrors the solar cascade's
+    #: ``solar_committed_w``. Without it each charger claimed the entire
+    #: allowance and two landed 69 % over target on review.
+    #:
+    #: (#885) DECLARED ONCE. This field was declared TWICE in this
+    #: dataclass — the second silently won, and the first had captured the
+    #: docstring belonging to ``peak_slot_allowed_w`` above, leaving that
+    #: field undocumented and this one described as something it is not.
     peak_committed_w: float = 0.0
     """Watts already committed to higher-priority chargers in
     this cycle (the #274/H1 share-one-peak-budget invariant)."""
@@ -708,6 +896,30 @@ class FleetContext:
     bigger EV budget → higher commanded amps → more discharge)."""
 
     battery_assist_min_surplus_w: float = 1200.0
+    # (#778) May the battery be spent on the car at all? Defaults True so an
+    # install that has expressed no opinion behaves exactly as before; the
+    # #537 surplus threshold above remains the separate 'when' question.
+    battery_may_assist_ev: bool = True
+    # (#778 phase 5) The forecast budget, and the master switch that lets it
+    # spend anything at all. Default OFF: this is the first behaviour in the
+    # arc that is not inert, and turning it on for someone is not ours to do.
+    battery_spendable_kwh: float = 0.0
+    #: (#878) The level tonight's own measured need says the pack
+    #: must still hold at dawn. The budget unlocked the assist;
+    #: this bounds HOW DEEP it may go. ``None`` = no budget was
+    #: computed, and means "fall back to buffer_soc" — never a
+    #: floor of zero, which would license draining to empty.
+    dynamic_floor_pct: "Optional[float]" = None
+    #: (#878) Assist watts already offered to HIGHER-PRIORITY chargers
+    #: this cycle. ONE battery serves the whole fleet, so a second
+    #: charger must see what the first took — mirrors
+    #: ``solar_committed_w`` and ``peak_committed_w``. Without it every
+    #: charger computed the same full potential from fleet-wide values
+    #: and added it again: two chargers asked one 5000 W pack for
+    #: 7727 W, and the floor that keeps the house covered was drained
+    #: through twice as fast as its taper could respond.
+    assist_committed_w: float = 0.0
+    forecast_spending_enabled: bool = False
     """Solar-surplus gate for battery assist (``battery_assist_min_surplus``).
     Battery assist only SUPPLEMENTS real solar — below this much pure
     solar surplus the battery is off-limits to the EV, so a sunless
@@ -807,10 +1019,18 @@ class FleetCycleState:
     power: "PowerReadings"
     config: "Mapping[str, Any]"
     is_night: bool = False
+    # (#778 phase 5) Tonight's forecast-derived spendable budget, in kWh.
+    # 0.0 until the arc's master switch is on and the evidence exists.
+    battery_spendable_kwh: float = 0.0
+    #: (#878) rides beside the budget it bounds
+    dynamic_floor_pct: "Optional[float]" = None
     tariff_level: "Optional[str]" = None
     forecast_remaining_kwh: float = 0.0
     # (#747) the load manager's peak posture, resolved once per cycle.
     peak_state: str = "normal"
+    # (#864) the slot-budget allowance, resolved once per cycle; None when
+    # no target peak limit is configured.
+    peak_slot_allowed_w: Optional[float] = None
     # #576 — fleet-level priority-list inputs (one home battery). Threaded
     # here so every charger's view sees the same slot + command state.
     battery_priority: "Optional[int]" = None
@@ -821,6 +1041,16 @@ class FleetCycleState:
     # treats exactly like measured solar (see coordinator/curtailment.py).
     # 0.0 = probe off/idle — the entire feature disappears from the math.
     curtailment_grant_w: float = 0.0
+    #: (arc #921) the cycle's sink verdicts, computed once in
+    #: ``_build_fleet_cycle_state`` and read by every consumer from here.
+    sink_verdicts: Dict[str, Any] = field(default_factory=dict)
+    #: (#955) this cycle's export command from ``ExportGuard`` — what the pure
+    #: ``decide_export`` turns into an intent. ``None`` until the first tick.
+    export_command: Any = None
+    export_guard_enabled: bool = False
+    #: (#892) the ev sink verdict is OPEN this cycle — a morning window the
+    #: user opened; the charger side may offer the pack below the solar gate.
+    morning_window_open: bool = False
 
 
 @dataclass(frozen=True)
@@ -874,6 +1104,26 @@ class ChargerView:
     (charges before the battery) only when ``ev_priority <
     fleet.battery_priority`` AND SOC ≥ reserve floor (#576 P2.2). Defaults to
     999 (bottom) so a view built without it never spuriously reclaims."""
+
+    wpa_table: Mapping[int, float] = field(default_factory=dict)
+    """(#846) Measured watts-per-amp per commanded setpoint for the phase
+    count SEM believes — ``{amps: W/A}``, empty until earned. Every
+    watts→amps conversion in ``decide()`` reads it through
+    ``predict_watts``/``amps_from_watts``: nameplate where the table is
+    silent, the car's own response where it has spoken. A typed field, not
+    a ``config`` key, for the same reason as ``plan`` below.
+
+    (This docstring spent #899 round 1 orphaned below ``redirect_allowed``,
+    which was inserted between the field and its own text.)"""
+
+    redirect_allowed: bool = True
+    """(#899) False once the meter has contradicted this session's battery
+    credit (see ``PerChargerState.redirect_vetoed``). Until the car is
+    unplugged the pack's charging watts are off the table for this charger
+    by EVERY route: the forecast redirect, and the #576 position reclaim
+    that ``_ev_reclaims`` gates — so the modes that delegate their day path
+    to ``solar_only``, the Zone 3/4 budget, and the stability bridge's own
+    surplus read all follow it."""
 
     plan: PlanVerdict = field(default_factory=PlanVerdict)
     """(#638) What the PLANNING layer decided for this charger this cycle.

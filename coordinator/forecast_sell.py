@@ -1,0 +1,160 @@
+"""(#778) The spend TRIGGER — the arc's last leg.
+
+The verdict side ships and is live (spendable budget, dynamic floor,
+phase = ``spending``). The actuation side ships too: ``decide_battery``
+sells on a DISCHARGING_ARBITRAGE verdict, budget-capped, floor-guarded,
+permission-bound. But the only thing that OPENS a sell today is the
+arbitrage engine — profitability math that requires a dynamic import
+forecast and never fires on a fixed export price. Guido's install and the
+reporter's both have fixed prices: a budget with no trigger.
+
+This module is the missing WHETHER + the plan's WHEN for forecast-led
+spending:
+
+* ``forecast_sell_blocks`` — the plan side. One just-in-time block ending
+  at the night window's start: latest-possible selling keeps options open
+  and lands after the solar tail by construction, sized so the budget is
+  spent exactly when the night takes over. (With a fixed export price
+  there is no better slot to hunt for; when a real export-price FORECAST
+  source exists one day, picking the richest slots belongs here.)
+* ``evaluate_forecast_sell`` — the live side. Fires only inside the
+  plan's open block, mirrors ``evaluate_arbitrage``'s verdict shape so
+  the entire downstream discipline (mode/permission gate, three floors,
+  budget cap, fleet split, #758 kill switch) applies unchanged.
+
+Every default keeps it shut: the arc's master switch
+(``forecast_spending_enabled``) is OFF, and without it neither the block
+nor the verdict exists.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from .battery_charge_scheduler import SchedulerDecision, SchedulerState
+
+#: Below this there is nothing worth a discharge cycle.
+MIN_SPEND_KWH: float = 0.2
+#: A block never runs shorter than this — a 4-minute sell is contactor
+#: churn, not a plan.
+MIN_BLOCK_MIN: int = 15
+#: …and never longer than this. A budget too big for 6 h at the configured
+#: rate sells 6 h worth; the rest stays in the pack for the night.
+MAX_BLOCK_H: float = 6.0
+
+
+def forecast_sell_blocks(
+    now: datetime,
+    night_start: Optional[datetime],
+    spendable_kwh: float,
+    max_discharge_w: float,
+) -> List[dict]:
+    """The plan's WHEN: one JIT block ``[night_start − duration, night_start)``.
+
+    Returns ``[]`` whenever there is nothing to say — no budget, no night
+    boundary, a rate that cannot move energy, or a night that has already
+    begun (the night owns the battery from its first minute).
+    """
+    try:
+        kwh = float(spendable_kwh or 0.0)
+        w = float(max_discharge_w or 0.0)
+    except (TypeError, ValueError):
+        return []
+    if night_start is None or kwh < MIN_SPEND_KWH or w <= 0:
+        return []
+    if now >= night_start:
+        return []
+    hours = min(MAX_BLOCK_H, kwh / (w / 1000.0))
+    hours = max(hours, MIN_BLOCK_MIN / 60.0)
+    # ANCHORED to the night, not to ``now``. The block is what the docstring
+    # says it is — [night_start − duration, night_start) — and that interval
+    # does not depend on when you ask.
+    #
+    # It used to be ``start = max(now, …)`` plus a "reject if the remaining
+    # span is under MIN_BLOCK_MIN" guard, which made the window shrink as the
+    # evening advanced and then vanish entirely in its last quarter hour. The
+    # plan is recomputed periodically, so the running block simply
+    # disappeared from the plan and the gate closed. Live on .175 (30.08):
+    # selling at 5009 W until 17:45:21, then nothing, with night_start 18:00
+    # — the sell stopped exactly when "just in time" means to act.
+    #
+    # MIN_BLOCK_MIN governs what may be PLANNED ("a 4-minute sell is
+    # contactor churn, not a plan") and ``hours`` above already enforces it.
+    # Applying the same number to the REMAINING span answered a different
+    # question: whether to CANCEL a block that had already opened.
+    #
+    # Anchoring also keeps ``kwh`` — and so the gate's derived rate
+    # (kwh/hours) — constant across recomputes. A span-trimmed kwh tapered
+    # the sell toward zero as the night approached.
+    start = night_start - timedelta(hours=hours)
+    return [{"start": start, "end": night_start, "kwh": round(kwh, 2)}]
+
+
+def evaluate_forecast_sell(
+    now: datetime,
+    *,
+    enabled: bool,
+    in_block: bool,
+    block_w: float,
+    spendable_kwh: float,
+    max_discharge_w: float,
+    dynamic_floor_pct: Optional[float],
+    reserve_pct: float,
+    export_rate: Optional[float] = None,
+    export_rate_known: bool = True,
+) -> SchedulerDecision:
+    """The live WHETHER, in ``evaluate_arbitrage``'s verdict shape.
+
+    ``from_arbitrage=True`` so a non-firing verdict routes to
+    STOP_FORCE_DISCHARGE (never the night scheduler's stop), plus
+    ``from_forecast_spend=True`` so ``decide_battery`` checks the SPEND
+    gate and the SPEND switch instead of arbitrage's."""
+    def _v(**kw) -> SchedulerDecision:
+        return SchedulerDecision(
+            from_arbitrage=True, from_forecast_spend=True,
+            evaluated_at=now, **kw)
+
+    if not enabled:
+        return _v(state=SchedulerState.IDLE, reason="forecast spending off")
+    # (#931) This sell was written price-blind ON PURPOSE for a fixed
+    # feed-in, where the rate is a constant the budget already priced. But
+    # the switch that enables it is a plain global, and a dynamic-tariff
+    # install that turns it on would be sold at whatever the evening's
+    # export price is — zero, or negative, paying to give energy away.
+    # Three states, never two: a price that could not be READ is not a
+    # price of zero, and neither of them is a reason to sell.
+    if not export_rate_known:
+        return _v(state=SchedulerState.IDLE,
+                  reason="export price unreadable — not selling blind on price")
+    if export_rate is not None and float(export_rate) <= 0.0:
+        return _v(state=SchedulerState.IDLE,
+                  reason=f"export price is not positive ({float(export_rate):.3f}) "
+                         "— selling would pay to give energy away")
+    kwh = float(spendable_kwh or 0.0)
+    if kwh < MIN_SPEND_KWH:
+        return _v(state=SchedulerState.NOT_NEEDED,
+                  reason=f"nothing spendable ({kwh:.1f} kWh)")
+    if not in_block:
+        return _v(state=SchedulerState.IDLE,
+                  reason="outside the plan's spend window")
+    sell_w = float(block_w or 0.0)
+    if sell_w <= 0:
+        sell_w = float(max_discharge_w or 0.0)
+    if sell_w <= 0:
+        return _v(state=SchedulerState.IDLE, reason="no discharge rate")
+    # The floor decide_battery enforces is max(reserve, sched.floor_soc,
+    # dynamic) — hand it the strongest one we know so a mis-plumbed view
+    # still cannot sell into the night's reserve.
+    floor = float(reserve_pct or 0.0)
+    if dynamic_floor_pct is not None:
+        try:
+            floor = max(floor, float(dynamic_floor_pct))
+        except (TypeError, ValueError):
+            pass
+    return _v(
+        state=SchedulerState.DISCHARGING_ARBITRAGE,
+        discharge_power_w=sell_w,
+        floor_soc=floor,
+        reason=(f"forecast spend: {kwh:.1f} kWh above tonight's need — "
+                f"selling before the night at {sell_w:.0f} W"),
+    )

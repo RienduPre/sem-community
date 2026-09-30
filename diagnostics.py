@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import SEMCoordinator
+from .coordinator.install_modules import presence_of, presence_summary
 from .features.device_axes import has_control_handle, may_actuate, user_hands_off
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,6 +66,22 @@ def _load_manager_diagnostics(coordinator: Any) -> dict[str, Any]:
 _LOG_TAIL_KB = 2048           # only read the last 2 MB of the log
 _LOG_MAX_LINES = 80           # return up to 80 matching lines
 _LOG_NEEDLE = "solar_energy_management"
+
+
+def _dict_or_none(value):
+    """(#967) A plain dict, or None — a MagicMock, a stale object, anything
+    else reads as "not there" rather than as a serialisation error."""
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _call_dict_or_none(fn):
+    """(#967) ``fn()`` when it is callable and answers a dict; else None."""
+    if not callable(fn):
+        return None
+    try:
+        return _dict_or_none(fn())
+    except Exception:  # noqa: BLE001 — diagnostics never fail on a surface
+        return None
 
 
 async def _get_recent_sem_logs(hass: HomeAssistant) -> list[str]:
@@ -183,6 +200,21 @@ REDACT_CONFIG_KEYS = {
     "ev_daily_energy_sensor",
     "vehicle_soc_entity",
     "battery_discharge_control_entity",
+    # (#915, 06.09 audit) the split pair the sources step now fills for any
+    # split-meter brand — same privacy class as the keys above
+    "grid_import_power_entity",
+    "grid_export_power_entity",
+    # (07.09 re-audit) The SAME entity ids appear again under the adapter
+    # and charger runtime blocks with shorter names. Redacting the config
+    # key while its mirror walks out of the next section is not privacy,
+    # it is bookkeeping.
+    "discharge_control_entity",
+    "force_discharge_entity",
+    "pause_switch_entity",
+    # (#1017, 28.09 stable audit) A notify service id is usually
+    # ``notify.mobile_app_<device name>`` and the Companion App names the
+    # device after its owner — a person's name in every diagnostics file.
+    "mobile_notification_service",
 }
 
 
@@ -336,11 +368,29 @@ async def async_get_config_entry_diagnostics(
                 )
             except Exception:
                 grid_device_resolved = None
+        # (#947) A name-only pick does not steer until the energy counters
+        # corroborate it, so the PICK alone no longer answers "what is SEM
+        # reading". The verdict and the window behind it belong here too —
+        # the whole #947 triage was reconstructed from a log line because
+        # this block named the sensors and not whether they were believed.
+        proof = getattr(reader, "_split_grid_proof", None) or {}
         split_grid_info = {
             "import_sensor": disc.get("import"),
             "export_sensor": disc.get("export"),
             "confidence": disc.get("confidence"),
             "grid_energy_device_resolved": grid_device_resolved,
+            # (#947 review) A field named "corroborated" reporting None for a
+            # pick that is trusted WITHOUT corroboration is self-contradictory.
+            # Say which it is.
+            "corroborated": (
+                "not-required" if disc.get("confidence") in ("declared", "same-device")
+                else proof.get("verdict")),
+            "contradictions": (proof.get("contradictions") or 0),
+            "corroboration_window": {
+                "import_kwh_seen": round(proof.get("import_wh") or 0.0, 4) / 1000.0,
+                "export_kwh_seen": round(proof.get("export_wh") or 0.0, 4) / 1000.0,
+                "pair_under_test": list(proof.get("pair") or ()) or None,
+            },
         }
 
     # PV string discovery result (#379 triage support).
@@ -405,6 +455,38 @@ async def async_get_config_entry_diagnostics(
                     "pause_switch_entity": getattr(ad, "_pause_switch_entity", None),
                     "pause_switch_discovered": getattr(ad, "_pause_switch_entity", None) is not None,
                 }
+            # (#967) What SEM believes one amp buys on THIS charger, and
+            # what it measured. The learner's refusals are the only place a
+            # wrong ``ev_phases`` is visible — and the download never carried
+            # them, so #967's phase question had to be answered from a
+            # screenshot and a multiplication instead of from the file.
+            try:
+                cfg = coordinator._ev_charger_cfg(str(cid))
+                phases, belief_ok = coordinator._wpa_phases_for(str(cid), cfg)
+                learner = getattr(coordinator, "_wpa_learner", None)
+                entry_info["phases"] = {
+                    "configured": cfg.get("ev_phases"),
+                    "believed": phases,
+                    "belief_undisputed": belief_ok,
+                    "voltage": cfg.get("ev_voltage"),
+                    "verdict": (learner.phase_verdict(str(cid), int(phases))
+                                if learner is not None and phases else None),
+                }
+            except Exception:  # noqa: BLE001 — a dump never fails on a field
+                entry_info["phases"] = None
+            # (#899 round 2) Whether this charger has stopped being credited
+            # the home battery's charging watts, and how close it is. The
+            # veto latches until the car is unplugged and until now left no
+            # trace anywhere: a user asking "why did my car stop in full
+            # sun?" sent a dump that could not answer it.
+            try:
+                _st = (getattr(coordinator, "_pcc_store", None) or {}).get(str(cid))
+                entry_info["battery_reclaim"] = {
+                    "vetoed": bool(getattr(_st, "redirect_vetoed", False)),
+                    "strikes": int(getattr(_st, "redirect_strikes", 0) or 0),
+                } if _st is not None else None
+            except Exception:  # noqa: BLE001 — a dump never fails on a field
+                entry_info["battery_reclaim"] = None
             charger_adapter_info[cid] = entry_info
 
     # Battery control observability (#523) — the battery-side mirror of
@@ -449,6 +531,11 @@ async def async_get_config_entry_diagnostics(
                     "battery_force_discharge_control_entity") or None,
                 "battery_force_discharge_entities": full_cfg.get(
                     "battery_force_discharge_entities"),
+                # (#809/#869) which way SEM's signed watts reach the wire
+                "battery_setpoint_model": full_cfg.get(
+                    "battery_setpoint_model") or "signed",
+                "battery_power_direction_entity": full_cfg.get(
+                    "battery_power_direction_entity") or None,
             },
             "scheduler": {
                 "enabled": getattr(sched, "enabled", None),
@@ -481,11 +568,30 @@ async def async_get_config_entry_diagnostics(
     # defensive caps and the Supervisor-install fallback.
     recent_logs = await _get_recent_sem_logs(hass)
 
+    # (#915) The detection report reaches the Config card and a sensor
+    # attribute, but never the diagnostics download — so a bug report about
+    # detection arrived without the one artefact that explains it. A trimmed
+    # slice: the census (what is installed, what SEM could not place, and
+    # now what those unplaceable domains ARE), the chargers it did map, the
+    # near-misses with their role proposals, and the prober disagreements.
+    _report = data.get("detection_report") or {}
+    detection = {k: _report.get(k) for k in
+                 ("census", "chargers", "near_misses", "disagreements",
+                  # (#887) cars found on a transport platform, named as cars
+                  "vehicles",
+                  # (#964) what the unit grouping could attribute to no box
+                  "unattributed")
+                 if _report.get(k) is not None}
+
     return {
+        "detection": detection,
+        # (#923) the module verdict the platforms and the dashboard were built on
+        "install_modules": presence_summary(presence_of(coordinator)),
         "config_entry": {
             "entry_id": entry.entry_id,
             "version": entry.version,
-            "title": entry.title,
+            # (#1017) no title: it is free text a user may have set to
+            # anything, and nothing in the file needs it.
             "data": async_redact_data(dict(entry.data), REDACT_CONFIG_KEYS),
             "options": async_redact_data(dict(entry.options), REDACT_CONFIG_KEYS),
         },
@@ -493,6 +599,25 @@ async def async_get_config_entry_diagnostics(
             "last_update_success": coordinator.last_update_success,
             "update_interval_s": coordinator.update_interval.total_seconds() if coordinator.update_interval else None,
             "observer_mode": getattr(coordinator, "_observer_mode", False),
+            # (#967) The joint energy plan and everything a reporter's
+            # screenshot of the EV strip is drawn from. #967's own diagnosis
+            # asked for "the plan's verdict for ev:<id> and where its blocks
+            # are" — and the download could not answer, because none of this
+            # was in it. The shadow is stored user-shaped already (computed_at,
+            # demands with status/note, blocks, slots); coverage is the
+            # per-demand verdict the card's chip shows; per_charger_plans are
+            # the strip rows themselves; night_targets the need each charger
+            # was planned for. Every one is None-safe: a rig-shaped
+            # coordinator without a plan reports "no plan", never a crash.
+            "energy_plan": _dict_or_none(getattr(coordinator, "_energy_plan_shadow", None)),
+            "plan_coverage": _call_dict_or_none(getattr(coordinator, "_plan_coverage_view", None)),
+            "per_charger_plans": {
+                k[len("charger_"):-len("_today_plan")]: v
+                for k, v in data.items()
+                if isinstance(k, str) and k.startswith("charger_") and k.endswith("_today_plan")
+            },
+            "night_targets": _dict_or_none(
+                getattr(coordinator, "_night_target_per_charger_map", None)),
         },
         "power": {
             "solar_w": data.get("solar_power"),
@@ -569,6 +694,14 @@ async def async_get_config_entry_diagnostics(
         "split_grid_discovery": split_grid_info,
         "pv_strings_discovery": pv_strings_info,
         "charger_adapters": charger_adapter_info,
+        # (#846/#967) fire → check → adjust, in the file: the measured W/A
+        # table per (charger, phase count), the buckets still earning
+        # confidence, and the refusals WITH their reasons. "SEM has no
+        # measurement" and "SEM measured and refused it" are different
+        # statements about an install, and the download used to carry
+        # neither.
+        "ev_watts_per_amp": data.get("ev_watts_per_amp"),
+        "ev_watts_per_amp_replay": data.get("ev_watts_per_amp_replay"),
         # #432 — full heat-pump observability block. One-click dump for
         # users with non-standard SG-Ready wiring (ESP relays, Shellies,
         # Modbus-bridged template switches). Tells the maintainer in a
@@ -584,11 +717,25 @@ async def async_get_config_entry_diagnostics(
                 "relay1_entity": data.get("heat_pump_relay1_entity"),
                 "relay2_entity": data.get("heat_pump_relay2_entity"),
                 "climate_entity": data.get("heat_pump_climate_entity"),
+                # (#801) A contact may be a text/number/select entity written
+                # with a user-given value. Without these a "the pump never
+                # boosts" export shows a perfectly-wired-looking contact and
+                # no reason — which is exactly what this block exists to stop.
+                "relay1_on_value": data.get("heat_pump_relay1_on_value"),
+                "relay1_off_value": data.get("heat_pump_relay1_off_value"),
+                "relay2_on_value": data.get("heat_pump_relay2_on_value"),
+                "relay2_off_value": data.get("heat_pump_relay2_off_value"),
+                "sg_ready_service": data.get("heat_pump_sg_ready_service"),
             },
             "live": {
                 "relay1_state": data.get("heat_pump_relay1_state"),
                 "relay2_state": data.get("heat_pump_relay2_state"),
                 "climate_state": data.get("heat_pump_climate_state"),
+                # (#421) the branch each write actually took — present in
+                # coordinator.data all along and omitted from this block.
+                "relay_path": data.get("heat_pump_relay_path"),
+                "activation_path": data.get("heat_pump_activation_path"),
+                "deactivation_path": data.get("heat_pump_deactivation_path"),
             },
         },
         "forecast": {

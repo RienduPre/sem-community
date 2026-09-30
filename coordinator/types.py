@@ -211,13 +211,45 @@ class PowerReadings:
     # showing a fabricated 0 W. One dark inverter among three does NOT
     # blank a total that is mostly real.
     inputs_degraded: bool = False
+    #: (#992, class 99) …and WHICH reads went dark. ``inputs_degraded`` is
+    #: set by three different gates — an entity that will not read, a
+    #: battery power no battery could produce (#902), and a solar zero the
+    #: energy balance refutes (#988) — and the verdict that consumes it
+    #: told users "sensor unavailable", naming one of the three. Two of
+    #: them are sensors that answered perfectly well with a number SEM
+    #: chose to disbelieve, so the user went looking for a broken entity
+    #: that was fine. The reader knows the names; now they travel.
+    dark_inputs: tuple = ()
     solar_power_unavailable: bool = False
     grid_power_unavailable: bool = False
     battery_power_all_unavailable: bool = False
+    # (#910) True for a cycle in which a charger's power read was a blink
+    # held at its last accepted value (status still charging).
+    ev_power_held: bool = False
 
     # Battery state
     battery_soc: float = 0.0
     battery_soc_unavailable: bool = False  # True when SOC sensor is offline
+    # (#875) False only while the SOC has NEVER been read this process —
+    # the window between a restart and the sensor's first report. Then
+    # ``battery_soc`` is 0.0 because nothing was ever measured, not
+    # because the pack is empty; the charger path treats it as unknown
+    # (neither a source nor a blocker). A later gap keeps this True: the
+    # held value IS a measurement and stays steerable.
+    battery_soc_known: bool = True
+    # (#934) How old the held SOC is: seconds since the last ACCEPTED read,
+    # stamped by the reader on every dark cycle that holds a value. None
+    # when this cycle's read was accepted, and before any read (there is
+    # nothing to age). The twin flag above is boolean and cannot tell a
+    # one-cycle modbus blink from a sustained outage; a LIMIT-type actuator
+    # (the #820 charge cap) that read the flag as "no SOC" restored and
+    # re-engaged its register on every blink. With the age, a consumer can
+    # hold a limit through a blink (safe — a cap is not an action) and let
+    # go only past SENSOR_DARK_READ_GRACE_S. A dark reading that carries NO
+    # age is not a hold a limit may ride — fail-closed for any producer that
+    # raises the flag without stamping it. Action-type gates (the #932
+    # sell) keep reading the flag: acting blind is the danger there.
+    battery_soc_stale_s: Optional[int] = None
     # (#638 finding #3) On a multi-battery install the fleet SOC is the
     # average of the units that could be READ. When one unit's sensors are
     # still warming (boot) or offline, that average silently becomes a
@@ -413,6 +445,16 @@ class EnergyTotals:
     daily_total_consumption: float = 0.0
     daily_grid_import: float = 0.0
     daily_grid_export: float = 0.0
+    #: (#871, arc #921) kWh exported while the export rate was NEGATIVE — energy
+    #: the meter charged for instead of paying for. Zero on every fixed-tariff
+    #: install, which is all of them today; the counter exists so the cost of
+    #: NOT acting is measurable before anything acts.
+    daily_grid_export_negative: float = 0.0
+    daily_grid_export_negative_cost: float = 0.0
+    monthly_grid_export_negative: float = 0.0
+    yearly_grid_export_negative: float = 0.0
+    monthly_grid_export_negative_cost: float = 0.0
+    yearly_grid_export_negative_cost: float = 0.0
     daily_battery_charge: float = 0.0
     daily_battery_discharge: float = 0.0
 
@@ -665,6 +707,9 @@ class LoadManagementData:
     controllable_devices_count: int = 0
     consecutive_peak_15min: float = 0.0  # kW
     monthly_consecutive_peak: float = 0.0  # kW
+    # (#864) the preventive slot guard's live numbers; None = no limit set.
+    peak_slot_allowed_w: Optional[float] = None
+    peak_slot_used_kwh: Optional[float] = None
     current_vs_peak_percentage: float = 0.0
     controlled_tariff_status: str = "unknown"
     load_management_recommendation: str = "none"
@@ -678,6 +723,20 @@ class LoadManagementData:
     # its device table was permanently empty. Excluded from the recorder by
     # the sensor (see #581) — it's a live-only structure.
     devices: Dict[str, dict] = field(default_factory=dict)
+    # (#896) The load manager's own telemetry. ``get_load_management_data()``
+    # has reported these since #433 (the four ``*_path`` keys) and #896 (the
+    # shed verdict), and the hand-picked copy in ``_build_load_management_
+    # data`` dropped every one of them — the #657 hop again. Pinned by
+    # ``test_896 … test_every_key_the_load_manager_reports_is_published``.
+    state_decision_path: str = "uninitialized"
+    process_path: str = "uninitialized"
+    action_path: str = "uninitialized"
+    last_error: Optional[str] = None
+    shed_path: str = "uninitialized"
+    shed_need_w: float = 0.0
+    shed_sheddable_w: float = 0.0
+    shed_futile: bool = False
+    uncontrolled_w: float = 0.0
 
 
 @dataclass
@@ -702,11 +761,25 @@ class ForecastSensorData:
     """Forecast data for coordinator sensors."""
     forecast_today_kwh: float = 0.0
     forecast_tomorrow_kwh: float = 0.0
+    #: (#884) Day after tomorrow, and why it is missing when it is.
+    #: The default is "unknown", NOT "unsupported_by_source": a
+    #: default that is indistinguishable from a real computed answer
+    #: is how this shipped broken — the value never arrived and the
+    #: default said "your provider does not publish it", confidently
+    #: and wrongly, on every install.
+    forecast_d2_kwh: float = 0.0
+    forecast_d2_path: str = "unknown"
     forecast_remaining_today_kwh: float = 0.0
     forecast_power_now_w: float = 0.0
     forecast_power_next_hour_w: float = 0.0
     forecast_peak_power_today_w: float = 0.0
     forecast_peak_time_today: str = ""
+    #: (#867) WHY the peak power reads what it reads — ``read``,
+    #: ``unsupported_by_source`` (Forecast.Solar / Open-Meteo publish no
+    #: peak-power sensor and no series to derive one from) or ``no_entity``.
+    #: Without this a permanent 0.0 is indistinguishable from a real zero,
+    #: and the card's peak row reads as broken rather than unsupported.
+    forecast_peak_power_path: str = "unsupported_by_source"
     forecast_source: str = "none"
     forecast_available: bool = False
     # (#819) Which forecast integrations are installed on this system.
@@ -722,7 +795,12 @@ class TariffSensorData:
     """Tariff data for coordinator sensors."""
     tariff_current_import_rate: float = 0.0
     tariff_current_export_rate: float = 0.0
-    tariff_price_level: str = "normal"
+    #: (#994) the default is the ABSENCE of a level, not a
+    #: confident middle one — a cycle that could not classify must
+    #: not publish "normal".
+    #: (#994) "no_prices" until a provider answers — nothing has been read
+    #: yet, which is exactly what that word means. Never a level.
+    tariff_price_level: str = "no_prices"
     tariff_provider: str = "static"
     tariff_is_dynamic: bool = False
     tariff_today_min_price: Optional[float] = None
@@ -841,6 +919,15 @@ class PVAnalyticsData:
     pv_performance_vs_forecast: float = 0.0
     pv_estimated_annual_degradation: float = 0.0
     pv_degradation_trend: str = "unknown"
+    # (#422, published 30.08) The analyzer records WHICH branch produced each
+    # number — "insufficient_history", "no_size_configured", "computed" — so a
+    # blank explains itself instead of looking broken. It computed these from
+    # the start and the coordinator copied only the four values above, so the
+    # telemetry meant to answer "why is this empty?" never reached anyone.
+    pv_yield_path: str = "uninitialized"
+    pv_performance_path: str = "uninitialized"
+    pv_degradation_path: str = "uninitialized"
+    pv_system_age_path: str = "uninitialized"
 
 
 @dataclass
@@ -1106,6 +1193,8 @@ class SEMData:
             "daily_total_consumption": self.energy.daily_total_consumption,
             "daily_grid_import_energy": self.energy.daily_grid_import,
             "daily_grid_export_energy": self.energy.daily_grid_export,
+            "daily_grid_export_negative_kwh": self.energy.daily_grid_export_negative,
+            "daily_grid_export_negative_cost": self.energy.daily_grid_export_negative_cost,
             "daily_battery_charge_energy": self.energy.daily_battery_charge,
             "daily_battery_discharge_energy": self.energy.daily_battery_discharge,
             # (#770) Where today's battery charge came from, and what the
@@ -1286,6 +1375,11 @@ class SEMData:
             "controllable_devices_count": self.load_management.controllable_devices_count,
             "consecutive_peak_15min": self.load_management.consecutive_peak_15min,
             "monthly_consecutive_peak": self.load_management.monthly_consecutive_peak,
+            # (#864) the preventive slot guard's live numbers. This dict is
+            # an EXPLICIT key list — a field added to the dataclass alone
+            # never reaches diagnostics (caught live on .175, the #819 trap).
+            "peak_slot_allowed_w": self.load_management.peak_slot_allowed_w,
+            "peak_slot_used_kwh": self.load_management.peak_slot_used_kwh,
             "current_vs_peak_percentage": self.load_management.current_vs_peak_percentage,
             "controlled_tariff_status": self.load_management.controlled_tariff_status,
             "load_management_recommendation": self.load_management.load_management_recommendation,
@@ -1293,6 +1387,16 @@ class SEMData:
             "peak_trend": self.load_management.peak_trend,
             "tariff_type": self.load_management.tariff_type,
             "load_management_devices": self.load_management.devices,
+            # (#896) the load manager's telemetry — see LoadManagementData.
+            "state_decision_path": self.load_management.state_decision_path,
+            "process_path": self.load_management.process_path,
+            "action_path": self.load_management.action_path,
+            "last_error": self.load_management.last_error,
+            "shed_path": self.load_management.shed_path,
+            "shed_need_w": self.load_management.shed_need_w,
+            "shed_sheddable_w": self.load_management.shed_sheddable_w,
+            "shed_futile": self.load_management.shed_futile,
+            "uncontrolled_w": self.load_management.uncontrolled_w,
 
             # Timestamp
             "last_update": self.last_update,
@@ -1320,6 +1424,7 @@ class SEMData:
             "forecast_power_now_w": round(self.forecast.forecast_power_now_w, 0),
             "forecast_peak_power_today_w": self.forecast.forecast_peak_power_today_w,
             "forecast_peak_time_today": self.forecast.forecast_peak_time_today,
+            "forecast_peak_power_path": self.forecast.forecast_peak_power_path,
             "forecast_source": self.forecast.forecast_source,
             # (#819) Which forecast integrations this install actually
             # has, so the dashboard picker offers what is there.
@@ -1406,6 +1511,10 @@ class SEMData:
             "pv_performance_vs_forecast": self.pv_analytics.pv_performance_vs_forecast,
             "pv_estimated_annual_degradation": self.pv_analytics.pv_estimated_annual_degradation,
             "pv_degradation_trend": self.pv_analytics.pv_degradation_trend,
+            "pv_yield_path": self.pv_analytics.pv_yield_path,
+            "pv_performance_path": self.pv_analytics.pv_performance_path,
+            "pv_degradation_path": self.pv_analytics.pv_degradation_path,
+            "pv_system_age_path": self.pv_analytics.pv_system_age_path,
 
             # Energy assistant (Phase 6)
             "energy_optimization_score": self.energy_assistant.energy_optimization_score,
@@ -1501,6 +1610,12 @@ class SEMData:
             for cid, intel in per_charger_intel.items():
                 data.update({
                     f"charger_{cid}_estimated_soc": intel.get("estimated_soc", 0),
+                    # (#1011) which reference set the estimate, and a refused
+                    # start as its own fact (attributes, not entities)
+                    f"charger_{cid}_estimated_soc_anchor": intel.get("estimated_soc_anchor"),
+                    f"charger_{cid}_estimated_soc_anchor_at": intel.get("estimated_soc_anchor_at"),
+                    f"charger_{cid}_start_declined_since": intel.get("start_declined_since"),
+                    f"charger_{cid}_start_declined_last": intel.get("start_declined_last"),
                     # #383: real vehicle SOC reading per charger (None
                     # when no per-charger ``vehicle_soc_entity`` is
                     # configured). The card prefers this over the

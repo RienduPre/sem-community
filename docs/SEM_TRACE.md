@@ -65,7 +65,7 @@ a legitimate zero never reads as a fault:
 
 | Subsystem | `match` is False when… | `null` (not checked) when… |
 |---|---|---|
-| **EV** | commanded amps > 0 but observed draw < 30 % of it | not charging / car unplugged |
+| **EV** | commanded amps > 0 but observed draw < 30 % of it — asked **per charger**, each against its own phases, voltage and measured draw, so one healthy charger cannot absorb another's stall (#961) | not charging / car unplugged |
 | **battery** | `force_charge` but not charging (or `force_discharge` but not discharging) | no explicit command (normal / idle) |
 | **heat pump** | boost commanded but the SG-Ready relay didn't reach BOOST/FORCE_ON | not boosting |
 | **load** (`load:<name>`) | SEM turned it on but the **relay** is still off | SEM isn't driving it, or it's unobservable |
@@ -74,6 +74,25 @@ The load check reads the **relay / mode**, not power — a thermostat-satisfied
 heater is legitimately *on at 0 W* and must not alarm. The battery check ignores
 the ramp: a freshly-commanded charge reads False for a cycle or two while the
 inverter spins up, and the health debounce (≥ 3 consecutive cycles) absorbs it.
+
+### Reading the EV record on a fleet (#961)
+
+The EV `process` layer carries three numbers, and they are not the same thing:
+
+| Field | What it is |
+|---|---|
+| `budget_amps` | the **fleet** canonical budget — one figure for the house, from the primary charger's config. It follows the sun and is *supposed* to move. |
+| `commanded_amps` | what SEM actually **asked** the chargers for, from the same setpoints `sensor.sem_charger_<id>_commanded_current` publishes. |
+| `per_charger_amps` | the breakdown, on fleets only, beside `fleet_charger_ids` so a charger missing from it is visible rather than merely absent. |
+
+Until 2.1.0-beta.23 the budget was published *as* `commanded_amps`, next to a
+per-charger mode reason — so a budget tracking the sun read as a control loop
+hunting, which is exactly how it was reported (#958). If you are asking "what
+did SEM tell my charger to do", it is `commanded_amps` or the per-charger
+sensor; `budget_amps` answers "how much was there to give".
+
+In **observer mode** `commanded_amps` is 0 by construction — SEM commands
+nothing — while `budget_amps` still shows what it would have done.
 
 ## Guarantees
 

@@ -18,6 +18,9 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from ..consts.devices import names_a_reboot
+from ..utils.log_gate import log_on_change
+
 # #392: KEBA's failsafe watchdog (and similar device-side timers on other
 # chargers) requires periodic *writes* to refresh — reads alone don't
 # count. SEM's _set_current dedup used to suppress writes when the
@@ -43,9 +46,13 @@ WRITE_HEARTBEAT_INTERVAL_S = DEFAULT_WRITE_HEARTBEAT_INTERVAL_S
 # pausing the car to ~120 W), so 30 s still raced it. Per-cycle re-writes outrun
 # any failsafe with a timeout ≥ ~1 cycle; a box that reverts sub-cycle is a
 # device-side failsafe-config problem SEM cannot out-write.
-_BRAND_WATCHDOG_REFRESH_S = {
-    "keba": 5.0,
-}
+# (#855 stage 4) Built from the hardware matrix — the one brand registry.
+# A brand whose failsafe needs a faster heartbeat declares
+# ``domain_token`` + ``watchdog_refresh_s`` on its CHARGERS row; this file
+# never learns a new brand again.
+from ..consts.hardware_matrix import charger_watchdog_refresh_map
+
+_BRAND_WATCHDOG_REFRESH_S = charger_watchdog_refresh_map()
 
 # #546 — managed-neutralize failsafe timeout. Long enough that the per-cycle
 # current writes never let it trip during normal charging (vs the old 30 s that
@@ -63,6 +70,17 @@ FAILSAFE_TIMEOUT_S = 600
 # is the inversion the #546 live test never tried: the watchdog cannot be
 # turned off over UDP — so point it at 0 instead of fighting it.
 FAILSAFE_OFF_TIMEOUT_S = 10
+
+# #1009 — how long after asking for the dead-man's OFF SEM reads the box's
+# failsafe back. Brand integrations poll their box every few seconds; 30 s
+# is one honest look, not a heartbeat.
+FAILSAFE_READBACK_DELAY_S = 30
+
+#: (#935) How long a teardown will wait on a charger before giving up on it.
+#: ``hass.services.async_call`` is unbounded, and a removal that hangs on a
+#: stalled integration never completes — HA awaits ``async_remove_entry``
+#: holding the entry's setup lock. Handing a box back is best-effort.
+_RELEASE_TIMEOUT_S = 15.0
 
 # #553/#545 — the quota-stop margin. Live-proven on the real P30
 # (2026-08-08): a target just ABOVE the session counter, written before
@@ -89,7 +107,7 @@ from ..consts.core import (
 )
 from ..coordinator.units import energy_state_to_kwh, power_state_to_watts
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -316,6 +334,12 @@ class ControllableDevice(ABC):
         # every cycle. Tier 2 expires on its own terms: the Reserve floor, the
         # daily target met, or the day rollover.
         self._batt_overnight_forced: bool = False
+        # (#885) Watts the PACK funded for this device on the last
+        # surplus walk. Re-measured every cycle by SurplusController;
+        # read by the per-charger reservation so a load that is already
+        # running keeps its claim on the battery instead of silently
+        # handing it to a lower-ranked charger.
+        self._tier1_batt_w: float = 0.0
         self._batt_overnight_forced_date: Optional[date] = None
 
         # (#744) Is ``rated_power`` a MEASUREMENT or a guess? The same
@@ -339,6 +363,18 @@ class ControllableDevice(ABC):
         # automation) changed the physical state, so SEM stops fighting a manual
         # on/off and stops crediting runtime to a load it isn't actually driving.
         self._sem_owned: bool = False
+        # (#855) Observer mode, carried on the DEVICE so the single
+        # hardware seam below can honour it. Set by the coordinator each
+        # cycle. Default False: a device nobody told is a device that acts,
+        # which is the safe default for the production path — the
+        # coordinator is the one that knows, and it always tells.
+        self.observer_mode: bool = False
+        # The commands the seam WITHHELD this cycle, oldest first. This is
+        # the observation surface: it names the exact service and payload
+        # that would have gone to the box, which is the thing the old
+        # decision-level WOULD could not say (#854 hid an enable here).
+        self.withheld_commands: list = []
+        self._commanded_claim: bool = False  # backing field, see _sem_commanded
         # Monotonic anchor for the "belief says on but the entity reads off"
         # drift grace window (a transient unavailable/poll gap must not flip us).
         self._observed_off_since: Optional[float] = None
@@ -855,6 +891,69 @@ class ControllableDevice(ABC):
         """Disable device from surplus control."""
         self._enabled = False
 
+    async def send(self, domain: str, service: str,
+                   data: dict | None = None, *, why: str = "") -> bool:
+        """(#855) THE SINGLE HARDWARE SEAM for a charger.
+
+        Every command SEM sends to a charger goes through here — the stop,
+        the start, the current write, the failsafe, the energy register.
+        Nothing else in the charger path may call
+        ``hass.services.async_call``; ``tests/test_855_one_seam.py`` pins
+        that.
+
+        Guido, 29.08.2026, on what the arc is for:
+
+            "the 2nd layer has one communication string to the 3rd layer
+             for ev charger ... and the observation should not be a matter
+             any more, more a matter of get the work done."
+
+        SEM already had this shape for loads — ``reconcile_load``, whose
+        docstring says the prize out loud: *"a clean layer cut makes
+        [observer mode] a one-line branch in the actuator"*. Chargers never
+        got it, and the cost was concrete:
+
+        * **#854** — a brand's "stop" was a current write + an energy
+          target + an ENABLE: a start wearing a stop's name, ~1 kWh into the
+          car on every plug-in against a zero ask. INVISIBLE in observer
+          mode, because the old cut sat ABOVE the adapter and reported the
+          decision ("WOULD IDLE") while the enable happened below it.
+        * **#804** — phase switching could not be exercised on the rig.
+        * **#852** — a reporter's stop could not be reproduced there.
+
+        Each ended in "turn observer off", which on shared hardware means
+        commanding somebody's real car charger.
+
+        With the cut HERE, observer mode runs the whole decision and brand
+        path and withholds only the send — recording exactly what it
+        withheld. Returns True when the command actually went to hardware.
+        """
+        payload = dict(data or {})
+        # getattr, not attribute access: devices built without __init__
+        # (test fixtures, legacy construction paths) must still SEND. The
+        # documented default is False — "a device nobody told is a device
+        # that acts" — and a missing field means nobody told it.
+        if getattr(self, "observer_mode", False):
+            if not hasattr(self, "withheld_commands"):
+                self.withheld_commands = []
+            self.withheld_commands.append(
+                {"service": f"{domain}.{service}", "data": payload,
+                 "why": why or "-"})
+            # Transition-gated so a steady state is not a stream of
+            # identical lines (#762) — a WOULD that has not changed is not
+            # news, and the surface above carries the current truth anyway.
+            log_on_change(
+                _LOGGER, f"observer:send:{self.device_id}:{domain}.{service}",
+                logging.INFO,
+                "OBSERVER · %s WOULD send %s.%s %s%s",
+                self.name, domain, service, payload,
+                f" — {why}" if why else "",
+            )
+            return False
+        # The one place in the charger path that really talks to HA.
+        await self.hass.services.async_call(
+            domain, service, payload, blocking=True)
+        return True
+
     @abstractmethod
     async def activate(self, available_watts: float) -> float:
         """Activate device with available surplus power.
@@ -954,11 +1053,40 @@ class ControllableDevice(ABC):
                 return False
         return True
 
+    @property
+    def _sem_commanded(self) -> bool:
+        """(#847) Did SEM issue the ON itself, as opposed to adopting one?
+
+        ``_sem_owned`` answers "is this load SEM's to manage" — and adoption
+        makes it True for a load SEM merely SAW running (so goal gates can
+        stop it). That is the right answer for gates and the wrong one for
+        the mode-Off release, which ACTUATES: switching off a load the user
+        started is #847's reported harm, and stranding one SEM started is
+        the class-17 bug on the other side. This flag separates them.
+
+        It is a property, not a second stored bool, because a flag that must
+        stay in sync with another is bug class 18 waiting to happen (set in
+        one pass, leaks because another pass didn't clear it). Ownership is
+        released in five places; making the claim SUBORDINATE means every
+        one of them clears this too, by construction — commanded ⊆ owned.
+        A stale True can therefore never outlive the ownership it describes
+        and mistake a user's own load for SEM's.
+        """
+        return self._commanded_claim and self._sem_owned
+
+    @_sem_commanded.setter
+    def _sem_commanded(self, value: bool) -> None:
+        self._commanded_claim = bool(value)
+
     def record_activated(self) -> None:
         """Record activation timestamp for anti-cycling."""
         self._last_activated = datetime.now()
         # (arc) SEM turned this on → SEM owns the on-state.
         self._sem_owned = True
+        # (#847) COMMANDED, not merely adopted: SEM issued the write,
+        # so opt-out (mode Off) may undo it. An adopted claim never
+        # earns this flag - SEM must not actuate what it did not start.
+        self._sem_commanded = True
         self._observed_off_since = None
 
     def _adopt_ownership(self) -> bool:
@@ -983,12 +1111,46 @@ class ControllableDevice(ABC):
         """
         owned = self.control_mode == DeviceControlMode.SURPLUS
         self._sem_owned = owned
+        # (#847) adopted != commanded: goal gates may stop this load,
+        # but the mode-Off release must leave it as the user has it.
+        self._sem_commanded = False
         return owned
+
+    # (#914) How long a restart adoption may wait for an entity whose
+    # integration is still loading. HA's own startup settles well inside it.
+    BOOT_ADOPTION_WINDOW_S: float = 600.0
+
+    def _boot_adoption_window_open(self) -> bool:
+        """(#914) Is this lifetime's one restart adoption still undecided?
+
+        Opens on the first call — the registration — and stays open while
+        the entity cannot be read yet, for at most ``BOOT_ADOPTION_WINDOW_S``.
+        An entity dark for longer is no evidence of anything SEM left behind:
+        the window closes unread, and SEM never claims what it sees start
+        later (a relay the user's own automation put in BOOST, a setpoint
+        set by hand).
+        """
+        if not getattr(self, "_boot_adoption_pending", False):
+            return False
+        now = time.monotonic()
+        until = getattr(self, "_boot_adoption_until", None)
+        if until is None:
+            self._boot_adoption_until = until = now + self.BOOT_ADOPTION_WINDOW_S
+        if now > until:
+            self._boot_adoption_pending = False
+            _LOGGER.info(
+                "%s: restart adoption closed unread — nothing readable within "
+                "%.0f min of registration (#914)",
+                self.name, self.BOOT_ADOPTION_WINDOW_S / 60,
+            )
+            return False
+        return True
 
     def record_deactivated(self) -> None:
         """Record deactivation timestamp for anti-cycling."""
         self._last_deactivated = datetime.now()
         self._sem_owned = False
+        self._sem_commanded = False  # (#847)
         self._observed_off_since = None
 
     def mark_reconciled_off(self, cooldown_until: "Optional[datetime]" = None) -> None:
@@ -1530,6 +1692,20 @@ class SwitchDevice(ComfortBandMixin, ControllableDevice):
             return True
         return False
 
+    def _adoptable_now(self) -> Optional[bool]:
+        """(#914) Is the load running on the axis SEM commands it on?
+        ``None`` = the entity cannot be read yet.
+
+        A switch's command IS its on/off state, so ``"on"`` is the whole
+        answer here. A subclass that commands something else — a hot-water
+        tank's SETPOINT — overrides this predicate, never the adoption
+        below: the belief, the clocks and the gated claim stay in one body.
+        """
+        state = self.hass.states.get(self.entity_id)
+        if not state or state.state in ("unavailable", "unknown", None):
+            return None
+        return state.state == "on"
+
     def adopt_if_running(self) -> bool:
         """(#559) Re-own a switch that is physically ON at (re-)registration.
 
@@ -1540,8 +1716,7 @@ class SwitchDevice(ComfortBandMixin, ControllableDevice):
         """
         if not self.entity_id or not self.hass or self.is_active:
             return False
-        state = self.hass.states.get(self.entity_id)
-        if not state or state.state != "on":
+        if not self._adoptable_now():
             return False
         self._status.state = DeviceState.ACTIVE
         self._status.current_consumption_w = self.rated_power
@@ -1550,7 +1725,7 @@ class SwitchDevice(ComfortBandMixin, ControllableDevice):
         self._last_activated = self._status.last_activated  # (#644) unified clock
         owned = self._adopt_ownership()  # (#779) gated, in one place
         _LOGGER.info(
-            "%s: switch %s was ON at registration — belief adopted, %s",
+            "%s: %s was running at registration — belief adopted, %s",
             self.name, self.entity_id,
             "re-owned as active" if owned
             else f"left to the user (mode {self.control_mode.value})",
@@ -1569,11 +1744,7 @@ class SwitchDevice(ComfortBandMixin, ControllableDevice):
                 return 0.0
 
         try:
-            await self.hass.services.async_call(
-                "homeassistant", "turn_on",
-                {"entity_id": self.entity_id},
-                blocking=True,
-            )
+            await self.send("homeassistant", "turn_on", {"entity_id": self.entity_id})
             self._status.state = DeviceState.ACTIVE
             self._status.current_consumption_w = self.rated_power
             self._status.allocated_power_w = self.rated_power
@@ -1599,11 +1770,7 @@ class SwitchDevice(ComfortBandMixin, ControllableDevice):
                 return
 
         try:
-            await self.hass.services.async_call(
-                "homeassistant", "turn_off",
-                {"entity_id": self.entity_id},
-                blocking=True,
-            )
+            await self.send("homeassistant", "turn_off", {"entity_id": self.entity_id})
             self._status.state = DeviceState.IDLE
             self._status.current_consumption_w = 0.0
             self._status.allocated_power_w = 0.0
@@ -1825,11 +1992,7 @@ class ClimateDevice(ComfortBandMixin, ControllableDevice):
         # Set the mode first. If THIS fails the unit never turned on — report
         # ERROR and bail.
         try:
-            await self.hass.services.async_call(
-                "climate", "set_hvac_mode",
-                {"entity_id": self.entity_id, "hvac_mode": self.hvac_mode},
-                blocking=True,
-            )
+            await self.send("climate", "set_hvac_mode", {"entity_id": self.entity_id, "hvac_mode": self.hvac_mode})
         except Exception as e:
             _LOGGER.error("Failed to activate %s: %s", self.name, e)
             self._status.state = DeviceState.ERROR
@@ -1849,12 +2012,8 @@ class ClimateDevice(ComfortBandMixin, ControllableDevice):
 
         if self.target_temperature is not None:
             try:
-                await self.hass.services.async_call(
-                    "climate", "set_temperature",
-                    {"entity_id": self.entity_id,
-                     "temperature": self.target_temperature},
-                    blocking=True,
-                )
+                await self.send("climate", "set_temperature", {"entity_id": self.entity_id,
+                     "temperature": self.target_temperature})
             except Exception as e:
                 # Non-fatal: the unit is running in the right mode, only the
                 # comfort setpoint didn't take. Stay ACTIVE.
@@ -1887,11 +2046,7 @@ class ClimateDevice(ComfortBandMixin, ControllableDevice):
                 return
 
         try:
-            await self.hass.services.async_call(
-                "climate", "set_hvac_mode",
-                {"entity_id": self.entity_id, "hvac_mode": "off"},
-                blocking=True,
-            )
+            await self.send("climate", "set_hvac_mode", {"entity_id": self.entity_id, "hvac_mode": "off"})
             self._status.state = DeviceState.IDLE
             self._status.current_consumption_w = 0.0
             self._status.allocated_power_w = 0.0
@@ -1916,6 +2071,16 @@ class ClimateDevice(ComfortBandMixin, ControllableDevice):
             "target_temperature": self.target_temperature,
         })
         return d
+
+
+# (#940) The four session-start mechanisms, named once. ``start_session``
+# is an elif CHAIN and exactly one of these fires; which one is a property
+# of the config, and three separate places used to re-derive it by hand.
+SESSION_START_NONE = ""
+SESSION_START_SERVICE = "start_service"
+SESSION_START_CHARGE_MODE = "charge_mode"
+SESSION_START_STOP_ENTITY = "start_stop_entity"
+SESSION_START_CHARGER_SERVICE = "charger_service"
 
 
 class CurrentControlDevice(ControllableDevice):
@@ -1952,6 +2117,12 @@ class CurrentControlDevice(ControllableDevice):
         self.phases = phases
         self.voltage = voltage
         self.current_entity_id = current_entity_id
+        #: (#976) Whether a 0 A write to the current entity is a PAUSE (most
+        #: number entities) or a PERSISTED LIMIT the charge point keeps until
+        #: it is replaced — a lockout, not a stop. The builder knows which
+        #: integrations do that; this layer only knows the flag.
+        self.zero_amps_parks_a_limit = False
+        self._zero_refused_logged = False
         # #523 (RienduPre): a valid HA service is always ``domain.service``.
         # A junk value with no dot (his Wallbox config carried a stray
         # ``charger_service='0'`` — a leftover that even propagated to a
@@ -2000,8 +2171,15 @@ class CurrentControlDevice(ControllableDevice):
         self.global_services: bool = True  # True = services don't need entity_id (KEBA-style)
         # Start/stop control — per-integration (#82)
         # Entities: switch/button/select entity_ids for start/stop
-        self.start_stop_entity: Optional[str] = None  # switch or button entity
-        self.charge_mode_entity: Optional[str] = None  # select entity (go-e, OpenWB)
+        # (#804) Assigned through the property below, which refuses a
+        # device-restart entity from ANY caller — config, discovery, retry.
+        self._reboot_entity_refused: bool = False
+        #: (#804) The "nothing opened the contactor" warning is a standing
+        #: FACT about the configuration, not an event: said once per device,
+        #: not once per cycle for the life of the session.
+        self._no_stop_warned: bool = False
+        self._start_stop_entity: Optional[str] = None  # switch or button entity
+        self._charge_mode_entity: Optional[str] = None  # select (go-e, OpenWB)
         self.charge_mode_start: Optional[str] = None  # select option for "start"
         self.charge_mode_stop: Optional[str] = None  # select option for "stop"
         # Service-based start/stop (Easee action_command)
@@ -2019,10 +2197,44 @@ class CurrentControlDevice(ControllableDevice):
         # at 3 (cleared on the next successful write).
         self._actuation_failures: int = 0
         self._actuation_repair_raised: bool = False
+        # (#945) An enable switch that cannot be commanded is NOT a rejected
+        # command — it is the absence of a readable entity, which every HA
+        # restart produces for as long as the charger's integration takes to
+        # load. It gets a WALL-CLOCK hold of its own instead of borrowing the
+        # 3-strike counter above, which at a 10 s cycle is 30 seconds.
+        self._enable_blocked_since: Optional[float] = None
+        self._enable_blocked_repair_raised: bool = False
+        #: (#945 round 2) Seconds of BAD time this episode has accumulated —
+        #: a leaky bucket, filled while SEM is asserting the enable surface
+        #: and not getting it, drained one-for-one while it is fine.
+        #:
+        #: Neither a cycle count nor a wall clock survives contact with real
+        #: chargers. A cycle count is a promise about the coordinator's
+        #: interval (the #945 bug). A "since" timestamp retired by one good
+        #: cycle makes an OSCILLATING switch — the #536 Eco-Smart fault this
+        #: surface exists for — unreportable forever, and churns any standing
+        #: notice once per blip. And a "since" timestamp retired only by a
+        #: sustained good run counts the good time as fault time: a healthy
+        #: switch that goes ``unavailable`` for one cycle every 200 s (a
+        #: cloud charger's routine poll failure) reaches the verdict at the
+        #: same speed as a dead one. Only bad time may buy a verdict.
+        self._enable_blocked_for: float = 0.0
+        #: Cycle stamp of the last enable-surface observation, so the bucket
+        #: integrates WALL time and cannot be outrun by a fast interval.
+        self._enable_last_at: Optional[float] = None
+        #: (#945 round 2) Which sentence the standing notice carries, so a
+        #: surface whose fault CHANGES (an absent switch that comes back and
+        #: then refuses to hold) is re-filed with the truth instead of
+        #: keeping the first diagnosis forever.
+        self._enable_blocked_error: Optional[str] = None
         # #485 H5: whether this instance has cleared a possible STALE
         # persistent Repair left by a previous device instance.
         self._stale_repair_checked: bool = False
         self._session_active: bool = False
+        #: (#935) True while SEM is the reason this box is refusing to charge
+        #: — a park or a stop SEM itself issued. Read at teardown, so SEM can
+        #: hand a box back that it, and only it, told to say no.
+        self._sem_parked: bool = False
         # #553 — SEM's belief that the KEBA runaway-cap energy target is
         # armed (set by stop_session, cleared by start_session). Surfaced in
         # the diagnose service's ev_actuation block.
@@ -2032,6 +2244,179 @@ class CurrentControlDevice(ControllableDevice):
     @property
     def device_type(self) -> DeviceType:
         return DeviceType.CURRENT_CONTROL
+
+    def _is_reboot_entity(self, entity_id: str) -> bool:
+        """(#804) The saved-config twin of the discovery rule. HA's own
+        ``restart`` device class first — it says the same thing in every
+        language — then the words, for integrations that declare no class."""
+        device_class = None
+        try:
+            attrs = getattr(self.hass.states.get(entity_id), "attributes", None)
+            if isinstance(attrs, dict):
+                device_class = attrs.get("device_class")
+        except Exception:  # noqa: BLE001 — a probe, never fatal
+            device_class = None
+        return names_a_reboot(entity_id, device_class)
+
+    def _refuse_reboot(self, entity_id: Optional[str], role: str) -> bool:
+        if not entity_id or not self._is_reboot_entity(entity_id):
+            return False
+        if not self._reboot_entity_refused:
+            self._reboot_entity_refused = True
+            _LOGGER.warning(
+                "%s: %s restarts the charger, so SEM will not use it as the "
+                "%s — pressing it would reboot the box, not start the car. "
+                "Name the entity that starts and stops charging under "
+                "Configuration → EV chargers (#804).",
+                self.name, entity_id, role)
+        return True
+
+    @property
+    def charge_mode_entity(self) -> Optional[str]:
+        return self._charge_mode_entity
+
+    @charge_mode_entity.setter
+    def charge_mode_entity(self, entity_id: Optional[str]) -> None:
+        if self._refuse_reboot(entity_id, "charge-mode control"):
+            self._charge_mode_entity = None
+            return
+        self._charge_mode_entity = entity_id
+
+    @property
+    def start_stop_entity(self) -> Optional[str]:
+        return self._start_stop_entity
+
+    @start_stop_entity.setter
+    def start_stop_entity(self, entity_id: Optional[str]) -> None:
+        """(#804) The one door for the charger's start/stop entity, so a
+        device RESTART cannot come through any of them.
+
+        @HorizonKane's stored config named ``button.…_neustart`` — detection
+        had matched "start" inside the German word for restart — and SEM
+        pressed it to resume charging, rebooting the charger each time. The
+        word rule is also applied at discovery; here it covers what is
+        already SAVED, which no detection fix reaches. Refusing leaves the
+        charger with no start/stop surface, which is the truth, and the
+        #627 repair then says so.
+        """
+        if self._refuse_reboot(entity_id, "charger's start/stop control"):
+            self._start_stop_entity = None
+            return
+        self._start_stop_entity = entity_id
+
+    def _discrete_contactor_surfaces(self) -> tuple:
+        """(#940) ``(can_open, can_close)`` — has SEM a DISCRETE mechanism
+        for this charger, in each direction?
+
+        DISCRETE means the command flips a contactor surface — a start/stop
+        switch, a charge-mode select, a brand start/stop service, a brand
+        ``enable``/``disable`` — rather than riding the current number. The
+        distinction is the whole of #940: a 0 A write is a pilot-signal
+        pause the charger's own firmware interprets, while these four are
+        SEM opening and closing a relay, and a relay has a wear budget.
+
+        This is the same dispatch list ``start_session`` / ``stop_session``
+        / ``ChargerAdapter.ensure_enabled`` walk, read ONCE so its two
+        consumers — ``can_stop_charging`` (#627, the open side plus the 0 A
+        fallback) and ``contactor_surface`` (#940, either side) — cannot
+        drift from it or from each other when a brand is added.
+        """
+        can_open = can_close = False
+        if self.stop_service:
+            can_open = True
+        if self.start_service:
+            can_close = True
+        if self.charge_mode_entity:
+            if self.charge_mode_stop:
+                can_open = True
+            if self.charge_mode_start:
+                can_close = True
+        if self.start_stop_entity:
+            can_close = True
+            # (#804) A BUTTON only closes. #804 B4a routes a button
+            # charger's stop through the current write — there is no press
+            # that opens the contactor — so claiming the open side here was
+            # the #627 mutual delegation all over again: ``stop_session``
+            # deferred to the current write, ``_set_current(0)`` skipped it
+            # because the number's own minimum is 6 A, and the capability
+            # probe said SEM could stop a box nothing could stop. The anti-
+            # cycle floor still counts the press: it reads BOTH sides.
+            if str(self.start_stop_entity).split(".", 1)[0] != "button":
+                can_open = True
+        if self.charger_service:
+            domain = str(self.charger_service).split(".", 1)[0]
+            try:
+                if self.hass.services.has_service(domain, "disable"):
+                    can_open = True
+                if self.hass.services.has_service(domain, "enable"):
+                    can_close = True
+            except Exception:  # noqa: BLE001 — capability probe, never raise
+                pass
+        return can_open, can_close
+
+    # ── #940 — which mechanism IS the session start? ────────────────────
+    #
+    # ``start_session`` is an elif CHAIN: exactly one of four mechanisms
+    # fires, and which one is a property of the config, not of the caller.
+    # ``ChargerAdapter.ensure_enabled`` writes the start/stop entity — and
+    # used to conclude from that write that the SESSION was open
+    # (``_session_active = True``, #536). On a charger whose start is a
+    # charge-mode select or a brand service, that conclusion is false, and
+    # it is the flag ``command_current`` reads to decide whether to call
+    # ``start_session`` at all. The brand's start was therefore NEVER sent
+    # on the transition cycle — because on that cycle the enable switch is
+    # off (SEM's own stop left it so), which is exactly when the reconciler
+    # prepends the ENABLE that sets the flag. The box stayed on its stop
+    # mode, dropped the switch again, and SEM re-asserted it five times and
+    # then filed "enable switch will not stay on" against healthy hardware.
+    # The answer lives HERE, once, so the chain and its readers cannot
+    # drift — the same rule ``_discrete_contactor_surfaces`` follows.
+    def session_start_mechanism(self) -> str:
+        """(#940) Name the ONE branch ``start_session`` will dispatch.
+
+        Returns one of the ``SESSION_START_*`` constants; ``""`` when the
+        charger has no session-start mechanism at all (a bare current
+        number — the start rides the amp write)."""
+        if self.start_service:
+            return SESSION_START_SERVICE
+        if self.charge_mode_entity and self.charge_mode_start:
+            return SESSION_START_CHARGE_MODE
+        if self.start_stop_entity:
+            return SESSION_START_STOP_ENTITY
+        if self.charger_service:
+            return SESSION_START_CHARGER_SERVICE
+        return SESSION_START_NONE
+
+    def enable_entity_is_session_start(self) -> bool:
+        """(#940) True when asserting the enable surface IS starting the
+        session — i.e. ``start_session`` would send the very same
+        ``turn_on`` / ``press`` to the very same entity.
+
+        Only then may ``ensure_enabled`` claim the session, and only then
+        is claiming it a service: for a ``button.`` surface a second press
+        is not idempotent, which is why #536/#804 latched in the first
+        place."""
+        return (self.session_start_mechanism()
+                == SESSION_START_STOP_ENTITY)
+
+    @property
+    def contactor_surface(self) -> bool:
+        """(#940) True when SEM's own start or stop flips a relay.
+
+        A charger whose only control surface is the current number
+        degrades gracefully under a flapping decision — it rides the amp
+        ladder and the reconciler's holds, and a 0 A write is a pause, not
+        a contactor cycle. One with a switch / select / service surface has
+        nothing between the decision and the relay, so it is the one that
+        gets the anti-cycle dwell (``CONTACTOR_MIN_ON_S`` /
+        ``CONTACTOR_MIN_OFF_S`` in ``charger_reconciler``).
+        """
+        return any(self._discrete_contactor_surfaces())
+
+    def _zero_amps_would_lock(self) -> bool:
+        """(#976) A 0 A write here parks a limit the charge point keeps —
+        it is not a pause. Unset means unknown → treated as a pause."""
+        return bool(getattr(self, "zero_amps_parks_a_limit", False))
 
     def can_stop_charging(self) -> bool:
         """Whether SEM has ANY mechanism that can actually open the contactor.
@@ -2054,24 +2439,28 @@ class CurrentControlDevice(ControllableDevice):
         the same fields ``stop_session`` actually dispatches on, and the
         reconciler surfaces it instead of counting.
         """
-        if self.stop_service:
+        if self._discrete_contactor_surfaces()[0]:
             return True
-        if self.charge_mode_entity and self.charge_mode_stop:
-            return True
-        if self.start_stop_entity:
-            return True
-        if self.charger_service:
-            domain = str(self.charger_service).split(".", 1)[0]
-            try:
-                if self.hass.services.has_service(domain, "disable"):
-                    return True
-            except Exception:  # noqa: BLE001 — capability probe, never raise
-                pass
         # Last resort: a 0 A write, which only stops the car if the control
-        # entity can express 0. ``_bound_to_entity_range`` returns the
-        # skip-flag for exactly that question.
+        # entity can express 0.
+        return self._zero_write_can_stop()
+
+    def _zero_write_can_stop(self) -> bool:
+        """Can a 0 A write actually stop this charger?
+
+        The exact predicate that made the write unreachable in #627 —
+        ``_bound_to_entity_range``'s skip flag — plus #976's persisted-limit
+        refusal. Kept apart from ``can_stop_charging`` because the button
+        branch of ``stop_session`` rides THIS question alone: a press cannot
+        open a contactor, so "some other surface could" is no answer for it.
+        """
         entity = self.current_entity_id or self.charger_service_entity_id
         if not entity:
+            return False
+        # (#976) …and never where 0 A parks a persisted limit: without a
+        # discrete stop surface this charger cannot be stopped, and the #627
+        # Repair says so — its fix is the start/stop switch.
+        if self._zero_amps_would_lock():
             return False
         try:
             _bounded, skip = self._bound_to_entity_range(entity, 0)
@@ -2263,6 +2652,22 @@ class CurrentControlDevice(ControllableDevice):
         # skips the write entirely — the actual stop is the adapter's
         # job (pause switch / stop_session), and the number entity
         # cannot express it.
+        # (#976) Some integrations turn the current number into a charging
+        # profile the charge point KEEPS: a 0 A limit written there outlives
+        # the session and ends every later start a second after it is
+        # accepted — a lockout, not a pause (a charge point was left that way
+        # on 18.09). The builder marks such entities; the stop is the
+        # start/stop switch, and a 0 A write never leaves here.
+        if current <= 0 and self._zero_amps_would_lock():
+            if not getattr(self, "_zero_refused_logged", False):
+                self._zero_refused_logged = True
+                _LOGGER.warning(
+                    "%s: refusing to write 0 A to %s — on this integration a "
+                    "0 A limit is a persisted charging profile that locks the "
+                    "charge point, not a pause. The stop is the start/stop "
+                    "switch (ev_start_stop_entity); set it if SEM has not "
+                    "adopted it (#976).", self.name, self.current_entity_id)
+            return self._status.current_consumption_w
         _entity_target = None
         if _entity_svc_domain in ("number", "input_number"):
             _entity_target = self.current_entity_id or self.charger_service_entity_id
@@ -2292,19 +2697,11 @@ class CurrentControlDevice(ControllableDevice):
             elif _entity_svc_domain in ("number", "input_number"):
                 # Map it to the entity write it was meant to be.
                 target = self.current_entity_id or self.charger_service_entity_id
-                await self.hass.services.async_call(
-                    _entity_svc_domain, "set_value",
-                    {"entity_id": target, "value": current},
-                    blocking=True,
-                )
+                await self.send(_entity_svc_domain, "set_value", {"entity_id": target, "value": current})
             elif _entity_svc_domain == "select":
                 # Amps exposed as a select: options are amp strings.
                 target = self.current_entity_id or self.charger_service_entity_id
-                await self.hass.services.async_call(
-                    "select", "select_option",
-                    {"entity_id": target, "option": str(int(current))},
-                    blocking=True,
-                )
+                await self.send("select", "select_option", {"entity_id": target, "option": str(int(current))})
             elif self.charger_service:
                 # Service-based control — param name varies per integration (#82)
                 domain, service = self.charger_service.split(".", 1)
@@ -2315,23 +2712,24 @@ class CurrentControlDevice(ControllableDevice):
                 # Pass entity_id only if service requires it (non-global services)
                 elif self.charger_service_entity_id and not self.global_services:
                     service_data["entity_id"] = self.charger_service_entity_id
-                await self.hass.services.async_call(
-                    domain, service,
-                    service_data,
-                    blocking=True,
-                )
+                await self.send(domain, service, service_data)
             elif self.current_entity_id:
                 # Number entity control
-                await self.hass.services.async_call(
-                    "number", "set_value",
-                    {"entity_id": self.current_entity_id, "value": current},
-                    blocking=True,
-                )
+                await self.send("number", "set_value", {"entity_id": self.current_entity_id, "value": current})
 
             self._clear_actuation_failure()
 
-            self._current_setpoint = current
-            self._last_write_at = now  # #392: heartbeat tracker
+            # (#855) A WITHHELD send is not a write. Observer mode runs this
+            # whole path so the seam can record what it would have sent, but
+            # nothing left the process — so SEM must not claim a setpoint or
+            # refresh the write heartbeat. ``commanded_current`` is derived
+            # from ``_current_setpoint`` and the coordinator deliberately
+            # zeroes it while observing: in #536 a bridge automation on the
+            # test rig drove the REAL charger off a stale setpoint, which is
+            # exactly what publishing the WOULD value here would restore.
+            if not getattr(self, "observer_mode", False):
+                self._current_setpoint = current
+                self._last_write_at = now  # #392: heartbeat tracker
             self._record_power_change()
             consumed = self.current_to_watts(current) if current >= self.min_current else 0.0
             self._status.current_consumption_w = consumed
@@ -2377,7 +2775,17 @@ class CurrentControlDevice(ControllableDevice):
             _LOGGER.debug("actuation-failure repair raise failed: %s", exc)
 
     def _clear_actuation_failure(self) -> None:
-        """Reset the failure streak; clear the Repair after a good write."""
+        """Reset the failure streak; clear the Repair after a good write.
+
+        (#945) Deliberately does NOT touch the enable-block hold. A write to
+        the CURRENT entity says nothing about the ENABLE switch — different
+        entities — and ``stop_session`` ends in a 0 A write on every charger
+        without a discrete stop mechanism, so zeroing the hold here let a
+        charger drawing against SEM's IDLE reset it once per 60 s reassert
+        dwell, and the 300 s window then never elapsed at all.
+        The hold is retired by the reconciler, on a cycle that did not report
+        the enable surface blocked.
+        """
         if self._actuation_failures == 0 and not self._actuation_repair_raised:
             # #485 H5: the Repair is persistent (survives restart) but
             # these flags are instance state. After the reload that
@@ -2394,6 +2802,14 @@ class CurrentControlDevice(ControllableDevice):
                     _LOGGER.debug("stale actuation-repair clear failed: %s", exc)
             return
         self._actuation_failures = 0
+        if self._enable_blocked_repair_raised:
+            # (#945) This Repair belongs to the ENABLE surface, and a current
+            # write is no evidence about that switch. Retiring it here deleted
+            # the notice once per write while the already-elapsed hold stayed
+            # armed, so the next blocked cycle re-raised it with no fresh
+            # wait — a persistent ERROR Repair churning per write. The
+            # condition ending retires it, in ``_note_enable_unblocked``.
+            return
         if not self._actuation_repair_raised:
             return
         self._actuation_repair_raised = False
@@ -2402,6 +2818,185 @@ class CurrentControlDevice(ControllableDevice):
             _ri.clear_charger_actuation_failed(self.hass, self.device_id)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("actuation-failure repair clear failed: %s", exc)
+
+    def _note_enable_blocked(self, now: Optional[float] = None,
+                             error: Optional[str] = None) -> bool:
+        """(#945) The enable switch is not doing what SEM asked this cycle —
+        is that a Repair yet?
+
+        ``error`` is the sentence the owner reads and names WHICH fault this
+        is (``repair_issues.ENABLE_UNREADABLE`` /
+        ``ENABLE_WILL_NOT_HOLD``); it defaults to the unreadable one.
+
+        An unreadable enable switch is the ABSENCE of evidence, not a
+        rejected command: ``hass.states.get`` returns None for every entity
+        whose integration has not finished loading, so an HA restart is
+        indistinguishable from a renamed or app-locked switch. The old
+        surface fed this straight into ``_record_actuation_failure``, whose
+        threshold is three CYCLES — 30 seconds at the default interval — so
+        SEM filed a persistent ERROR Repair half a minute into every
+        restart, telling the owner that "the last 3+ current commands were
+        rejected" when no command had been sent at all (#945, alexmc1510).
+
+        The hold is the one #611 settled for exactly this question and that
+        #824 already applies to this very entity: ``UNAVAILABLE_REPAIR_
+        THRESHOLD_S`` of WALL CLOCK, so a warm-up cannot cry wolf however
+        fast the coordinator cycles. Returns True once the Repair stands.
+        """
+        if not self._note_enable_unasserted(now):
+            return False
+        try:
+            from ..coordinator import repair_issues as _ri
+            detail = str(error or _ri.ENABLE_UNREADABLE)
+            # A Repair the WRITE side raised owns the surface: three
+            # rejected commands are harder evidence than a silent switch,
+            # and both would be the same issue id.
+            if self._actuation_repair_raised and not self._enable_blocked_repair_raised:
+                return True
+            if (self._enable_blocked_repair_raised
+                    and self._enable_blocked_error == detail):
+                return True
+            # Either the first file of this episode, or the SAME episode
+            # whose fault has changed under it: an entity that was absent
+            # for the warm-up, came back, and then refused to hold is no
+            # longer "unavailable/locked", and the owner must not be left
+            # reading the first diagnosis forever. Same issue id, so the
+            # re-file replaces the notice rather than adding one.
+            self._enable_blocked_repair_raised = True
+            self._actuation_repair_raised = True
+            self._enable_blocked_error = detail
+            _ri.raise_charger_actuation_failed(
+                self.hass, self.device_id, name=self.name, error=detail,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — never fail the cycle over a repair
+            _LOGGER.debug("enable-blocked repair raise failed: %s", exc)
+            return False
+
+    def _note_enable_unasserted(self, now: Optional[float] = None) -> bool:
+        """(#945 round 2) SEM wants the enable surface ON and it is not —
+        open or advance the EPISODE clock, and answer "has this outlasted a
+        restart's warm-up yet?". Never raises a Repair: the cycles in which
+        SEM is still re-asserting the switch are part of the episode, not a
+        verdict about it.
+
+        The episode, not the sub-case, is what the clock is about. Round one
+        put the wall clock on the UNREADABLE switch only and left the
+        readable-but-``off`` one on ``_record_actuation_failure``'s three
+        CYCLES — so the hold covered the half of a restart in which the
+        entity does not exist yet, and the half after it appears (still
+        ``off``, because the integration has not reached the box) reached a
+        persistent ERROR Repair 80 s later. alexmc1510 restarted onto
+        2.1.0-beta.22 and got the same notice with the other sentence in it.
+        One episode — "SEM is asserting this switch and it is not holding" —
+        one clock, retired by the reconciler on a cycle that neither
+        re-asserts nor reports (``_note_enable_unblocked``).
+        """
+        if now is None:
+            now = time.monotonic()
+        if getattr(self, "observer_mode", False):
+            # (#945 round 2) Observer mode runs the whole decision and brand
+            # path and withholds only the SEND (#855). Not one ``turn_on``
+            # left the process, so there is nothing here that could have
+            # been refused — and this Repair tells the owner their hardware
+            # is out of SEM's control. These cycles DRAIN rather than merely
+            # not filling: an episode that was open when the switch was
+            # flipped would otherwise sit frozen at whatever level it had
+            # reached and file on the first cycle after observer mode ends,
+            # with no warm-up at all.
+            self._drain_enable_episode(now)
+            return False
+        hold = self._enable_hold_s()
+        if hold is None:
+            return False
+        delta = self._enable_tick(now)
+        if self._enable_blocked_since is None:
+            self._enable_blocked_since = now
+        # Capped at the hold: guilt is bounded, so RECOVERY is bounded too.
+        # An uncapped bucket after a day of a dead switch would need a day of
+        # good operation to pay off, and the notice would outlive the repair.
+        self._enable_blocked_for = min(hold, self._enable_blocked_for + delta)
+        return self._enable_blocked_for >= hold
+
+    def _enable_hold_s(self) -> Optional[float]:
+        """#611's warm-up, the one constant (class 46) — or None if the
+        repair module cannot be read, in which case nothing is decided."""
+        try:
+            from ..coordinator import repair_issues as _ri
+            return float(_ri.UNAVAILABLE_REPAIR_THRESHOLD_S)
+        except Exception as exc:  # noqa: BLE001 — never fail a cycle over a repair
+            _LOGGER.debug("enable-block hold unreadable: %s", exc)
+            return None
+
+    def _enable_tick(self, now: float) -> float:
+        """Wall seconds since the last enable observation. Never negative and
+        never the whole clock: the first observation of a lifetime has no
+        predecessor to measure from, so it buys nothing."""
+        last = self._enable_last_at
+        self._enable_last_at = now
+        if last is None or now <= last:
+            return 0.0
+        return now - last
+
+    def _drain_enable_episode(self, now: float) -> None:
+        """Good time pays the bucket down one-for-one; empty ends the
+        episode and retires a Repair this path raised."""
+        hold = self._enable_hold_s()
+        if hold is None:
+            return
+        delta = self._enable_tick(now)
+        self._enable_blocked_for = max(0.0, self._enable_blocked_for - delta)
+        if self._enable_blocked_for > 0.0:
+            return
+        self._enable_blocked_since = None
+        self._enable_blocked_error = None
+        if not self._enable_blocked_repair_raised:
+            return
+        self._enable_blocked_repair_raised = False
+        self._actuation_repair_raised = False
+        try:
+            from ..coordinator import repair_issues as _ri
+            _ri.clear_charger_actuation_failed(self.hass, self.device_id)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("enable-blocked repair clear failed: %s", exc)
+
+    def _note_enable_unblocked(self, now: Optional[float] = None) -> None:
+        """(#945) This cycle asked nothing of the enable surface — start or
+        advance the GOOD run, and once it has lasted as long as a fault would
+        have had to, retire the episode and a Repair this path raised.
+
+        Deliberately NOT ``_clear_actuation_failure``: that would also delete
+        a genuine #462 Repair raised by three REJECTED writes, a different
+        fact about the same charger sharing one issue id.
+
+        (class 84) And deliberately NOT a first-of-lifetime clear either. The
+        id is shared with the write side, and "the enable switch is not
+        blocked" is no evidence that current commands land — on a service- or
+        button-controlled charger there is no switch to be fine, so a
+        first-cycle clear there would delete a genuine "every command
+        rejected" Repair on the evidence of a switch that does not exist. A
+        Repair a PREVIOUS lifetime left on this id is retired by #485 H5's
+        first-good-write clear (``_stale_repair_checked``), which is evidence
+        that SEM can command this charger.
+
+        (round 2) And deliberately not an IMMEDIATE clear. A single good
+        cycle is not the end of the episode — it is what an oscillating
+        switch looks like between drops, and the #536 Eco-Smart/Autostart
+        fault this whole surface exists for IS an oscillation: the box lets
+        the relay go, SEM re-asserts, it reads ``on`` for one cycle, it is
+        off again. Retiring on that blip reset the fault clock forever (the
+        box became unreportable — strictly worse than crying wolf) and
+        churned any standing notice, raising and deleting it once per blip.
+        So good time pays the bucket down one second per second instead:
+        forgiveness costs exactly what accusation cost, a blip buys back only
+        a blip, and a charger the owner has actually fixed clears in the time
+        its fault had earned. A Repair a previous LIFETIME left behind is
+        still retired at once by #485 H5's first-good-write clear, which is
+        real evidence and needs no hold.
+        """
+        if now is None:
+            now = time.monotonic()
+        self._drain_enable_episode(now)
 
     def _session_energy_sensor_id(self):
         """Entity id of the box's OWN session-energy register sensor
@@ -2503,8 +3098,9 @@ class CurrentControlDevice(ControllableDevice):
         disable it. ``steady_failsafe`` (default on) controls persistence."""
         if not bool(getattr(self, "arm_failsafe_enabled", True)):
             _LOGGER.debug(
-                "%s: not arming the charger failsafe (keba_arm_failsafe off) — "
-                "a Repair guides disabling the box's own failsafe", self.name,
+                "%s: not arming the charger failsafe (arm-failsafe option "
+                "off) — a Repair guides disabling the box's own failsafe",
+                self.name,
             )
             return
         domain = (self.charger_service or "").split(".", 1)[0]
@@ -2514,15 +3110,12 @@ class CurrentControlDevice(ControllableDevice):
             fallback_a = max(6, int(round(self.min_current)))
             steady = bool(getattr(self, "steady_failsafe", True))
             persist = 1 if steady else 0
-            await self.hass.services.async_call(
-                domain, "set_failsafe",
-                {"failsafe_timeout": FAILSAFE_TIMEOUT_S,
-                 "failsafe_fallback": fallback_a, "failsafe_persist": persist},
-                blocking=True,
-            )
+            await self.send(domain, "set_failsafe", {"failsafe_timeout": FAILSAFE_TIMEOUT_S,
+                 "failsafe_fallback": fallback_a, "failsafe_persist": persist})
             _LOGGER.info(
-                "%s: KEBA failsafe set non-tripping (timeout=%ds, fallback=%dA, "
-                "persist=%d)", self.name, FAILSAFE_TIMEOUT_S, fallback_a, persist,
+                "%s: charger failsafe set non-tripping via %s.set_failsafe "
+                "(timeout=%ds, fallback=%dA, persist=%d)", self.name, domain,
+                FAILSAFE_TIMEOUT_S, fallback_a, persist,
             )
         except Exception as e:  # noqa: BLE001
             _LOGGER.warning("Failed to set charger failsafe: %s", e)
@@ -2547,20 +3140,90 @@ class CurrentControlDevice(ControllableDevice):
         if not domain or not self.hass.services.has_service(domain, "set_failsafe"):
             return
         try:
-            await self.hass.services.async_call(
-                domain, "set_failsafe",
-                {"failsafe_timeout": FAILSAFE_OFF_TIMEOUT_S,
-                 "failsafe_fallback": 0, "failsafe_persist": 1},
-                blocking=True,
-            )
+            sent = await self.send(domain, "set_failsafe", {"failsafe_timeout": FAILSAFE_OFF_TIMEOUT_S,
+                 "failsafe_fallback": 0, "failsafe_persist": 1})
+            # (#1009) "Asked", not "re-armed". A brand integration may floor
+            # the fallback at 6 A: the 0 A is then refused with no error, the
+            # box keeps the charging failsafe SEM armed at start (600 s /
+            # floor), and re-enables itself ~10 min after every stop (PROD
+            # 26.09.2026). The read-back says what the box actually did; a
+            # withheld (observer) write reads nothing back — the rigs share
+            # the real box and must not judge PROD's write.
             _LOGGER.info(
-                "%s: failsafe re-armed as dead-man's OFF (timeout=%ds, "
-                "fallback=0A, persisted) — the box holds the no while "
-                "SEM is away (#740)", self.name, FAILSAFE_OFF_TIMEOUT_S,
+                "%s: asked the box for a dead-man's OFF (failsafe timeout=%ds, "
+                "fallback 0 A, persisted); read-back in %ds says whether it "
+                "took (#740, #1009)", self.name, FAILSAFE_OFF_TIMEOUT_S,
+                FAILSAFE_READBACK_DELAY_S,
             )
+            if sent:
+                self._schedule_failsafe_readback()
         except Exception as e:  # noqa: BLE001
             _LOGGER.warning(
                 "Failed to arm the dead-man's-off failsafe: %s", e)
+
+    def _schedule_failsafe_readback(self) -> None:
+        """(#1009) One delayed look at the box's failsafe, after asking."""
+        try:
+            from homeassistant.helpers.event import async_call_later
+            async_call_later(self.hass, FAILSAFE_READBACK_DELAY_S,
+                             self._failsafe_readback)
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("%s: failsafe read-back not scheduled: %s",
+                          self.name, e)
+
+    def _failsafe_readback_state(self):
+        """The box's failsafe entity, or None when there is nothing to read.
+
+        Brand-blind: any binary_sensor carrying ``fallback_current`` and
+        ``failsafe_timeout`` attributes whose id shares this charger's brand
+        token (``_brand_key``). None is "could not ask", never "the box
+        agreed" (#925).
+        """
+        brand = self._brand_key()
+        if not brand:
+            return None     # no token to match on: any sensor could be another charger's
+        try:
+            states = self.hass.states.async_all("binary_sensor")
+        except Exception:  # noqa: BLE001
+            return None
+        for st in states or []:
+            attrs = getattr(st, "attributes", None) or {}
+            if "fallback_current" not in attrs or "failsafe_timeout" not in attrs:
+                continue
+            if brand and brand not in str(getattr(st, "entity_id", "")):
+                continue
+            return st
+        return None
+
+    @callback
+    def _failsafe_readback(self, _now=None) -> None:
+        """(#1009) Say what the box did with the dead-man's OFF, once."""
+        st = self._failsafe_readback_state()
+        if st is None:
+            _LOGGER.debug("%s: no failsafe read-back entity — the dead-man's "
+                          "OFF cannot be verified", self.name)
+            return
+        attrs = getattr(st, "attributes", None) or {}
+        try:
+            fallback = float(attrs.get("fallback_current") or 0)
+            timeout = float(attrs.get("failsafe_timeout") or 0)
+        except (TypeError, ValueError):
+            return
+        if fallback <= 0:
+            self._deadman_refused_logged = False   # fixed: a relapse is worth saying again
+            _LOGGER.info("%s: dead-man's OFF confirmed on read-back (%s: "
+                         "%.0f s / 0 A)", self.name, st.entity_id, timeout)
+            return
+        if getattr(self, "_deadman_refused_logged", False):
+            return
+        self._deadman_refused_logged = True
+        _LOGGER.warning(
+            "%s: the box kept its failsafe at %.0f s / %.0f A (%s) — it "
+            "refuses a 0 A fallback, so Off and Pause are best-effort here: "
+            "it will resume by itself about %.0f s after a stop. The Repair "
+            "SEM raises for this charger says what to change (#1009)",
+            self.name, timeout, fallback, st.entity_id, timeout,
+        )
 
     def _energy_target_sensor_id(self) -> Optional[str]:
         """Entity id of the box's OWN energy-target register sensor, if the
@@ -2663,9 +3326,7 @@ class CurrentControlDevice(ControllableDevice):
         if not (domain and self.hass.services.has_service(domain, "set_energy")):
             return
         try:
-            await self.hass.services.async_call(
-                domain, "set_energy", {"energy": 0}, blocking=True,
-            )
+            await self.send(domain, "set_energy", {"energy": 0})
             self._idle_guard_armed = False
             _LOGGER.info(
                 "%s: released a STALE energy-target guard the box still held "
@@ -2690,32 +3351,26 @@ class CurrentControlDevice(ControllableDevice):
         - Fallback: probe for domain.enable service (KEBA pattern)
         """
         try:
-            # 1. Profile-based start (preferred)
-            if self.start_service:
+            # 1. Profile-based start (preferred). (#940) The branch is
+            # NAMED by ``session_start_mechanism`` rather than re-derived
+            # here, so ``ensure_enabled`` asks the same question this
+            # answers and the two cannot drift apart.
+            mechanism = self.session_start_mechanism()
+            if mechanism == SESSION_START_SERVICE:
                 domain, service = self.start_service.split(".", 1)
                 data = dict(self.start_service_data or {})
                 if self.service_device_id:
                     data["device_id"] = self.service_device_id
-                await self.hass.services.async_call(domain, service, data, blocking=True)
-            elif self.charge_mode_entity and self.charge_mode_start:
-                await self.hass.services.async_call(
-                    "select", "select_option",
-                    {"entity_id": self.charge_mode_entity, "option": self.charge_mode_start},
-                    blocking=True,
-                )
-            elif self.start_stop_entity:
+                await self.send(domain, service, data)
+            elif mechanism == SESSION_START_CHARGE_MODE:
+                await self.send("select", "select_option", {"entity_id": self.charge_mode_entity, "option": self.charge_mode_start})
+            elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
                 if domain in ("switch", "input_boolean"):
-                    await self.hass.services.async_call(
-                        domain, "turn_on",
-                        {"entity_id": self.start_stop_entity}, blocking=True,
-                    )
+                    await self.send(domain, "turn_on", {"entity_id": self.start_stop_entity})
                 elif domain == "button":
-                    await self.hass.services.async_call(
-                        "button", "press",
-                        {"entity_id": self.start_stop_entity}, blocking=True,
-                    )
-            elif self.charger_service:
+                    await self.send("button", "press", {"entity_id": self.start_stop_entity})
+            elif mechanism == SESSION_START_CHARGER_SERVICE:
                 # 2. KEBA-style fallback: probe for enable/disable services
                 domain = self.charger_service.split(".", 1)[0]
 
@@ -2731,16 +3386,12 @@ class CurrentControlDevice(ControllableDevice):
                 # SEM start must release that guard or the session would end
                 # at 1 Wh. SEM owns the KEBA session-energy register.
                 if self.hass.services.has_service(domain, "set_energy"):
-                    await self.hass.services.async_call(
-                        domain, "set_energy",
-                        {"energy": energy_target_kwh if energy_target_kwh > 0 else 0},
-                        blocking=True,
-                    )
+                    await self.send(domain, "set_energy", {"energy": energy_target_kwh if energy_target_kwh > 0 else 0})
                     self._idle_guard_armed = False
 
                 # Pilot cycle: disable/enable for cars that need fresh signal
                 if self.needs_pilot_cycle and self.hass.services.has_service(domain, "disable"):
-                    await self.hass.services.async_call(domain, "disable", {}, blocking=True)
+                    await self.send(domain, "disable", {})
                     await asyncio.sleep(3)
 
                 # Enable charger. The historically-working sequence
@@ -2755,9 +3406,10 @@ class CurrentControlDevice(ControllableDevice):
                 # IDLE-debounce — see ``actuate.py``), which prevents
                 # ``keba.disable`` from firing on transient solar dips.
                 if self.hass.services.has_service(domain, "enable"):
-                    await self.hass.services.async_call(domain, "enable", {}, blocking=True)
+                    await self.send(domain, "enable", {})
 
             self._session_active = True
+            await self._remember_parked(False)   # (#935) SEM said yes again
             _LOGGER.info("Charging session started for %s", self.name)
         except Exception as e:
             _LOGGER.error("Failed to start session on %s: %s", self.name, e)
@@ -2775,21 +3427,35 @@ class CurrentControlDevice(ControllableDevice):
         every charge — which is why a plug-in never auto-started for him.
         """
         domain = (self.charger_service or "").split(".", 1)[0]
+        _parked_it = False
         try:
             if domain and self.hass.services.has_service(domain, "disable"):
-                await self.hass.services.async_call(
-                    domain, "disable", {}, blocking=True)
+                await self.send(domain, "disable", {})
+                _parked_it = True
                 _LOGGER.info(
                     "%s: parked OFF on disconnect via %s.disable — the box "
                     "holds the no until the next charge", self.name, domain)
             elif self.start_stop_entity:
                 sdomain = self.start_stop_entity.split(".")[0]
                 if sdomain in ("switch", "input_boolean"):
-                    await self.hass.services.async_call(
-                        sdomain, "turn_off",
-                        {"entity_id": self.start_stop_entity}, blocking=True)
+                    await self.send(sdomain, "turn_off", {"entity_id": self.start_stop_entity})
+                    _parked_it = True
         except Exception as e:  # noqa: BLE001 — surfaced, never fatal
             _LOGGER.error("park_off(%s): disable failed: %s", self.name, e)
+
+        # (#935) SEM is the reason this box is saying no, so SEM owes it a
+        # yes when SEM goes away. Recorded explicitly rather than inferred
+        # from the intent enum: ``command_disable`` and ``command_park_off``
+        # both end at DISABLE, and only one of them means "SEM parked it".
+        #
+        # (#935 review) And ONLY when a park actually landed. Set
+        # unconditionally, a charger with no disable service and no
+        # start/stop entity — the documented "stop is unenforceable" config —
+        # took the flag without a single write, and the teardown would then
+        # "hand back" a box SEM had never touched. That is the #908 rule
+        # inverted, by the code that exists to honour it.
+        if _parked_it:
+            await self._remember_parked(True)
 
         # SEM is done with this session whether or not every write landed —
         # set the bookkeeping first so a best-effort failure below cannot
@@ -2813,6 +3479,138 @@ class CurrentControlDevice(ControllableDevice):
         except Exception as e:  # noqa: BLE001
             _LOGGER.debug("park_off(%s): dead-man arm skipped: %s", self.name, e)
 
+    async def _remember_parked(self, parked: bool) -> None:
+        """(#935 review) The park debt, written where it outlives this process.
+
+        ``_sem_parked`` alone was an instance attribute rebuilt False on every
+        setup, and the reconciler cannot re-derive it: ``PARK_OFF`` fires on
+        the connect→disconnect EDGE, and a box that is already empty at boot
+        is a steady state, not an edge (``charger_reconciler``: "an empty box
+        at boot has nothing to park"). So park → restart → remove left the
+        charger disabled with its persisted dead-man failsafe holding 0 A and
+        nothing on the system that knew why — the precise sentence this whole
+        issue opens with. Same hole #949 had just closed one layer over, for
+        the inverter's charge limit.
+        """
+        self._sem_parked = bool(parked)
+        store = getattr(self, "_park_store", None)
+        if store is None:
+            return
+        try:
+            record = await store.async_load() or {}
+            ids = set(record.get("parked") or [])
+            key = str(getattr(self, "charger_id", "") or self.name)
+            if parked:
+                ids.add(key)
+            else:
+                ids.discard(key)
+            await store.async_save({"parked": sorted(ids)})
+        except Exception:  # noqa: BLE001 — a record never costs a command
+            _LOGGER.debug("%s: could not record the park state", self.name,
+                          exc_info=True)
+
+    def adopt_park_state(self, parked_ids) -> None:
+        """Take over a park this install left behind in a previous lifetime."""
+        key = str(getattr(self, "charger_id", "") or self.name)
+        if key in set(parked_ids or ()):
+            self._sem_parked = True
+
+    async def release_to_user(self, *, reason: str = "removal") -> Optional[str]:
+        """(#935) Hand the box back when SEM goes away for good.
+
+        A parked box holds its "no" three ways: the contactor is disabled, the
+        stored current is 0 A, and a PERSISTED dead-man failsafe re-asserts
+        0 A every few minutes. Together that is exactly the point — the box
+        keeps refusing while SEM is not there to say otherwise (#740). It is
+        also why removing SEM leaves a charger that will not start and gives
+        no reason: the standing no outlives the thing that meant it.
+
+        So on removal and on disable, SEM undoes its own three:
+
+        1. **enable** — the same four-way ``start_session`` uses: the profile's
+           start service, a charge-mode select, a start/stop switch, or the
+           charger domain's own ``enable``. Never the domain's *authorise*
+           call: authorisation is the owner's, not ours, and SEM has never
+           touched it.
+        2. **failsafe** — re-armed at the CHARGING fallback rather than 0 A,
+           so a box left alone lands on its floor instead of on a standing
+           off. Skipped entirely when SEM never armed it (the arm-failsafe
+           option off), because then there is nothing of SEM's to undo.
+        3. **nothing else** — no current is written, no session is opened, no
+           energy target is set. Handing a box back is not starting a charge.
+
+        Gated on ``_sem_parked``: a box SEM never parked is left exactly as
+        found. That is #908's rule, which #936 extended to batteries and #949
+        to the inverter's charge limit; the charger is the last one.
+
+        Returns a one-line description of what it did, or None when there was
+        nothing to undo. Never raises — a teardown must always complete.
+        """
+        if not getattr(self, "_sem_parked", False):
+            return None
+        did: list[str] = []
+        # (#935 review) BOUNDED. ``hass.services.async_call`` takes no timeout
+        # and neither did anything here, so a charger integration whose
+        # handler stalls — an ordinary failure for a cloud-backed one — hung
+        # ``async_remove_entry``, which HA awaits while holding the entry's
+        # setup lock. The removal would simply never finish. A hand-back is
+        # best-effort by nature; nothing here is worth blocking a removal.
+        async def _bounded(coro):
+            return await asyncio.wait_for(coro, timeout=_RELEASE_TIMEOUT_S)
+
+        try:
+            # (#940) The same ONE resolver ``start_session`` dispatches on —
+            # this chain used to be a second hand-written copy of it, and a
+            # brand added to one would have been missed by the other.
+            mechanism = self.session_start_mechanism()
+            if mechanism == SESSION_START_SERVICE:
+                domain, service = self.start_service.split(".", 1)
+                data = dict(self.start_service_data or {})
+                if self.service_device_id:
+                    data["device_id"] = self.service_device_id
+                await _bounded(self.send(domain, service, data))
+                did.append(self.start_service)
+            elif mechanism == SESSION_START_CHARGE_MODE:
+                await _bounded(self.send("select", "select_option", {
+                    "entity_id": self.charge_mode_entity,
+                    "option": self.charge_mode_start}))
+                did.append(f"{self.charge_mode_entity}={self.charge_mode_start}")
+            elif mechanism == SESSION_START_STOP_ENTITY:
+                domain = self.start_stop_entity.split(".")[0]
+                if domain in ("switch", "input_boolean"):
+                    await _bounded(self.send(
+                        domain, "turn_on",
+                        {"entity_id": self.start_stop_entity}))
+                    did.append(f"{self.start_stop_entity} on")
+            elif mechanism == SESSION_START_CHARGER_SERVICE:
+                domain = self.charger_service.split(".", 1)[0]
+                if self.hass.services.has_service(domain, "enable"):
+                    await _bounded(self.send(domain, "enable", {}))
+                    did.append(f"{domain}.enable")
+        except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001
+            _LOGGER.warning("release_to_user(%s): enable failed: %s",
+                            self.name, e)
+        try:
+            # Puts the charging fallback back over the dead-man OFF. Its own
+            # opt-out check means this is a no-op on a box SEM never armed.
+            await _bounded(self.arm_failsafe())
+            did.append("failsafe → charging fallback")
+        except (Exception, asyncio.TimeoutError) as e:  # noqa: BLE001
+            _LOGGER.debug("release_to_user(%s): failsafe reset skipped: %s",
+                          self.name, e)
+        # (#935, live on PROD 13.09) Clear the RECORD, not just the flag. The
+        # hand-back set `_sem_parked = False` and left
+        # `sem.parked.<entry>` still naming this charger, so the next setup
+        # adopted a park that had already been handed back — and the next
+        # disable would "enable" a box SEM had not disabled. The debt is paid;
+        # the ledger has to say so.
+        await self._remember_parked(False)
+        if not did:
+            return None
+        said = f"{self.name}: handed back on {reason} — " + ", ".join(did)
+        _LOGGER.info("#935 %s", said)
+        return said
+
     async def stop_session(self) -> None:
         """Stop the charging session.
 
@@ -2831,34 +3629,36 @@ class CurrentControlDevice(ControllableDevice):
                 data = dict(self.stop_service_data or {})
                 if self.service_device_id:
                     data["device_id"] = self.service_device_id
-                await self.hass.services.async_call(domain, service, data, blocking=True)
+                await self.send(domain, service, data)
                 stop_method = f"stop_service={self.stop_service}"
             elif self.charge_mode_entity and self.charge_mode_stop:
-                await self.hass.services.async_call(
-                    "select", "select_option",
-                    {"entity_id": self.charge_mode_entity, "option": self.charge_mode_stop},
-                    blocking=True,
-                )
+                await self.send("select", "select_option", {"entity_id": self.charge_mode_entity, "option": self.charge_mode_stop})
                 stop_method = f"charge_mode={self.charge_mode_stop}"
             elif self.start_stop_entity:
                 domain = self.start_stop_entity.split(".")[0]
                 if domain in ("switch", "input_boolean"):
-                    await self.hass.services.async_call(
-                        domain, "turn_off",
-                        {"entity_id": self.start_stop_entity}, blocking=True,
-                    )
+                    await self.send(domain, "turn_off", {"entity_id": self.start_stop_entity})
                     stop_method = f"{domain}.turn_off={self.start_stop_entity}"
                 elif domain == "button":
-                    # Stop buttons have different entity_ids than start buttons
-                    # The stop entity is typically named *_stop_charging*
-                    stop_entity = self.start_stop_entity.replace("resume", "stop").replace("start", "stop")
-                    if "_charging" not in stop_entity:
-                        stop_entity = stop_entity.replace("_stop", "_stop_charging")
-                    await self.hass.services.async_call(
-                        "button", "press",
-                        {"entity_id": stop_entity}, blocking=True,
-                    )
-                    stop_method = f"button.press={stop_entity}"
+                    # (#804 B4a) The old code GUESSED a stop button by
+                    # string-rewriting the start entity's id (resume→stop,
+                    # then _stop→_stop_charging) — pressing an entity nobody
+                    # named, on the strength of a naming convention. Deleted.
+                    # A button-surface charger (Zaptec resume, Wattpilot
+                    # start) stops through the CURRENT path — command_idle
+                    # writes 0, which both reporters' hardware honours as a
+                    # soft pause — and the button exists to come BACK, via
+                    # ensure_enabled. Pressing a guessed id is worse than
+                    # pressing nothing.
+                    # …and only when that write can actually land. On a box
+                    # whose current number stops at 6 A the 0 A write is
+                    # skipped (#487), so naming a stop method here recorded
+                    # a park debt for a stop that never happened and hid the
+                    # #627 repair. Say nothing fired, and the warning below
+                    # plus ``can_stop_charging`` tell the truth.
+                    if self._zero_write_can_stop():
+                        stop_method = ("current-0 (button surface: stop rides "
+                                       "the current write)")
             elif self.charger_service:
                 # KEBA-style fallback
                 domain = self.charger_service.split(".", 1)[0]
@@ -2933,14 +3733,14 @@ class CurrentControlDevice(ControllableDevice):
                     #
                     # A disable opens the contactor — measured 3 s to stop a
                     # drawing box. Nothing else is needed.
-                    await self.hass.services.async_call(
-                        domain, "disable", {}, blocking=True)
+                    await self.send(domain, "disable", {})
                     stop_method = f"{domain}.disable"
                 else:
                     _LOGGER.warning(
                         "stop_session(%s): charger_service=%s configured but "
                         "%s.disable service is not registered — falling back to "
-                        "_set_current(0) which does NOT stop KEBA-style contactors. "
+                        "_set_current(0), which does NOT open a service-"
+                        "controlled contactor. "
                         "Check that the underlying charger integration is loaded.",
                         self.name, self.charger_service, domain,
                     )
@@ -2965,24 +3765,33 @@ class CurrentControlDevice(ControllableDevice):
             # the box's own standing "no" for the window where SEM is not
             # there to say it.
             await self.arm_failsafe_off()
+            # (#935) Same standing "no" as park_off, so the same debt — and
+            # only when a stop mechanism actually fired (``stop_method`` is
+            # None when SEM relied on _set_current(0) alone and wrote no
+            # standing refusal to undo).
+            if stop_method is not None:
+                await self._remember_parked(True)
             self._session_active = False
             self._status.state = DeviceState.IDLE
             self._status.current_consumption_w = 0.0
             self._current_setpoint = 0.0
             self._last_write_at = 0.0  # #392: reset heartbeat tracker on session stop
 
-            if stop_method is None:
+            if stop_method is None and not self._no_stop_warned:
+                self._no_stop_warned = True
                 # No brand-specific stop fired — relying on _set_current(0) alone.
                 # That works on Wallbox / Easee / go-e / OpenEVSE (firmware treats
                 # 0 A as pause) but NOT on KEBA (0 A is "minimum", contactor stays
                 # closed; needs keba.disable). Warning so this case is visible in
                 # PROD logs the next time the bug class re-emerges.
                 _LOGGER.warning(
-                    "stop_session(%s): no brand-specific stop mechanism "
-                    "configured (stop_service=None, charge_mode_entity=None, "
-                    "start_stop_entity=None, charger_service=None). Relying on "
-                    "_set_current(0) alone — confirm your charger firmware "
-                    "treats 0 A as a stop signal, not as a minimum hold.",
+                    "stop_session(%s): no mechanism opened the contactor — "
+                    "no stop service, no charge-mode stop option, no "
+                    "start/stop switch (a button only starts), no "
+                    "<domain>.disable. Relying on _set_current(0) alone — "
+                    "confirm your charger firmware treats 0 A as a stop "
+                    "signal, not as a minimum hold, and that its current "
+                    "entity can be written to 0.",
                     self.name,
                 )
             else:
@@ -3060,11 +3869,7 @@ class SetpointDevice(ControllableDevice):
 
         target = min(self.max_setpoint, self.normal_setpoint + self.boost_offset)
         try:
-            await self.hass.services.async_call(
-                "climate", "set_temperature",
-                {"entity_id": self.climate_entity_id, "temperature": target},
-                blocking=True,
-            )
+            await self.send("climate", "set_temperature", {"entity_id": self.climate_entity_id, "temperature": target})
             self._boosted = True
             self._status.state = DeviceState.ACTIVE
             self._status.current_consumption_w = self.rated_power
@@ -3085,11 +3890,7 @@ class SetpointDevice(ControllableDevice):
             return
 
         try:
-            await self.hass.services.async_call(
-                "climate", "set_temperature",
-                {"entity_id": self.climate_entity_id, "temperature": self.normal_setpoint},
-                blocking=True,
-            )
+            await self.send("climate", "set_temperature", {"entity_id": self.climate_entity_id, "temperature": self.normal_setpoint})
             self._boosted = False
             self._status.state = DeviceState.IDLE
             self._status.current_consumption_w = 0.0
@@ -3196,11 +3997,7 @@ class ScheduleDevice(ControllableDevice):
             return 0.0
 
         try:
-            await self.hass.services.async_call(
-                "homeassistant", "turn_on",
-                {"entity_id": self.entity_id},
-                blocking=True,
-            )
+            await self.send("homeassistant", "turn_on", {"entity_id": self.entity_id})
             self._started = True
             self._start_time = datetime.now()
             self._status.state = DeviceState.ACTIVE
@@ -3317,7 +4114,14 @@ def surplus_device_from_spec(
             comfort_offset=float(spec.get("comfort_offset", 0.0) or 0.0),
             comfort_limit=float(spec.get("comfort_limit", 0.0) or 0.0),
         )
-    return SwitchDevice(
+    # (#880) NOT a bare SwitchDevice. Every service-registered device comes
+    # back through here at every restart, and the register_surplus_device
+    # schema takes ``entity_id`` as a plain string — so a my-PV AC-THOR
+    # registered by an automation got a SwitchDevice calling
+    # ``homeassistant.turn_on`` on a ``number`` entity: no such service, the
+    # error swallowed, the device parked in ERROR at 0 W. That IS the bug
+    # this issue is about, on the one path its first fix did not reach.
+    return device_class_for_control(entity_id)(
         hass=hass,
         device_id=device_id,
         name=name,
@@ -3327,3 +4131,11 @@ def surplus_device_from_spec(
         power_entity_id=power_entity_id,
         energy_entity_id=energy_entity_id,
     )
+
+
+# (#880) Re-exported so `from .base import PowerSetpointDevice` works for the
+# call sites that already import every other device class from here. The
+# class lives in its own module: this file is already 3,900 lines.
+from .power_setpoint import (  # noqa: E402,F401
+    PowerSetpointDevice, device_class_for_control,
+)

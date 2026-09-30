@@ -305,6 +305,9 @@ class TestEnrichedScheduleForDay:
                        PriceLevel.CHEAP if h<6 else PriceLevel.EXPENSIVE if h>=17 and h<20 else PriceLevel.NORMAL)
             for h in range(24)
         ]
+        # Deliberately bare: rendering a schedule must not need a price
+        # entity, a cache, or any other attribute a real __init__ sets
+        # (#994 — an absence word that re-read the live price broke this).
         prov = DynamicTariffProvider.__new__(DynamicTariffProvider)
         prov._read_prices_list = lambda: prices
         sched = prov.get_schedule_for_day()

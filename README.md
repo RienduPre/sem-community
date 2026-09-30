@@ -26,19 +26,23 @@ SEM monitors your solar production, battery, grid, EV charger, and household dev
 ## Features
 
 - **Smart EV charging** — dynamic 6-32A current control based on real-time solar surplus
-- **Five charging modes** — Solar only, Solar + cheapest hours, Min + Solar, Always (max), Off
+- **Six charging modes** — Solar only, **Solar + battery**, Solar + cheapest hours, Min + Solar, Always (max), Off
 - **Auto mode** — automatically switches between self-consumption and fast charging based on solar forecast vs EV need
-- **1↔3-phase switching (#804)** — for wallboxes with a phase-switch entity (go-e, KEBA X-series, openWB): SEM measures the active phases from the real draw, offers a per-charger **Phase Mode** (Auto / 1-phase / 3-phase), and switches through a safe *stop → switch → settle → start* sequence with hysteresis and hard interval/session caps. Auto scales the charger to fit the surplus; manual winter-pins 1-phase for low sun. See [docs/EV_CHARGING_LOGIC.md](docs/EV_CHARGING_LOGIC.md#phase-switching--13phase-observed-manual-and-automatic-804)
+- **1↔3-phase switching (#804)** — *off by default in 2.1 while the model is reworked; enable per charger under Configuration → EV chargers → Phase switching.* For wallboxes with a phase-switch entity (go-e, KEBA X-series, openWB): SEM measures the active phases from the real draw, offers a per-charger **Phase Mode** (Auto / 1-phase / 3-phase), and switches through a safe *stop → switch → settle → start* sequence with hysteresis and hard interval/session caps. Auto scales the charger to fit the surplus; manual winter-pins 1-phase for low sun. See [docs/EV_CHARGING_LOGIC.md](docs/EV_CHARGING_LOGIC.md#phase-switching--13phase-observed-manual-and-automatic-804)
 - **Battery-aware** — four-zone SOC strategy decides when battery helps the EV and when it charges first
 - **Min/Max charge-target range** — a per-charger dual-handle slider (kWh or SOC %): **Min** is the guaranteed amount (night/grid tops up to it), **Max** is the solar ceiling (surplus charges up to it, then stops). E.g. *Min 50% / Max 80%* — always keep 50% from the grid, let solar add up to 80% for battery longevity. Max defaults to full (charge freely from sun)
 - **Charge-by deadline** — set a per-charger "be ready by HH:MM" time and SEM scales the night current to reach Min by then (overriding the gentle ramp when time is short), and warns if the target can't physically be met in time. "Set as default" copies a charger's target + deadline to the global defaults
-- **Tariff-optimized charging** — opt-in per charger: defer night charging to the cheapest contiguous price window (Min still guaranteed by the deadline) and pause daytime grid top-up during expensive hours — surfaced live as the next-cheap-window on the EV card
+- **Tariff-optimized charging** — opt-in per charger: defer night charging to the cheapest contiguous price window (Min still guaranteed by the deadline), **top the Min floor up from grid on a cheap or negative price hour during the day** (#856), and pause grid top-up during expensive hours — surfaced live as the next-cheap-window on the EV card
 - **Night charging with battery protection** — charges EV from grid overnight without draining home battery
 - **Battery export arbitrage** — on a dynamic/spot tariff, opt-in sell the home battery to the grid when the export price beats the cost of recharging later (round-trip + wear accounted for); never below your reserve SOC, brand-agnostic, shown live as a "Selling to grid" state. See [docs/BATTERY_EXPORT_ARBITRAGE.md](docs/BATTERY_EXPORT_ARBITRAGE.md)
+- **Battery → car in the evening (2.1, #778/#878)** — set a charger to **Solar + battery** and the home battery keeps charging the car after the sun has gone, but only down to the level the house still needs to reach dawn (measured from your own nights, never below your buffer), and only when tomorrow's forecast is expected to put it back.
+- **Forecast-led battery spending (2.1, #778)** — your battery's overnight floor stops being a number you typed once in June and becomes an answer: *how much of the pack can tonight actually spare, given what your house really uses overnight and how much tomorrow's sun is expected to put back?* Every term is measured — the pack's real capacity, the high-percentile envelope of your own recorded nights, tomorrow's forecast after house load and committed EV charge, scaled by how accurate that horizon has actually proven. **Off by default**, and while it is off every number is still measured and shown, so you can watch it be right before letting it spend. Two separate permissions (*may sell to the grid*, *may assist the car*) rather than one mode. See [Forecast-Led Spending](docs/USER_GUIDE.md#forecast-led-spending-v21)
+- **Paced battery charging (2.1, #820)** — a pack that fills flat-out is full by 11:30 and then clips the whole afternoon. SEM spreads the fill across the day from the solar forecast minus house forecast, so the battery lands full at day's end and the surplus in between goes to the car, the loads, or the grid. Opt-in; declines to pace on a forecast it has not earned trust in, and charges flat-out below the safety buffer regardless
 - **Hot water solar boost** — SEM supplements your existing heating system with solar surplus (does not replace your boiler/heat pump), with mandatory Legionella prevention cycle (DVGW W 551, SIA 385/1, ÖNORM B 5019)
 - **Multi-device surplus distribution** — EV, heat pump, hot water, appliances — each gets surplus by priority, with appliance dependency chains (e.g. heater only runs when pump is active)
 - **Daily runtime goals for household loads (#620)** — give any switch a **Min / Max runtime** window (e.g. *pool pump ≥ 4 h, ≤ 8 h/day*) via a dual-handle slider, a daytime **mode** (Off / Peak-only / Solar only / **Solar + battery** assist), and a **"Finish overnight from"** picker — **Off / Battery / Grid** (cheap-tariff window) — for completing the runtime when the sun runs short. Plus an optional stop condition picked with an entity search (e.g. water-temp ≥ 28 °C, car SOC ≥ 80 %). No forced grid deadlines. The load is prioritised in the one device list and exposes a surplus-event interface for your own automations. See [`docs/LOAD_PRIORITY.md`](docs/LOAD_PRIORITY.md).
-- **Peak load management** — automatic device shedding to stay under your grid limit
+- **Peak load management** — two halves. *Reactive:* automatic device shedding once the rolling average approaches your grid limit. *Preventive (2.1, #864):* demand tariffs bill the average import of each fixed 15-minute clock slot, so waiting for the average to cross is too late by definition — an EV was measured charging at **9.9 kW under a 6.0 kW target** with the state reading `normal` throughout. SEM now tracks each billing slot's remaining budget at the meter and bounds **everything it commands** by it before writing — the EV offer in every mode, the battery's cheap-hours grid charging, and cheap-hours load starts that cannot fit. It floors at minimum current rather than stopping a car on a transient. Off-switch is the one that already exists: the Target Limit slider at MAX
+- **The grid is not always a sink (2.1, #921)** — on a spot feed-in tariff the export price goes negative. SEM measures what that costs, gives every destination a per-cycle OPEN/HELD/CLOSED verdict, keeps the energy in the battery, the car, the house and the loads first, and — with the export guard on — caps feed-in at zero at the inverter for the duration, with hysteresis and a hand-back. Huawei (services), Deye (work mode), any writable export-limit number. All of it off by default.
 - **Solar forecast integration** — Solcast, Forecast.Solar or Open-Meteo Solar Forecast for smart charging decisions
 - **Dynamic tariff support** — Tibber, Nordpool, aWATTar, Amber Electric, Octopus Energy price-responsive charging
 - **200+ sensors and entities** — power, energy, flows, costs, performance, forecasts, and more
@@ -54,6 +58,13 @@ SEM monitors your solar production, battery, grid, EV charger, and household dev
 - **EV battery health** — tracks capacity degradation from partial charge sessions over months
 - **Hardware compatibility test suite** — 150+ automated tests covering all supported hardware — every inverter + charger combination verified in CI
 - **Transparent auto-detection (#814)** — the dashboard **Configuration → Detected hardware** section shows every device SEM found with the evidence for each role, and names *near-misses* (a brand almost supported) instead of silently detecting nothing. The full support matrix with an honest per-brand status is generated and CI-guarded: [docs/SUPPORTED_HARDWARE.md](docs/SUPPORTED_HARDWARE.md)
+- **Hardware SEM has never met (2.1, #915)** — SEM reads each integration's own list of entities and services, so a brand nobody reported is recognised and proposed on the Configuration tab. You confirm; SEM binds nothing it guessed.
+- **Your inverter's house figure (2.1, #891)** — name the house power sensor your inverter reports and SEM shows it beside its own, with the difference.
+- **Pause a charger (2.1, #980)** — pick a time, press Pause: the charge mode goes Off and comes back on its own.
+- **Loads set by watts (2.1, #880)** — a load with a watt number (my-PV AC-THOR and similar) is given the watts it should draw, not just switched on.
+- **Two more setpoint models (2.1, #809/#869)** — a battery whose setpoint counts the other way (Victron ESS), or takes a direction select plus watts (Anker Solix).
+- **Modules (2.1, #923)** — SEM shows what your install has. A solar-only house gets no battery entities.
+- **Removal hands the house back (2.1, #935)** — a load SEM switched on is switched off, a parked wallbox is released, and nothing else is touched.
 
 ---
 
@@ -110,9 +121,7 @@ Beta releases are tested on real hardware before publishing but may contain roug
 Before setting up SEM, make sure you have:
 
 - **Home Assistant 2026.2.0** or newer
-- **Energy Dashboard configured** — SEM reads your solar and grid sensors from the HA Energy Dashboard (Settings > Energy). You need at least:
-  - A solar production sensor (W)
-  - A grid consumption sensor (W)
+- **A solar production sensor (W) and a grid sensor (W)** — SEM reads them from the HA Energy Dashboard when it is set up, and asks your system directly when it is not (#915): the installer proposes the sensors your installed integrations declare, and you confirm them. No Energy Dashboard required.
 - **Battery capacity** is auto-detected from your inverter (v1.2.1+)
 - **Optional but recommended:**
   - Battery SOC (%) and power (W) sensors
@@ -167,13 +176,14 @@ Key settings you can adjust (all have sensible defaults):
 | Battery buffer SOC | 70% | Above this, battery can help charge the EV |
 | Battery auto-start SOC | 90% | Above this, EV starts even without solar surplus |
 | Min solar power | 500W | Minimum surplus before solar EV charging starts |
-| Observer mode | Off | Read-only mode for test systems (no hardware control) |
+| Observer mode | **On** | SEM watches and shows what it *would* do, commanding nothing. Turn it off when the decisions look right. |
 
 For detailed explanations of all settings, see the [Setup Guide](docs/SETUP_GUIDE.md).
 
 ### Step 6: Load Management (Optional)
 
-Enable peak load management if your utility bills based on peak demand. Tune
+Off on a fresh install. Enable peak load management on the Configuration tab
+if your utility bills based on peak demand. Tune
 the target peak limit from the Control tab's slider (1–80 kW, or drag to
 **Uncapped** if your connection has no limit worth defending) — warning (90%)
 and emergency (120%) are derived from it automatically and sit behind an
@@ -191,7 +201,7 @@ SEM is designed to be mostly automatic. The controls that matter (v1.6.3 — tog
 
 | Entity | Default | What it does |
 |--------|---------|-------------|
-| `switch.sem_observer_mode` | OFF | Read-only mode — SEM monitors but doesn't control hardware (global) |
+| `switch.sem_observer_mode` | **ON** on a new install | Read-only mode — SEM monitors and publishes its would-decisions but sends no commands (global) |
 | `select.sem_charger_<id>_charge_mode` | `Min + Solar` | **Per-charger.** One named selector carries the night-charging, smart-night, and tariff-window intent that used to live on three separate switches. Options: *Solar only* / *Solar + cheapest hours* / *Min + Solar* / *Always (max)* / *Off*. |
 
 EV charge targets, currents, phases and consumption are all **per-charger** entities too (`number.sem_charger_<id>_…`, `select.sem_charger_<id>_…`) — the global EV settings were removed in #255 (per-charger is the source of truth; globals are read-only summaries). Everything else — solar charging, surplus distribution, battery protection, peak management — is fully automatic.
@@ -206,9 +216,22 @@ The per-charger `Charge mode` selector replaces the four-toggle soup with five n
 
 Pure surplus. With the **"At least" floor at 0** — the default — it never touches the grid, day or night. Set a floor **on this charger** and SEM tops that shortfall up overnight by the Charge-by time, which is how you keep the solar-first mode and still guarantee a minimum (#634/#679). Pick this if you only ever want to charge from sun.
 
+### Solar + battery (2.1)
+
+Surplus first, and when the sun runs out the **home battery** carries on
+charging the car — the mode most people mean by "use my own power for the
+car". Two limits make it safe: the drain stops at the higher of your Buffer
+SoC and **tonight's computed floor** (what the house needs to reach dawn,
+measured from your own nights), and below the Solar Gate it only spends when
+tomorrow's forecast is expected to refill the pack. Choosing this mode *is*
+the permission — there is no second switch. Grid: never, unless you set an
+"At least" floor, which is a night top-up like every other mode.
+
 ### Solar + cheapest hours
 
-Surplus by day, grid only in the cheapest contiguous tariff window at night (Min still guaranteed by the deadline). Hidden if no dynamic tariff is configured. This is the only mode that consults the tariff.
+Surplus first, and grid whenever the price is genuinely cheap — **day or night** (#856, 2.1). By day a cheap, very cheap or negative price hour tops the **Min floor** up from grid through the same seam the night window uses (plan gate, deadline floor, peak-managed rate); solar surplus always wins when it offers more, and expensive hours pause grid import entirely. By night it defers to the cheapest contiguous window, with Min still guaranteed by the deadline.
+
+The Min floor is what a cheap hour fills — with *At least* at 0 kWh there is nothing to top up and a cheap hour charges nothing, which the strategy line says out loud. A static tariff never triggers the daytime half. Hidden if no dynamic tariff is configured; this is the only mode that consults the tariff.
 
 ### Min + Solar (default)
 
@@ -300,13 +323,13 @@ SEM creates 70+ sensors organized by category:
 
 **Solar Inverters:** Huawei Solar, SolaX, DEYE/Sunsynk, Growatt, Sofar, Solis, Fronius, SMA, SolarEdge, Enphase, GoodWe, Tesla Powerwall, Kostal Plenticore, Sungrow, Victron, Sonnenbatterie, E3DC, GivEnergy, Fox ESS, Alpha ESS, Senec, RCT Power, KSTAR, FENECON Home — or any inverter with HA sensors. SEM reads from the HA Energy Dashboard and auto-detects both grid and battery sign conventions.
 
-**Batteries:** Any battery exposed through a supported inverter integration, plus standalone systems: Sessy (NL), Huawei LUNA2000, Tesla Powerwall, Sonnen, BYD, Pylontech, and others work automatically. Battery capacity is auto-detected from the inverter.
+**Batteries:** Any battery exposed through a supported inverter integration, plus standalone systems: Sessy (NL), Huawei LUNA2000, Tesla Powerwall, Sonnen, BYD and others work automatically. Battery capacity is auto-detected from the inverter.. Since 2.1 the generic adapter also writes a mirrored setpoint (Victron ESS) or a direction select plus watts (Anker Solix).
 
 **Battery discharge control auto-detected for:** Huawei Solar, SolaX (solax-modbus), DEYE/Sunsynk (ha-solarman), Growatt, Sofar, Solis, GoodWe, SolarEdge (solaredge-modbus-multi), Enphase (IQ Battery), Tesla Powerwall, Victron, Kostal Plenticore, Sungrow
 
-**EV Chargers (auto-detected):** KEBA P30, Wallbox Pulsar, go-eCharger (HTTP + MQTT), Fronius/go-e Wattpilot, Easee, Zaptec, ChargePoint, Heidelberg Energy Control, OpenWB 2.x, OCPP-compatible (ABB Terra, Vestel, Grizzl-E, etc.), Ohme, Peblar Rocksolid, V2C Trydan, Alfen Eve, Blue Current, OpenEVSE
+**EV Chargers (auto-detected):** KEBA P30, Wallbox Pulsar, go-eCharger (HTTP + MQTT), Fronius/go-e Wattpilot, Easee, Zaptec, ChargePoint, Heidelberg Energy Control, OpenWB 2.x, OCPP-compatible (ABB Terra, Vestel, Grizzl-E, etc.), Ohme, Peblar Rocksolid, V2C Trydan, Alfen Eve, Blue Current, OpenEVSE, NRGkick, ABL eMH1 (through matfroh's ABL_emh1_modbus), Wallbox behind the MQTT bridge, GARO, JuiceBox 48
 
-**EV Chargers (manual config):** Any charger exposing power/connected/charging sensors in HA. Proven live this way (not brand-detected yet): **GARO** wallbox and **JuiceBox 48** — see the matrix for the threads.
+**EV Chargers (manual config):** Any charger exposing power/connected/charging sensors in HA. Since 2.1 SEM also proposes a charger from the integration's own words when it does not know the brand (#915) — and says when a service needs wiring by hand.
 
 > **Note:** KSTAR inverters are supported via the [ha-solarman](https://github.com/davidrapan/ha-solarman) integration with KSTAR YAML profiles, not via a dedicated KSTAR integration.
 
@@ -318,7 +341,7 @@ SEM creates 70+ sensors organized by category:
 
 **Heat Pumps:** Any SG-Ready compatible heat pump controllable via HA
 
-**Smart Meters:** Shelly EM/Pro, Discovergy, or any HA-compatible meter
+**Smart Meters:** Shelly EM/Pro or any HA-compatible meter
 
 ---
 
@@ -428,6 +451,11 @@ automation:
 | [Dashboard Guide](docs/DASHBOARD_GUIDE.md) | Dashboard tabs, cards, and multi-language support |
 | [Multi-Device Guide](docs/MULTI_DEVICE_GUIDE.md) | Multi-inverter, multi-charger, and brand-specific setup |
 | [Architecture](docs/ARCHITECTURE.md) | Developer and contributor documentation |
+| [User Guide](docs/USER_GUIDE.md) | Every setting and every decision, explained |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Symptoms, causes and the fix |
+| [Known Limitations](docs/KNOWN_LIMITATIONS.md) | What SEM deliberately does not do, and why |
+| [Supported Hardware](docs/SUPPORTED_HARDWARE.md) | Every brand with an honest status — tested live, implemented, requested |
+| [Tariff Models](docs/TARIFF_MODELS.md) | Which price shapes SEM can plan around |
 
 ---
 
@@ -444,6 +472,53 @@ All SEM entities are removed automatically. Your Energy Dashboard and hardware s
 ---
 
 ## Recent Improvements
+
+### v2.1.0 — Forecast-led planning and spending
+2.1 looks ahead. SEM forms an honest expectation of the energy that is coming and plans how to spend it. It also learns hardware it had never met. Everything new that acts is off by default, with two exceptions: the peak slot guard (which also keeps the battery covering the house while a peak is near), and modules — SEM removes the entities of hardware your house does not have.
+
+**Planning and spending**
+
+- **The battery's overnight floor is measured, not typed** (#778). SEM learns what your house uses at night and spends only what tonight can spare.
+- **Solar + battery keeps the car going after sunset** (#878), down to that floor and no further.
+- **The pack fills across the day, not by 11:30** (#820). Charge pacing follows the solar forecast so the battery lands full at sunset.
+- **A new install starts from your history** (#815), not from nothing.
+- **Every forecast source you run is scored against your roof** (#822), and the best one is used.
+
+**The peak limit**
+
+- **The 15-minute peak is guarded before the damage, across every device** (#864, #874). Demand tariffs bill the slot average; SEM keeps it under your limit.
+- **Houses fused per phase get a per-phase current guard** (#843).
+- **The peak card says what its number is** and shows the budget it steers (#909).
+
+**The grid is not always a sink** (#921)
+
+- **A negative export price is a cost.** SEM measures what exporting costs you (#871).
+- **The export guard caps feed-in at the inverter while the price is negative** (#955), after the house, the car and the loads had their turn.
+- **Charge pacing keeps headroom before the meter closes** (#926).
+- **The house can be a battery sink** (#879): keep the pack through cheap hours, spend it on the house in expensive ones.
+- **A morning EV window** empties the pack into the car before you leave, when today's sun will refill it (#892).
+
+**Hardware**
+
+- **SEM learns a brand from the integration's own words** (#915), so hardware nobody reported is recognised and proposed. You confirm; SEM binds nothing it guessed.
+- **An install no longer stops at the Energy Dashboard** (#915). SEM asks your integrations what they create.
+- **The Configuration tab shows what SEM found, with the evidence** (#814, #848), and names a near miss instead of guessing.
+- **New brands:** NRGkick, ABL eMH1, Wallbox behind the MQTT bridge, GARO, JuiceBox 48, the victron integration, Deye's work mode (#827), a GM car over OnStar (#887).
+- **Two more ways to write a battery setpoint** (#809, #869): inverted sign, or a direction select plus watts.
+- **SG-Ready on heat pumps whose contacts are not switches** (#801), and **more than one heat pump** (#685).
+- **A load set by watts gets the watts** (#880). **Pause a charger for a while**, then it comes back on its own (#980).
+- **Your inverter's own house figure, shown beside SEM's** (#891).
+
+**Honesty**
+
+- **SEM shows what your install has** (#923, #857). A solar-only house gets no battery entities.
+- **Observer Mode (watch-only) shows the exact commands it holds back** (#855), for every device (#874).
+- **Removing SEM hands the house back** (#935, #908). Only what SEM switched on is switched off.
+- **Charge mode Off is hands-off, and a stop is a stop** (#898, #942).
+- **Messages name the real cause** (#992, #967). No more "peak protection" for an emergency shed.
+- **Repairs go away once you fixed the cause** (#933).
+
+**Requirements:** unchanged — Home Assistant 2026.2.0 or newer.
 
 ### v2.0 — Trustworthy (29.08.2026)
 The 2.0 line adds almost nothing you have to learn. It makes what SEM already did **believable**: the same decisions, no longer changing their mind for reasons nobody can see.
@@ -585,7 +660,7 @@ The 2.0 line adds almost nothing you have to learn. It makes what SEM already di
 ### Tariff Mode Selector (#120)
 - **Three tariff modes** exposed in options flow: Static (fixed HT/NT), Dynamic (Tibber/Nordpool/aWATTar/Amber Electric/Octopus Energy), Calendar (time-based schedule)
 - **Auto-detection** — SEM scans for Tibber/Nordpool/aWATTar/Amber Electric/Octopus Energy entities when dynamic mode is selected
-- **Price-responsive surplus** — dynamic mode enables price-aware device activation during cheap/negative price windows
+- **Price-responsive surplus** — dynamic mode trims the distributable surplus in expensive windows; cheap hours are bought per device via *Finish overnight from: Grid*, never as house-wide virtual surplus (#953)
 
 ### GoodWe Support (#68)
 - **Troubleshooting guide** for GoodWe + Easee setup (Energy Dashboard configuration, sign convention auto-detection)
@@ -616,6 +691,8 @@ SEM is free and open-source. If it saves you money on your energy bill, consider
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor_on_GitHub-%E2%9D%A4-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/traktore-org)
 
 Your support helps keep SEM maintained, tested on real hardware, and free for everyone.
+
+Dutch or Belgian? [smart-energy-management.nl](https://smart-energy-management.nl) has articles on SEM and home energy management in Dutch, by long-time SEM user [@RienduPre](https://github.com/RienduPre).
 
 ---
 

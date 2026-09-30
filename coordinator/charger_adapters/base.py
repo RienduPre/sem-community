@@ -13,8 +13,12 @@ adapter properties — different brands report different idle power
 """
 from __future__ import annotations
 
+import logging
+
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover — type-only
     from ..charger_types import ChargerPower
@@ -198,8 +202,10 @@ class ChargerAdapter(ABC):
 
         - ``(None, True)``  — no readable enable switch (N/A): KEBA,
           service control, or a ``button.`` start entity.
-        - ``(None, False)`` — switch present but ``unavailable``/``unknown``
-          (Wallbox locked / eco-smart): SEM cannot drive it → surface.
+        - ``(None, False)`` — no usable answer: the switch is present but
+          reads anything other than ``on``/``off`` (``unavailable`` /
+          ``unknown``, Wallbox locked / eco-smart). SEM cannot drive it →
+          surface.
         - ``(True/False, True)`` — switch on / off.
         """
         dev = self._device
@@ -207,40 +213,234 @@ class ChargerAdapter(ABC):
         if not ent or not str(ent).startswith(("switch.", "input_boolean.")):
             return (None, True)
         st = dev.hass.states.get(ent)
-        if st is None or st.state in ("unavailable", "unknown"):
+        # (#945) ``on``/``off`` are the only answers a switch can give. A
+        # third value is not "off" — reading it that way would accuse the
+        # box of refusing an assertion it was never coherently told, which
+        # is this issue's whole shape — so it joins the unreadable case and
+        # waits out the hold.
+        if st is None or st.state not in ("on", "off"):
             return (None, False)
         return (st.state == "on", True)
 
     async def ensure_enabled(self) -> None:
-        """Idempotently turn the start/stop switch ON. No-op for chargers
-        without a ``switch.``/``input_boolean.`` enable entity."""
+        """Idempotently assert the start/stop surface ON.
+
+        ``switch.``/``input_boolean.`` → ``turn_on`` (idempotent by nature).
+        ``button.`` → ``press`` — (#804 B4a) a button start entity used to be
+        INVISIBLE here (early return), while the only presser in the tree
+        string-mangled the entity id and was unreachable after a latching
+        stop. Now the button is a first-class enable surface: SEM presses
+        exactly what the user named, and the reconciler's existing ENABLE
+        retry/backoff budget paces the presses — a press has no readable
+        state, so pacing by observed charging is the whole design.
+        No-op only when no start/stop entity is configured at all."""
         dev = self._device
         ent = getattr(dev, "start_stop_entity", None)
-        if not ent or not str(ent).startswith(("switch.", "input_boolean.")):
+        if not ent:
             return
-        await dev.hass.services.async_call(
-            ent.split(".")[0], "turn_on", {"entity_id": ent}, blocking=True,
-        )
-        # Keep SEM's session view consistent with the contactor we just closed.
-        dev._session_active = True
+        ent = str(ent)
+        if ent.startswith(("switch.", "input_boolean.")):
+            await dev.send(ent.split(".")[0], "turn_on", {"entity_id": ent},
+                           why="ensure_enabled")
+        elif ent.startswith("button."):
+            await dev.send("button", "press", {"entity_id": ent},
+                           why="ensure_enabled (#804 resume surface)")
+        else:
+            return
+        # (#940) Claim the SESSION only when this write IS the session start.
+        #
+        # ``_session_active`` is not a contactor flag — it is the flag
+        # ``GenericAdapter.command_current`` reads to decide whether to call
+        # ``start_session`` at all. Setting it here unconditionally (#536)
+        # was a latch scoped wider than its evidence (bug class 83): on a
+        # charger whose start is a charge-mode select or a brand service,
+        # asserting the enable switch says nothing about that mechanism —
+        # and because the reconciler prepends this ENABLE on exactly the
+        # cycle where the switch is off (the transition out of a stop), the
+        # brand's start was suppressed on the ONE cycle that needed it. The
+        # box stayed on its stop mode, dropped the switch, and five
+        # re-asserts later SEM filed "enable switch will not stay on"
+        # against hardware that was doing what it was told (#939/#940,
+        # @alexmc1510).
+        #
+        # ``is not False``, not truthiness: only a device that positively
+        # answers "my start is somewhere else" withholds the claim. A stub
+        # device that cannot answer keeps the historical behaviour rather
+        # than acquiring a second start it never asked for.
+        starts_here = getattr(dev, "enable_entity_is_session_start", None)
+        claims = True
+        if callable(starts_here):
+            try:
+                claims = starts_here() is not False
+            except Exception as e:  # noqa: BLE001 — a probe never costs a cycle
+                _LOGGER.debug("enable_entity_is_session_start() failed: %s", e)
+        if claims:
+            dev._session_active = True
 
-    async def report_enable_blocked(self) -> None:
-        """Surface an uncontrollable enable switch as an actuation failure
-        so the existing repair flow raises it (debounced by the device)."""
-        rec = getattr(self._device, "_record_actuation_failure", None)
-        if rec is not None:
-            rec(RuntimeError("enable switch unavailable/locked — cannot start charging"))
+    async def report_enable_blocked(self, now: "float | None" = None) -> None:
+        """Surface an enable switch SEM cannot keep on — once it has been one
+        for longer than a restart's warm-up (#945).
+
+        Neither condition that reaches this hook is a rejected command, and
+        both used to be reported as one: they fed the device's 3-strike
+        COMMAND counter (#462), which files its Repair after three CYCLES —
+        ~30 s — so every HA restart raised a persistent ERROR Repair while
+        the charger's own integration was still loading. The device owns the
+        wall clock now (#611's threshold, the same one #824 applies to this
+        very entity); below it this stays the reconciler's WARNING, which is
+        already logged.
+
+        Round one (2.1.0-beta.17) held only the FIRST of the two, and the
+        distinction it drew was wrong:
+
+        * the switch is unreadable / uncontrollable — missing, ``unavailable``,
+          or a brand status of *locked*. Nothing can be inferred yet, and a
+          restart looks exactly like this, so it waits out the hold.
+        * the switch is READABLE and sits ``off`` while SEM wants to charge,
+          with the #536 re-assert budget spent. That was called evidence
+          ("SEM wrote ``turn_on`` five times and watched it come back off")
+          and kept the three-cycle speed. But the three cycles that file the
+          Repair are the ones on which SEM sends NOTHING — the reconciler
+          returns the report ALONE so a successful write cannot flap it — and
+          a restart reaches this branch too, roughly 80 s after the switch
+          entity appears still ``off`` because its integration has not
+          reached the box yet. alexmc1510 restarted onto beta.22 and got the
+          same notice with the other sentence in it (#945 round 2).
+
+        So both wait, on ONE episode clock, and each keeps its own sentence.
+        The fear that a readable switch would retire the hold it is waiting
+        on was already answered in the same fix, on the other side: the
+        retire is keyed on the emitted ACTIONS, not on "can I read the
+        entity?" — and it now includes the re-asserts, which ARE the episode.
+        A charger with no readable enable switch at all files nothing: there
+        is no surface here to be blocked.
+        """
+        dev = self._device
+        enabled, controllable = None, True
+        try:
+            enabled, controllable = self.enable_state()
+        except Exception as e:  # noqa: BLE001 — never let a report throw
+            _LOGGER.debug("enable_state() failed in report: %s", e)
+        if controllable and enabled is not False:
+            # Nothing here is blocked. Either there is no readable enable
+            # switch AT ALL (``(None, True)`` — KEBA, a service, a button),
+            # or the switch has come back ``on`` between the decision's
+            # ``observe()`` and this report: the reconciler awaits actions
+            # before reporting, so the world can move underneath it. Both
+            # answer "no evidence", and the issue id is shared with the
+            # write path — a verdict invented here would be a verdict about
+            # somebody else's command.
+            _LOGGER.debug(
+                "enable-blocked reported on a surface that is not blocked "
+                "(enabled=%s) — nothing to surface (#945)", enabled)
+            return
+        note = getattr(dev, "_note_enable_blocked", None)
+        if not callable(note):
+            return
+        try:
+            from ..repair_issues import (
+                ENABLE_UNREADABLE, ENABLE_WILL_NOT_HOLD)
+            error = ENABLE_WILL_NOT_HOLD if controllable else ENABLE_UNREADABLE
+            if not note(now, error):
+                _LOGGER.debug(
+                    "enable switch not asserted (%s) — holding the Repair "
+                    "until it outlasts a restart's warm-up (#945)", error)
+        except Exception as e:  # noqa: BLE001 — a repair never costs a cycle
+            _LOGGER.debug("enable-blocked surface failed: %s", e)
+
+    async def report_failsafe_suspected(self, interval_s: float) -> None:
+        """(#823) Raise the failsafe Repair for this charger.
+
+        The reconciler recognised a constant-interval self-re-enable after
+        SEM's stop. The fix is a one-time change on the box (a failsafe /
+        controller-timeout fallback setting), so the Repair carries the
+        learned interval and points there. Warn-once is the reconciler's
+        job; this only files the surface (#799: a log line is not one).
+        """
+        try:
+            from ..repair_issues import raise_charger_failsafe_suspected
+            dev = self._device
+            raise_charger_failsafe_suspected(
+                dev.hass, str(getattr(dev, "device_id", "") or
+                              getattr(dev, "charger_id", "charger")),
+                name=str(getattr(dev, "name", None) or "EV charger"),
+                interval_s=float(interval_s),
+            )
+        except Exception as e:  # noqa: BLE001 — a repair never costs a cycle
+            _LOGGER.debug("failsafe repair not raised: %s", e)
+
+    async def clear_failsafe_suspected(self) -> None:
+        """(#823) Retire the failsafe Repair once a stop finally holds."""
+        try:
+            from ..repair_issues import clear_charger_failsafe_suspected
+            dev = self._device
+            clear_charger_failsafe_suspected(
+                dev.hass, str(getattr(dev, "device_id", "") or
+                              getattr(dev, "charger_id", "charger")))
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.debug("failsafe repair not cleared: %s", e)
+
+    # (#846) The ONE place amps and watts convert. Both consult the measured
+    # W/A when one has been earned for the BELIEVED phase count, and fall
+    # back to nameplate otherwise — so the surplus→amps math, the night
+    # planner's block sizing, the peak guard and the phase guard all improve
+    # from a single change rather than each growing its own opinion (#46).
+    def _wpa_context(self):
+        """(learner, charger_id, phases) — or None when nothing can be
+        measured. ``phases`` is the BELIEF where the coordinator has one,
+        nameplate otherwise: the belief anchors this, never the reverse."""
+        dev = self._device
+        coord = getattr(dev, "_coordinator", None) or getattr(dev, "coordinator", None)
+        from ..watts_per_amp import WattsPerAmpLearner
+        learner = getattr(coord, "_wpa_learner", None)
+        # isinstance, not truthiness: a mocked device hands back a Mock for
+        # any attribute, and the conversion then returns a Mock instead of
+        # watts. Type-check the collaborator (test_charger_adapters).
+        if not isinstance(learner, WattsPerAmpLearner):
+            return None
+        cid = str(getattr(dev, "charger_id", "") or "")
+        if not cid:
+            return None
+        # the coordinator owns the rule (config without switching, the
+        # sequencer's belief with it); the adapter's own phases are the
+        # fallback when no coordinator is bound
+        phases = None
+        rule = getattr(coord, "_wpa_phases_for", None)
+        if callable(rule):
+            try:
+                phases, _ok = rule(cid)
+            except Exception:  # noqa: BLE001
+                phases = None
+        phases = int(phases) if phases in (1, 3) else int(self.phases)
+        return learner, cid, phases
+
+    def nominal_watts_per_amp(self, phases: int | None = None) -> float:
+        ph = int(phases) if phases in (1, 3) else int(self.phases)
+        return float(ph) * float(self.voltage)
 
     def watts_for_amps(self, amps: int) -> float:
-        """How much power ``amps`` corresponds to at this charger's
-        phases × voltage."""
-        return float(amps) * self.phases * self.voltage
+        """How much power ``amps`` really buys — measured where known,
+        nameplate otherwise. Never MORE than nameplate (#846)."""
+        ctx = self._wpa_context()
+        if ctx is None:
+            return float(amps) * self.phases * self.voltage
+        learner, cid, phases = ctx
+        return learner.watts_for_amps(cid, phases, float(amps),
+                                      self.nominal_watts_per_amp(phases))
 
     def amps_for_watts(self, watts: float) -> int:
         """Round-toward-zero conversion from watts to amps. The
         actuator should clamp the result to
         ``[min_current_a, max_current_a]`` itself; this is a
-        plain conversion."""
-        if self.phases * self.voltage <= 0:
-            return 0
-        return int(watts // (self.phases * self.voltage))
+        plain conversion — measured W/A where known (#846), and always
+        rounding DOWN, because handing out an amp the car then exceeds is
+        the one direction that can breach a limit."""
+        ctx = self._wpa_context()
+        if ctx is None:
+            if self.phases * self.voltage <= 0:
+                return 0
+            return int(watts // (self.phases * self.voltage))
+        learner, cid, phases = ctx
+        return learner.amps_for_watts(cid, phases, float(watts),
+                                      self.nominal_watts_per_amp(phases),
+                                      int(self.max_current_a))
