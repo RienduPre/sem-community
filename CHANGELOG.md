@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
-- 🐛 **SEM can stop a Wattpilot** (#804, by @HorizonKane). It now presses the box's own stop button, and starts with the forced start so the box's Eco mode does not override the current.
+- 🐛 **SEM can stop a Wattpilot** (#804, by @HorizonKane). It uses the box's own stop and forced-start buttons, so current and mode now apply.
 
 # [2.1.0-beta.50] — 29.09.2026
 
