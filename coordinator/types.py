@@ -221,6 +221,10 @@ class PowerReadings:
     #: that was fine. The reader knows the names; now they travel.
     dark_inputs: tuple = ()
     solar_power_unavailable: bool = False
+    #: (#1022) minutes every solar read came back dark today — the PV
+    #: health sensor's downtime figure. Adds up in the reader, resets at
+    #: midnight.
+    solar_downtime_min_today: float = 0.0
     grid_power_unavailable: bool = False
     battery_power_all_unavailable: bool = False
     # (#910) True for a cycle in which a charger's power read was a blink
