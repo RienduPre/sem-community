@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- **Charging sessions are kept** — the last 400, per charger, with a CSV export service. (#1024)
+- **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
+- **Hints** — five kinds of short message when something is off, each off until you switch it on. (#1019)
+
 # [2.1.0] — 30.09.2026
 
 The first stable release of the 2.1 line.

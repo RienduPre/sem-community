@@ -1230,6 +1230,19 @@ SEM supports active control of **multiple EV chargers** (v1.4.0+). Add chargers 
 
 **Per-charger features:** Each charger gets its own session tracking, stall detection, enable/disable delays, and taper detection. The primary charger (first configured) drives the EV Intelligence SOC tracking and charge skip decisions.
 
+### Session history and export
+
+SEM keeps the last 400 finished charging sessions: start, end, charger,
+energy, solar share, cost and duration. The EV tab shows them per charger
+with a month view and totals, and a CSV button.
+
+For your own log, call the service `solar_energy_management.export_session_history`
+from a script or automation. It returns the rows and the same rows as
+CSV text. Fields: `charger_id` (one charger), `since` (a date, `YYYY-MM-DD`).
+
+Sessions recorded before this version have no charger or cost stored;
+they show with those columns empty.
+
 ---
 
 ## Battery Discharge Protection
@@ -1620,6 +1633,29 @@ nothing today), `days_since_full_yield` (last day at 90 % or more), and
 produce, and it has produced almost nothing for two hours. Snow needs an
 outdoor temperature source; without one it stays off. The Energy tab
 shows the row.
+
+---
+
+## Hints
+
+SEM can send a short sentence when something is off. Five categories,
+each its own switch on the Configuration tab under Notifications, all
+off until you turn one on. Every hint is one message per event, on its
+own phone channel (`sem_hints`) and as the event
+`solar_energy_management_notification` with `category: hint`, so an
+automation can use it without a phone.
+
+| switch | when | example |
+|---|---|---|
+| An input stopped sending | a sensor SEM reads has been silent for 15 minutes; again when it is back | "Solar power stopped sending 17 min ago." |
+| A load ran all night | at SEM's morning, when the night's draw was 1.5× the usual (and over 300 W) | "The house used 620 W all night, usually 210 W." |
+| Grid use rose | at SEM's night start, when today's grid use was 1.5× the usual with the same sun | "Grid use rose to 9.1 kWh (usually 4.2) with the same sun." |
+| Power is cheap, car idle | the price turned cheap while a car is plugged in and not charging (dynamic tariff only) | "Power is cheap now. Garage: plugged in and not charging." |
+| Weekly summary | the first night start on a Sunday | "This week: 142 kWh solar · 71 % self-use · 38 kWh from the grid · 24 kWh into the car · 12.40 CHF." |
+
+"Night start" and "morning" are SEM's own night window (sunset and
+sunrise, bounded by the night settings), not fixed hours. The
+comparisons need three past nights or days first.
 
 ---
 

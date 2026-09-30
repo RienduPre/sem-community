@@ -4425,6 +4425,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 charging_context.available_power,
             )
 
+            # (#1019) Hints — after the notifications, off unless a switch
+            # says otherwise; never raises into the cycle.
+            try:
+                await self._evaluate_hints(power, energy, costs, performance, tariff_data)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("hint evaluation failed", exc_info=True)
+
             # Step 13: Persist data
             if self._storage:
                 self._storage.import_energy_calculator_state(
@@ -13528,6 +13535,92 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     pass
 
         return None
+
+    def _hint_facts(self, power, energy, costs, performance, tariff_data,
+                    now_mono: Optional[float] = None):
+        """(#1019) What the hint engine sees this cycle, from what the
+        coordinator already has. Night is SEM's own day/night clock
+        (``time_manager.is_night_mode``) — the one source the whole
+        coordinator uses, which the compressed-sun simulation moves."""
+        import time as _time
+
+        from .hints import HINT_CATEGORIES, HintFacts
+
+        now_mono = _time.monotonic() if now_mono is None else float(now_mono)
+        cfg = self.config or {}
+        enabled = {c: bool(cfg.get(f"hint_{c}", False)) for c in HINT_CATEGORIES}
+
+        dark: dict = {}
+        since = getattr(getattr(self, "_sensor_reader", None),
+                        "_sensor_unavailable_since", None) or {}
+        for entity_id, t0 in dict(since).items():
+            state = self.hass.states.get(entity_id)
+            name = None
+            if state is not None:
+                name = (getattr(state, "attributes", None) or {}).get("friendly_name")
+            dark[entity_id] = (str(name or entity_id), max(0.0, now_mono - float(t0)))
+
+        level = str(getattr(tariff_data, "tariff_price_level", "") or "")
+        price_cheap = level in ("cheap", "very_cheap", "negative")
+        dynamic = str(cfg.get("tariff_mode") or "") == "dynamic"
+
+        idle: list = []
+        conn = getattr(power, "ev_connected_per_charger", None) or {}
+        chrg = getattr(power, "ev_charging_per_charger", None) or {}
+        chargers = cfg.get("ev_chargers") or []
+        if chargers and conn:
+            for c in chargers:
+                cid = c.get("id")
+                if conn.get(cid) and not chrg.get(cid, False):
+                    idle.append(str(c.get("name") or cid))
+        elif getattr(power, "ev_connected", False) and not getattr(power, "ev_charging", False):
+            idle.append("EV")
+
+        currency = getattr(getattr(self.hass, "config", None), "currency", None)
+        return HintFacts(
+            now=dt_util.now(),
+            night=bool(self.time_manager.is_night_mode()),
+            enabled=enabled,
+            home_w=float(getattr(power, "home_consumption_power", 0.0) or 0.0),
+            daily_solar_kwh=float(getattr(energy, "daily_solar", 0.0) or 0.0),
+            daily_import_kwh=float(getattr(energy, "daily_grid_import", 0.0) or 0.0),
+            daily_home_kwh=float(getattr(energy, "daily_home", 0.0) or 0.0),
+            daily_ev_kwh=float(getattr(energy, "daily_ev", 0.0) or 0.0),
+            daily_cost=float(getattr(costs, "daily_net_cost", 0.0) or 0.0),
+            self_use_pct=float(getattr(performance, "self_consumption_rate", 0.0) or 0.0),
+            currency=currency if isinstance(currency, str) else "",
+            dark_inputs=dark,
+            price_cheap=price_cheap,
+            dynamic_tariff=dynamic,
+            idle_plugged_cars=tuple(idle),
+        )
+
+    async def _evaluate_hints(self, power, energy, costs, performance, tariff_data) -> None:
+        """(#1019) Run the engine once per cycle. With every switch off
+        nothing is built, nothing is stored. The engine's state is restored
+        from the energy store on first use and written back on every run."""
+        from .hints import HINT_CATEGORIES, HintEngine
+
+        cfg = self.config or {}
+        if not any(cfg.get(f"hint_{c}", False) for c in HINT_CATEGORIES):
+            return
+        engine = getattr(self, "_hint_engine", None)
+        if engine is None:
+            stored = {}
+            if self._storage is not None:
+                try:
+                    stored = self._storage.get_hints_state() or {}
+                except Exception:  # noqa: BLE001
+                    stored = {}
+            engine = HintEngine(stored)
+            self._hint_engine = engine
+        hints = engine.evaluate(self._hint_facts(power, energy, costs, performance, tariff_data))
+        nm = getattr(self, "_notification_manager", None)
+        for hint in hints:
+            if nm is not None:
+                await nm.notify_hint(hint)
+        if self._storage is not None:
+            self._storage.set_hints_state(engine.to_dict())
 
     def _pv_health_verdict(self, power, forecast_data, now_mono: Optional[float] = None):
         """(#1022) PV health from what SEM already keeps: the forecast
