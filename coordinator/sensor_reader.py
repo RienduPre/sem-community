@@ -9,7 +9,7 @@ from collections import deque
 from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass, replace
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from . import repair_issues as _ri
@@ -5175,16 +5175,31 @@ class SensorReader:
             except Exception as e:  # noqa: BLE001 — best-effort autodetect
                 _LOGGER.debug("Export-limit autodetect failed: %s", e)
         self._export_limit_cache = result
+        # (#996) a miss from a scan before HA finished starting is not a "no"
+        self._export_limit_read_running = (
+            getattr(self.hass, "state", None) is CoreState.running)
         return result
+
+    def invalidate_export_limit_cache(self) -> None:
+        """(#996) Scan again on the next ask — an inverter entity appeared."""
+        self._export_limit_cache = _CYCLES_UNSET
 
     def export_limit_answer(self, solar_anchor_entity: Optional[str]) -> Optional[bool]:
         """(#996) Did the registry scan find an export-limit entity? True /
         False after it ran; None when there was no solar anchor to scan
         from — "could not ask" is UNKNOWN to the install-modules oracle,
         never ABSENT (#925)."""
+        running = getattr(self.hass, "state", None) is CoreState.running
+        cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+        if (cached is None and running
+                and not getattr(self, "_export_limit_read_running", False)):
+            # The miss was read while HA was starting — look again now.
+            self.invalidate_export_limit_cache()
         self.detect_export_limit_entity(solar_anchor_entity)
         cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
         if cached is _CYCLES_UNSET:
+            return None
+        if cached is None and not getattr(self, "_export_limit_read_running", False):
             return None
         return cached is not None
 

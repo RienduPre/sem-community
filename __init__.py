@@ -331,6 +331,58 @@ _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
 }) | MODULE_EVIDENCE_KEYS
 
 
+def _is_capability_candidate(hass, entity_id: str) -> bool:
+    """(#996) A new entity that could change a runtime capability: one of a
+    forecast integration's, or a name with an export-limit word."""
+    from .coordinator.forecast_reader import FORECAST_PLATFORMS
+    from .coordinator.sensor_reader import EXPORT_LIMIT_KEYWORDS
+    if "." not in entity_id:
+        return False
+    domain, name = entity_id.split(".", 1)
+    if domain in ("number", "sensor", "select") and any(
+            k in name for k in EXPORT_LIMIT_KEYWORDS):
+        return True
+    if domain != "sensor":
+        return False
+    from homeassistant.helpers import entity_registry as er
+    ent = er.async_get(hass).async_get(entity_id)
+    return ent is not None and ent.platform in FORECAST_PLATFORMS
+
+
+@callback
+def _async_watch_capabilities(hass, entry, coordinator) -> None:
+    """(#996) Re-ask the runtime capability questions once HA is running
+    and whenever the entity registry gains a candidate entity."""
+    from homeassistant.core import CoreState
+    from homeassistant.helpers import entity_registry as er
+
+    @callback
+    def _recheck(_event=None) -> None:
+        if getattr(entry, "runtime_data", None) is not coordinator:
+            return   # reloaded or unloaded since: the new one has its own watch
+        try:
+            coordinator.recheck_capabilities()
+        except Exception:  # noqa: BLE001 — a recheck never costs SEM
+            _LOGGER.debug("#996 capability recheck failed", exc_info=True)
+
+    if hass.state is CoreState.running:
+        _recheck()
+    else:
+        # Not tied to unload: a fired once-listener cannot be removed again
+        # (the same pattern as _async_post_startup_init above).
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _recheck)
+
+    @callback
+    def _on_registry(event) -> None:
+        if event.data.get("action") != "create":
+            return
+        if _is_capability_candidate(hass, event.data.get("entity_id", "")):
+            _recheck()
+
+    entry.async_on_unload(
+        hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _on_registry))
+
+
 def _require_load_manager(coordinator):
     """(#913) The load manager, or the honest reason there is none.
 
@@ -3079,6 +3131,11 @@ def _schedule_post_startup_tasks(
 
     # Schedule tasks to run when Home Assistant is fully started
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_post_startup_init)
+
+    # (#996) The runtime capabilities (a forecast integration, an export-limit
+    # entity) are UNKNOWN until HA is running; ask again then, and whenever
+    # the registry gains a candidate, so the rows come back by themselves.
+    _async_watch_capabilities(hass, entry, coordinator)
 
     # (#967) Everything that reads the recorder starts HERE, on a task
     # nothing in setup waits for. Home Assistant cancels a setup that

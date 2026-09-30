@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.const import STATE_UNKNOWN, STATE_UNAVAILABLE
 from homeassistant.util import dt as dt_util
 
@@ -142,6 +142,12 @@ OPEN_METEO_UNIQUE_SUFFIXES = {
 #: minute of quiet before we conclude anything.
 PREFERRED_GRACE_CYCLES: int = 6
 
+def ha_is_running(hass) -> bool:
+    """(#996) True only once Home Assistant has finished starting. A
+    registry probe before that can miss an integration that loads later."""
+    return getattr(hass, "state", None) is CoreState.running
+
+
 FORECAST_SOURCES: dict = {
     "solcast": (SOLCAST_PLATFORM, "SOLCAST_ENTITIES"),
     "forecast_solar": (FORECAST_SOLAR_PLATFORM, "FORECAST_SOLAR_ENTITIES"),
@@ -149,6 +155,7 @@ FORECAST_SOURCES: dict = {
     # is no hardcoded fallback map to hand the locator (#687).
     "open_meteo": (OPEN_METEO_SOLAR_PLATFORM, None),
 }
+FORECAST_PLATFORMS = frozenset(platform for platform, _ in FORECAST_SOURCES.values())
 
 
 @dataclass
@@ -496,7 +503,9 @@ class ForecastReader:
         if not path or path == "uninitialized":
             return None
         if path.endswith("none_available"):
-            return False
+            # (#996) A miss read while HA was still starting is "not asked":
+            # the integration may load after SEM (restart race).
+            return False if getattr(self, "_none_read_while_running", False) else None
         return None
 
     @property
@@ -675,6 +684,9 @@ class ForecastReader:
             return self._source
 
         self._last_source_detection_path = "none_available"
+        # (#996) "found nothing" only counts once Home Assistant is running:
+        # during a restart the forecast integration may simply load after SEM.
+        self._none_read_while_running = ha_is_running(self.hass)
         # Log once per outage; subsequent cycles stay silent.
         if not self._no_forecast_logged:
             _LOGGER.info("No solar forecast integration detected")

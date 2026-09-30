@@ -1825,6 +1825,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         A reader that has not looked, cannot look, or raises answers None —
         the oracle keeps every row on None (#925)."""
         facts: Dict[str, Optional[bool]] = {"solar_forecast": None, "export_limit": None}
+        # Before Home Assistant has finished starting, a registry probe can
+        # miss an integration that simply loads after SEM (restart race):
+        # nothing read then may become ABSENT and delete registry rows.
+        from .forecast_reader import ha_is_running
+        if not ha_is_running(getattr(self, "hass", None)):
+            return facts
         reader = getattr(self, "_forecast_reader", None)
         if reader is not None:
             try:
@@ -1841,6 +1847,28 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             except Exception:  # noqa: BLE001
                 pass
         return facts
+
+    def recheck_capabilities(self) -> None:
+        """(#996) Ask the runtime capability questions again — at startup
+        once HA is running, and when the registry gains a forecast or an
+        export-limit entity — then run the growth check, so a capability
+        that appears brings its rows back by itself."""
+        from .forecast_reader import ha_is_running
+        if not ha_is_running(getattr(self, "hass", None)):
+            return
+        sensors = getattr(self, "_sensor_reader", None)
+        if sensors is not None and getattr(sensors, "_export_limit_cache", None) is None:
+            try:
+                sensors.invalidate_export_limit_cache()
+            except Exception:  # noqa: BLE001
+                pass
+        reader = getattr(self, "_forecast_reader", None)
+        if reader is not None and not getattr(reader, "_source", None):
+            try:
+                reader.detect_source()
+            except Exception:  # noqa: BLE001 — no answer is UNKNOWN
+                _LOGGER.debug("#996 forecast re-detection failed", exc_info=True)
+        self._check_module_growth()
 
     def _check_module_growth(self) -> None:
         """(#923) Hardware SEM only DISCOVERS — a battery added to HA's Energy
