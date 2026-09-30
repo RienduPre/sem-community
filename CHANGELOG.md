@@ -24,6 +24,8 @@ The first stable release of the 2.1 line.
 - **More chargers and inverters found on their own**: NRGkick, ABL, Wallbox over MQTT, Victron.
 - **Pause a charger**, with a countdown on the EV card.
 
+Also fixed since 2.0: HACS installs work again, SEM can stop Wattpilot and OCPP chargers, and setup no longer times out on a long history.
+
 Needs Home Assistant 2026.2.0 or newer. New features are off until you switch them on, except two: the peak guard, and modules — SEM removes the entities of hardware you do not have.
 
 # [2.1.0-beta.51] — 30.09.2026
