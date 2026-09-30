@@ -58,14 +58,23 @@ def select_sessions(
     return rows
 
 
+def _cell(value):
+    """A text cell that a spreadsheet would run as a formula gets a leading
+    quote; numbers pass as they are."""
+    if value is None:
+        return ""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+        return "'" + value
+    return value
+
+
 def sessions_csv(rows: Iterable[dict]) -> str:
-    """The rows as CSV text, header first, comma-safe."""
+    """The rows as CSV text, header first, comma-safe, formula-safe."""
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow([name for name, _ in CSV_COLUMNS])
     for row in rows:
-        writer.writerow(["" if row.get(key) is None else row.get(key)
-                         for _, key in CSV_COLUMNS])
+        writer.writerow([_cell(row.get(key)) for _, key in CSV_COLUMNS])
     return out.getvalue()
 
 

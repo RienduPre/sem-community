@@ -82,3 +82,11 @@ class TestService:
         response = await handler(SimpleNamespace(data={}))
         assert response["rows"] == []
         assert response["csv"].count("\n") == 1
+
+
+def test_a_text_cell_is_never_a_formula():
+    from custom_components.solar_energy_management.session_history import sessions_csv
+    text = sessions_csv([{"charger_id": "=HYPERLINK(1)", "energy_kwh": -1.5}])
+    line = text.splitlines()[1]
+    assert "'=HYPERLINK(1)" in line
+    assert ",-1.5" in line or line.endswith("-1.5") or "-1.5," in line
