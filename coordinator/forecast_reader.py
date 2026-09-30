@@ -485,6 +485,20 @@ class ForecastReader:
     def _last_source_detection_path(self, value: Optional[str]) -> None:
         self.__detection_path = value
 
+    def detection_answer(self) -> Optional[bool]:
+        """(#996) Has SEM found a forecast integration? True when a source
+        is in use, False when the ladder ran and found none, None when it
+        has not run — the install-modules oracle reads None as UNKNOWN,
+        never as "no" (#925)."""
+        if self._source:
+            return True
+        path = self._last_source_detection_path
+        if not path or path == "uninitialized":
+            return None
+        if path.endswith("none_available"):
+            return False
+        return None
+
     @property
     def requested_source(self) -> Optional[str]:
         """What the user asked for, whether or not it could be used.

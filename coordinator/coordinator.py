@@ -1814,7 +1814,31 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
     def install_presence(self) -> Dict[Module, Presence]:
         """(#923) What this install has right now — see install_modules.py."""
-        return module_verdict(self.config, self._ed_raw_config, self._ed_answered)
+        # Called through the class so a bare test double (a SimpleNamespace
+        # with the three attributes) still gets a verdict.
+        return module_verdict(self.config, self._ed_raw_config, self._ed_answered,
+                              runtime=SEMCoordinator._runtime_facts(self))
+
+    def _runtime_facts(self) -> Dict[str, Optional[bool]]:
+        """(#996) The two capability answers only the entity registry can
+        give: a forecast integration and the inverter's export-limit entity.
+        A reader that has not looked, cannot look, or raises answers None —
+        the oracle keeps every row on None (#925)."""
+        facts: Dict[str, Optional[bool]] = {"solar_forecast": None, "export_limit": None}
+        reader = getattr(self, "_forecast_reader", None)
+        if reader is not None:
+            try:
+                facts["solar_forecast"] = reader.detection_answer()
+            except Exception:  # noqa: BLE001 — no answer is UNKNOWN, never a crash
+                pass
+        sensors = getattr(self, "_sensor_reader", None)
+        if sensors is not None:
+            try:
+                facts["export_limit"] = sensors.export_limit_answer(
+                    (self.config or {}).get("solar_production_sensor"))
+            except Exception:  # noqa: BLE001
+                pass
+        return facts
 
     def _check_module_growth(self) -> None:
         """(#923) Hardware SEM only DISCOVERS — a battery added to HA's Energy

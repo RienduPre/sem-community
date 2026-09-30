@@ -5177,6 +5177,17 @@ class SensorReader:
         self._export_limit_cache = result
         return result
 
+    def export_limit_answer(self, solar_anchor_entity: Optional[str]) -> Optional[bool]:
+        """(#996) Did the registry scan find an export-limit entity? True /
+        False after it ran; None when there was no solar anchor to scan
+        from — "could not ask" is UNKNOWN to the install-modules oracle,
+        never ABSENT (#925)."""
+        self.detect_export_limit_entity(solar_anchor_entity)
+        cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+        if cached is _CYCLES_UNSET:
+            return None
+        return cached is not None
+
     def _auto_detect_battery_soc(self, battery_power_entity: str) -> Optional[str]:
         """Auto-detect battery SOC sensor from the same device as the power sensor.
 
