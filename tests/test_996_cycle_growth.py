@@ -26,6 +26,15 @@ from custom_components.solar_energy_management.coordinator.install_modules impor
 _PHACC = importlib.util.find_spec("pytest_homeassistant_custom_component") is not None
 
 
+@pytest.fixture(autouse=True)
+def _misses_confirm_at_once(monkeypatch):
+    """These tests are about what a remembered verdict does, not about how
+    long a miss must hold before it is remembered (test_996_runtime_facts)."""
+    from custom_components.solar_energy_management.coordinator import coordinator as mod
+    monkeypatch.setattr(mod, "CAPABILITY_MISS_CONFIRM_READS", 1)
+    monkeypatch.setattr(mod, "CAPABILITY_MISS_HOLD_S", 0.0)
+
+
 class TestTheRateLimitIsPerEntry:
 
     def _stub(self, entry_id, hass):

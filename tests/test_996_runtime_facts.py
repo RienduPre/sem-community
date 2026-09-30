@@ -176,7 +176,8 @@ class TestTheStoredRunningVerdict:
             _stub(forecast_path="solcast", forecast_source="solcast", export_cache=None), store)
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
-        assert store.verdicts == {"solar_forecast": True, "export_limit": False}
+        # The hit is remembered at once; the export miss is not (yet).
+        assert store.verdicts == {"solar_forecast": True}
         assert stub.hass.async_create_task.call_count == 1
         SEMCoordinator.install_presence(stub)          # unchanged: no second write
         assert stub.hass.async_create_task.call_count == 1
@@ -196,4 +197,59 @@ class TestTheStoredRunningVerdict:
             _stub(forecast_path="solcast", forecast_source="solcast", hass=STARTING), store)
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
+        assert store.verdicts["solar_forecast"] is True
+
+
+class TestAMissIsRememberedOnlyOnceItHolds:
+    """The SOC-step confirm streak: a one-cycle forecast blip must not
+    become "no forecast" at the next restart."""
+
+    def _stub(self, store, clock):
+        stub = _stub(forecast_path="none_available", export_cache="unset")
+        stub._storage = store
+        stub.hass = SimpleNamespace(state=CoreState.running, async_create_task=MagicMock())
+        return stub
+
+    def _clock(self, monkeypatch):
+        from custom_components.solar_energy_management.coordinator import coordinator as mod
+        now = [1000.0]
+        monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
+        return now
+
+    def test_one_missed_cycle_leaves_a_stored_present(self, monkeypatch):
+        self._clock(monkeypatch)
+        store = _Store({"solar_forecast": True})
+        SEMCoordinator.install_presence(self._stub(store, None))
+        assert store.verdicts["solar_forecast"] is True
+
+    def test_a_held_miss_is_remembered(self, monkeypatch):
+        now = self._clock(monkeypatch)
+        store = _Store({"solar_forecast": True})
+        stub = self._stub(store, now)
+        for _ in range(6):
+            SEMCoordinator.install_presence(stub)
+            now[0] += 120.0
+        assert store.verdicts["solar_forecast"] is False
+
+    def test_many_reads_in_a_short_time_are_not_enough(self, monkeypatch):
+        now = self._clock(monkeypatch)
+        store = _Store({"solar_forecast": True})
+        stub = self._stub(store, now)
+        for _ in range(30):                      # 30 reads in 5 minutes
+            SEMCoordinator.install_presence(stub)
+            now[0] += 10.0
+        assert store.verdicts["solar_forecast"] is True
+
+    def test_a_hit_breaks_the_streak(self, monkeypatch):
+        now = self._clock(monkeypatch)
+        store = _Store({"solar_forecast": True})
+        stub = self._stub(store, now)
+        for _ in range(5):
+            SEMCoordinator.install_presence(stub)
+            now[0] += 150.0
+        stub._forecast_reader._source = "solcast"      # it came back
+        SEMCoordinator.install_presence(stub)
+        stub._forecast_reader._source = None
+        SEMCoordinator.install_presence(stub)          # a new streak starts at 1
+        now[0] += 150.0
         assert store.verdicts["solar_forecast"] is True

@@ -71,6 +71,14 @@ DEFAULT_BATTERY_DISCHARGE_CONTROL_ENTITY: Final = ""
 # the existing dark-read path — instead of steering a cycle.
 BATTERY_SOC_MAX_STEP_PCT: Final = 25.0   # pp between two reads; a LUNA moves single digits per MINUTE
 BATTERY_SOC_STEP_CONFIRM_READS: Final = 3  # a rejected level that persists this many reads IS the truth
+# (#996) A runtime capability miss (no forecast integration, no export-limit
+# entity) is remembered across restarts only once it has held: this many
+# reads in a row AND at least CAPABILITY_MISS_HOLD_S. Same confirm-streak
+# shape as the SOC step above — a Solcast forecast that is unavailable for
+# one cycle must not drop the forecast rows at the next restart. A hit is
+# remembered at once.
+CAPABILITY_MISS_CONFIRM_READS: Final = 6
+CAPABILITY_MISS_HOLD_S: Final = 600.0
 BATTERY_POWER_PLAUSIBLE_MAX_W: Final = 100_000.0  # no home battery; 22.8 MW was 2 000x the hardware
 
 # (#988) How much energy must be leaving the house with no source other than

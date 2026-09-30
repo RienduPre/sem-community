@@ -33,6 +33,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util import dt as dt_util
 
+from ..consts.core import CAPABILITY_MISS_CONFIRM_READS, CAPABILITY_MISS_HOLD_S
 from ..const import (
     DOMAIN,
     DEFAULT_UPDATE_INTERVAL,
@@ -1838,10 +1839,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             except Exception:  # noqa: BLE001 — no store is "nothing stored"
                 stored = {}
         changed = False
+        now = time.monotonic()
         for name, value in live.items():
-            if value is not None and storage is not None:
+            to_store = SEMCoordinator._confirmed_capability(self, name, value, now)
+            if to_store is not None and storage is not None:
                 try:
-                    changed = storage.set_capability_verdict(name, value) or changed
+                    changed = storage.set_capability_verdict(name, to_store) or changed
                 except Exception:  # noqa: BLE001
                     pass
         if changed:
@@ -1852,6 +1855,36 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 pass
         return {name: (value if value is not None else stored.get(name))
                 for name, value in live.items()}
+
+    def _confirmed_capability(self, name: str, value: Optional[bool],
+                              now: float) -> Optional[bool]:
+        """(#996) What may be REMEMBERED for a runtime capability this read.
+
+        A hit is remembered at once. A miss only once it has held for
+        ``CAPABILITY_MISS_CONFIRM_READS`` reads in a row and at least
+        ``CAPABILITY_MISS_HOLD_S`` — the SOC-step confirm streak again: a
+        forecast unavailable for one cycle (``cached_source_lost_redetected``)
+        must not become "no forecast" for the next restart. "Not asked"
+        neither confirms nor breaks a streak."""
+        streaks = getattr(self, "_capability_miss_streak", None)
+        if not isinstance(streaks, dict):
+            streaks = {}
+            try:
+                self._capability_miss_streak = streaks
+            except Exception:  # noqa: BLE001 — a frozen stand-in: no memory
+                pass
+        if value is None:
+            return None
+        if value is True:
+            streaks.pop(name, None)
+            return True
+        count, since = streaks.get(name, (0, now))
+        count += 1
+        streaks[name] = (count, since)
+        if (count >= CAPABILITY_MISS_CONFIRM_READS
+                and now - since >= CAPABILITY_MISS_HOLD_S):
+            return False
+        return None
 
     def _live_runtime_facts(self) -> Dict[str, Optional[bool]]:
         """(#996) What the readers say right now; None for "not asked"."""

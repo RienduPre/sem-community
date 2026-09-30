@@ -33,6 +33,15 @@ from .test_923_real_installs import _dashboard, _minimal_entry  # noqa: E402
 from .test_996_restart_race import FORECAST_ROW, _install_solcast, _row  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _misses_confirm_at_once(monkeypatch):
+    """These tests are about what a remembered verdict does, not about how
+    long a miss must hold before it is remembered (test_996_runtime_facts)."""
+    from custom_components.solar_energy_management.coordinator import coordinator as mod
+    monkeypatch.setattr(mod, "CAPABILITY_MISS_CONFIRM_READS", 1)
+    monkeypatch.setattr(mod, "CAPABILITY_MISS_HOLD_S", 0.0)
+
+
 async def _start(hass, entry, *, starting):
     """Set the entry up as a boot (HA still starting) or a live setup."""
     hass.set_state(CoreState.starting if starting else CoreState.running)
@@ -159,3 +168,30 @@ async def test_no_flip_flop_across_restart_reload_restart(
     assert seen == [Presence.ABSENT] * 3
     assert created == []
     assert _row(hass) is None
+
+
+@pytest.mark.asyncio
+async def test_a_restart_right_after_a_one_cycle_blip_keeps_the_rows(
+        hass, enable_custom_integrations, monkeypatch):
+    from custom_components.solar_energy_management.coordinator import coordinator as mod
+    monkeypatch.setattr(mod, "CAPABILITY_MISS_CONFIRM_READS", 6)   # the real rule
+    monkeypatch.setattr(mod, "CAPABILITY_MISS_HOLD_S", 600.0)
+    _dashboard(monkeypatch)
+    _install_solcast(hass)
+    entry = _minimal_entry()
+    entry.add_to_hass(hass)
+    assert _verdict(await _start(hass, entry, starting=False)) is Presence.PRESENT
+
+    # Solcast's forecast is unavailable for one cycle.
+    for entity_id in SOLCAST_ENTITIES.values():
+        hass.states.async_set(entity_id, "unavailable")
+    await _cycle(hass, entry)
+    # The blip really was a live miss (else this test proves nothing).
+    assert entry.runtime_data._capability_miss_streak.get("solar_forecast"), (
+        entry.runtime_data._forecast_reader._last_source_detection_path)
+    await _stop(hass, entry)
+
+    _uninstall_solcast(hass)                       # and it loads late on the boot
+    coordinator = await _start(hass, entry, starting=True)
+    assert _verdict(coordinator) is Presence.PRESENT
+    assert _row(hass) is not None
