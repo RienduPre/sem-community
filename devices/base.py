@@ -3511,6 +3511,18 @@ class CurrentControlDevice(ControllableDevice):
                 "%s: watching only — no park debt recorded (wanted %s)",
                 self.name, parked)
             return
+        await self._write_park_record(parked)
+
+    async def _write_park_record(self, parked: bool) -> None:
+        """The record itself, with no gate in front of it.
+
+        (#1027 review) Separate from ``_remember_parked`` for one caller:
+        ``release_to_user`` has ALREADY decided, and it has awaited several
+        sends since. If the switch is flipped during those awaits, a gate
+        read a second time would keep the debt on a box that was just handed
+        back — and the next setup would adopt a park already paid, the
+        "#935, live on PROD 13.09" bug. One decision, one lifetime.
+        """
         self._sem_parked = bool(parked)
         store = getattr(self, "_park_store", None)
         if store is None:
@@ -3637,8 +3649,10 @@ class CurrentControlDevice(ControllableDevice):
         # `sem.parked.<entry>` still naming this charger, so the next setup
         # adopted a park that had already been handed back — and the next
         # disable would "enable" a box SEM had not disabled. The debt is paid;
-        # the ledger has to say so.
-        await self._remember_parked(False)
+        # the record has to say so. (#1027) Written straight, without the
+        # gate: the decision was made at the top of this method, and the
+        # switch may have flipped during the awaits since.
+        await self._write_park_record(False)
         if not did:
             return None
         said = f"{self.name}: handed back on {reason} — " + ", ".join(did)

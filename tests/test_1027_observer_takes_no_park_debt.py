@@ -84,7 +84,8 @@ def _device(*, watching: bool, store=None, parked=False,
             has_service=lambda d, s: s in services,
             async_call=_async_call)),
     )
-    for m in ("send", "park_off", "_remember_parked", "adopt_park_state",
+    for m in ("send", "park_off", "_remember_parked", "_write_park_record",
+              "adopt_park_state",
               "release_to_user", "session_start_mechanism", "arm_failsafe"):
         setattr(dev, m, getattr(CurrentControlDevice, m).__get__(dev))
     dev.calls = calls
@@ -121,6 +122,27 @@ class TestWatchingTakesNoDebt:
         _run(dev.park_off())
         assert dev.calls == []
         assert store.data is None and dev._sem_parked is False
+
+    def test_the_claim_comes_from_the_send_and_not_from_silence(self):
+        """(review) The gate one layer down hides this one: with
+        ``_remember_parked`` gated, ``park_off`` could still read "the call
+        did not raise" as "the box was parked" and no test would notice. So
+        ask the question the other way round — a send that goes nowhere while
+        the device believes it commands. That is the line under test, alone.
+        """
+        store = FakeStore()
+        dev = _device(watching=False, store=store)
+        dev.send = AsyncMock(return_value=False)     # withheld, did not raise
+        _run(dev.park_off())
+        assert store.data is None, "no send left, so no park to record"
+        assert dev._sem_parked is False
+
+    def test_a_send_that_lands_still_books_the_debt(self):
+        store = FakeStore()
+        dev = _device(watching=False, store=store)
+        dev.send = AsyncMock(return_value=True)
+        _run(dev.park_off())
+        assert store.data == {"parked": ["ev_charger"]}
 
     def test_an_existing_record_survives_a_watching_lifetime(self):
         """The record is the commanding lifetime's. A watcher must not pay
@@ -206,6 +228,64 @@ class TestWatchingHandsNothingBack:
                                               ("keba", "set_failsafe")]
         assert store.data == {"parked": []}
 
+    def test_a_park_left_behind_is_named_in_the_log(self, caplog):
+        """(review) The box may be another SEM's, so SEM leaves it alone —
+        but the record can still name a box an earlier COMMANDING lifetime of
+        this entry really parked, and a removal deletes SEM's own files. This
+        is the last moment anything can say so."""
+        from custom_components.solar_energy_management import (
+            _async_say_the_park_is_unpaid,
+        )
+
+        store = FakeStore({"parked": ["ev_charger"]})
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "custom_components.solar_energy_management._park_store",
+                lambda h, e: store)
+            _run(_async_say_the_park_is_unpaid(
+                MagicMock(), SimpleNamespace(entry_id="01A")))
+        assert "ev_charger" in caplog.text
+        assert "refuses to charge" in caplog.text
+
+    def test_nothing_is_said_when_no_box_is_parked(self, caplog):
+        from custom_components.solar_energy_management import (
+            _async_say_the_park_is_unpaid,
+        )
+
+        store = FakeStore({"parked": []})
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "custom_components.solar_energy_management._park_store",
+                lambda h, e: store)
+            _run(_async_say_the_park_is_unpaid(
+                MagicMock(), SimpleNamespace(entry_id="01A")))
+        assert "#1027" not in caplog.text
+
+    def test_the_gate_reads_the_lifetime_captured_before_the_flip(self):
+        """The order in ``async_unload_entry`` is load-bearing and invisible:
+        ``async_release_batteries_on_unload`` sets observer mode ON part way
+        down (#936). A gate reading the flag LIVE, moved below that line,
+        would answer "watching" for every install and quietly stop handing
+        chargers back. So the gate reads a variable captured at the top, and
+        the flag is read exactly once."""
+        import ast
+        import inspect
+        import textwrap
+
+        from custom_components import solar_energy_management as sem
+
+        tree = ast.parse(textwrap.dedent(
+            inspect.getsource(sem.async_unload_entry)))
+        live = [n for n in ast.walk(tree)
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "id", "") == "getattr"
+                and len(n.args) > 1
+                and isinstance(n.args[1], ast.Constant)
+                and n.args[1].value == "_observer_mode"]
+        assert len(live) == 1, (
+            "the lifetime's mode is captured once, at the top; every gate "
+            "below reads that variable")
+
     def test_unload_asks_the_coordinator_before_stashing_a_hand_back(self):
         """The lifetime knows its mode from setup; a device learns it on a
         cycle. So the gate that decides whether a removal hands hardware
@@ -282,6 +362,22 @@ class TestTheGateCannotBeRefactoredAway:
         assert reads_flag(fn, "self", "observer_mode"), (
             f"{name} must ask whether SEM commands before it claims, keeps "
             f"or pays a park debt")
+
+    def test_the_hook_is_actually_wired_in_production(self):
+        """(review) The behaviour tests below inject their own hook, so the
+        one production line that sets it could be deleted with a green
+        suite — and "the record is not stranded" would be false."""
+        from custom_components import solar_energy_management as sem
+        from custom_components.solar_energy_management.tests.ast_contracts import (
+            assigns_attribute,
+        )
+
+        assert assigns_attribute(sem.async_setup_entry, "coordinator",
+                                 "_readopt_parked_chargers")
+        assert assigns_attribute(sem.async_unload_entry, "coordinator",
+                                 "_readopt_parked_chargers"), (
+            "and it is dropped on unload — it holds the entry and the "
+            "coordinator alive")
 
     def test_setup_tells_every_device_its_mode_before_anything_claims(self):
         """"A device nobody told is a device that acts" is the documented
