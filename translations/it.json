@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Finestra mattutina EV"
+      },
+      "hint_silent_input": {
+        "name": "Avviso: un sensore non invia più"
+      },
+      "hint_night_load": {
+        "name": "Avviso: un carico è rimasto acceso di notte"
+      },
+      "hint_grid_rise": {
+        "name": "Avviso: prelievo dalla rete aumentato"
+      },
+      "hint_cheap_now": {
+        "name": "Avviso: energia economica, auto ferma"
+      },
+      "hint_weekly_summary": {
+        "name": "Riepilogo settimanale"
       }
     },
     "number": {

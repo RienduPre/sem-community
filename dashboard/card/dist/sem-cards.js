@@ -8080,6 +8080,13 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
             ${this._renderOptionToggle("enable_charger_notifications","config_notif_charger",t,"config_help_notif_charger",!0)}
             ${this._renderOptionToggle("enable_mobile_notifications","config_notif_mobile",t,"config_help_notif_mobile",!1)}
             ${this._renderOptionSelect("mobile_notification_service","config_notif_service",i,t,"config_help_notif_service","")}
+            ${""}
+            <div style="margin-top:6px;border-top:1px solid ${e.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle("switch.sem_hint_silent_input","hint_silent_input",e,"config_help_hint_silent_input")}
+            ${this._renderToggle("switch.sem_hint_night_load","hint_night_load",e,"config_help_hint_night_load")}
+            ${this._renderToggle("switch.sem_hint_grid_rise","hint_grid_rise",e,"config_help_hint_grid_rise")}
+            ${this._renderToggle("switch.sem_hint_cheap_now","hint_cheap_now",e,"config_help_hint_cheap_now")}
+            ${this._renderToggle("switch.sem_hint_weekly_summary","hint_weekly_summary",e,"config_help_hint_weekly_summary")}
         `}_renderAdvanced(e){const t=this._options||{};return W`
             ${""}
             <div class="readonly-row" style="border-bottom:1px solid ${e.surfaceBorder};padding-bottom:4px;margin-bottom:4px">

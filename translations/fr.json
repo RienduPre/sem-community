@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Fenêtre matinale VE"
+      },
+      "hint_silent_input": {
+        "name": "Indice : une entrée ne répond plus"
+      },
+      "hint_night_load": {
+        "name": "Indice : une charge a tourné toute la nuit"
+      },
+      "hint_grid_rise": {
+        "name": "Indice : consommation réseau en hausse"
+      },
+      "hint_cheap_now": {
+        "name": "Indice : courant bon marché, voiture à l'arrêt"
+      },
+      "hint_weekly_summary": {
+        "name": "Résumé hebdomadaire"
       }
     },
     "number": {

@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Ochtendvenster voor de EV"
+      },
+      "hint_silent_input": {
+        "name": "Hint: een sensor stuurt niets meer"
+      },
+      "hint_night_load": {
+        "name": "Hint: een verbruiker draaide de hele nacht"
+      },
+      "hint_grid_rise": {
+        "name": "Hint: netverbruik gestegen"
+      },
+      "hint_cheap_now": {
+        "name": "Hint: stroom goedkoop, auto wacht"
+      },
+      "hint_weekly_summary": {
+        "name": "Weekoverzicht"
       }
     },
     "number": {

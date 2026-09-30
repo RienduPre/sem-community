@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Janela matinal do VE"
+      },
+      "hint_silent_input": {
+        "name": "Dica: um sensor deixou de enviar"
+      },
+      "hint_night_load": {
+        "name": "Dica: uma carga esteve ligada toda a noite"
+      },
+      "hint_grid_rise": {
+        "name": "Dica: consumo da rede subiu"
+      },
+      "hint_cheap_now": {
+        "name": "Dica: energia barata, carro parado"
+      },
+      "hint_weekly_summary": {
+        "name": "Resumo semanal"
       }
     },
     "number": {

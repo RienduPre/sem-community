@@ -2758,6 +2758,15 @@ class SEMConfigCard extends SEMLitBase {
                 opts, 'config_help_notif_mobile', false)}
             ${this._renderOptionSelect('mobile_notification_service', 'config_notif_service',
                 notifyServices, opts, 'config_help_notif_service', '')}
+            ${/* (#1019) Five hint categories, each a switch, all default OFF.
+                  The entity is the source of truth, the card stages — same
+                  pattern as the battery-intelligence toggles. */ ''}
+            <div style="margin-top:6px;border-top:1px solid ${T.surfaceBorder};padding-top:4px"></div>
+            ${this._renderToggle('switch.sem_hint_silent_input', 'hint_silent_input', T, 'config_help_hint_silent_input')}
+            ${this._renderToggle('switch.sem_hint_night_load', 'hint_night_load', T, 'config_help_hint_night_load')}
+            ${this._renderToggle('switch.sem_hint_grid_rise', 'hint_grid_rise', T, 'config_help_hint_grid_rise')}
+            ${this._renderToggle('switch.sem_hint_cheap_now', 'hint_cheap_now', T, 'config_help_hint_cheap_now')}
+            ${this._renderToggle('switch.sem_hint_weekly_summary', 'hint_weekly_summary', T, 'config_help_hint_weekly_summary')}
         `;
     }
 

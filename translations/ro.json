@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Fereastra de dimineață VE"
+      },
+      "hint_silent_input": {
+        "name": "Indiciu: un senzor nu mai trimite"
+      },
+      "hint_night_load": {
+        "name": "Indiciu: un consumator a mers toată noaptea"
+      },
+      "hint_grid_rise": {
+        "name": "Indiciu: consumul din rețea a crescut"
+      },
+      "hint_cheap_now": {
+        "name": "Indiciu: energie ieftină, mașina așteaptă"
+      },
+      "hint_weekly_summary": {
+        "name": "Rezumat săptămânal"
       }
     },
     "number": {

@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Morgonfönster för elbilen"
+      },
+      "hint_silent_input": {
+        "name": "Tips: en sensor slutade sända"
+      },
+      "hint_night_load": {
+        "name": "Tips: en last gick hela natten"
+      },
+      "hint_grid_rise": {
+        "name": "Tips: nätuttaget ökade"
+      },
+      "hint_cheap_now": {
+        "name": "Tips: elen är billig, bilen väntar"
+      },
+      "hint_weekly_summary": {
+        "name": "Veckosammanfattning"
       }
     },
     "number": {

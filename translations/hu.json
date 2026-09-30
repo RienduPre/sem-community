@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Reggeli EV-ablak"
+      },
+      "hint_silent_input": {
+        "name": "Tipp: egy érzékelő nem küld"
+      },
+      "hint_night_load": {
+        "name": "Tipp: egy fogyasztó egész éjjel ment"
+      },
+      "hint_grid_rise": {
+        "name": "Tipp: nőtt a hálózati fogyasztás"
+      },
+      "hint_cheap_now": {
+        "name": "Tipp: olcsó az áram, az autó vár"
+      },
+      "hint_weekly_summary": {
+        "name": "Heti összefoglaló"
       }
     },
     "number": {

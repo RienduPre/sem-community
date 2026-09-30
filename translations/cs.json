@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Ranní okno pro EV"
+      },
+      "hint_silent_input": {
+        "name": "Tip: senzor přestal posílat"
+      },
+      "hint_night_load": {
+        "name": "Tip: spotřebič běžel celou noc"
+      },
+      "hint_grid_rise": {
+        "name": "Tip: odběr ze sítě vzrostl"
+      },
+      "hint_cheap_now": {
+        "name": "Tip: elektřina je levná, auto čeká"
+      },
+      "hint_weekly_summary": {
+        "name": "Týdenní přehled"
       }
     },
     "number": {

@@ -1453,6 +1453,21 @@
       },
       "ev_morning_window_enabled": {
         "name": "Morning EV window"
+      },
+      "hint_silent_input": {
+        "name": "Hint: an input stopped sending"
+      },
+      "hint_night_load": {
+        "name": "Hint: a load ran all night"
+      },
+      "hint_grid_rise": {
+        "name": "Hint: grid use rose"
+      },
+      "hint_cheap_now": {
+        "name": "Hint: power is cheap, car idle"
+      },
+      "hint_weekly_summary": {
+        "name": "Weekly summary"
       }
     },
     "number": {

@@ -103,6 +103,34 @@ SWITCH_TYPES = [
         entity_category=EntityCategory.CONFIG,
         icon="mdi:car-clock",
     ),
+    # (#1019) Five hint categories, each its own switch, all default OFF.
+    # A hint is a short sentence on the phone (and a bus event) when
+    # something is off; nothing here can act on the house.
+    SwitchEntityDescription(
+        key="hint_silent_input",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:lan-disconnect",
+    ),
+    SwitchEntityDescription(
+        key="hint_night_load",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:weather-night",
+    ),
+    SwitchEntityDescription(
+        key="hint_grid_rise",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:transmission-tower-import",
+    ),
+    SwitchEntityDescription(
+        key="hint_cheap_now",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:cash-clock",
+    ),
+    SwitchEntityDescription(
+        key="hint_weekly_summary",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:calendar-week",
+    ),
 ]
 
 # (#778 phase 6) Switch key -> its slot in the nested ``battery_permissions``

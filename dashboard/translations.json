@@ -1584,7 +1584,17 @@
     "pause_status_line": "Pozastaveno — zbývá {left} · zpět na {mode} v {time}.",
     "pause_resume_hint": "Zvolte režim pro okamžité pokračování.",
     "pause_resuming": "Pokračuje…",
-    "pv_health_title": "Stav FV"
+    "pv_health_title": "Stav FV",
+    "hint_silent_input": "Senzor přestal posílat",
+    "config_help_hint_silent_input": "Jedna zpráva, když senzor čtený SEM mlčí 15 minut, a jedna, když je zpět.",
+    "hint_night_load": "Spotřebič běžel celou noc",
+    "config_help_hint_night_load": "Ráno podle SEM: dům spotřeboval mnohem více než jiné noci.",
+    "hint_grid_rise": "Odběr ze sítě vzrostl",
+    "config_help_hint_grid_rise": "Na začátku noci podle SEM: dnešní odběr ze sítě je výrazně nad obvyklým, při stejném slunci.",
+    "hint_cheap_now": "Elektřina je levná, auto čeká",
+    "config_help_hint_cheap_now": "Cena klesla, auto je připojené a nenabíjí. Jen s dynamickým tarifem.",
+    "hint_weekly_summary": "Týdenní přehled",
+    "config_help_hint_weekly_summary": "Neděle večer: slunce, vlastní spotřeba, síť, auto a náklady týdne."
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3171,7 +3181,17 @@
     "pause_status_line": "Pauset — {left} tilbage · tilbage til {mode} kl. {time}.",
     "pause_resume_hint": "Vælg en tilstand for at genoptage nu.",
     "pause_resuming": "Genoptager…",
-    "pv_health_title": "PV-tilstand"
+    "pv_health_title": "PV-tilstand",
+    "hint_silent_input": "En sensor sender ikke længere",
+    "config_help_hint_silent_input": "Én besked når en sensor SEM læser har været stille i 15 minutter, og én når den er tilbage.",
+    "hint_night_load": "Et forbrug kørte hele natten",
+    "config_help_hint_night_load": "Ved SEMs morgen: huset brugte meget mere end andre nætter.",
+    "hint_grid_rise": "Netforbrug steg",
+    "config_help_hint_grid_rise": "Ved SEMs natstart: dagens netforbrug ligger langt over det sædvanlige, med samme sol.",
+    "hint_cheap_now": "Strømmen er billig, bilen venter",
+    "config_help_hint_cheap_now": "Prisen blev billig, en bil er tilsluttet og lader ikke. Kun ved dynamisk tarif.",
+    "hint_weekly_summary": "Ugeoversigt",
+    "config_help_hint_weekly_summary": "Søndag aften: sol, egetforbrug, net, bil og omkostning for ugen."
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4758,7 +4778,17 @@
     "pause_status_line": "Pausiert — noch {left} · zurück zu {mode} um {time}.",
     "pause_resume_hint": "Einen Modus wählen, um sofort fortzusetzen.",
     "pause_resuming": "Wird fortgesetzt…",
-    "pv_health_title": "PV-Zustand"
+    "pv_health_title": "PV-Zustand",
+    "hint_silent_input": "Ein Sensor sendet nicht mehr",
+    "config_help_hint_silent_input": "Eine Meldung, wenn ein Sensor 15 Minuten still war, und eine, wenn er wieder da ist.",
+    "hint_night_load": "Last lief die ganze Nacht",
+    "config_help_hint_night_load": "Am SEM-Morgen: das Haus hat nachts viel mehr gebraucht als sonst.",
+    "hint_grid_rise": "Netzbezug gestiegen",
+    "config_help_hint_grid_rise": "Bei SEM-Nachtbeginn: der Netzbezug heute liegt weit über dem Üblichen, bei gleicher Sonne.",
+    "hint_cheap_now": "Strom günstig, Auto wartet",
+    "config_help_hint_cheap_now": "Der Preis wurde günstig, ein Auto steckt und lädt nicht. Nur bei dynamischem Tarif.",
+    "hint_weekly_summary": "Wochenübersicht",
+    "config_help_hint_weekly_summary": "Sonntagabend: Solar, Eigenverbrauch, Netz, Auto und Kosten der Woche."
   },
   "en": {
     "% of limit": "% of limit",
@@ -6345,7 +6375,17 @@
     "pause_status_line": "Paused — {left} left · back to {mode} at {time}.",
     "pause_resume_hint": "Pick a mode to resume now.",
     "pause_resuming": "Resuming…",
-    "pv_health_title": "PV health"
+    "pv_health_title": "PV health",
+    "hint_silent_input": "An input stopped sending",
+    "config_help_hint_silent_input": "One message when a sensor SEM reads has been silent for 15 minutes, and one when it is back.",
+    "hint_night_load": "A load ran all night",
+    "config_help_hint_night_load": "At SEM's morning: the house used much more than on other nights.",
+    "hint_grid_rise": "Grid use rose",
+    "config_help_hint_grid_rise": "At SEM's night start: today's grid use is well above the usual, with the same sun.",
+    "hint_cheap_now": "Power is cheap, car idle",
+    "config_help_hint_cheap_now": "The price turned cheap, a car is plugged in and not charging. Dynamic tariff only.",
+    "hint_weekly_summary": "Weekly summary",
+    "config_help_hint_weekly_summary": "Sunday evening: solar, self-use, grid, car and cost for the week."
   },
   "es": {
     "% of limit": "% del límite",
@@ -7932,7 +7972,17 @@
     "pause_status_line": "En pausa — quedan {left} · vuelve a {mode} a las {time}.",
     "pause_resume_hint": "Elija un modo para reanudar ahora.",
     "pause_resuming": "Reanudando…",
-    "pv_health_title": "Estado FV"
+    "pv_health_title": "Estado FV",
+    "hint_silent_input": "Un sensor dejó de enviar",
+    "config_help_hint_silent_input": "Un mensaje cuando un sensor que SEM lee lleva 15 minutos en silencio, y otro cuando vuelve.",
+    "hint_night_load": "Una carga estuvo toda la noche",
+    "config_help_hint_night_load": "Por la mañana de SEM: la casa consumió mucho más que otras noches.",
+    "hint_grid_rise": "Subió el consumo de red",
+    "config_help_hint_grid_rise": "Al inicio de la noche de SEM: el consumo de red de hoy supera con creces lo habitual, con el mismo sol.",
+    "hint_cheap_now": "Energía barata, coche parado",
+    "config_help_hint_cheap_now": "El precio bajó, hay un coche enchufado y no carga. Solo con tarifa dinámica.",
+    "hint_weekly_summary": "Resumen semanal",
+    "config_help_hint_weekly_summary": "Domingo por la tarde: solar, autoconsumo, red, coche y coste de la semana."
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9519,7 +9569,17 @@
     "pause_status_line": "Tauolla — {left} jäljellä · takaisin tilaan {mode} klo {time}.",
     "pause_resume_hint": "Valitse tila jatkaaksesi heti.",
     "pause_resuming": "Jatketaan…",
-    "pv_health_title": "PV:n kunto"
+    "pv_health_title": "PV:n kunto",
+    "hint_silent_input": "Anturi lakkasi lähettämästä",
+    "config_help_hint_silent_input": "Yksi viesti, kun SEMin lukema anturi on ollut hiljaa 15 minuuttia, ja yksi kun se palaa.",
+    "hint_night_load": "Kuorma kävi koko yön",
+    "config_help_hint_night_load": "SEMin aamulla: talo käytti paljon enemmän kuin muina öinä.",
+    "hint_grid_rise": "Verkosta otto kasvoi",
+    "config_help_hint_grid_rise": "SEMin yön alussa: päivän verkosta otto on selvästi tavallista suurempi samalla auringolla.",
+    "hint_cheap_now": "Sähkö on halpaa, auto odottaa",
+    "config_help_hint_cheap_now": "Hinta muuttui halvaksi, auto on kytketty eikä lataa. Vain dynaamisella tariffilla.",
+    "hint_weekly_summary": "Viikkoyhteenveto",
+    "config_help_hint_weekly_summary": "Sunnuntai-iltana: aurinko, oma käyttö, verkko, auto ja viikon kustannus."
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -11106,7 +11166,17 @@
     "pause_status_line": "En pause — encore {left} · retour à {mode} à {time}.",
     "pause_resume_hint": "Choisissez un mode pour reprendre maintenant.",
     "pause_resuming": "Reprise…",
-    "pv_health_title": "État du PV"
+    "pv_health_title": "État du PV",
+    "hint_silent_input": "Une entrée ne répond plus",
+    "config_help_hint_silent_input": "Un message quand un capteur lu par SEM est muet depuis 15 minutes, un autre quand il revient.",
+    "hint_night_load": "Une charge a tourné toute la nuit",
+    "config_help_hint_night_load": "Au matin SEM : la maison a consommé bien plus que les autres nuits.",
+    "hint_grid_rise": "Consommation réseau en hausse",
+    "config_help_hint_grid_rise": "Au début de nuit SEM : le soutirage du jour dépasse nettement l'habitude, à soleil égal.",
+    "hint_cheap_now": "Courant bon marché, voiture à l'arrêt",
+    "config_help_hint_cheap_now": "Le prix est devenu bas, une voiture est branchée et ne charge pas. Tarif dynamique seulement.",
+    "hint_weekly_summary": "Résumé hebdomadaire",
+    "config_help_hint_weekly_summary": "Dimanche soir : solaire, autoconsommation, réseau, voiture et coût de la semaine."
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12693,7 +12763,17 @@
     "pause_status_line": "Szünetel — még {left} · vissza ide: {mode}, {time}-kor.",
     "pause_resume_hint": "Válasszon módot az azonnali folytatáshoz.",
     "pause_resuming": "Folytatás…",
-    "pv_health_title": "PV állapot"
+    "pv_health_title": "PV állapot",
+    "hint_silent_input": "Egy érzékelő nem küld",
+    "config_help_hint_silent_input": "Egy üzenet, ha egy SEM által olvasott érzékelő 15 perce néma, és egy, ha visszatér.",
+    "hint_night_load": "Egy fogyasztó egész éjjel ment",
+    "config_help_hint_night_load": "SEM reggelén: a ház sokkal többet fogyasztott, mint más éjszakákon.",
+    "hint_grid_rise": "Nőtt a hálózati fogyasztás",
+    "config_help_hint_grid_rise": "SEM éjszakájának kezdetén: a mai hálózati fogyasztás jóval a szokásos fölött, azonos napsütésnél.",
+    "hint_cheap_now": "Olcsó az áram, az autó vár",
+    "config_help_hint_cheap_now": "Az ár olcsó lett, egy autó csatlakoztatva van és nem tölt. Csak dinamikus tarifánál.",
+    "hint_weekly_summary": "Heti összefoglaló",
+    "config_help_hint_weekly_summary": "Vasárnap este: nap, saját fogyasztás, hálózat, autó és a hét költsége."
   },
   "it": {
     "% of limit": "% del limite",
@@ -14280,7 +14360,17 @@
     "pause_status_line": "In pausa — ancora {left} · torna a {mode} alle {time}.",
     "pause_resume_hint": "Scegli un modo per riprendere subito.",
     "pause_resuming": "Ripresa…",
-    "pv_health_title": "Stato FV"
+    "pv_health_title": "Stato FV",
+    "hint_silent_input": "Un sensore non invia più",
+    "config_help_hint_silent_input": "Un messaggio quando un sensore letto da SEM tace da 15 minuti, e uno quando torna.",
+    "hint_night_load": "Un carico è rimasto acceso di notte",
+    "config_help_hint_night_load": "Al mattino SEM: la casa ha consumato molto più delle altre notti.",
+    "hint_grid_rise": "Prelievo dalla rete aumentato",
+    "config_help_hint_grid_rise": "All'inizio della notte SEM: il prelievo di oggi è ben oltre il solito, con lo stesso sole.",
+    "hint_cheap_now": "Energia economica, auto ferma",
+    "config_help_hint_cheap_now": "Il prezzo è sceso, un'auto è collegata e non carica. Solo con tariffa dinamica.",
+    "hint_weekly_summary": "Riepilogo settimanale",
+    "config_help_hint_weekly_summary": "Domenica sera: solare, autoconsumo, rete, auto e costo della settimana."
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15867,7 +15957,17 @@
     "pause_status_line": "Gepauzeerd — nog {left} · terug naar {mode} om {time}.",
     "pause_resume_hint": "Kies een modus om nu te hervatten.",
     "pause_resuming": "Hervat…",
-    "pv_health_title": "PV-gezondheid"
+    "pv_health_title": "PV-gezondheid",
+    "hint_silent_input": "Een sensor stuurt niets meer",
+    "config_help_hint_silent_input": "Eén bericht als een sensor die SEM leest 15 minuten stil is, en één als hij terug is.",
+    "hint_night_load": "Een verbruiker draaide de hele nacht",
+    "config_help_hint_night_load": "Bij SEM's ochtend: het huis gebruikte veel meer dan andere nachten.",
+    "hint_grid_rise": "Netverbruik gestegen",
+    "config_help_hint_grid_rise": "Bij SEM's nachtstart: het netverbruik van vandaag ligt ver boven normaal, bij dezelfde zon.",
+    "hint_cheap_now": "Stroom goedkoop, auto wacht",
+    "config_help_hint_cheap_now": "De prijs werd goedkoop, een auto is aangesloten en laadt niet. Alleen bij dynamisch tarief.",
+    "hint_weekly_summary": "Weekoverzicht",
+    "config_help_hint_weekly_summary": "Zondagavond: zon, eigen verbruik, net, auto en kosten van de week."
   },
   "no": {
     "% of limit": "% av grense",
@@ -17454,7 +17554,17 @@
     "pause_status_line": "Pauset — {left} igjen · tilbake til {mode} kl. {time}.",
     "pause_resume_hint": "Velg en modus for å fortsette nå.",
     "pause_resuming": "Fortsetter…",
-    "pv_health_title": "PV-tilstand"
+    "pv_health_title": "PV-tilstand",
+    "hint_silent_input": "En sensor sender ikke lenger",
+    "config_help_hint_silent_input": "Én melding når en sensor SEM leser har vært stille i 15 minutter, og én når den er tilbake.",
+    "hint_night_load": "En last gikk hele natten",
+    "config_help_hint_night_load": "Ved SEMs morgen: huset brukte mye mer enn andre netter.",
+    "hint_grid_rise": "Nettforbruket økte",
+    "config_help_hint_grid_rise": "Ved SEMs nattstart: dagens nettforbruk ligger langt over det vanlige, med samme sol.",
+    "hint_cheap_now": "Strømmen er billig, bilen venter",
+    "config_help_hint_cheap_now": "Prisen ble billig, en bil er tilkoblet og lader ikke. Kun ved dynamisk tariff.",
+    "hint_weekly_summary": "Ukesoppsummering",
+    "config_help_hint_weekly_summary": "Søndag kveld: sol, egenforbruk, nett, bil og kostnad for uken."
   },
   "pl": {
     "% of limit": "% limitu",
@@ -19041,7 +19151,17 @@
     "pause_status_line": "Wstrzymano — pozostało {left} · powrót do {mode} o {time}.",
     "pause_resume_hint": "Wybierz tryb, aby wznowić teraz.",
     "pause_resuming": "Wznawianie…",
-    "pv_health_title": "Stan PV"
+    "pv_health_title": "Stan PV",
+    "hint_silent_input": "Czujnik przestał wysyłać",
+    "config_help_hint_silent_input": "Jedna wiadomość, gdy czujnik czytany przez SEM milczy 15 minut, i jedna, gdy wróci.",
+    "hint_night_load": "Odbiornik pracował całą noc",
+    "config_help_hint_night_load": "O poranku SEM: dom zużył znacznie więcej niż w inne noce.",
+    "hint_grid_rise": "Pobór z sieci wzrósł",
+    "config_help_hint_grid_rise": "Na początku nocy SEM: dzisiejszy pobór z sieci jest znacznie wyższy niż zwykle, przy tym samym słońcu.",
+    "hint_cheap_now": "Prąd tani, auto czeka",
+    "config_help_hint_cheap_now": "Cena spadła, auto jest podłączone i nie ładuje. Tylko przy taryfie dynamicznej.",
+    "hint_weekly_summary": "Podsumowanie tygodnia",
+    "config_help_hint_weekly_summary": "Niedziela wieczorem: słońce, zużycie własne, sieć, auto i koszt tygodnia."
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20628,7 +20748,17 @@
     "pause_status_line": "Em pausa — faltam {left} · volta a {mode} às {time}.",
     "pause_resume_hint": "Escolha um modo para retomar agora.",
     "pause_resuming": "A retomar…",
-    "pv_health_title": "Estado FV"
+    "pv_health_title": "Estado FV",
+    "hint_silent_input": "Um sensor deixou de enviar",
+    "config_help_hint_silent_input": "Uma mensagem quando um sensor lido pelo SEM está em silêncio há 15 minutos, e outra quando volta.",
+    "hint_night_load": "Uma carga esteve ligada toda a noite",
+    "config_help_hint_night_load": "Na manhã do SEM: a casa consumiu muito mais do que noutras noites.",
+    "hint_grid_rise": "Consumo da rede subiu",
+    "config_help_hint_grid_rise": "No início da noite do SEM: o consumo da rede de hoje está bem acima do habitual, com o mesmo sol.",
+    "hint_cheap_now": "Energia barata, carro parado",
+    "config_help_hint_cheap_now": "O preço ficou barato, um carro está ligado e não carrega. Só com tarifa dinâmica.",
+    "hint_weekly_summary": "Resumo semanal",
+    "config_help_hint_weekly_summary": "Domingo à noite: solar, autoconsumo, rede, carro e custo da semana."
   },
   "ro": {
     "% of limit": "% din limită",
@@ -22215,7 +22345,17 @@
     "pause_status_line": "În pauză — mai sunt {left} · revine la {mode} la {time}.",
     "pause_resume_hint": "Alegeți un mod pentru a relua acum.",
     "pause_resuming": "Se reia…",
-    "pv_health_title": "Stare PV"
+    "pv_health_title": "Stare PV",
+    "hint_silent_input": "Un senzor nu mai trimite",
+    "config_help_hint_silent_input": "Un mesaj când un senzor citit de SEM tace de 15 minute, și unul când revine.",
+    "hint_night_load": "Un consumator a mers toată noaptea",
+    "config_help_hint_night_load": "Dimineața SEM: casa a consumat mult mai mult decât în alte nopți.",
+    "hint_grid_rise": "Consumul din rețea a crescut",
+    "config_help_hint_grid_rise": "La începutul nopții SEM: consumul din rețea de azi e mult peste obișnuit, cu același soare.",
+    "hint_cheap_now": "Energie ieftină, mașina așteaptă",
+    "config_help_hint_cheap_now": "Prețul a devenit ieftin, o mașină e conectată și nu încarcă. Doar la tarif dinamic.",
+    "hint_weekly_summary": "Rezumat săptămânal",
+    "config_help_hint_weekly_summary": "Duminică seara: solar, consum propriu, rețea, mașină și costul săptămânii."
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23802,7 +23942,17 @@
     "pause_status_line": "Pausad — {left} kvar · tillbaka till {mode} kl. {time}.",
     "pause_resume_hint": "Välj ett läge för att återuppta nu.",
     "pause_resuming": "Återupptar…",
-    "pv_health_title": "PV-hälsa"
+    "pv_health_title": "PV-hälsa",
+    "hint_silent_input": "En sensor slutade sända",
+    "config_help_hint_silent_input": "Ett meddelande när en sensor SEM läser varit tyst i 15 minuter, och ett när den är tillbaka.",
+    "hint_night_load": "En last gick hela natten",
+    "config_help_hint_night_load": "Vid SEM:s morgon: huset använde mycket mer än andra nätter.",
+    "hint_grid_rise": "Nätuttaget ökade",
+    "config_help_hint_grid_rise": "Vid SEM:s nattstart: dagens nätuttag ligger långt över det vanliga, med samma sol.",
+    "hint_cheap_now": "Elen är billig, bilen väntar",
+    "config_help_hint_cheap_now": "Priset blev billigt, en bil är inkopplad och laddar inte. Endast vid dynamisk tariff.",
+    "hint_weekly_summary": "Veckosammanfattning",
+    "config_help_hint_weekly_summary": "Söndag kväll: sol, egenanvändning, nät, bil och kostnad för veckan."
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25389,6 +25539,16 @@
     "pause_status_line": "已暂停 — 剩余 {left} · 将于 {time} 恢复为 {mode}。",
     "pause_resume_hint": "选择一个模式以立即恢复。",
     "pause_resuming": "正在恢复…",
-    "pv_health_title": "光伏健康"
+    "pv_health_title": "光伏健康",
+    "hint_silent_input": "某个传感器停止发送",
+    "config_help_hint_silent_input": "SEM 读取的传感器静默 15 分钟时发一条消息，恢复时再发一条。",
+    "hint_night_load": "某负载整夜运行",
+    "config_help_hint_night_load": "SEM 的早晨：房屋用电远高于其他夜晚。",
+    "hint_grid_rise": "电网用电上升",
+    "config_help_hint_grid_rise": "SEM 夜间开始时：今日电网用电远高于平常，而日照相同。",
+    "hint_cheap_now": "电价便宜，车辆闲置",
+    "config_help_hint_cheap_now": "电价变便宜，有车已插上但未充电。仅限动态电价。",
+    "hint_weekly_summary": "每周摘要",
+    "config_help_hint_weekly_summary": "周日晚上：本周的光伏、自用、电网、车辆和费用。"
   }
 }
