@@ -3080,6 +3080,23 @@ def _schedule_post_startup_tasks(
     # Schedule tasks to run when Home Assistant is fully started
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _async_post_startup_init)
 
+    # (#967) Everything that reads the recorder starts HERE, on a task
+    # nothing in setup waits for. Home Assistant cancels a setup that
+    # overruns its start-up budget, and the cancel is not an exception any
+    # of the "never cost us the setup" handlers can catch — SEM simply did
+    # not load. Unlike the listener above, this also fires on a reload,
+    # where HA is already running and the started event never comes again.
+    from .coordinator.recorder_history import run_after_start
+    entry.async_on_unload(run_after_start(
+        hass, coordinator.async_seed_from_recorder, name="sem recorder seeds",
+    ))
+    _registry = getattr(coordinator, "_device_registry", None)
+    if _registry is not None:
+        entry.async_on_unload(run_after_start(
+            hass, _registry.async_seed_ratings_from_history,
+            name="sem rated-power seed",
+        ))
+
     # React live to new sensor entities from other integrations (e.g. DSMR loading
     # after SEM's first refresh). Cheap: only fires on entity creation, not state
     # changes. See plan for issue #166.
@@ -3422,6 +3439,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             #   dropped by the next ``async_setup_entry`` (i.e. a reload), so a
             #   device list only lingers between an unload and whatever
             #   follows it.
+            # (#967) Drop any recorder work this coordinator was still
+            # waiting on. A reload during the boot would otherwise leave the
+            # old one on the start event beside the new one.
+            try:
+                coordinator.cancel_pending_recorder_work()
+            except Exception:  # noqa: BLE001 — teardown must finish
+                _LOGGER.debug("could not cancel pending recorder work")
+
             sc = getattr(coordinator, "_surplus_controller", None)
             if sc is not None:
                 # detach_devices() clears the registry AND hands the devices

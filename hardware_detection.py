@@ -19,12 +19,15 @@ Detection is integration-aware:
    - 3-5: Common generic patterns
 
 """
+import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
+
+from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -970,6 +973,45 @@ def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
         result.pop("ev_current_control_entity", None)
 
 
+#: (#804) The roles SEM COMMANDS. A reboot entity in any of them is a
+#: power-cycle wearing a control's name.
+_CONTROL_ROLES = (
+    "ev_start_stop_entity",
+    "ev_charge_mode_entity",
+    "ev_current_control_entity",
+    "ev_phase_switch_entity",
+)
+
+
+def _reject_reboot_control(result: Dict[str, str], entities=None) -> None:
+    """(#804) Drop a device-RESTART entity from any control role.
+
+    @HorizonKane's Wattpilot published ``button.…_neustart`` and the brand
+    row's "start" hint matched the letters inside it, so SEM adopted the
+    reboot button as the charger's start/stop control: every enable
+    rebooted the box, and the stop that rides the current write was
+    skipped below the number's 6 A minimum. The word rule lives here, at
+    the choke point every registry path funnels through, so it holds for
+    the hand-written brands and the generic prober too — not only for the
+    row whose hint was wrong.
+
+    HA's own ``restart`` device class is asked first: it says the same
+    thing in every language, which a word list can never do — "Neu
+    starten", "Starta om" and "Start på nytt" all begin a word with
+    "start" and would otherwise pass.
+    """
+    classes = {str(getattr(e, "entity_id", "")):
+               getattr(e, "original_device_class", None)
+               for e in (entities or [])}
+    for role in _CONTROL_ROLES:
+        eid = result.get(role)
+        if eid and names_a_reboot(eid, classes.get(eid)):
+            _LOGGER.info(
+                "discovery: %s names a device restart — not adopting it as "
+                "%s (#804)", eid, role)
+            result.pop(role, None)
+
+
 def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     """Every brand-agnostic correction a freshly discovered charger config
     gets, at the one place all four REGISTRY discovery paths funnel through —
@@ -984,6 +1026,7 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     correction."""
     _reject_offline_current_control(result, entities)
     _reject_capability_sensor(result, entities)
+    _reject_reboot_control(result, entities)
 
 
 # ============================================================
@@ -2257,16 +2300,34 @@ def vehicle_from_device(dev_entities) -> Dict[str, Any]:
                     break
             if role in out:
                 break
+    if "vehicle_soc_entity" not in out:
+        # (#887, 29.09) Azlinon's bridge publishes the charge level as a
+        # SENSOR ``…_charge_state`` in percent, not as ``…_ev_battery_level``.
+        # The same word on a BINARY sensor means "charging now", so the
+        # sensor counts only when it says it is a level: unit % or device
+        # class battery. No unit, no claim.
+        for e in dev_entities:
+            eid = str(getattr(e, "entity_id", ""))
+            if not (eid.startswith("sensor.") and eid.endswith("_charge_state")):
+                continue
+            unit = (getattr(e, "original_unit_of_measurement", None)
+                    or getattr(e, "unit_of_measurement", None))
+            dclass = (getattr(e, "original_device_class", None)
+                      or getattr(e, "device_class", None))
+            if str(unit or "").strip() == "%" or dclass == "battery":
+                out["vehicle_soc_entity"] = eid
+                break
     if "vehicle_soc_entity" not in out and "vehicle_range_entity" not in out:
         return {}
     # the name is the bridge's own stem: sensor.2024_chevrolet_blazer_ev_ev_range
-    first = out.get("vehicle_soc_entity") or out["vehicle_range_entity"]
-    stem = first.split(".", 1)[1]
-    for tails in (t for _, t in _VEHICLE_TAILS.values()):
-        for tail in tails:
-            if stem.endswith(tail):
-                stem = stem[: -len(tail)]
-                break
+    # — cut by the tail of the ROLE the entity was found under, so the
+    # ``…_charge_state`` level is not cut as ``…_ev_charge_state`` (#887).
+    role = "vehicle_range_entity" if "vehicle_range_entity" in out else "vehicle_soc_entity"
+    stem = out[role].split(".", 1)[1]
+    for tail in [*_VEHICLE_TAILS[role][1], "_charge_state"]:
+        if stem.endswith(tail):
+            stem = stem[: -len(tail)]
+            break
     out["name"] = stem.replace("_", " ").strip().title() or "vehicle"
     return out
 
@@ -3013,10 +3074,64 @@ def _discover_abl_emh1(entities) -> Dict[str, str]:
     return result
 
 
+def _name_hit(eid: str, hint: str) -> bool:
+    """Does ``hint`` name a SEGMENT of this entity id?
+
+    (#804) An entity id is a sequence of words, not a bag of letters, and a
+    plain ``in`` claims every longer word that happens to contain the hint.
+    The live catch: @HorizonKane's go-e box publishes
+    ``button.carport_wattpilot_91114903_neustart`` — the German RESTART
+    button — and the Wattpilot row's ``("start", "resume")`` matched it, so
+    SEM adopted a device reboot as the charging start/stop control. Every
+    language has one: restart, neustart, herstart, redemarrer.
+
+    A hit must therefore begin a word: at the start of the id, or right
+    after a separator. A hint that already begins with a separator
+    (``"_state"``) carries its own boundary and is matched as written.
+    """
+    if not hint:
+        return False
+    if hint[0] in "._-":
+        return hint in eid
+    start = 0
+    while True:
+        at = eid.find(hint, start)
+        if at < 0:
+            return False
+        if at == 0 or eid[at - 1] in "._-":
+            return True
+        start = at + 1
+
+
+def _discover_wattpilot(entities) -> Dict[str, str]:
+    """(#802/#804) The data row, plus the box's own force buttons: stop is the
+    ``-frc1`` button through ``button.press``, start the ``-frc2`` one. Matched
+    by unique id because the names are localised ("Laden stoppen")."""
+    result = _discover_from_hints(entities, _BRAND_HINTS["wattpilot"])
+    btn: Dict[str, str] = {}
+    for e in entities:
+        eid = str(getattr(e, "entity_id", "") or "")
+        uid = str(getattr(e, "unique_id", "") or "")
+        if eid.startswith("button."):
+            for suffix in ("-frc0", "-frc1", "-frc2"):
+                if uid.endswith(suffix):
+                    btn[suffix] = eid
+    if "-frc1" in btn:
+        result["ev_stop_service"] = "button.press"
+        result["ev_stop_service_data"] = json.dumps({"entity_id": btn["-frc1"]})
+        start = btn.get("-frc2") or btn.get("-frc0")
+        if start:
+            result["ev_start_stop_entity"] = start
+    return result
+
+
 def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     """Apply a brand's data rows: each role takes the LAST matching entity
     (the same last-wins the hand-written loops had), a rule matches on
-    domain, optional device_class, and optional any-of name hints."""
+    domain, optional device_class, and optional any-of name hints.
+
+    Name hints match on WORD boundaries (``_name_hit``); the ``not`` list
+    stays a plain substring, because a negative may be broad."""
     result: Dict[str, str] = {}
     for entry in entities:
         eid = str(entry.entity_id)
@@ -3027,14 +3142,19 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
                 continue
             if "device_class" in rule and dc != rule["device_class"]:
                 continue
+            # (#804) HA labels a reboot button ``restart`` in every
+            # language. A rule that did not ask for that class never wants
+            # it — the word hints are what matched it before.
+            if dc == REBOOT_DEVICE_CLASS and rule.get("device_class") != dc:
+                continue
             names = rule.get("names")
-            if names and not any(n in eid for n in names):
+            if names and not any(_name_hit(eid, n) for n in names):
                 continue
             # (#816) an optional SECOND any-of set, ANDed with the first —
             # "juicebox" AND "lifetime" — because brands on the shared mqtt
             # platform need conjunctions a single any-of cannot express.
             names2 = rule.get("names2")
-            if names2 and not any(n in eid for n in names2):
+            if names2 and not any(_name_hit(eid, n) for n in names2):
                 continue
             # (#917/#984) a NEGATIVE any-of, for siblings that share the
             # positive words: ``total_charged_energy`` beside
@@ -3353,7 +3473,7 @@ _EV_CHARGER_PLATFORMS = [
     ("blue_current", _discover_blue_current),
     # (#802/#814) data-row brands need no function — the generic matcher
     # applies their _BRAND_HINTS rows.
-    ("wattpilot", lambda ents: _discover_from_hints(ents, _BRAND_HINTS["wattpilot"])),
+    ("wattpilot", lambda ents: _discover_wattpilot(ents)),
     # (#917) NRGkick — a data row plus the phase-count offer.
     ("nrgkick", _discover_nrgkick),
     # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus.
@@ -4145,6 +4265,91 @@ def ocpp_charge_control_switch(hass, number_entity_id: str):
     return None
 
 
+def wattpilot_force_buttons(hass, number_entity_id: str) -> Dict[str, str]:
+    """(#804) The Wattpilot's own start and stop, found on the same device as
+    its current number.
+
+    ruaan-deysel/ha-wattpilot (the fork @HorizonKane runs) has no stop switch:
+    it writes the box's force state ``frc`` through three buttons whose
+    unique ids end ``-frc0`` (neutral: the box's own logic decides),
+    ``-frc1`` (off) and ``-frc2`` (on). Their names are localised — "Laden
+    stoppen", "Laden erzwingen" — so they are matched by unique id, the same
+    in every language.
+
+    ``stop`` is ``-frc1``. ``start`` is ``-frc2``: neutral would hand the box
+    back to its own Eco / PV-surplus regulation, which then overrides the
+    current SEM writes (evcc drives go-e boxes with frc 1/2 for the same
+    reason). ``{}`` when the number is not a Wattpilot or no stop exists.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(hass)
+        entry = reg.async_get(number_entity_id)
+        if entry is None or str(entry.platform or "") != "wattpilot" \
+                or not getattr(entry, "device_id", None):
+            return {}
+        found: Dict[str, str] = {}
+        disabled: List[str] = []
+        # (review) include disabled buttons: they did nothing for SEM before
+        # this fix, so a user may well have switched them off — finding none
+        # would leave the box as unstoppable as before, silently.
+        for e in er.async_entries_for_device(
+                reg, entry.device_id, include_disabled_entities=True):
+            eid = str(getattr(e, "entity_id", "") or "")
+            uid = str(getattr(e, "unique_id", "") or "")
+            if not eid.startswith("button."):
+                continue
+            for suffix, role in (("-frc1", "stop"), ("-frc2", "start"),
+                                 ("-frc0", "neutral")):
+                if uid.endswith(suffix):
+                    if getattr(e, "disabled_by", None):
+                        disabled.append(eid)
+                    else:
+                        found[role] = eid
+        if "stop" not in found:
+            return {"disabled": ",".join(sorted(disabled))} if disabled else {}
+        out = {"stop": found["stop"]}
+        start = found.get("start") or found.get("neutral")
+        if start:
+            out["start"] = start
+        out["frc_buttons"] = ",".join(sorted(found.values()))
+        return out
+    except Exception:  # noqa: BLE001 — a lookup that fails finds nothing
+        return {}
+
+
+def _wire_wattpilot(hass, device, charger_id: str, current_entity_id) -> None:
+    """(#804) A Wattpilot SEM could not stop. Its stop is a button, and a
+    button-started charger's only stop was a 0 A write — below the box's 6 A
+    minimum, so it was skipped: Off, Solar only and every phase switch did
+    nothing, and the box's own neutral start left its Eco / PV-surplus logic
+    in charge of the current. A saved stop service wins; a start the user
+    chose that is not one of the box's own force buttons is kept."""
+    ctl = wattpilot_force_buttons(hass, current_entity_id)
+    if ctl.get("disabled") and "stop" not in ctl:
+        _LOGGER.warning(
+            "Charger '%s': Wattpilot — its stop button is disabled in Home "
+            "Assistant (%s). Enable it so SEM can stop this charger (#804)",
+            charger_id, ctl["disabled"])
+        return
+    if not ctl:
+        _LOGGER.warning(
+            "Charger '%s': Wattpilot %s — no stop button found on the device; "
+            "SEM cannot stop this charger (#804)", charger_id, current_entity_id)
+        return
+    current = getattr(device, "start_stop_entity", None)
+    ours = set(ctl["frc_buttons"].split(","))
+    if ctl.get("start") and (not current or current in ours):
+        device.start_stop_entity = ctl["start"]
+    if not getattr(device, "stop_service", None):
+        device.stop_service = "button.press"
+        device.stop_service_data = {"entity_id": ctl["stop"]}
+    _LOGGER.info(
+        "Charger '%s': Wattpilot — start %s, stop %s (the box's own force "
+        "buttons, #804)", charger_id, getattr(device, "start_stop_entity", None),
+        ctl["stop"])
+
+
 def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> None:
     """(#976) What the current entity's PLATFORM implies for control, applied
     to a freshly built charger device — the ONE producer, called by every
@@ -4166,6 +4371,9 @@ def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> Non
         return
     platform = entity_platform(hass, current_entity_id)
     device.zero_amps_parks_a_limit = (platform == "ocpp")
+    if platform == "wattpilot":
+        _wire_wattpilot(hass, device, charger_id, current_entity_id)
+        return
     if platform != "ocpp" or getattr(device, "start_stop_entity", None):
         return
     sw = ocpp_charge_control_switch(hass, current_entity_id)

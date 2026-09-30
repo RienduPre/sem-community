@@ -558,7 +558,7 @@ Update to SEM v1.2.0 or newer. This issue does not occur on v1.2.0+.
 1. Verify the hot water entity is configured in SEM: check **Settings > Devices & Services > Solar Energy Management > Configure**
 2. Confirm the entity exists and is available in **Developer Tools > States** — search for your `water_heater.*`, `climate.*`, or `switch.*` entity
 3. Check that the device control mode is set to `surplus` (not `peak_only` or `off`) — SEM will not activate devices in `peak_only` or `off` mode
-4. Verify sufficient solar surplus: `sensor.sem_surplus_available` should exceed the heater's minimum power threshold
+4. Verify sufficient solar surplus: `binary_sensor.sem_surplus_available` should be **on** — it turns on when the surplus covers the heater's minimum power
 5. If using a `water_heater` or `climate` entity, check that the current temperature sensor is reporting correctly — SEM needs accurate temperature readings to decide when to heat
 
 ---
@@ -962,6 +962,18 @@ would strobe the contactor and the box wins anyway. **Fix:** find the
 failsafe/fallback-current setting on the wallbox and set the fallback current
 to `0`. The notice retires itself once a stop holds.
 
+On a KEBA the settings are `Curr FS` (fallback current) and `Tmo FS`
+(timeout); on a Modbus-driven box they usually sit in the register block the
+integration already uses. **If this is a KEBA on the official integration**,
+the timer is SEM's own: SEM arms the box's failsafe at every start (600 s,
+charging floor) so a dead controller still charges the car, and asks for 0 A
+at every stop — which the KEBA refuses (its floor is 6 A). Turn SEM's arming
+off first (`solar_energy_management.set_option` with `keba_arm_failsafe:
+false`), then set the box. Until then, Off and Pause hold for about the
+interval the notice names. Rule out another controller (a second SEM, an
+automation, the vendor app on a schedule) before changing the box — a fixed
+re-enable interval fits that just as well.
+
 ## SEM stood down while the charger kept charging
 
 Every stop SEM sent took, and each time the charger closed its contactor
@@ -1090,6 +1102,14 @@ ten minutes, so a firmware update recovers on its own. **Fix:** if you never
 intended battery export, clear the forcible-discharge entity in SEM's battery
 settings and the notice disappears; if you do want it, check whether your
 inverter's firmware/integration version exposes a working discharge control.
+Read the device's own words in the notice's error text first: a setpoint
+outside the register's range, or a register the inverter locks in its current
+mode, refuses just as consistently as a missing register. While the write is
+withdrawn, the routine safety write SEM makes when returning the battery to
+normal operation is skipped — harmless, there was nothing to clear — and
+charging, discharge limits and everyday operation are unaffected. A restart
+makes SEM try again, so a firmware update or a corrected entity is picked up
+on its own.
 
 ## The battery power setpoint keeps going unavailable
 

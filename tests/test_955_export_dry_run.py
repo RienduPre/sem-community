@@ -44,8 +44,19 @@ class _State:
         self.attributes = {"maximum_power_watt": watt, "maximum_power_percent": percent}
 
 
+class _Reg:
+    """(#1026) HA's device registry answers `async_get`; its `devices` mapping
+    is no longer ours to read."""
+
+    def __init__(self, devices):
+        self._by_id = dict(devices)
+
+    def async_get(self, device_id):
+        return self._by_id.get(device_id)
+
+
 def _registry():
-    reg = SimpleNamespace(devices={
+    reg = _Reg({
         INV: SimpleNamespace(id=INV, identifiers={("huawei_solar", "BT1")}, via_device_id=None),
         BATT: SimpleNamespace(id=BATT, identifiers={("huawei_solar", "BT1/battery_1")},
                               via_device_id=INV),
@@ -118,7 +129,7 @@ class TestHuaweiDryRun:
     def test_no_inverter_device_is_a_row_that_says_so(self):
         a = _huawei(); a._inverter_device_id = ""
         with patch("homeassistant.helpers.device_registry.async_get",
-                   return_value=SimpleNamespace(devices={})):
+                   return_value=_Reg({})):
             row = a.export_dry_run(ExportIntent.LIMIT, 0.0)
         assert row["service"] is None and "inverter_device_id" in row["why"]
 

@@ -676,6 +676,17 @@ Each term is measured rather than assumed:
 The SOC zones bar draws tonight's computed floor in orange beside your
 configured floor, so you can see it move from day to day.
 
+**The entities behind it** — all on the Battery tab, and usable on your own
+dashboards:
+
+| Entity | What it holds |
+|---|---|
+| `sensor.sem_battery_spendable_kwh` | tonight's budget (unknown while learning) |
+| `sensor.sem_battery_dynamic_floor_pct` | tonight's computed floor |
+| `sensor.sem_battery_measured_capacity_kwh` | the pack size SEM measured from real cycles |
+| `sensor.sem_battery_capacity_drift_pct` | how far that measurement sits from the nameplate |
+| `sensor.sem_forecast_trust_d1` / `_d2` | how accurate tomorrow's and the day after's forecast have proven, 0–100 % |
+
 **What the budget may be spent on**
 
 Two switches, and they are deliberately separate rather than one setting:
@@ -1507,7 +1518,9 @@ Everything below is **off by default** and lives on the Config tab under
   into the car down to the *Morning drain floor*, only when today's forecast
   refills the pack.
 - **Charge pacing** now lands the pack full by the *earlier* of sunset and
-  the next closed meter, so the headroom is there when the price turns.
+  the next closed meter, so the headroom is there when the price turns. It
+  is a switch on the Battery tab, `switch.sem_battery_charge_pacing_enabled`
+  (**Battery charge pacing**), off by default.
 
 SEM never curtails what the battery, the car and the loads could still take.
 

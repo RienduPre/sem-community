@@ -800,6 +800,20 @@ propagation through `observe()`, the reconciler row, the repair raise/clear, **a
 CHARGE rows stay untouched when `stop_controllable=False`. Refs #487 #548 #627.
 **Watch:** any new "SEM couldn't actually do X" should be a *computed capability on the device*,
 not a counter of failed attempts in the caller.
+**Re-opened by a new branch — #804 (@HorizonKane).** The closure holds only while the probe mirrors
+the dispatch, and #804 B4a added a branch to `stop_session` without adding it to the probe: a
+`button.` start/stop entity stops "through the current write", while
+`_discrete_contactor_surfaces` kept answering "this entity can open the contactor" for any
+start/stop entity at all. On a go-e — a start button beside a current number whose own minimum is
+6 A — the button claimed the stop, the current write was skipped, nothing opened, and the #627
+repair that exists to say so stayed silent because the capability said all was well. The park debt
+was recorded too, for a stop that sent nothing. **Closure:** a button CLOSES a contactor and does
+not open one — `can_close` only, so the probe falls through to the 0 A writability question it was
+built on; and the button branch of `stop_session` names a stop method only when that write can
+land. #940's anti-cycle floor is unaffected: it reads both sides. **Guard:**
+`tests/test_804_no_commands.py::TestAButtonOnlyCloses`. **Sweep question for this class:** when a
+dispatch chain grows a branch, does the capability that mirrors it grow the same branch — and does
+the new branch ACT, or does it defer? Refs #487 #627 #804.
 
 ### 26. Config key every test injects and production never writes — GUARDED
 **Symptom:** none, for years. The code reads `cfg.get("some_key", <literal>)`, every test
@@ -2120,17 +2134,57 @@ generated, so it did not cover the fresh-install first view. **Closure:** migrat
 `async_register_static_paths([StaticPathConfig(url, path, cache)])`, and split the handler — the
 reload-duplicate (`RuntimeError`/`ValueError`) logs at debug, anything else logs at WARNING and
 continues (never swallowed silently, never blocking the resource registration below).
+**Second catch (#1026, Guido, PROD HA 2026.8, 28.09.2026) — caught at the WARNING stage, before
+the removal.** HA 2026.8 logged *"uses `device_registry.devices` as a mapping ... will stop working
+in Home Assistant 2027.9.0"* at every start. Four sites, all in
+`coordinator/battery_adapters/huawei.py`: the inverter resolver behind the feed-in cut
+(`reg.devices.get` twice, then a walk of every device in the house) and the zero-config battery
+autodetect (a second walk). The class shape is the same as #799 and the damage would have been
+worse: both resolvers return `None` inside a broad `except` — *"resolution never breaks a cycle"*,
+*"detection must never break setup"* — so on 2027.9 the raise would have read as **"there is no
+Huawei inverter on this install"**, and forcible charge, forcible discharge and the export cut
+would all have gone quiet on working hardware with nothing in the log. **Closure:** `reg.async_get(
+device_id)` for the two lookups, and `device_registry.async_entries_for_config_entry(reg, entry_id)`
+over the `huawei_solar` config entries for the two walks — the helpers HA's own message names, and
+both read the registry's real containers (`_device_data`, `_devices`) rather than the deprecation
+view, so the log line goes away instead of moving to another line. That was checked against HA's own
+source, not assumed: `devices` is now a `_DeprecatedDeviceRegistryItemsView` property whose `get`,
+`values`, `__getitem__`, string `__contains__` and proxied methods each report, and
+`async_entries_for_config_entry` deliberately bypasses it. The per-entry question is also the
+narrower one (only a `huawei_solar` device could ever match, so the fleet walk was never needed),
+both resolvers now WARN instead of reporting an empty house, and the per-entry order is sorted
+because HA re-indexes a device on every update — unsorted, "the first battery" would move to another
+battery after the inverter reported new firmware. Note SEM cannot use the message's other suggestion,
+iterating `reg.devices`: it yields device entries on 2026.8 and dict KEYS on the older versions SEM
+still supports. One accepted narrowing: a device carrying a `("huawei_solar", …)` identifier that is
+attached to some OTHER integration's config entry is now invisible. Only `huawei_solar` mints those
+identifiers.
 **Where else it lives:** every call into a HA host API with a removal schedule wrapped in a broad
 `except` — `hass.components.*`, `async_get_registry`, the singular `async_forward_entry_setup`,
 `async_add_job`. Swept 2026-08-18: `register_static_path` was the only *removed* API still called
-(one site); `async_forward_entry_setups` (plural, current) is already in use. **Guard:**
-`tests/test_frontend_resources.py::TestStaticPathServedViaAsyncApi` — a source lint that the
-removed `register_static_path(` call form never returns (mentioning the name in a comment is fine),
-plus a runtime assertion that the dashboard dir is actually served through
-`async_register_static_paths` with the right `/local` url_path. **Sweep question:** for every host
-API we call inside a `try/except`, has HA scheduled it for removal — and can the `except` clause tell
-"already done" apart from "this method no longer exists"? A comment on an `except` that names the one
-way it fires is a claim to verify, not a fact. Refs #799 #283 #785 #55.
+(one site); `async_forward_entry_setups` (plural, current) is already in use. Swept again 2026-09-29
+(#1026): the device registry was the only deprecated form still read; `hass.async_create_task` is
+current. **Watch:** the entity registry's `reg.entities.values()` is the same shape and SEM reads it
+at 17 production sites (`hardware_detection.py`, `config_flow.py`, `select.py`, `cleanup.py`,
+`__init__.py`, `huawei.py`). HA has NOT scheduled it — 2026.8 warns about the device registry only,
+and HA publishes no "every entity" helper to replace it — so it is a watch item, not a sweep.
+**Guard:** `tests/test_frontend_resources.py::TestStaticPathServedViaAsyncApi` — a source lint that
+the removed `register_static_path(` call form never returns (mentioning the name in a comment is
+fine), plus a runtime assertion that the dashboard dir is actually served through
+`async_register_static_paths` with the right `/local` url_path. Plus (#1026)
+`ast_contracts.host_registry_mapping_reads()`, pinned by
+`tests/test_1026_device_registry_is_asked_not_read.py`: no production file may read `devices` or
+`deleted_devices` off anything holding a host registry. It follows the binding through assignment,
+the walrus, tuple unpacking, `for`/`with` targets, a rename chain, `self._reg` across methods, the
+inline `dr.async_get(hass).devices` form, `getattr(reg, "devices")`, and a parameter named `reg` /
+`registry` inside the function that declares it — nine shapes, each pinned by its own case, so the
+list is measured rather than claimed. Scoping the parameter rule to its own function is what keeps
+SEM's own `UnifiedDeviceRegistry.devices` readable. Its blind spots, stated rather than implied: a
+registry pulled out of `hass.data` by hand, a parameter under some other name, and a file that names
+the `device_registry` module nowhere. **Sweep question:** for
+every host API we call inside a `try/except`, has HA scheduled it for removal — and can the `except`
+clause tell "already done" apart from "this method no longer exists"? A comment on an `except` that
+names the one way it fires is a claim to verify, not a fact. Refs #799 #1026 #283 #785 #55.
 
 ### 49. Config-flow entity picker offers a domain the runtime validator rejects — GUARDED
 **Symptom:** a field in the setup UI cannot be configured to a working value at all — the entity
@@ -2642,6 +2696,21 @@ only ones in 171 rows, which is exactly why nothing looked wrong. **Closure:** a
 `tests/test_915_roster_at_runtime.py::TestSemDoesNotOfferToWriteTheseRegisters::test_a_substring_is_not_a_word`.
 **Sweep question:** every regex over an identifier — does it anchor to segment boundaries, and
 which real key would it match by accident? Refs #915 #810.
+**Second instance — #804 (@HorizonKane), the EV brand rows.** The closure above was applied to the
+battery lexicon's regexes and not to the OTHER matcher over identifiers: `_discover_from_hints`
+tests a brand's name hints with a plain `in`. The Wattpilot row hints `("start", "resume")` for the
+charging button, and the reporter's go-e publishes `button.carport_wattpilot_91114903_neustart` —
+the German RESTART button. SEM adopted a device reboot as the charger's start/stop control, so
+every enable power-cycled the box and every stop wrote nothing. Every language ships one of these
+words and every one of them contains "start": restart, neustart, herstart, genstart, omstart.
+**Closure:** a hit must BEGIN a segment (`_name_hit`) — the rows hint prefixes ("charg" for
+charging, "amp" for amperage), so the anchor is the start of a word, not both ends — plus
+`_reject_reboot_control` at `apply_charger_discovery_guards`, the choke point every registry path
+funnels through, so the hand-written brands and the generic prober are covered too. A SAVED config
+is reached by the `start_stop_entity` property setter, which refuses a reboot from any caller.
+**Guard:** `tests/test_804_no_commands.py::TestASubstringIsNotAWord` — the reporter's own entity id,
+the segment rule, and an oracle that feeds EVERY brand in `_EV_CHARGER_PLATFORMS` a device whose
+only button is a reboot and asserts no role takes it. Refs #804 #915.
 
 ### 68. A protection floor read as a target — the knob is not missed, it is INVERTED — GUARDED
 **Symptom:** five brands (Growatt, Sigen, Solis, Sungrow, Sunsynk) declare both halves of the SOC
@@ -4739,6 +4808,16 @@ the wire to one silent probe per 600 s and raises the Repair, but the intent is 
 the stop path re-enters every cycle. Closing it means deciding what a withdrawn register means for
 the state machine (record the stop that cannot be sent, or keep the flood), which is a contract
 call, not a mechanical guard. Refs #1005 #757 #589 #978 #840 #925.
+**The wait-shaped twin — #804 (@HorizonKane).** The same composition without a retry: a HOLD whose
+exit condition a permanent fault can never meet. The phase sequencer stops the charger before it
+switches (never switch under load) and waited for the draw to reach zero with no bound. On a box
+SEM could not actually stop, that wait never ended — and the hold replaces every charge command
+with DISABLE, so the charger was never commanded again for the rest of the session: "SEM sends no
+commands". **Closure:** `STOP_WAIT_S = 120 s` (a Zaptec opens in 3-15 s, measured), then the switch
+is given up and the target marked not-taking, which a new target or a replug clears. **Guard:**
+`tests/test_804_no_commands.py::TestTheHoldGivesUp`, including the end-to-end pass through the real
+control path. **Sweep question:** for every wait on hardware, what makes it end if the hardware
+never answers — and what is held hostage while it waits? Refs #804 #1005.
 
 ### 109. A field that means "not applicable" carries a number, and a new reader takes the number — GUARDED
 **Symptom:** a mode that says *unlimited* behaves as if it had nothing. coppe218's Zaptec on
@@ -4843,3 +4922,129 @@ fail a test.
 **Residual (for Guido).** The stable channel now offers v2.0.0 — a month and 41 betas old. This
 keeps it reachable; only cutting 2.1.0 makes it current. Nothing Guido already watches reports a
 failed run: the autopilot follows branch CI and the release asset, not this job. Refs #1012 #834.
+
+### 111. Work of unknown length awaited inside setup — the host cancels it and NOTHING loads — GUARDED
+**Symptom:** the integration does not start. One line in the log, and no SEM at all:
+`Setup of config entry 'Solar Energy Management' ... cancelled` /
+`asyncio.exceptions.CancelledError: Global task timeout: Bootstrap stage 2 timeout` (#967,
+@alexmc1510). The trigger was adding one more power sensor to the Energy Dashboard.
+**Root shape:** Home Assistant gives all integrations one shared budget to start in, and
+`async_setup_entry` is inside it. SEM awaited the recorder there — 60 days of EV power history for
+the taper detector, 7 days per load for the rated-power seed, a `LIKE '%solar%'` statistics scan
+for the install date, another for the yearly totals — each a database read whose cost is the
+user's history, not ours. Every one of them was *called* "best effort, never blocks setup" in its
+own comment, and each was awaited. Two things make this class bite harder than a slow start:
+a cancel arrives as `CancelledError`, which is **not** an `Exception`, so every `except Exception`
+"this must never cost us the setup" handler on the way up passes it straight through; and the cost
+grows with the install, so it passes every test and every small system and fails on the big one.
+**The tell:** an await inside setup whose duration is set by data we do not own — a database, a
+network call, a device that answers when it feels like it. Ask what the biggest install costs,
+not the test one. A comment saying "never blocks setup" next to an `await` is the same tell.
+**Where it lives:** every recorder read. Swept in one change: `features/device_registry.py`
+(`_history_max_power`, the reported one), `coordinator/ev_taper_detector.py`
+(`async_seed_from_history`, 60 days), `energy_calculator.async_detect_install_date` and
+`seed_yearly_from_statistics` (both reached through the first update cycle, which setup awaits),
+and `wpa_replay` (already a task, now also held until after start so it does not compete with the
+boot). The backfill services are user-triggered and were never on this path.
+**Closure:** `coordinator/recorder_history.py` — one door. `run_after_start()` is how a caller asks
+for recorder work: it waits for `EVENT_HOMEASSISTANT_STARTED`, or puts the work on a task when HA
+is already running (a reload, where the started event never comes again). The work is never in
+setup's await chain, which is the whole property — on a reload it may still finish before setup
+returns, and that is fine, there is no start-up budget outside a boot. It hands back an unsubscribe
+and every caller keeps it: a fresh install reloads itself during the boot (the welcome notification
+writes an option), so a coordinator that forgets leaves a dead twin waiting to do the work as well.
+`read_states()` is the only entity-history query, and it is the cheap shape — the attributes stay
+in the database, and the window is never longer than the recorder keeps. That clamp reads
+`auto_purge` first: `keep_days` is what the purge deletes past, so on an install that purges by
+hand it says nothing about what the database holds. Nothing is dropped, only deferred: a load
+skipped during setup is not marked as tried, so the seed happens one pass later.
+**Guard:** `tests/test_967_no_recorder_during_setup.py` — a real Home Assistant, set to *starting*
+the way a boot is, with every door to the recorder wired to a list: setup must read it zero times.
+Both halves are pinned, because the cheap way to pass the first is to delete the work: a second
+test fires the started event and fails unless the reads happen AND both deferred seeds were handed
+their turn by name. Each half was verified by breaking it — remove the two gates and the first goes
+red, remove the hand-over and the second does. Plus: the four history APIs are read in one place
+only, and the query shape, the keep-days clamp and the hand-purged install each have a test.
+Statistics and the install-date sqlite read are not behind the door — they stay off the setup path
+by their caller's gate — but the oracle catches them anyway, because it patches the recorder's own
+entry points rather than SEM's. Refs #967.
+
+### 112. Every guard bounds the RATE; the thing the peer counts is the COUNT — GUARDED
+**Symptom:** the pacing is provably right and the hardware refuses anyway. @hoyte's Zaptec Go 2
+(#975, 2.1.0-beta.20, solar+battery on a cloudy day) puts up *"Charging has been stopped too many
+times. Please reconnect the vehicle"* and stops charging for the rest of the plug-in. Nothing in
+SEM's log is wrong: every stop cleared the rolling median, the 2 A deadband, the 30 s cadence, the
+180 s disable delay and the post-stop settle, and each one was the correct answer to the surplus at
+that moment. **Root shape:** SEM's guards are all *rate*-shaped — a minimum interval, a dwell, a
+delay, a cycles-per-hour floor. The peer's consumable is *count*-shaped and scoped to a session:
+spent, never refilled, until the car is unplugged. A rate bounds an average over a window, so a
+long enough window spends any budget: no value of any delay bounds a count. That is why the fix for
+this class is never a bigger number — tuning the delay changes how long the afternoon takes to
+spend the budget, not whether it does. Measured on SEM's own loop: a six-hour afternoon whose surplus
+flickers every five minutes spends one interruption per cloud — **36** — against **6** once the
+widening is in. The 36 is the scenario's own cloud count, not an emergent number; what was emergent
+before the fix is that nothing in SEM counted them at all. The neighbouring
+machinery hides it exactly as in class 81, and not all of it even bounds speed: the rolling median
+and the 2 A deadband bound the signal's AMPLITUDE, the cadence and the disable delay bound the
+rate, and the post-stop settle clears on the car's own draw rather than on a clock. Five
+mechanisms, three shapes, and not one of them a number of stops. `_stop_war_rounds` *does* count —
+the BOX's restarts, not SEM's stops. **Where it lives:** any peer with a finite per-session or lifetime operation budget.
+The **closed precedent** is `ev_phase_sequencer`, which already carries both shapes —
+`AUTO_MIN_INTERVAL_S` for the rate and `AUTO_MAX_PER_SESSION` against `_session_switches`, reset by
+`new_session()` on a plug-cycle — so the stop path was the one actuator that had the rate half and
+not the count half. Assessed and **not** this class: the battery adapters' `_last_discharge_limit_w`
+hysteresis (a 100 W band, so the DISCHARGE-LIMIT register's write count follows the decision rather
+than the cycle — `_zero_setpoint()` and `_set_strategy()` run before that return, so the claim is
+about that one register); #536's enable backoff (already count-shaped — five attempts, then it stops and reports);
+`SwitchDevice`/`ClimateDevice` `min_on`/`min_off` (a rate over a relay's lifetime count, with no
+per-session latch on the other side that we know of).
+**Closure:** the hysteresis GROWS with the churn it has already caused, in `charge_stability` —
+`SESSION_STOP_BUDGET = 4` interruptions per plug-in are free, then each further stop MULTIPLIES *both*
+the enable delay and the TRANSIENT bridge by a factor that grows `SESSION_CHURN_PER_STOP` per stop,
+to a dimensionless `SESSION_CHURN_MAX = 4.0` — so the 180 s bridge reaches 720 s, not 4 s. The charger that flaps twice an hour never notices; the one being interrupted
+every few minutes ends up bridging through the clouds instead, which is what the reporter asked
+for. Three scoping decisions carry it: only a **disconnect** refunds the budget (a mode change or a
+restart must not — the charge point's own counter does not reset for either, so `session_stops`
+round-trips through `snapshot_timers`/`restore_timers` with a bounds check); the **structural** stop
+(#461) is excluded, because with the sun gone there is nothing to bridge to and the hold would
+import grid to keep a contactor closed — slack is for flicker, never for nightfall; and the widening
+is applied to the *delays*, not to a refusal, so nothing is swallowed and no retry budget is spent
+on a command that never went out (class 81(a)).
+**Guard:** `tests/test_975_session_interruption_budget.py` — the factor and both delays pinned, the
+two things that must not move (a structural idle still stops inside 120 s at maximum churn; a fresh
+plug-in starts a fresh budget), the restart round-trip and a corrupt blob. Around them a **count
+oracle**, the only pin written in the units the charge point actually uses: a six-hour flicker
+driven through the real `ChargeStability`, counting what one plug-in spends. Each count is asserted
+as a PAIR against the same afternoon with the widening neutralised, because a bound on its own is
+also satisfied by a run that stopped nothing — so each pair carries a floor (the free stops ARE
+spent; the unbudgeted day really does churn past them) as well as a ceiling, and `_flicker` raises
+if SEM never took the session (#552), the ownership regression that would otherwise report zero and
+pass. Be honest about what this buys: the count is a closed form in the constants, so it is not
+proof against a retune — it is proof that the factor is still WIRED to the real filter and that the
+increment site is still reached.
+**Sweep question:** for every limiter SEM owns, ask *what the peer is counting* — and whether our
+guard is written in the same units. If ours is "not more often than every N seconds" and theirs is
+"not more than K per session", the two do not constrain each other at all, and ours will look
+healthy in the log at the moment theirs runs out. Then ask where the count is spent: is the counter
+incremented at *every* site that makes the peer count, or only at the one the fix was written for?
+**Residuals (for Guido):** (1) `_session_stops` is incremented at exactly ONE site, and it is not
+only the discretionary stop: it sits above the `stop_for_short` branch, so it counts the structural
+stop (#461) and the peak EMERGENCY shed (`decide.py`, `bridgeable=False`) as well. Only the
+WIDENING excludes those; the COUNT includes them, which is the right way round. What the count
+misses is every session SEM ends from outside this filter — the #804 phase switch
+(`ev_control`, `reason="phase switch: … (#804)"`), the conductor-protection stop
+(`active_phase_guard._disable_decision`) and the VPP export pause (`vpp_dispatch`) are three
+separate producers, and none of them spends the budget. Assuming the charge point counts those as
+interruptions too — likely, and NOT verified against Zaptec's firmware — SEM's number is lower than
+the box's, which is the wrong direction for a budget. These are demands that must not be delayed
+(class 81(d)), so the answer is probably to *count* them without widening for them. (2) The budget is
+brand-blind and the 4 is a module constant: the Go 2's real limit is not documented and not
+configurable, so a charge point with a tighter one is still a report waiting to happen — and the
+budget's own size was never fitted to a measured device limit, only to the churn. (3) Class
+81(e) switches the anti-cycle floor off for a current-number-only surface on the premise that "a
+0 A write is a pilot-signal pause, not a relay cycle" — true about the relay, false about the
+SESSION, which is what this class counts; the budget now covers that surface at the stability
+layer, but 81(e)'s own reasoning still reads as though a pause were free.
+**Neighbour:** class 81 asked which thing a minimum interval limits, the repeat or the cycle; this
+is the next question in that line — a limit on the cycle is still not a limit on the count.
+Refs #975 #940 #893 #461 #552 #804.

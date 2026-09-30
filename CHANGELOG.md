@@ -26,6 +26,38 @@ The first stable release of the 2.1 line.
 
 Needs Home Assistant 2026.2.0 or newer. New features are off until you switch them on, except two: the peak guard, and modules — SEM removes the entities of hardware you do not have.
 
+# [2.1.0-beta.51] — 30.09.2026
+
+- 🐛 **SEM can stop a Wattpilot** (#804, by @HorizonKane). It uses the box's own stop and forced-start buttons, so current and mode now apply.
+
+# [2.1.0-beta.50] — 29.09.2026
+
+- 🐛 **An OnStar car's charge level is found under its other name** (#887, by @Azlinon). A `…_charge_state` sensor in % now counts.
+
+# [2.1.0-beta.49] — 29.09.2026
+
+- 🐛 **The startup warning about the device registry is gone** (#1026). Huawei battery control would have stopped working in Home Assistant 2027.9.
+
+- 📝 **Seven Repair notices are short again** (#1018). Each says the one thing to do, in all 16 languages; the detail sits behind Learn more.
+
+- 🧪 **The README's battery and meter lines are checked against the hardware list** (#1018). BYD has its row.
+
+# [2.1.0-beta.48] — 28.09.2026
+
+- 🐛 **Diagnostics no longer include the notify service name or the entry title** (#1017). The service name often holds the phone owner's name.
+
+- 🐛 **A lying plug sensor and a rejected battery control write are logged once, not every cycle** (#1017).
+
+# [2.1.0-beta.47] — 28.09.2026
+
+- 🐛 **A restart button is never used to start charging** (#804, by @HorizonKane). SEM had adopted the go-e reboot button, so nothing it sent reached the car.
+- 🐛 **SEM now says when it cannot stop a charger** (#804). A start button cannot open the contactor, and 0 A below the charger's minimum never lands.
+- 🐛 **A phase switch gives up if the charger will not stop** (#804). The wait for it held every charging command back for the whole session.
+
+# [2.1.0-beta.46] — 28.09.2026
+
+- 🐛 **SEM could fail to start at all** (#967, by @alexmc1510). Reading history during setup used up the time Home Assistant allows.
+
 # [2.1.0-beta.45] — 27.09.2026
 
 - 🐛 **HACS could not install SEM at all** (#1012). Every beta pushed the stable release off the one page HACS reads.

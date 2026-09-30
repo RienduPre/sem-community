@@ -999,7 +999,7 @@ characteristic staircase pattern (for example: 7 kW to 5 kW to 3 kW over
 
 When taper is detected:
 - `sensor.sem_ev_taper_trend` shows "declining"
-- `sensor.sem_ev_taper_minutes_to_full` estimates time remaining
+- `sensor.sem_charger_<id>_taper_minutes_to_full` estimates time remaining (one per charger)
 - A push notification is sent if mobile notifications are enabled
 
 This lets you see in the dashboard when the car is nearly full, even without

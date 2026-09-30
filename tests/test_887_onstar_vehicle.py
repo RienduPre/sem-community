@@ -15,10 +15,11 @@ import pytest
 from custom_components.solar_energy_management import hardware_detection as hd
 
 
-def _ent(entity_id, device_id, device_class=None):
+def _ent(entity_id, device_id, device_class=None, unit=None):
     return SimpleNamespace(
         entity_id=entity_id, platform="mqtt", device_id=device_id,
         original_device_class=device_class, disabled_by=None,
+        original_unit_of_measurement=unit,
         unique_id=entity_id.split(".", 1)[1], translation_key=None,
     )
 
@@ -101,3 +102,45 @@ class TestTheReportSaysVehicleNotPleaseReport:
     def test_the_key_exists_even_with_no_car(self):
         rep = hd.build_detection_report(registry=_registry(_traverse()))
         assert rep["vehicles"] == []
+
+
+class TestTheChargeLevelUnderItsOtherName:
+    """(#887, 29.09) Azlinon's real install: no ``…_ev_battery_level``; the
+    charge level is ``sensor.2024_chevrolet_blazer_ev_charge_state`` in %.
+    His diagnostics showed range, plug and charging found, level missing."""
+
+    def _his_blazer(self, unit="%", dclass=None):
+        d = "onstar-blazer"
+        return [
+            _ent("sensor.2024_chevrolet_blazer_ev_ev_range", d, "distance"),
+            _ent("sensor.2024_chevrolet_blazer_ev_charge_state", d, dclass, unit),
+            _ent("binary_sensor.2024_chevrolet_blazer_ev_ev_plug_state", d, "plug"),
+            _ent("binary_sensor.2024_chevrolet_blazer_ev_ev_charge_state", d, "battery_charging"),
+        ]
+
+    def test_a_percent_charge_state_sensor_is_the_charge_level(self):
+        v = hd.vehicle_from_device(self._his_blazer())
+        assert v["vehicle_soc_entity"] == "sensor.2024_chevrolet_blazer_ev_charge_state"
+        assert v["ev_charging_sensor"] == "binary_sensor.2024_chevrolet_blazer_ev_ev_charge_state"
+        assert v["name"] == "2024 Chevrolet Blazer Ev"
+
+    def test_device_class_battery_counts_too(self):
+        v = hd.vehicle_from_device(self._his_blazer(unit=None, dclass="battery"))
+        assert v["vehicle_soc_entity"].endswith("_charge_state")
+
+    def test_no_unit_no_claim(self):
+        v = hd.vehicle_from_device(self._his_blazer(unit=None))
+        assert "vehicle_soc_entity" not in v
+        assert v["vehicle_range_entity"].endswith("_ev_range")   # still a car
+
+    def test_the_binary_charging_state_is_never_the_level(self):
+        d = "x"
+        v = hd.vehicle_from_device([
+            _ent("sensor.car_ev_range", d, "distance"),
+            _ent("binary_sensor.car_charge_state", d, "battery_charging", "%"),
+        ])
+        assert "vehicle_soc_entity" not in v
+
+    def test_the_named_element_still_wins(self):
+        v = hd.vehicle_from_device(_blazer())
+        assert v["vehicle_soc_entity"] == "sensor.2024_chevrolet_blazer_ev_ev_battery_level"

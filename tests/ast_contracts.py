@@ -437,3 +437,208 @@ def absence_spent_as_config(*, root: Optional[Path] = None,
                         if not conditional:
                             hits.append((str(rel), lineno, name))
     return sorted(set(hits))
+
+
+# ── (#1026, bug class 48) host registries read as a mapping ──────────────
+
+#: The helper module whose ``async_get(hass)`` hands back HA's DEVICE registry.
+_HOST_DEVICE_REGISTRY = "homeassistant.helpers.device_registry"
+
+#: The containers on it that HA 2026.8 turned into a deprecation view. Reading
+#: either as a mapping is reported now and removed in 2027.9.
+_HOST_REGISTRY_MAPPINGS = ("devices", "deleted_devices")
+
+#: Parameter names that mean "somebody handed me the host registry". A
+#: contract cannot follow a value into a call, so the name has to carry it —
+#: and these four are what this codebase spells it.
+_REGISTRY_PARAM_NAMES = ("reg", "registry", "dev_reg", "device_reg")
+
+
+def _dotted(node: ast.AST) -> str:
+    """``self._dev_reg`` → ``"self._dev_reg"``; anything else → ``""``."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return f"{base}.{node.attr}" if base else ""
+    return ""
+
+
+def _device_registry_names(tree: ast.AST) -> tuple:
+    """What this file calls HA's ``device_registry`` helper.
+
+    Returns ``(module_aliases, async_get_aliases)``. Both import styles count::
+
+        from homeassistant.helpers import device_registry as dr   → dr.async_get
+        import homeassistant.helpers.device_registry as dr        → dr.async_get
+        from homeassistant.helpers.device_registry import async_get  → async_get
+
+    The third one is why this is not just an alias set: it binds a BARE name,
+    and a contract that only knew the dotted form skipped the whole file.
+    """
+    modules, getters = set(), set()
+    head, _, tail = _HOST_DEVICE_REGISTRY.rpartition(".")
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            if n.module == head:
+                for a in n.names:
+                    if a.name == tail:
+                        modules.add(a.asname or a.name)
+            elif n.module == _HOST_DEVICE_REGISTRY:
+                for a in n.names:
+                    if a.name == "async_get":
+                        getters.add(a.asname or a.name)
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == _HOST_DEVICE_REGISTRY:
+                    modules.add(a.asname or a.name)
+    return modules, getters
+
+
+def _is_registry_call(node: ast.AST, modules: set, getters: set) -> bool:
+    """A call that hands back the host registry, in either import style."""
+    if isinstance(node, ast.NamedExpr):       # (reg := dr.async_get(hass))
+        node = node.value
+    if not isinstance(node, ast.Call):
+        return False
+    f = node.func
+    if isinstance(f, ast.Attribute) and f.attr == "async_get":
+        return _dotted(f.value) in modules
+    return isinstance(f, ast.Name) and f.id in getters
+
+
+def _registry_parameters(tree: ast.AST) -> list:
+    """``(name, first_line, last_line)`` for every registry-named parameter.
+
+    Scoped to the function that declares it, which is the whole point: SEM has
+    its OWN registry and ``__init__.py`` passes it around under the same words.
+    A file-wide rule read ``len(registry.devices)`` — our registry, 300 lines
+    from the only function with a ``registry`` parameter — as a host read.
+    """
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        args = fn.args
+        for a in (list(args.posonlyargs) + list(args.args)
+                  + list(args.kwonlyargs)):
+            if a.arg in _REGISTRY_PARAM_NAMES:
+                out.append((a.arg, fn.lineno, fn.end_lineno or fn.lineno))
+    return out
+
+
+def _bound_registry_names(tree: ast.AST, modules: set, getters: set) -> set:
+    """Every name in this file that holds the host registry.
+
+    Follows assignment, the walrus, tuple unpacking, ``for`` and ``with``
+    targets and a plain rename (``r = reg``). Repeats until nothing new turns
+    up, so a rename chain cannot outrun it. Parameters are handled separately,
+    because they are only true inside their own function.
+    """
+    bound = set()
+
+    def _mark(target, value) -> None:
+        holds = (_is_registry_call(value, modules, getters)
+                 or (isinstance(value, ast.Name) and value.id in bound)
+                 or (isinstance(value, ast.NamedExpr)
+                     and _is_registry_call(value.value, modules, getters)))
+        if isinstance(target, (ast.Tuple, ast.List)) \
+                and isinstance(value, (ast.Tuple, ast.List)) \
+                and len(target.elts) == len(value.elts):
+            for t, v in zip(target.elts, value.elts, strict=True):
+                _mark(t, v)
+            return
+        if not holds:
+            return
+        name = _dotted(target)
+        if name:
+            bound.add(name)
+
+    for _ in range(8):
+        before = len(bound)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    _mark(t, n.value)
+            elif isinstance(n, ast.AnnAssign) and n.value is not None:
+                _mark(n.target, n.value)
+            elif isinstance(n, ast.NamedExpr):
+                _mark(n.target, n.value)
+            elif isinstance(n, (ast.For, ast.AsyncFor)):
+                # `for reg in [dr.async_get(hass)]:` — the call is in there
+                if any(_is_registry_call(sub, modules, getters)
+                       for sub in ast.walk(n.iter)):
+                    _mark(n.target, n.iter)
+                    name = _dotted(n.target)
+                    if name:
+                        bound.add(name)
+            elif isinstance(n, (ast.With, ast.AsyncWith)):
+                for item in n.items:
+                    if item.optional_vars is not None:
+                        _mark(item.optional_vars, item.context_expr)
+        if len(bound) == before:
+            break
+    return bound
+
+
+def host_registry_mapping_reads(*, root: Optional[Path] = None,
+                                skip_dirs: Iterable[str] = _SKIP_DIRS) -> list:
+    """(#1026, bug class 48) Every production read of Home Assistant's device
+    registry through one of its deprecated mapping views.
+
+    HA 2026.8 made ``DeviceRegistry.devices`` a view that logs
+    *"uses `device_registry.devices` as a mapping or calls its lookup methods"*
+    for every custom integration and stops answering in 2027.9. The supported
+    lookups are ``reg.async_get(device_id)`` and
+    ``device_registry.async_entries_for_config_entry(reg, entry_id)``, both of
+    which read the registry's real containers. Iterating ``reg.devices`` is
+    allowed on 2026.8 but yields dict KEYS on the older versions SEM still
+    supports, so this contract admits neither.
+
+    Only the HOST registry counts. SEM has its own ``UnifiedDeviceRegistry``
+    with a ``devices`` dict, and that one is ours to read: a name qualifies
+    here only when this file binds it from ``device_registry.async_get(...)``,
+    reads it straight off that call, or takes it as a parameter spelled one of
+    :data:`_REGISTRY_PARAM_NAMES`.
+
+    Covered shapes: plain assignment, the walrus, tuple unpacking, ``for`` and
+    ``with`` targets, a rename chain, ``self._reg`` across methods, the inline
+    ``dr.async_get(hass).devices`` chain, ``getattr(reg, "devices")``, and
+    ``deleted_devices``. Known blind spots, so they are not mistaken for
+    coverage: a registry fetched out of ``hass.data`` by hand, one passed as a
+    parameter under some other name, and a file that names the
+    ``device_registry`` module nowhere. All three are outside how this codebase
+    gets a registry today.
+
+    Returns ``[(relative_path, lineno, expression)]``.
+    """
+    hits = []
+    for rel, tree in _production_files(root, skip_dirs):
+        modules, getters = _device_registry_names(tree)
+        if not modules and not getters:
+            continue
+        bound = _bound_registry_names(tree, modules, getters)
+        params = _registry_parameters(tree)
+
+        def _holds(node, lineno, _b=bound, _p=params,
+                   _m=modules, _g=getters) -> bool:
+            name = _dotted(node)
+            if name in _b or _is_registry_call(node, _m, _g):
+                return True
+            return any(name == pname and lo <= lineno <= hi
+                       for pname, lo, hi in _p)
+
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and n.attr in _HOST_REGISTRY_MAPPINGS:
+                if _holds(n.value, n.lineno):
+                    hits.append((str(rel), n.lineno,
+                                 f"{_dotted(n.value) or 'async_get(...)'}.{n.attr}"))
+            elif isinstance(n, ast.Call) and _callee_name(n) == "getattr" \
+                    and len(n.args) >= 2 \
+                    and isinstance(n.args[1], ast.Constant) \
+                    and n.args[1].value in _HOST_REGISTRY_MAPPINGS:
+                if _holds(n.args[0], n.lineno):
+                    hits.append((str(rel), n.lineno,
+                                 f'getattr({_dotted(n.args[0])}, '
+                                 f'"{n.args[1].value}")'))
+    return sorted(set(hits))

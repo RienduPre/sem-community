@@ -338,7 +338,10 @@ pack still needs plus what the house will draw back out of it in the deficit
 hours before sunset — and carries a fixed 10 % headroom so an evening that
 comes in under the forecast still lands the pack full; the sensor behind the
 line (`sensor.sem_battery_charge_pacing`) shows both terms as `drain_kwh`
-and `headroom_pct`. In the **Learning** state the panel also offers
+and `headroom_pct`. The other figures on the panel are entities too:
+`sensor.sem_battery_spendable_kwh`, `sensor.sem_battery_dynamic_floor_pct`,
+`sensor.sem_battery_measured_capacity_kwh`, `sensor.sem_battery_capacity_drift_pct`
+and `sensor.sem_forecast_trust_d1` / `_d2`. In the **Learning** state the panel also offers
 **Rebuild from history**, which reconstructs those nights from your battery's
 own recorded discharge instead of waiting a week for them to happen:
 

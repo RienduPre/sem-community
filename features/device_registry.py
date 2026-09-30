@@ -260,6 +260,12 @@ class UnifiedDeviceRegistry:
         # device_ids we've already tried to seed from history this session — so
         # a device with no history yet isn't re-queried on every 35 s refresh.
         self._rating_seed_attempted: set = set()
+        # (#967) The history seed reads the recorder, and the recorder is slow
+        # on a long window. Setup does not wait for it: Home Assistant cancels
+        # a setup that overruns its start-up budget, and the whole integration
+        # then fails to load. Turned on by
+        # ``async_seed_ratings_from_history`` once HA has started.
+        self._history_seeds_enabled: bool = False
         # (#576) Only surface the home-battery priority row when the install
         # actually has a battery. Set by the coordinator each cycle from
         # ``power.battery_soc is not None``; batteryless systems never see it.
@@ -2994,7 +3000,15 @@ class UnifiedDeviceRegistry:
             # real history is a measurement — including 8 W. The old
             # ``> _DEFAULT_RATED_POWER`` gate discarded exactly the small loads
             # that needed the correction most (#744).
-            if override <= 0 and did not in self._rating_seed_attempted:
+            # (#967) ``_history_seeds_enabled`` is False until Home Assistant
+            # has started. The device is NOT marked as attempted while it is
+            # off, so the seed still happens — one pass later, off the setup
+            # path.
+            if (
+                self._history_seeds_enabled
+                and override <= 0
+                and did not in self._rating_seed_attempted
+            ):
                 self._rating_seed_attempted.add(did)
                 hist_max = await self._history_max_power(sensor)
                 if hist_max > 0 and (not measured or hist_max > rated_now):
@@ -3014,31 +3028,31 @@ class UnifiedDeviceRegistry:
     async def _history_max_power(self, power_sensor: str, days: int = 7) -> float:
         """(#576) Largest numeric value the power sensor reported in the last
         ``days`` — the load's real running draw. 0.0 if the recorder is
-        unavailable or has no usable history (best-effort, never raises)."""
-        try:
-            from homeassistant.components.recorder import get_instance
-            from homeassistant.components.recorder.history import (
-                state_changes_during_period,
-            )
-            from homeassistant.util import dt as dt_util
-            from datetime import timedelta as _timedelta
+        unavailable or has no usable history."""
+        from ..coordinator.recorder_history import read_states
 
-            end = dt_util.utcnow()
-            start = end - _timedelta(days=days)
-            history = await get_instance(self.hass).async_add_executor_job(
-                state_changes_during_period, self.hass, start, end, str(power_sensor),
-            )
-            mx = 0.0
-            for st in history.get(power_sensor, []):
-                try:
-                    v = float(st.state)
-                except (ValueError, TypeError):
-                    continue
-                if v > mx:
-                    mx = v
-            return mx
-        except Exception as e:  # noqa: BLE001 — best-effort seed, never blocks setup
-            _LOGGER.debug(
-                "rated-power history seed for %s unavailable: %s", power_sensor, e,
-            )
-            return 0.0
+        states = await read_states(self.hass, power_sensor, days)
+        mx = 0.0
+        for st in states or []:
+            try:
+                v = float(st.state)
+            except (ValueError, TypeError):
+                continue
+            if v > mx:
+                mx = v
+        return mx
+
+    async def async_seed_ratings_from_history(self) -> None:
+        """(#967) The recorder pass, once Home Assistant has started.
+
+        Setup runs the same seeding with the history turned off, so a load
+        keeps its persisted rating from the first second. This adds the part
+        that needs the database, at a moment where taking a few seconds
+        costs nobody their integration.
+        """
+        self._history_seeds_enabled = True
+        try:
+            if await self._seed_and_apply_ratings():
+                await self._save_storage()
+        except Exception as e:  # noqa: BLE001 — a rating never costs a restart
+            _LOGGER.debug("rated-power history seed pass failed: %s", e)

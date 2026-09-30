@@ -5020,7 +5020,11 @@ class SensorReader:
             readings.ev_charging
             or readings.ev_power > EV_ACTIVE_CHARGE_FLOOR_W
         ):
-            _LOGGER.warning(
+            # (#1017) Once per episode, not once per cycle: a plug sensor
+            # that lies for a whole session used to write this line every
+            # 30 s. The DEBUG transition below re-arms it for the next one.
+            log_on_change(
+                _LOGGER, "ev_connected:physics", logging.WARNING,
                 "ev_connected inferred from physics: plug sensor reported off "
                 "but ev_power=%.0fW / ev_charging=%s. Treating as connected. "
                 "(Upstream charger-integration bug protection — see #285+1 "
@@ -5028,6 +5032,11 @@ class SensorReader:
                 readings.ev_power, readings.ev_charging,
             )
             readings.ev_connected = True
+        else:
+            log_on_change(
+                _LOGGER, "ev_connected:physics", logging.DEBUG,
+                "ev_connected: plug sensor and power agree (#285+1)",
+            )
 
     def _infer_per_charger_connection_from_physics(
         self, readings: PowerReadings,
@@ -5053,13 +5062,20 @@ class SensorReader:
             pc_power = readings.ev_power_per_charger.get(cid, 0.0) or 0.0
             pc_charging = readings.ev_charging_per_charger.get(cid, False)
             if pc_power > EV_ACTIVE_CHARGE_FLOOR_W or pc_charging:
-                _LOGGER.warning(
+                log_on_change(
+                    _LOGGER, f"ev_connected:physics:{cid}", logging.WARNING,
                     "ev_connected_per_charger[%s] inferred from physics: plug "
                     "sensor reported off but power=%.0fW / charging=%s. Treating "
                     "as connected. (#285+1 multi-charger protection.)",
                     cid, pc_power, pc_charging,
                 )
                 readings.ev_connected_per_charger[cid] = True
+            else:
+                log_on_change(
+                    _LOGGER, f"ev_connected:physics:{cid}", logging.DEBUG,
+                    "ev_connected_per_charger[%s]: plug sensor and power agree",
+                    cid,
+                )
 
     def detect_battery_cycles_sensor(self, battery_anchor_entity: Optional[str]) -> Optional[str]:
         """#593 — autodetect a battery lifetime-cycle sensor on the SAME device
