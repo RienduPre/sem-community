@@ -2875,9 +2875,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             "Load management features will be unavailable."
         )
 
+    # (#1027) Every device is built by now, so tell every one of them whether
+    # this SEM commands or only watches — BEFORE anything below can claim or
+    # release. ``send`` withholds only when the device knows, the documented
+    # default is "a device nobody told is a device that acts", and until here
+    # the only teller was the per-cycle push. A removal in the window between
+    # setup and the first cycle commanded real hardware.
+    try:
+        coordinator._push_observer_mode_to_devices()
+    except Exception as err:  # noqa: BLE001 — never fail a setup over a flag
+        _LOGGER.warning("Could not tell the devices this SEM's mode: %s", err)
+
     # (#935) Every charger is built by now, so take back any park a previous
     # lifetime left on the hardware — the reconciler cannot re-derive it
     # (PARK_OFF fires on an edge; an already-empty box at boot is not one).
+    # (#1027) A watching SEM adopts nothing; the record waits on disk, and
+    # this callback is what the first commanding cycle runs instead.
+    coordinator._readopt_parked_chargers = lambda: hass.async_create_task(
+        _async_adopt_parked_chargers(hass, entry, coordinator))
     hass.async_create_task(_async_adopt_parked_chargers(hass, entry, coordinator))
 
     # (#923) ONE module verdict for every platform: captured here, after the
@@ -3287,7 +3302,17 @@ async def _async_adopt_parked_chargers(hass: HomeAssistant,
     steady state. Without this, park → restart → remove left the charger
     disabled with its own persisted dead-man failsafe holding it at 0 A, and
     nothing left on the system that knew why.
+
+    (#1027) Never while SEM is only watching. The COORDINATOR is asked, not
+    the devices: this runs before the first cycle, and a device learns its
+    mode on a cycle (``_push_observer_mode_to_devices``) — so a device asked
+    here would answer with the default, which is "I act". The record is left
+    where it is; the first cycle that can command adopts it.
     """
+    if bool(getattr(coordinator, "_observer_mode", False)):
+        _LOGGER.info("#1027 — watching only: no charger park adopted, and "
+                     "the record is left for a lifetime that can command")
+        return
     store = _park_store(hass, entry)
     if store is None:
         return
@@ -3387,7 +3412,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             # box parked (SEM is coming back in seconds and will decide
             # again), a disable hands it back now, a removal replays it
             # from async_remove_entry.
-            _parked = [
+            # (#1027) And never while SEM is only watching — the same gate
+            # ``async_release_export_guard`` and ``unload_release_reason``
+            # already carry. Asked of the coordinator, which has known its
+            # mode since setup, so the answer does not depend on a cycle
+            # having told the devices yet.
+            _parked = [] if bool(getattr(coordinator, "_observer_mode", False)) else [
                 dev for dev in (getattr(coordinator, "_ev_devices", None)
                                 or {}).values()
                 if getattr(dev, "_sem_parked", False)
