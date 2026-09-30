@@ -36,6 +36,11 @@ ENERGY_SAVE_INTERVAL = 300
 # async_save_daily_throttled writes immediately at most this often instead.
 DAILY_SAVE_INTERVAL = 120
 
+# (#1024) Finished charging sessions kept for the EV card's session list —
+# a year of daily sessions. ~120 bytes each; the whole list is well under
+# the energy store's size, and it never rides on an entity attribute.
+SESSION_HISTORY_MAX = 400
+
 # (#668) The keys of ``EnergyCalculator.get_state()`` that this layer carries.
 #
 # ONE list, deliberately. Before #668 the export and the import each had their
@@ -654,17 +659,23 @@ class SEMStorage:
             self._energy_data["last_decay_date"] = iso_date
 
     def add_session_to_history(self, session: Dict[str, Any]) -> None:
-        """Append a completed session to bounded history (max 90 entries)."""
+        """Append a completed session to bounded history.
+
+        (#1024) The bound is ``SESSION_HISTORY_MAX`` — a year of daily
+        sessions — so the session list on the EV card can show a month
+        view with totals. ONE writer: ``ev_control._update_session_tracking``,
+        where the session ends, per charger.
+        """
         state = self.get_ev_intelligence_state()
         history = state.get("session_history", [])
         history.append(session)
-        if len(history) > 90:
-            history = history[-90:]
+        if len(history) > SESSION_HISTORY_MAX:
+            history = history[-SESSION_HISTORY_MAX:]
         state["session_history"] = history
         self._energy_data["ev_intelligence"] = state
 
     def get_session_history(self) -> list:
-        """Get EV session history (bounded to 90 entries)."""
+        """Get EV session history (bounded to ``SESSION_HISTORY_MAX``)."""
         state = self.get_ev_intelligence_state()
         return state.get("session_history", [])
 

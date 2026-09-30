@@ -12674,14 +12674,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     self._session_data.energy_kwh,
                     end_soc=self._cycle_vehicle_soc,
                 )
-                if self._storage:
-                    self._storage.add_session_to_history({
-                        "timestamp": self._session_data.start_time,
-                        "energy_kwh": round(self._session_data.energy_kwh, 2),
-                        "solar_share_pct": round(self._session_data.solar_share_pct, 1),
-                        "duration_min": round(self._session_data.duration_minutes, 1),
-                        "taper_detected": self._ev_taper_detector.full_detected,
-                    })
+                # (#1024) The session record is written where the session
+                # ends, per charger: ``ev_control._update_session_tracking``.
             self._ev_taper_detector.reset_session()
 
         # Stall detection → full charge: if car is connected AND SEM has
