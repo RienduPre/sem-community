@@ -1,9 +1,9 @@
 """#996 — the house changes and the controls follow.
 
-Wiring a capability through set_option reloads the entry (the structural
-keys), and a capability that appears while SEM runs — a plant size typed
-on the card, a forecast integration installed — is growth: ABSENT → PRESENT
-reloads once through the #923 guard. PRESENT → ABSENT waits for the next
+A capability key is not a reload key — plant size and investment are
+sliders. A capability that appears while SEM runs — a plant size typed on
+the card, a forecast integration installed — is growth: ABSENT → PRESENT
+reloads once through the #923 guard, from the coordinator's cycle. PRESENT → ABSENT waits for the next
 restart, on purpose."""
 from __future__ import annotations
 
@@ -13,9 +13,10 @@ from custom_components.solar_energy_management.coordinator.install_modules impor
 )
 
 
-def test_every_capability_key_reloads_when_set():
-    missing = sorted(set(CAPABILITY_KEYS) - _SET_OPTION_STRUCTURAL_KEYS)
-    assert not missing, missing
+def test_no_capability_key_reloads_on_every_tweak():
+    # Plant size and investment are sliders; a reload per tweak is #462.
+    # The per-cycle growth check reloads once, on ABSENT -> PRESENT only.
+    assert not set(CAPABILITY_KEYS) & _SET_OPTION_STRUCTURAL_KEYS
 
 
 def test_a_capability_that_appears_is_growth():

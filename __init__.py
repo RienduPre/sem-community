@@ -5456,8 +5456,12 @@ async def _async_register_phase_services(
         # name (number.py CONFIG_KEY_MAP, #542) — the naive number.sem_<key>
         # check missed them (the legionella dual-path confusion). Reverse-map
         # option key → entity suffix so they entity-route like any other.
-        from .number import CONFIG_KEY_MAP as _NUM_MAP
+        from .number import CONFIG_KEY_MAP as _NUM_MAP, NUMBER_TYPES as _NUM_TYPES
+        from .coordinator.install_modules import (
+            entity_kept as _entity_kept, presence_of as _presence_of,
+        )
         _OPTION_TO_ENTITY = {v: k for k, v in _NUM_MAP.items()}
+        _NUMBER_KEYS = {d.key for d in _NUM_TYPES}
 
         # (#636) Load-management peaks have LIVE updaters but no number
         # entities — pre-fix they fell to the unrouted → entry-write →
@@ -5484,6 +5488,14 @@ async def _async_register_phase_services(
                     persist_global_option(hass, target_entry, _c2, key, value)
                     continue
             _ent_suffix = _OPTION_TO_ENTITY.get(key, key)
+            # (#996) A tunable whose number entity this house does not get
+            # (its capability is absent) has nothing to refresh and nothing
+            # built from it: store it without a reload (the #462 rule), so
+            # it is in place if the capability appears.
+            if (_coord is not None and _ent_suffix in _NUMBER_KEYS
+                    and not _entity_kept("number", _ent_suffix, _presence_of(_coord))):
+                persist_global_option(hass, target_entry, _coord, key, value)
+                continue
             if hass.states.get(f"number.sem_{_ent_suffix}") is not None:
                 await hass.services.async_call(
                     "number", "set_value",

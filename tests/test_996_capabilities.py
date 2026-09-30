@@ -204,8 +204,9 @@ class TestRows:
 
 class TestWiring:
 
-    def test_capability_keys_reload_when_set(self):
-        assert set(CAPABILITY_KEYS) <= MODULE_EVIDENCE_KEYS
+    def test_capability_keys_are_not_reload_keys(self):
+        # #462: a slider (plant size, investment) must not reload per tweak.
+        assert not set(CAPABILITY_KEYS) & MODULE_EVIDENCE_KEYS
 
     def test_summary_carries_the_capabilities(self):
         s = presence_summary({Module.DYNAMIC_TARIFF: Presence.ABSENT})

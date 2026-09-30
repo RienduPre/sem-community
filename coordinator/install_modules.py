@@ -135,7 +135,11 @@ _DEFAULT_VALUES: Mapping[str, tuple[str, ...]] = {
     "battery_charge_platform": ("auto",),
 }
 
-# (#996) The option keys a capability verdict reads. ``tariff_mode`` alone
+# (#996) The option keys a capability verdict reads. They are NOT reload
+# keys (not in MODULE_EVIDENCE_KEYS): plant size and investment are sliders,
+# and a reload per tweak is the #462 bug. A capability that turns PRESENT is
+# caught by the coordinator's per-cycle growth check instead — one reload,
+# only on the ABSENT → PRESENT edge. ``tariff_mode`` alone
 # decides the dynamic tariff — a price entity without the mode drives
 # nothing (the dynamic provider is built only when the mode says so).
 # ``target_peak_limit`` is deliberately NOT a capability: the config flow
@@ -154,7 +158,6 @@ CAPABILITY_KEYS: tuple[str, ...] = (
 # tests/test_923_structural_keys.py against _SET_OPTION_STRUCTURAL_KEYS.
 MODULE_EVIDENCE_KEYS: frozenset[str] = frozenset(
     BATTERY_WIRING_KEYS + EV_WIRING_KEYS + HEAT_PUMP_WIRING_KEYS + HOT_WATER_WIRING_KEYS
-    + CAPABILITY_KEYS
 )
 
 _EMPTY: tuple[Any, ...] = (None, "", [], {}, ())
