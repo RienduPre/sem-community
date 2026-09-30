@@ -629,6 +629,24 @@ class SEMStorage:
     # Legionella timestamp persistence (#508 I2) — without this, driving
     # the legionella cycle (#508 C1) would force a disinfection run on
     # every restart, since a None timestamp reads as "overdue".
+    def get_capability_verdicts(self) -> Dict[str, bool]:
+        """(#996) The last verdict each runtime capability had from a read
+        taken while Home Assistant was running — the fallback at setup,
+        when the live read has not been asked yet."""
+        raw = self._energy_data.get("capability_verdicts")
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, bool)}
+
+    def set_capability_verdict(self, name: str, value: bool) -> bool:
+        """(#996) Store one running-time verdict. True when it changed."""
+        current = self.get_capability_verdicts()
+        if current.get(name) is value:
+            return False
+        current[name] = bool(value)
+        self._energy_data["capability_verdicts"] = current
+        return True
+
     def get_legionella_time(self) -> Optional[str]:
         """Get the persisted last-legionella ISO timestamp, or None."""
         return self._energy_data.get("legionella_last_time")

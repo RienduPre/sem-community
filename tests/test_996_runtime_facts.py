@@ -114,3 +114,68 @@ class TestTheVerdict:
         assert p[Module.SOLAR_FORECAST] is Presence.UNKNOWN
         assert p[Module.EXPORT_LIMIT] is Presence.UNKNOWN
         assert p[Module.DYNAMIC_TARIFF] is Presence.ABSENT
+
+
+class _Store:
+    """The two SEMStorage accessors, in memory."""
+
+    def __init__(self, verdicts=None):
+        self.verdicts = dict(verdicts or {})
+        self.saves = 0
+
+    def get_capability_verdicts(self):
+        return dict(self.verdicts)
+
+    def set_capability_verdict(self, name, value):
+        if self.verdicts.get(name) is value:
+            return False
+        self.verdicts[name] = value
+        return True
+
+    async def async_save_energy_now(self):
+        self.saves += 1
+
+
+class TestTheStoredRunningVerdict:
+    """A restart must not flip rows an earlier running read decided."""
+
+    def _with_store(self, stub, store):
+        stub._storage = store
+        stub.hass = SimpleNamespace(state=stub.hass.state, async_create_task=MagicMock())
+        return stub
+
+    def test_starting_with_a_stored_absent_is_absent(self):
+        stub = self._with_store(_stub(forecast_path="uninitialized", hass=STARTING),
+                                _Store({"solar_forecast": False, "export_limit": False}))
+        p = SEMCoordinator.install_presence(stub)
+        assert p[Module.SOLAR_FORECAST] is Presence.ABSENT
+        assert p[Module.EXPORT_LIMIT] is Presence.ABSENT
+
+    def test_starting_with_a_stored_present_is_present(self):
+        stub = self._with_store(_stub(forecast_path="uninitialized", hass=STARTING),
+                                _Store({"solar_forecast": True}))
+        p = SEMCoordinator.install_presence(stub)
+        assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
+        assert p[Module.EXPORT_LIMIT] is Presence.UNKNOWN
+
+    def test_nothing_stored_is_unknown(self):
+        stub = self._with_store(_stub(forecast_path="uninitialized", hass=STARTING), _Store())
+        assert SEMCoordinator.install_presence(stub)[Module.SOLAR_FORECAST] is Presence.UNKNOWN
+
+    def test_a_running_read_wins_and_is_stored_once(self):
+        store = _Store({"solar_forecast": False})
+        stub = self._with_store(
+            _stub(forecast_path="solcast", forecast_source="solcast", export_cache=None), store)
+        p = SEMCoordinator.install_presence(stub)
+        assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
+        assert store.verdicts == {"solar_forecast": True, "export_limit": False}
+        assert stub.hass.async_create_task.call_count == 1
+        SEMCoordinator.install_presence(stub)          # unchanged: no second write
+        assert stub.hass.async_create_task.call_count == 1
+
+    def test_a_read_while_starting_is_never_stored(self):
+        store = _Store()
+        stub = self._with_store(
+            _stub(forecast_path="none_available", export_cache=None, hass=STARTING), store)
+        SEMCoordinator.install_presence(stub)
+        assert store.verdicts == {}

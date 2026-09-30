@@ -1822,12 +1822,40 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
     def _runtime_facts(self) -> Dict[str, Optional[bool]]:
         """(#996) The two capability answers only the entity registry can
         give: a forecast integration and the inverter's export-limit entity.
-        A reader that has not looked, cannot look, or raises answers None —
-        the oracle keeps every row on None (#925)."""
+
+        A live answer counts only from a read taken while Home Assistant is
+        running — before that an integration may simply load after SEM.
+        When there is no live answer, the last running-time verdict stored
+        for this entry stands in, so a restart does not rebuild rows an
+        earlier running read had removed (or drop rows it had kept). No
+        live answer and nothing stored is None — UNKNOWN keeps every row."""
+        live = SEMCoordinator._live_runtime_facts(self)
+        storage = getattr(self, "_storage", None)
+        stored: Dict[str, bool] = {}
+        if storage is not None:
+            try:
+                stored = storage.get_capability_verdicts()
+            except Exception:  # noqa: BLE001 — no store is "nothing stored"
+                stored = {}
+        changed = False
+        for name, value in live.items():
+            if value is not None and storage is not None:
+                try:
+                    changed = storage.set_capability_verdict(name, value) or changed
+                except Exception:  # noqa: BLE001
+                    pass
+        if changed:
+            hass = getattr(self, "hass", None)
+            try:
+                hass.async_create_task(storage.async_save_energy_now())
+            except Exception:  # noqa: BLE001 — saved with the next cycle's write
+                pass
+        return {name: (value if value is not None else stored.get(name))
+                for name, value in live.items()}
+
+    def _live_runtime_facts(self) -> Dict[str, Optional[bool]]:
+        """(#996) What the readers say right now; None for "not asked"."""
         facts: Dict[str, Optional[bool]] = {"solar_forecast": None, "export_limit": None}
-        # Before Home Assistant has finished starting, a registry probe can
-        # miss an integration that simply loads after SEM (restart race):
-        # nothing read then may become ABSENT and delete registry rows.
         from .forecast_reader import ha_is_running
         if not ha_is_running(getattr(self, "hass", None)):
             return facts
