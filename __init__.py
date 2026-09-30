@@ -2908,6 +2908,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     try:
         await _async_register_services(hass, coordinator)
         await _async_register_phase_services(hass, coordinator)
+        # (#1024) The EV card reads the session list over this command.
+        from .session_history import async_register_websocket
+        async_register_websocket(hass)
         _LOGGER.debug("Services registered successfully")
     except Exception as err:
         _LOGGER.warning(
