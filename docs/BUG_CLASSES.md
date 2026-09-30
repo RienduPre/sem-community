@@ -5048,3 +5048,97 @@ layer, but 81(e)'s own reasoning still reads as though a pause were free.
 **Neighbour:** class 81 asked which thing a minimum interval limits, the repeat or the cycle; this
 is the next question in that line — a limit on the cycle is still not a limit on the count.
 Refs #975 #940 #893 #461 #552 #804.
+
+### 113. A claim read back from disk outlives the mode that forbids making one — GUARDED
+**Symptom:** removing a SEM that has Observer mode ON sends a real command to real hardware.
+Guido's test install (#1027, v2.1.0) watched a KEBA that a second SEM controls; removal sent
+`keba.enable` and put the box's failsafe back on its charging fallback. No car was plugged in, so
+nothing happened that day. The log said `handed back on integration removed — keba.enable,
+failsafe → charging fallback` for a lifetime that had never written to that box.
+**Root shape:** #855 moved the observer gate DOWN to the single hardware seam: `send` withholds the
+command and returns False. The layers above it were never taught to read that answer. Three of them
+in one mechanism: (a) `park_off` read *"the call did not raise"* as *"the box was parked"* and wrote
+the park debt to disk — on every disconnect edge, for a box it had never touched; (b) the next
+setup ADOPTED that record, so a lifetime that commands nothing believed it had parked a wallbox;
+(c) removal hands back every box SEM parked, and that gate saw the adopted flag and said yes. The
+debt crosses lifetimes on purpose (#935: `PARK_OFF` fires on an edge, and an already-empty box at
+boot is a steady state the reconciler cannot re-derive) — which is exactly why the adopter has to
+ask whether THIS lifetime may command at all. Distinct from class 97, where the memory of a write
+was a de-dup cache and the cost was a locked-out retry: here the memory is a DUTY, and paying it is
+the first real command of the lifetime.
+**Where it lives:** every claim SEM keeps across a restart, in any mode that promises to send
+nothing. Already closed, and the precedent: the battery adapters (`unload_release_reason(adapter,
+was_observer)` — *"observer commands nothing, including on the way out"*, #936), the export cut
+(`export_release_recipes` and `async_release_export_guard`, #955), the charge pacer (#949, the only
+one that closed BOTH ends — it never adopts, *"consuming the record of a real engagement is a side
+effect, and an observer has none"*, and it re-adopts on the first commanding cycle). The charger
+park was the one left. Assessed and NOT this class: the load boost (#914 `adopt_if_running`) — it
+claims belief and ownership but never `_sem_commanded`, and every release path is gated on that
+(#908), so an adopted load is left alone; `SwitchDevice.activate` is unreachable while observing
+(`compute_load_intent` returns one layer up).
+**Closure:** one rule, three doors, each asked separately — an observing lifetime TAKES no park
+debt, ADOPTS none, and PAYS none. `_remember_parked` returns early in both directions (the record
+belongs to the lifetime that really parked the box and is left as it is), `adopt_park_state` does
+not claim, `release_to_user` writes nothing and keeps the record. `park_off` now takes the claim
+FROM `send`'s return, not from the absence of an exception. Two gates are asked of the LIFETIME
+rather than of the device, because a device learns its mode on a cycle and the documented default is
+*"a device nobody told is a device that acts"*: the setup adopter, which runs before the first
+cycle, and the unload stash, which decides whether a removal hands hardware back. That second one
+reads a variable captured at the TOP of `async_unload_entry`, not the live flag:
+`async_release_batteries_on_unload` sets observer mode ON part way down the same function (#936),
+so a gate reading it live would answer "watching" for every install the day someone moved the block
+— silently, with no log. Setup now tells every device its mode once, before anything can claim,
+closing the window between setup and the first cycle. The record is not stranded:
+`_readopt_on_leaving_observer` adopts it on the cycle the switch goes off, so a rig watched for an
+hour does not then take control of a box it does not know is parked. What a watching REMOVAL leaves
+behind is said rather than fixed (`_async_say_the_park_is_unpaid`): the box may be another SEM's, so
+SEM must not touch it, but the record can still name a box an earlier commanding lifetime really
+parked — and a removal deletes SEM's own files, so this is the last moment anything can say so.
+**Guard:** `tests/test_1027_observer_takes_no_park_debt.py` — the three doors with a commanding
+FLOOR beside each (a park IS recorded, a park IS adopted, a box IS handed back, or the observer
+assertions pass on a device that simply cannot park); the store untouched through a whole watching
+lifetime; the switch going off adopting once and a steady lifetime never re-reading. Two pins come
+from mutation testing this change, because the first cut of the guard passed with either of them
+reverted: `park_off`'s claim is asked the other way round — a send that goes nowhere while the
+device believes it commands, so the gate one layer down cannot answer for it — and the production
+hook wiring is pinned by `assigns_attribute`, since every behaviour test injects its own hook and
+would stay green with the one real assignment deleted. Be honest about the third kind: the
+`reads_flag` pins (which accept `getattr(self, "observer_mode", False)`, the house style for a flag
+a bare stub may not have) are rename tripwires, not behavioural gates — they prove the door still
+names the question, not that it acts on the answer. The behaviour tests are what prove that. The
+unload ORDER has its own pin: the flag may be read exactly once in `async_unload_entry`.
+**Sweep question:** for every fact SEM writes to disk and reads back in a later lifetime — who is
+allowed to WRITE it, and does the reader ask whether this lifetime may act on it? A record is
+evidence about the hardware; a mode is a rule about this process. Reading the first without asking
+the second is how a watcher acquires a duty.
+**Left for Guido:** (1) **The records the bug already wrote.** An observing rig booked a park on
+every disconnect edge, so #1027's own install has bogus entries in `sem.parked.<entry>` right now.
+Nothing in this change purges them, and nothing can tell a bogus one from a real one by reading it:
+the cure is either provenance (a marker only a commanding lifetime writes, unmarked records dropped
+once) or believing the entity (ask the box whether it is actually disabled — class 97's cure, and
+what #935's docstring says the reconciler cannot do from the connect edge alone). A blanket purge
+was deliberately NOT shipped: it would drop the legitimate records on every commanding install with
+an EV to protect the few rigs, trading a rare wrong write for a rare stranded charger, and that is a
+product call. The exposure is smaller than before this change, and different in kind: the bug needed
+no switch flip at all, whereas what is left needs the switch OFF — and with it off SEM commands that
+charger by definition, so a hand-back it never earned costs one `keba.enable` on a box it is
+actively driving, not a command from a lifetime that promised to send nothing. The first charge
+clears the record either way, through `start_session`. (2) `_export_guard_adopt`
+still adopts a cut while observing and sets `_applied` — harmless today (every write below it is
+gated, twice), and gating it naively would STRAND the cut when the switch goes off, since it only
+ever runs on a lifetime's first tick. It wants the pacer's shape, not a gate. (3) `stop_session`
+records the debt from `stop_method is not None` — which mechanism was CHOSEN, not whether it
+landed. The `_remember_parked` gate covers the observer case, but a stop whose send fails for any
+other reason still books a park, `_stopped_by_disable` still skips the 0 A write, and the "no
+mechanism opened the contactor" warning is still suppressed. `park_off` was taught to read `send`'s
+return; `stop_session`, three lines of the same shape, was not — the asymmetry is the thing to fix.
+(4) `release_to_user` appends to its `did` list without reading `send`'s return, so its sentence is
+only true because the observer door is shut in front of it — and it still reports
+`failsafe → charging fallback` when `arm_failsafe_enabled=False` makes that call a no-op.
+(5) `SEMCoordinator.__init__` resolves `config.get("observer_mode", False)` while
+`DEFAULT_OBSERVER_MODE` and `PERSISTED_FLAG_DEFAULTS` both say True. `promote_persisted_flags`
+(#777) closes this for every install that ever recorded the flag anywhere, so what is left is the
+install where nobody ever said — which now boots "I act" and, since this change, tells every device
+so. One word fixes it and the blast radius is an install that currently commands going quiet, which
+is Guido's call, not a sweep.
+Refs #1027 #935 #936 #949 #955 #855 #908 #914 #740.
