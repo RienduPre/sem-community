@@ -29,10 +29,10 @@ FORCE = "button.carport_wattpilot_91114903_laden_erzwingen"
 RESTART = "button.carport_wattpilot_91114903_neustart"
 
 
-def _e(eid, uid, platform="wattpilot", device_id="dev-wp", dc=None):
+def _e(eid, uid, platform="wattpilot", device_id="dev-wp", dc=None, disabled_by=None):
     return SimpleNamespace(entity_id=eid, unique_id=f"{CID}-{uid}", platform=platform,
                            device_id=device_id, original_device_class=dc,
-                           disabled_by=None, translation_key=None)
+                           disabled_by=disabled_by, translation_key=None)
 
 
 def _his_box(with_force=True):
@@ -61,7 +61,9 @@ def _patched(entries):
     reg = _Reg(entries)
     return (patch("homeassistant.helpers.entity_registry.async_get", return_value=reg),
             patch("homeassistant.helpers.entity_registry.async_entries_for_device",
-                  side_effect=lambda r, dev_id: [e for e in entries if e.device_id == dev_id]))
+                  side_effect=lambda r, dev_id, include_disabled_entities=False: [
+                      e for e in entries if e.device_id == dev_id
+                      and (include_disabled_entities or not e.disabled_by)]))
 
 
 def _hass():
@@ -171,3 +173,27 @@ class TestAFreshInstallIsDetectedWithStopAndStart:
         assert r["ev_start_stop_entity"] == FORCE
         assert r["ev_current_control_entity"] == NUM
         assert RESTART not in r.values()
+
+
+class TestADisabledStopButtonIsNamed:
+    """(review) The buttons did nothing for SEM before this fix, so a user may
+    have disabled them. That must not leave the box silently unstoppable."""
+
+    def test_a_disabled_stop_is_named_and_nothing_is_wired(self, caplog):
+        ents = [e for e in _his_box() if not e.unique_id.endswith("frc1")]
+        ents.append(_e(STOP, "frc1", disabled_by="user"))
+        hass = _hass()
+        d = _device(hass, start=RESTART)
+        a, b = _patched(ents)
+        with a, b, caplog.at_level(logging.WARNING):
+            hd.wire_current_entity(hass, d, "ev_charger", NUM)
+        assert "disabled" in caplog.text and STOP in caplog.text
+        assert not d.stop_service
+
+    def test_a_disabled_forced_start_falls_back_to_neutral(self):
+        ents = [e for e in _his_box() if not e.unique_id.endswith("frc2")]
+        ents.append(_e(FORCE, "frc2", disabled_by="user"))
+        a, b = _patched(ents)
+        with a, b:
+            ctl = hd.wattpilot_force_buttons(MagicMock(), NUM)
+        assert ctl["stop"] == STOP and ctl["start"] == START0

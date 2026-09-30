@@ -4289,7 +4289,12 @@ def wattpilot_force_buttons(hass, number_entity_id: str) -> Dict[str, str]:
                 or not getattr(entry, "device_id", None):
             return {}
         found: Dict[str, str] = {}
-        for e in er.async_entries_for_device(reg, entry.device_id):
+        disabled: List[str] = []
+        # (review) include disabled buttons: they did nothing for SEM before
+        # this fix, so a user may well have switched them off — finding none
+        # would leave the box as unstoppable as before, silently.
+        for e in er.async_entries_for_device(
+                reg, entry.device_id, include_disabled_entities=True):
             eid = str(getattr(e, "entity_id", "") or "")
             uid = str(getattr(e, "unique_id", "") or "")
             if not eid.startswith("button."):
@@ -4297,9 +4302,12 @@ def wattpilot_force_buttons(hass, number_entity_id: str) -> Dict[str, str]:
             for suffix, role in (("-frc1", "stop"), ("-frc2", "start"),
                                  ("-frc0", "neutral")):
                 if uid.endswith(suffix):
-                    found[role] = eid
+                    if getattr(e, "disabled_by", None):
+                        disabled.append(eid)
+                    else:
+                        found[role] = eid
         if "stop" not in found:
-            return {}
+            return {"disabled": ",".join(sorted(disabled))} if disabled else {}
         out = {"stop": found["stop"]}
         start = found.get("start") or found.get("neutral")
         if start:
@@ -4318,6 +4326,12 @@ def _wire_wattpilot(hass, device, charger_id: str, current_entity_id) -> None:
     in charge of the current. A saved stop service wins; a start the user
     chose that is not one of the box's own force buttons is kept."""
     ctl = wattpilot_force_buttons(hass, current_entity_id)
+    if ctl.get("disabled") and "stop" not in ctl:
+        _LOGGER.warning(
+            "Charger '%s': Wattpilot — its stop button is disabled in Home "
+            "Assistant (%s). Enable it so SEM can stop this charger (#804)",
+            charger_id, ctl["disabled"])
+        return
     if not ctl:
         _LOGGER.warning(
             "Charger '%s': Wattpilot %s — no stop button found on the device; "
