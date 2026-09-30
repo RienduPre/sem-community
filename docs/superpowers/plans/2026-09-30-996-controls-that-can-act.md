@@ -144,8 +144,9 @@ test `tests/test_996_options_change.py`.
 1. Full suite + ruff; CI both rungs; ruflo reviewer told to REFUTE:
    "no install loses an entity it can use" (feed it PROD's and
    HA-TEST's options).
-2. HA-TEST full install as the plain house: entity count before/after,
-   screenshots after next to the Task 1 mockup.
+2. .175 (branch testing, observer ON): `SRC=/home/sem/sem-996 ~/bin/sem-deploy-175.sh`,
+   entity count before/after, then `~/bin/sem-sim-compress.sh 10.10.20.175 18.0 30`
+   to show nothing breaks across a simulated day.
 3. PROD only on Guido's "go": `scripts/audit_control_needs.py` on the
    PROD options first — the dropped list must be empty or approved line
    by line. Then deploy, compare the entity list.
