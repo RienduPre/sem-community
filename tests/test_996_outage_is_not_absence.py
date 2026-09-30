@@ -51,8 +51,8 @@ class TestTheRegistryRead:
             hass.states.async_set(entity_id, "unavailable")
         reader = ForecastReader(hass)
         assert reader.installed_answer() is True
-        reader.read_forecast()
-        assert reader.detection_answer() is not True   # the live read cannot read it
+        # The live read — what control decisions use — cannot read it.
+        assert reader.read_forecast().available is False
 
     @pytest.mark.asyncio
     async def test_a_disabled_integration_is_absent_while_running(self, hass):

@@ -497,8 +497,8 @@ class ForecastReader:
         fact — an enabled entity of Solcast, Forecast.Solar or Open-Meteo —
         not "can I read a forecast right now". A cloud outage leaves the
         entities registered and so cannot make the forecast rows ABSENT;
-        only removing or disabling the integration can. ``detection_answer``
-        and the live read keep driving control decisions as before.
+        only removing or disabling the integration can. The live read
+        (``read_forecast``) keeps driving control decisions as before.
 
         True at any time; False only while Home Assistant is running (an
         integration may register after SEM on a restart); None when the
@@ -524,22 +524,6 @@ class ForecastReader:
         if found:
             return True
         return False if ha_is_running(self.hass) else None
-
-    def detection_answer(self) -> Optional[bool]:
-        """(#996) Has SEM found a forecast integration? True when a source
-        is in use, False when the ladder ran and found none, None when it
-        has not run — the install-modules oracle reads None as UNKNOWN,
-        never as "no" (#925)."""
-        if self._source:
-            return True
-        path = self._last_source_detection_path
-        if not path or path == "uninitialized":
-            return None
-        if path.endswith("none_available"):
-            # (#996) A miss read while HA was still starting is "not asked":
-            # the integration may load after SEM (restart race).
-            return False if getattr(self, "_none_read_while_running", False) else None
-        return None
 
     @property
     def requested_source(self) -> Optional[str]:
@@ -717,9 +701,6 @@ class ForecastReader:
             return self._source
 
         self._last_source_detection_path = "none_available"
-        # (#996) "found nothing" only counts once Home Assistant is running:
-        # during a restart the forecast integration may simply load after SEM.
-        self._none_read_while_running = ha_is_running(self.hass)
         # Log once per outage; subsequent cycles stay silent.
         if not self._no_forecast_logged:
             _LOGGER.info("No solar forecast integration detected")

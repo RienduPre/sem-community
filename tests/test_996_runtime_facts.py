@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 from homeassistant.core import CoreState
 
 from custom_components.solar_energy_management.coordinator.coordinator import SEMCoordinator
-from custom_components.solar_energy_management.coordinator.forecast_reader import ForecastReader
 from custom_components.solar_energy_management.coordinator.install_modules import (
     Module, Presence,
 )
@@ -28,16 +27,14 @@ RUNNING = SimpleNamespace(state=CoreState.running)
 STARTING = SimpleNamespace(state=CoreState.starting)
 
 
-def _stub(forecast_path=None, forecast_source=None, export_cache="unset",
-          hass=RUNNING, read_running=True):
+def _stub(installed=None, export_cache="unset", hass=RUNNING):
+    """``installed`` is what the forecast reader's registry read answers:
+    True (installed), False (asked while running, nothing), None (not asked).
+    Its registry side is tested on a real registry in
+    test_996_outage_is_not_absence."""
     reader = MagicMock()
-    reader._last_source_detection_path = forecast_path
-    reader._source = forecast_source
-    reader._none_read_while_running = read_running
-    reader.detection_answer = lambda: ForecastReader.detection_answer(reader)
-    # The capability read has the same three answers; its registry side is
-    # tested on a real registry in test_996_outage_is_not_absence.
-    reader.installed_answer = reader.detection_answer
+    reader.installed_answer = lambda: reader.answer
+    reader.answer = installed
     sensors = MagicMock()
     if export_cache == "unset":
         sensors.export_limit_answer = lambda *_: None
@@ -50,57 +47,36 @@ def _stub(forecast_path=None, forecast_source=None, export_cache="unset",
     )
 
 
-class TestForecastAnswer:
-
-    def test_never_detected_is_none(self):
-        assert ForecastReader.detection_answer(
-            SimpleNamespace(_last_source_detection_path="uninitialized", _source=None)) is None
-
-    def test_a_found_source_is_true(self):
-        assert ForecastReader.detection_answer(
-            SimpleNamespace(_last_source_detection_path="solcast", _source="solcast")) is True
-
-    def test_none_available_while_running_is_false(self):
-        assert ForecastReader.detection_answer(SimpleNamespace(
-            _last_source_detection_path="none_available", _source=None,
-            _none_read_while_running=True)) is False
-
-    def test_none_available_while_starting_is_not_an_answer(self):
-        assert ForecastReader.detection_answer(SimpleNamespace(
-            _last_source_detection_path="none_available", _source=None,
-            _none_read_while_running=False)) is None
-
-
 class TestTheVerdict:
 
     def test_no_answers_keep_both_unknown(self):
-        p = SEMCoordinator.install_presence(_stub(forecast_path="uninitialized"))
+        p = SEMCoordinator.install_presence(_stub(installed=None))
         assert p[Module.SOLAR_FORECAST] is Presence.UNKNOWN
         assert p[Module.EXPORT_LIMIT] is Presence.UNKNOWN
 
     def test_found_answers_are_present(self):
         p = SEMCoordinator.install_presence(
-            _stub(forecast_path="solcast", forecast_source="solcast",
+            _stub(installed=True,
                   export_cache="number.inverter_export_limit"))
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
         assert p[Module.EXPORT_LIMIT] is Presence.PRESENT
 
     def test_asked_while_running_and_nothing_is_absent(self):
         p = SEMCoordinator.install_presence(
-            _stub(forecast_path="none_available", export_cache=None))
+            _stub(installed=False, export_cache=None))
         assert p[Module.SOLAR_FORECAST] is Presence.ABSENT
         assert p[Module.EXPORT_LIMIT] is Presence.ABSENT
 
     def test_a_miss_while_ha_is_starting_is_not_absent(self):
         # The readers answer None for a miss read before HA was running.
         p = SEMCoordinator.install_presence(
-            _stub(forecast_path="none_available", read_running=False, hass=STARTING))
+            _stub(installed=None, hass=STARTING))
         assert p[Module.SOLAR_FORECAST] is Presence.UNKNOWN
         assert p[Module.EXPORT_LIMIT] is Presence.UNKNOWN
 
     def test_a_hit_while_ha_is_starting_is_present(self):
         p = SEMCoordinator.install_presence(
-            _stub(forecast_path="solcast", forecast_source="solcast",
+            _stub(installed=True,
                   export_cache="number.inverter_export_limit", hass=STARTING))
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
         assert p[Module.EXPORT_LIMIT] is Presence.PRESENT
@@ -108,11 +84,11 @@ class TestTheVerdict:
     def test_a_miss_read_while_starting_stays_unknown_after_start(self):
         # Running now, but the reader's last miss was taken during start-up.
         p = SEMCoordinator.install_presence(
-            _stub(forecast_path="none_available", read_running=False))
+            _stub(installed=None))
         assert p[Module.SOLAR_FORECAST] is Presence.UNKNOWN
 
     def test_a_reader_that_raises_is_not_an_answer(self):
-        stub = _stub(forecast_path="none_available", export_cache=None)
+        stub = _stub(installed=False, export_cache=None)
         stub._forecast_reader.installed_answer = MagicMock(side_effect=RuntimeError("boom"))
         stub._sensor_reader.export_limit_answer = MagicMock(side_effect=RuntimeError("boom"))
         p = SEMCoordinator.install_presence(stub)
@@ -156,27 +132,27 @@ class TestTheStoredRunningVerdict:
         return stub
 
     def test_starting_with_a_stored_absent_is_absent(self):
-        stub = self._with_store(_stub(forecast_path="uninitialized", hass=STARTING),
+        stub = self._with_store(_stub(installed=None, hass=STARTING),
                                 _Store({"solar_forecast": False, "export_limit": False}))
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.ABSENT
         assert p[Module.EXPORT_LIMIT] is Presence.ABSENT
 
     def test_starting_with_a_stored_present_is_present(self):
-        stub = self._with_store(_stub(forecast_path="uninitialized", hass=STARTING),
+        stub = self._with_store(_stub(installed=None, hass=STARTING),
                                 _Store({"solar_forecast": True}))
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
         assert p[Module.EXPORT_LIMIT] is Presence.UNKNOWN
 
     def test_nothing_stored_is_unknown(self):
-        stub = self._with_store(_stub(forecast_path="uninitialized", hass=STARTING), _Store())
+        stub = self._with_store(_stub(installed=None, hass=STARTING), _Store())
         assert SEMCoordinator.install_presence(stub)[Module.SOLAR_FORECAST] is Presence.UNKNOWN
 
     def test_a_running_read_wins_and_is_stored_once(self):
         store = _Store({"solar_forecast": False})
         stub = self._with_store(
-            _stub(forecast_path="solcast", forecast_source="solcast", export_cache=None), store)
+            _stub(installed=True, export_cache=None), store)
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
         # The hit is remembered at once; the export miss is not (yet).
@@ -188,7 +164,7 @@ class TestTheStoredRunningVerdict:
     def test_a_miss_while_starting_is_never_stored(self):
         store = _Store()
         stub = self._with_store(
-            _stub(forecast_path="none_available", read_running=False, hass=STARTING), store)
+            _stub(installed=None, hass=STARTING), store)
         SEMCoordinator.install_presence(stub)
         assert store.verdicts == {}
 
@@ -197,7 +173,7 @@ class TestTheStoredRunningVerdict:
         # a scan that already finds Solcast.
         store = _Store({"solar_forecast": False})
         stub = self._with_store(
-            _stub(forecast_path="solcast", forecast_source="solcast", hass=STARTING), store)
+            _stub(installed=True, hass=STARTING), store)
         p = SEMCoordinator.install_presence(stub)
         assert p[Module.SOLAR_FORECAST] is Presence.PRESENT
         assert store.verdicts["solar_forecast"] is True
@@ -208,7 +184,7 @@ class TestAMissIsRememberedOnlyOnceItHolds:
     become "no forecast" at the next restart."""
 
     def _stub(self, store, clock):
-        stub = _stub(forecast_path="none_available", export_cache="unset")
+        stub = _stub(installed=False, export_cache="unset")
         stub._storage = store
         stub.hass = SimpleNamespace(state=CoreState.running, async_create_task=MagicMock())
         return stub
@@ -250,9 +226,9 @@ class TestAMissIsRememberedOnlyOnceItHolds:
         for _ in range(5):
             SEMCoordinator.install_presence(stub)
             now[0] += 150.0
-        stub._forecast_reader._source = "solcast"      # it came back
+        stub._forecast_reader.answer = True           # it came back
         SEMCoordinator.install_presence(stub)
-        stub._forecast_reader._source = None
+        stub._forecast_reader.answer = False
         SEMCoordinator.install_presence(stub)          # a new streak starts at 1
         now[0] += 150.0
         assert store.verdicts["solar_forecast"] is True
