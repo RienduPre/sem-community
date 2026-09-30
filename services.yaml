@@ -577,6 +577,32 @@ get_config:
       selector:
         text:
 
+export_session_history:
+  name: Export charging sessions
+  description: >-
+    Returns the stored charging sessions, newest first, as rows and as CSV
+    text. Use it in a script or automation to keep your own log. The EV
+    card shows the same list.
+  fields:
+    charger_id:
+      name: Charger
+      description: "Only this charger's sessions (the charger id from your config)"
+      required: false
+      selector:
+        text:
+    since:
+      name: Since
+      description: "Only sessions from this date on (YYYY-MM-DD)"
+      required: false
+      selector:
+        date:
+    entry_id:
+      name: Config Entry ID
+      description: "Only needed if you run more than one SEM config entry"
+      required: false
+      selector:
+        text:
+
 set_option:
   name: Set Configuration Option
   description: >
