@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **SEM can stop a Wattpilot** (#804, by @HorizonKane). It uses the box's own stop and forced-start buttons, so current and mode now apply.
+
 # [2.1.0-beta.50] — 29.09.2026
 
 - 🐛 **An OnStar car's charge level is found under its other name** (#887, by @Azlinon). A `…_charge_state` sensor in % now counts.
