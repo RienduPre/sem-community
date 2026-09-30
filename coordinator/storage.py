@@ -609,6 +609,15 @@ class SEMStorage:
         """Persist the per-charger measured-W/A EMA."""
         self._energy_data["ev_wpa_ema"] = dict(state)
 
+    # (#1019) The hint engine's small state: what fired (so a restart
+    # repeats nothing), past nights' load, the last days' totals.
+    def get_hints_state(self) -> Dict[str, Any]:
+        state = self._energy_data.get("hints")
+        return dict(state) if isinstance(state, dict) else {}
+
+    def set_hints_state(self, state: Dict[str, Any]) -> None:
+        self._energy_data["hints"] = dict(state)
+
     # Sign-detection persistence (#476 item 5) — locked grid/battery
     # sign flags survive restarts so the autodetect can't re-learn a
     # wrong sign from ambiguous post-reboot samples.
