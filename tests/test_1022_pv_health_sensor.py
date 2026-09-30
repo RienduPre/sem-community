@@ -81,6 +81,7 @@ def _coordinator(ledger, temp=None):
     c.config = {}
     c._forecast_ledger = ledger
     c._pv_low_since_mono = None
+    c._tracker_date = dt_util.now().date()
     if temp is not None:
         c.config = {"outdoor_temperature_entity": "sensor.out"}
         st = MagicMock()

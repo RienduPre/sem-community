@@ -151,12 +151,23 @@ class TestRecordOnSessionEnd:
 
 
 class TestOneWriter:
-    def test_the_coordinator_no_longer_writes_the_record_itself(self):
-        import inspect
-        from custom_components.solar_energy_management.coordinator import (
-            coordinator as coord_mod,
+    def test_the_fleet_disconnect_path_writes_no_second_record(self):
+        """The old writer sat in ``_update_ev_intelligence`` on the fleet
+        disconnect. Drive that path: it must leave the store alone."""
+        from custom_components.solar_energy_management.coordinator.coordinator import (
+            SEMCoordinator,
         )
-        src = inspect.getsource(coord_mod)
-        assert "add_session_to_history(" not in src, (
-            "the session record has ONE writer: ev_control._update_session_tracking"
+        det = MagicMock()
+        det.full_detected = True
+        c = SimpleNamespace(
+            _last_ev_connected=True,
+            _session_data=SessionData(active=False, energy_kwh=4.0),
+            _ev_taper_detector=det,
+            _cycle_vehicle_soc=None,
+            _storage=MagicMock(),
         )
+        power = SimpleNamespace(ev_connected=False)
+        # the block under test, called the way the coordinator runs it
+        SEMCoordinator._finish_fleet_session(c, power)
+        det.on_session_end.assert_called_once()
+        c._storage.add_session_to_history.assert_not_called()

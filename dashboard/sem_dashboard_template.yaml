@@ -214,29 +214,15 @@ views:
                 color: '#8DC892'
 
           # ── PV health (#1022): one line — does the plant do what the
-          # forecast said? The icon takes the sensor's colour (green /
-          # yellow / orange / red are HA named colours); the numbers are
-          # the sensor's attributes. Wrapped like the sankey so a missing
-          # mushroom install shows a notice, not an error card.
-          - type: custom:sem-require
-            requires: mushroom-template-card
-            name: Mushroom
-            card:
-              type: custom:mushroom-template-card
-              entity: sensor.sem_pv_health
-              primary: PV health
-              secondary: >-
-                {% set r = state_attr('sensor.sem_pv_health', 'ratio_7d') %}
-                {% set d = state_attr('sensor.sem_pv_health', 'downtime_min_today') %}
-                {% if r is not none %}{{ (r * 100) | round }} %{% else %}–{% endif %}
-                · {{ d if d is not none else 0 }} min
-                {% if state_attr('sensor.sem_pv_health', 'snow') %}· ❄{% endif %}
-              icon: mdi:solar-panel
-              icon_color: >-
-                {% set s = states('sensor.sem_pv_health') %}
-                {{ s if s in ['green', 'yellow', 'orange', 'red'] else 'grey' }}
-              tap_action:
-                action: more-info
+          # forecast said? A core tile card (zero prerequisites, #617): the
+          # state is the colour, tap opens the numbers (7-day ratio, dark
+          # minutes, snow) as attributes.
+          - type: tile
+            entity: sensor.sem_pv_health
+            name: PV health
+            icon: mdi:solar-panel
+            tap_action:
+              action: more-info
 
           # ── 24h Power Curves (sem-chart-card replaces apexcharts) ──
           - type: custom:sem-chart-card

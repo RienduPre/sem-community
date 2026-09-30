@@ -5325,6 +5325,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 self._today_surplus_hours = [False] * 24
                 self._today_ev_hours = [False] * 24
                 self._tracker_date = today_date
+                # (#1022) the solar downtime figure is per day — same clock
+                _rdr = getattr(self, "_sensor_reader", None)
+                if _rdr is not None and hasattr(_rdr, "reset_solar_downtime"):
+                    _rdr.reset_solar_downtime()
             # (#645) Decay is checked against its OWN persisted date, NOT the
             # in-memory tracker above — a restart re-initialises the tracker to
             # today and would swallow the rollover.
@@ -12680,15 +12684,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             self._ev_taper_detector.update_energy(ev_increment, hw_total)
 
         # Reset on disconnect
-        if self._last_ev_connected and not power.ev_connected:
-            if self._session_data.energy_kwh > 0:
-                self._ev_taper_detector.on_session_end(
-                    self._session_data.energy_kwh,
-                    end_soc=self._cycle_vehicle_soc,
-                )
-                # (#1024) The session record is written where the session
-                # ends, per charger: ``ev_control._update_session_tracking``.
-            self._ev_taper_detector.reset_session()
+        self._finish_fleet_session(power)
 
         # Stall detection → full charge: if car is connected AND SEM has
         # been commanding a charge AND the EV still draws 0 W for ~3 min,
@@ -13510,6 +13506,19 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         temp = self._outdoor_temperature_or_none()
         return 15.0 if temp is None else temp  # Safe default
 
+    def _finish_fleet_session(self, power) -> None:
+        """Reset the primary detector on the fleet disconnect. (#1024) The
+        session RECORD is not written here: ``ev_control.
+        _update_session_tracking`` writes it where the session ends, per
+        charger."""
+        if self._last_ev_connected and not power.ev_connected:
+            if self._session_data.energy_kwh > 0:
+                self._ev_taper_detector.on_session_end(
+                    self._session_data.energy_kwh,
+                    end_soc=self._cycle_vehicle_soc,
+                )
+            self._ev_taper_detector.reset_session()
+
     def _outdoor_temperature_or_none(self) -> Optional[float]:
         """(#1022) The outdoor temperature, or None when nothing reports
         one. The 15 °C fallback above is fine for a consumption estimate
@@ -13560,8 +13569,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 name = (getattr(state, "attributes", None) or {}).get("friendly_name")
             dark[entity_id] = (str(name or entity_id), max(0.0, now_mono - float(t0)))
 
-        level = str(getattr(tariff_data, "tariff_price_level", "") or "")
-        price_cheap = level in ("cheap", "very_cheap", "negative")
+        from .price_signal import is_cheap_name
+        price_cheap = is_cheap_name(getattr(tariff_data, "tariff_price_level", None))
         dynamic = str(cfg.get("tariff_mode") or "") == "dynamic"
 
         idle: list = []
@@ -13639,7 +13648,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         led = getattr(self, "_forecast_ledger", None)
         if led is not None:
             try:
-                today_s = str(dt_util.now().date())
+                # Today is still settling. The date is the coordinator's own
+                # day clock (``_tracker_date``), not a second one (#645).
+                tracker = getattr(self, "_tracker_date", None)
+                all_days = [str(d) for d in led.days()]
+                today_s = str(tracker) if tracker is not None else (
+                    max(all_days) if all_days else "")
                 for day in led.days():
                     if str(day) >= today_s:
                         continue
