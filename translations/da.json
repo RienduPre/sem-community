@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Husmåler-afvigelse"
+      },
+      "pv_health": {
+        "name": "PV-tilstand",
+        "state": {
+          "green": "God",
+          "yellow": "Middel",
+          "orange": "Svag",
+          "red": "Dårlig"
+        }
       }
     },
     "binary_sensor": {

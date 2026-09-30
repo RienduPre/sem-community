@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Scarto contatore casa"
+      },
+      "pv_health": {
+        "name": "Stato FV",
+        "state": {
+          "green": "Buono",
+          "yellow": "Discreto",
+          "orange": "Scarso",
+          "red": "Cattivo"
+        }
       }
     },
     "binary_sensor": {

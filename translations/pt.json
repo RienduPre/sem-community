@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Diferença do contador"
+      },
+      "pv_health": {
+        "name": "Estado FV",
+        "state": {
+          "green": "Bom",
+          "yellow": "Razoável",
+          "orange": "Fraco",
+          "red": "Mau"
+        }
       }
     },
     "binary_sensor": {

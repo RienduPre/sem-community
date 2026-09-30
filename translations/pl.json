@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Różnica licznika"
+      },
+      "pv_health": {
+        "name": "Stan PV",
+        "state": {
+          "green": "Dobry",
+          "yellow": "Średni",
+          "orange": "Słaby",
+          "red": "Zły"
+        }
       }
     },
     "binary_sensor": {

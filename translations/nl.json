@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Verschil huismeter"
+      },
+      "pv_health": {
+        "name": "PV-gezondheid",
+        "state": {
+          "green": "Goed",
+          "yellow": "Matig",
+          "orange": "Zwak",
+          "red": "Slecht"
+        }
       }
     },
     "binary_sensor": {

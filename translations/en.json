@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "House meter difference"
+      },
+      "pv_health": {
+        "name": "PV health",
+        "state": {
+          "green": "Good",
+          "yellow": "Fair",
+          "orange": "Poor",
+          "red": "Bad"
+        }
       }
     },
     "binary_sensor": {

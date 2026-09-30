@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Talomittarin ero"
+      },
+      "pv_health": {
+        "name": "PV:n kunto",
+        "state": {
+          "green": "Hyvä",
+          "yellow": "Kohtalainen",
+          "orange": "Heikko",
+          "red": "Huono"
+        }
       }
     },
     "binary_sensor": {

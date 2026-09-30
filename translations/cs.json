@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Rozdíl měřiče"
+      },
+      "pv_health": {
+        "name": "Stav FV",
+        "state": {
+          "green": "Dobrý",
+          "yellow": "Průměrný",
+          "orange": "Slabý",
+          "red": "Špatný"
+        }
       }
     },
     "binary_sensor": {

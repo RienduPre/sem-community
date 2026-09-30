@@ -1601,6 +1601,26 @@ Install [Solcast PV Solar](https://github.com/BJReplay/ha-solcast-solar), [Forec
 - Forecast-based night target reduction
 - Smart battery redirect decisions in the flow calculator
 
+### PV health
+
+`sensor.sem_pv_health` says whether the plant does what the forecast said.
+One colour, from the last seven days of yield against forecast:
+
+| colour | yield ÷ forecast |
+|---|---|
+| green | 85 % or more |
+| yellow | 65 % to 85 % |
+| orange | 40 % to 65 % |
+| red | under 40 % |
+
+The state is `unknown` until three days are in. Attributes: `ratio_7d`,
+`settled_days`, `downtime_min_today` (minutes the solar input reported
+nothing today), `days_since_full_yield` (last day at 90 % or more), and
+`snow` — on when it is freezing, the forecast says the plant should
+produce, and it has produced almost nothing for two hours. Snow needs an
+outdoor temperature source; without one it stays off. The Energy tab
+shows the row.
+
 ---
 
 ## Observer Mode
@@ -1753,6 +1773,7 @@ big estimate is never treated as a measurement.
 - `sensor.sem_pv_performance_vs_forecast` — actual yield vs Solcast/Forecast.Solar prediction
 - `sensor.sem_pv_daily_specific_yield` — kWh per kWp installed
 - `sensor.sem_pv_estimated_annual_degradation` — long-term PV health
+- `sensor.sem_pv_health` — green / yellow / orange / red from seven days of yield against forecast (see [PV health](#pv-health))
 
 ### Charging Sensors
 - `sensor.sem_charging_state` — current charging state

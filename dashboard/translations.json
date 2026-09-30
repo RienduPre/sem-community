@@ -1583,7 +1583,8 @@
     "pause_duration_12_hours": "12 hodin",
     "pause_status_line": "Pozastaveno — zbývá {left} · zpět na {mode} v {time}.",
     "pause_resume_hint": "Zvolte režim pro okamžité pokračování.",
-    "pause_resuming": "Pokračuje…"
+    "pause_resuming": "Pokračuje…",
+    "pv_health_title": "Stav FV"
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3169,7 +3170,8 @@
     "pause_duration_12_hours": "12 timer",
     "pause_status_line": "Pauset — {left} tilbage · tilbage til {mode} kl. {time}.",
     "pause_resume_hint": "Vælg en tilstand for at genoptage nu.",
-    "pause_resuming": "Genoptager…"
+    "pause_resuming": "Genoptager…",
+    "pv_health_title": "PV-tilstand"
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4755,7 +4757,8 @@
     "pause_duration_12_hours": "12 Stunden",
     "pause_status_line": "Pausiert — noch {left} · zurück zu {mode} um {time}.",
     "pause_resume_hint": "Einen Modus wählen, um sofort fortzusetzen.",
-    "pause_resuming": "Wird fortgesetzt…"
+    "pause_resuming": "Wird fortgesetzt…",
+    "pv_health_title": "PV-Zustand"
   },
   "en": {
     "% of limit": "% of limit",
@@ -6341,7 +6344,8 @@
     "pause_duration_12_hours": "12 hours",
     "pause_status_line": "Paused — {left} left · back to {mode} at {time}.",
     "pause_resume_hint": "Pick a mode to resume now.",
-    "pause_resuming": "Resuming…"
+    "pause_resuming": "Resuming…",
+    "pv_health_title": "PV health"
   },
   "es": {
     "% of limit": "% del límite",
@@ -7927,7 +7931,8 @@
     "pause_duration_12_hours": "12 horas",
     "pause_status_line": "En pausa — quedan {left} · vuelve a {mode} a las {time}.",
     "pause_resume_hint": "Elija un modo para reanudar ahora.",
-    "pause_resuming": "Reanudando…"
+    "pause_resuming": "Reanudando…",
+    "pv_health_title": "Estado FV"
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9513,7 +9518,8 @@
     "pause_duration_12_hours": "12 tuntia",
     "pause_status_line": "Tauolla — {left} jäljellä · takaisin tilaan {mode} klo {time}.",
     "pause_resume_hint": "Valitse tila jatkaaksesi heti.",
-    "pause_resuming": "Jatketaan…"
+    "pause_resuming": "Jatketaan…",
+    "pv_health_title": "PV:n kunto"
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -11099,7 +11105,8 @@
     "pause_duration_12_hours": "12 heures",
     "pause_status_line": "En pause — encore {left} · retour à {mode} à {time}.",
     "pause_resume_hint": "Choisissez un mode pour reprendre maintenant.",
-    "pause_resuming": "Reprise…"
+    "pause_resuming": "Reprise…",
+    "pv_health_title": "État du PV"
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12685,7 +12692,8 @@
     "pause_duration_12_hours": "12 óra",
     "pause_status_line": "Szünetel — még {left} · vissza ide: {mode}, {time}-kor.",
     "pause_resume_hint": "Válasszon módot az azonnali folytatáshoz.",
-    "pause_resuming": "Folytatás…"
+    "pause_resuming": "Folytatás…",
+    "pv_health_title": "PV állapot"
   },
   "it": {
     "% of limit": "% del limite",
@@ -14271,7 +14279,8 @@
     "pause_duration_12_hours": "12 ore",
     "pause_status_line": "In pausa — ancora {left} · torna a {mode} alle {time}.",
     "pause_resume_hint": "Scegli un modo per riprendere subito.",
-    "pause_resuming": "Ripresa…"
+    "pause_resuming": "Ripresa…",
+    "pv_health_title": "Stato FV"
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15857,7 +15866,8 @@
     "pause_duration_12_hours": "12 uur",
     "pause_status_line": "Gepauzeerd — nog {left} · terug naar {mode} om {time}.",
     "pause_resume_hint": "Kies een modus om nu te hervatten.",
-    "pause_resuming": "Hervat…"
+    "pause_resuming": "Hervat…",
+    "pv_health_title": "PV-gezondheid"
   },
   "no": {
     "% of limit": "% av grense",
@@ -17443,7 +17453,8 @@
     "pause_duration_12_hours": "12 timer",
     "pause_status_line": "Pauset — {left} igjen · tilbake til {mode} kl. {time}.",
     "pause_resume_hint": "Velg en modus for å fortsette nå.",
-    "pause_resuming": "Fortsetter…"
+    "pause_resuming": "Fortsetter…",
+    "pv_health_title": "PV-tilstand"
   },
   "pl": {
     "% of limit": "% limitu",
@@ -19029,7 +19040,8 @@
     "pause_duration_12_hours": "12 godzin",
     "pause_status_line": "Wstrzymano — pozostało {left} · powrót do {mode} o {time}.",
     "pause_resume_hint": "Wybierz tryb, aby wznowić teraz.",
-    "pause_resuming": "Wznawianie…"
+    "pause_resuming": "Wznawianie…",
+    "pv_health_title": "Stan PV"
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20615,7 +20627,8 @@
     "pause_duration_12_hours": "12 horas",
     "pause_status_line": "Em pausa — faltam {left} · volta a {mode} às {time}.",
     "pause_resume_hint": "Escolha um modo para retomar agora.",
-    "pause_resuming": "A retomar…"
+    "pause_resuming": "A retomar…",
+    "pv_health_title": "Estado FV"
   },
   "ro": {
     "% of limit": "% din limită",
@@ -22201,7 +22214,8 @@
     "pause_duration_12_hours": "12 ore",
     "pause_status_line": "În pauză — mai sunt {left} · revine la {mode} la {time}.",
     "pause_resume_hint": "Alegeți un mod pentru a relua acum.",
-    "pause_resuming": "Se reia…"
+    "pause_resuming": "Se reia…",
+    "pv_health_title": "Stare PV"
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23787,7 +23801,8 @@
     "pause_duration_12_hours": "12 timmar",
     "pause_status_line": "Pausad — {left} kvar · tillbaka till {mode} kl. {time}.",
     "pause_resume_hint": "Välj ett läge för att återuppta nu.",
-    "pause_resuming": "Återupptar…"
+    "pause_resuming": "Återupptar…",
+    "pv_health_title": "PV-hälsa"
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25373,6 +25388,7 @@
     "pause_duration_12_hours": "12 小时",
     "pause_status_line": "已暂停 — 剩余 {left} · 将于 {time} 恢复为 {mode}。",
     "pause_resume_hint": "选择一个模式以立即恢复。",
-    "pause_resuming": "正在恢复…"
+    "pause_resuming": "正在恢复…",
+    "pv_health_title": "光伏健康"
   }
 }

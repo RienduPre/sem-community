@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Skillnad husmätare"
+      },
+      "pv_health": {
+        "name": "PV-hälsa",
+        "state": {
+          "green": "Bra",
+          "yellow": "Medel",
+          "orange": "Svag",
+          "red": "Dålig"
+        }
       }
     },
     "binary_sensor": {

@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Diferență contor"
+      },
+      "pv_health": {
+        "name": "Stare PV",
+        "state": {
+          "green": "Bună",
+          "yellow": "Medie",
+          "orange": "Slabă",
+          "red": "Proastă"
+        }
       }
     },
     "binary_sensor": {

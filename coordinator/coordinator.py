@@ -4854,6 +4854,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             result["battery_last_night_date"] = _pe.get("battery_last_night_date")
             result["forecast_trust_d1"] = _pe.get("forecast_trust_d1")
             result["forecast_trust_d2"] = _pe.get("forecast_trust_d2")
+            # (#1022) PV health: the colour is the state, the numbers ride
+            # on the one sensor as attributes.
+            _pvh = self._pv_health_verdict(power, forecast_data)
+            result["pv_health"] = _pvh.state
+            result["pv_health_attrs"] = _pvh.as_attributes()
             result["battery_overnight_need_kwh"] = _pe.get("battery_overnight_need_kwh")
             result["battery_expected_refill_kwh"] = _pe.get("battery_expected_refill_kwh")
             result["battery_refill_clipped_kwh"] = _pe.get("battery_refill_clipped_kwh")
@@ -13495,6 +13500,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         Used for temperature-corrected EV consumption prediction (#106).
         Falls back to 15°C (spring-like) if no weather data available.
         """
+        temp = self._outdoor_temperature_or_none()
+        return 15.0 if temp is None else temp  # Safe default
+
+    def _outdoor_temperature_or_none(self) -> Optional[float]:
+        """(#1022) The outdoor temperature, or None when nothing reports
+        one. The 15 °C fallback above is fine for a consumption estimate
+        and wrong for a snow flag — a made-up spring day can never say
+        "freezing", so that caller asks here."""
         # Try configured entity first
         temp_entity = self.config.get("outdoor_temperature_entity", "")
         if temp_entity:
@@ -13514,7 +13527,59 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 except (ValueError, TypeError):
                     pass
 
-        return 15.0  # Safe default
+        return None
+
+    def _pv_health_verdict(self, power, forecast_data, now_mono: Optional[float] = None):
+        """(#1022) PV health from what SEM already keeps: the forecast
+        ledger's settled days (today never counts — it is still settling),
+        the reader's dark minutes, and a two-hour "dark under a bright
+        forecast" clock for the snow flag. Never raises: a missing piece
+        gives no verdict, not an error."""
+        import time as _time
+
+        from ..analytics.pv_health import (
+            SNOW_EXPECT_W, SNOW_YIELD_SHARE, pv_health,
+        )
+
+        now_mono = _time.monotonic() if now_mono is None else float(now_mono)
+        days: list = []
+        led = getattr(self, "_forecast_ledger", None)
+        if led is not None:
+            try:
+                today_s = str(dt_util.now().date())
+                for day in led.days():
+                    if str(day) >= today_s:
+                        continue
+                    forecast = led.forecast_for(day, 0)
+                    if forecast is None:
+                        forecast = led.forecast_for(day, 1)
+                    days.append((forecast, led.actual_for(day)))
+            except Exception:  # noqa: BLE001 — a half-restored ledger is no verdict
+                days = []
+
+        expect_w = float(getattr(forecast_data, "forecast_power_now_w", 0.0) or 0.0)
+        solar_w = float(getattr(power, "solar_power", 0.0) or 0.0)
+        low_now = expect_w >= SNOW_EXPECT_W and solar_w < SNOW_YIELD_SHARE * expect_w
+        low_since = getattr(self, "_pv_low_since_mono", None)
+        if low_now:
+            if low_since is None:
+                low_since = now_mono
+        else:
+            low_since = None
+        self._pv_low_since_mono = low_since
+        low_for_s = None if low_since is None else now_mono - low_since
+
+        try:
+            temp = self._outdoor_temperature_or_none()
+        except Exception:  # noqa: BLE001
+            temp = None
+        freezing = None if temp is None else temp <= 0.0
+
+        return pv_health(
+            days,
+            float(getattr(power, "solar_downtime_min_today", 0.0) or 0.0),
+            freezing, expect_w, solar_w, low_for_s,
+        )
 
     # Solar charging state sets
     def _restore_per_charger_detectors(self, ev_intel_state) -> None:

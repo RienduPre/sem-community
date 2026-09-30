@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Abweichung Hauszähler"
+      },
+      "pv_health": {
+        "name": "PV-Zustand",
+        "state": {
+          "green": "Gut",
+          "yellow": "Mässig",
+          "orange": "Schwach",
+          "red": "Schlecht"
+        }
       }
     },
     "binary_sensor": {
