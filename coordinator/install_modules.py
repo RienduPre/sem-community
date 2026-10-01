@@ -449,7 +449,7 @@ ENTITY_MODULES: Mapping[tuple[str, str], frozenset[Module]] = _table(
         "forecast_peak_time_today", "forecast_power_now_w",
         "forecast_remaining_today_kwh", "forecast_surplus_kwh",
         "forecast_today_kwh", "forecast_tomorrow_kwh", "forecast_trust_d1",
-        "forecast_trust_d2", "pv_performance_vs_forecast",
+        "forecast_trust_d2", "pv_health", "pv_performance_vs_forecast",
     )),
     # (#996) kWh per kWp and the degradation trend divide by the plant
     # size; the analyzer's 10 kWp default is a made-up number.
@@ -478,6 +478,9 @@ CORE_BY_DECISION: Mapping[tuple[str, str], str] = {
     # (#996) Every control chooses a side (tests/test_996_every_control_
     # has_a_need.py). These act on every install.
     ("number", "update_interval"): "how often SEM reads its inputs, on every install",
+    ("select", "hints"): (
+        "plain-word hints and a weekly note; they read what every install has, "
+        "off by default"),
     ("number", "minimum_solar_power"): "the solar floor below which SEM counts no surplus",
     ("number", "surplus_event_threshold"): "the surplus event fires for user automations on every install",
     ("number", "electricity_import_rate"): "the flat import price — the tariff a static house has",
