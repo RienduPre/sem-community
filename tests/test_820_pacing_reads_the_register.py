@@ -195,6 +195,35 @@ class TestBelowTheBufferIsFullPower:
         _run(w.apply(h, ENTITY, None, observer=False, hw_max_w=5000.0))
         assert reg.writes[-1] == 3000.0
 
+    def test_a_release_during_a_blip_is_tried_again(self):
+        """Review: the register read unavailable at the moment of release.
+        SEM must stay engaged, write nothing, and release on the next cycle
+        when the register is back — not forget it holds a cap."""
+        reg = Register(1560)
+        w = ChargePacingWriter()
+        h = reg.hass()
+        _run(w.apply(h, ENTITY, 1200.0, observer=False, hw_max_w=5000.0))
+        good = reg.state
+        reg.state = SimpleNamespace(state="unavailable", attributes={})
+        out = _run(w.apply(h, ENTITY, None, observer=False, hw_max_w=5000.0))
+        assert out == "limit_unreadable"
+        assert w.engaged is True
+        reg.state = good
+        out = _run(w.apply(h, ENTITY, None, observer=False, hw_max_w=5000.0))
+        assert out == "restored"
+        assert reg.writes[-1] == 5000.0
+        assert w.engaged is False
+
+    def test_a_cap_above_the_max_stays_on_the_step_grid(self):
+        """A cap is a ceiling: clamped to max 2450 on a 200-step register it
+        lands on 2400, a value the step allows. (A release writes the
+        entity's own max, which is always allowed.)"""
+        reg = Register(1000, hi=2450, step=200)
+        w = ChargePacingWriter()
+        h = reg.hass()
+        _run(w.apply(h, ENTITY, 3000.0, observer=False, hw_max_w=5000.0))
+        assert reg.writes[-1] == 2400.0
+
     def test_sems_own_cap_is_never_captured_as_the_value_to_restore(self):
         """A release the register refused leaves SEM's cap on it. The next
         engagement must not take that cap for the user's setting."""

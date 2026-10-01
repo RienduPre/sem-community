@@ -132,11 +132,21 @@ def clamp_to_entity_range(
             base = lo_w or 0.0
             # a hair of tolerance so 2.4 kW / 0.1 kW is 24 steps, not 23
             watts = base + math.floor((watts - base) / step_w + 1e-9) * step_w
-    if lo_w is not None:
-        watts = max(lo_w, watts)
     hi = attrs.get("max")
     if isinstance(hi, (int, float)) and math.isfinite(hi):
-        watts = min(float(hi) * scale, watts)
+        hi_w = float(hi) * scale
+        if round_down_to_step and watts > hi_w:
+            # Floor the max onto the step grid too, so a capped ceiling is
+            # still a value the entity's step allows (#820 review).
+            step = attrs.get("step")
+            if (isinstance(step, (int, float)) and math.isfinite(step)
+                    and step > 0):
+                step_w = float(step) * scale
+                base = lo_w or 0.0
+                hi_w = base + math.floor((hi_w - base) / step_w + 1e-9) * step_w
+        watts = min(hi_w, watts)
+    if lo_w is not None:
+        watts = max(lo_w, watts)
     return watts
 
 

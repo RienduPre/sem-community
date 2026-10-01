@@ -276,6 +276,15 @@ class ChargePacingWriter:
         #: nothing to adopt when nothing was persisted
         self._adopted: bool = store is None
 
+    def _release_state(self) -> None:
+        """Pacing no longer holds the register."""
+        self.engaged = False
+        self.engaged_entity = ""
+        self.restore_value = None
+        self.last_written_w = None
+        self._confirmed = False
+        self._unconfirmed_cycles = 0
+
     async def apply(self, hass, entity_id: str, cap_w, *,
                     observer: bool, hw_max_w: float | None = None) -> str:
         """Returns a short action token: wrote|held|write_refused|restored|
@@ -320,20 +329,19 @@ class ChargePacingWriter:
                 # to what the register can take.
                 candidates = [v for v in (self.restore_value, hw_max_w)
                               if v is not None and v > 0]
-                self.engaged = False
-                self.engaged_entity = ""
-                self.restore_value = None
-                self.last_written_w = None
-                self._confirmed = False
-                self._unconfirmed_cycles = 0
                 if not candidates:
                     # Nothing to put back, and no way left to learn it. Keep
                     # the record: erasing it would remove the only trace that
                     # a register is still being held down (#949 review).
+                    self._release_state()
                     return "idle"
                 prepared = _fit(hass, entity_id, max(candidates))
                 if prepared is None:
+                    # The register cannot be read right now (a Modbus blip).
+                    # Stay engaged so the next cycle tries the release again
+                    # and unload still knows a cap is held (#820 review).
                     return "limit_unreadable"
+                self._release_state()
                 native, _watts = prepared
                 await self._forget()
                 await hass.services.async_call(
