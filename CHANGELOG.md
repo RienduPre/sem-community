@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+### ✨ Improvements
+
+- **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
+
 # [2.2.0-beta.2] — 30.09.2026
 
 - 🐛 **Removing SEM no longer switches a charger back on when SEM was set to watch only** (#1027). Watching sends no command, not even during removal.

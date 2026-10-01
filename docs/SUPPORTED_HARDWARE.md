@@ -102,6 +102,27 @@ Everything else SEM reads or switches: the SG-Ready and hot-water path, metered 
 | Viessmann Vitocal 250-A / 252-A | heat pump / hot water | `vicare` | 🧩 implemented | #600 / disc. 599 (tlinnet) ViCare sensors mapped into SEM's fields; no actuation confirmed yet |
 | Buderus heat pump | heat pump (SG-Ready) | `ems-esp` | 📥 requested | #801 (HorizonKane) SG-Ready needs a command sent to EMS-ESP, not a relay flip |
 
+## How SEM finds a charger it has no row for
+
+SEM does not add code per brand. It reads what an integration offers and
+looks for these roles:
+
+- **Start and stop buttons** — a charger with a start and a stop button can
+  be started and stopped.
+- **A charge-mode select** — a select that can stop and can charge (for
+  example Fast / Eco / Stopped) is the charge mode, whatever it is called.
+- **A phase select** — a select with 1 and 3 is suggested as the phase switch.
+- **A car's own charge control** — a car integration's charging-amps number
+  and charge switch (Tesla Fleet, Teslemetry, Tessie).
+- **A charger that only reports** — driven through the one car that has
+  those controls (a Tesla Wall Connector with one Tesla).
+- **A companion device** — an installation or site device next to a
+  charger belongs to it and is not reported as unknown hardware.
+
+What SEM finds shows in the hardware report (Diagnose). For now it is a
+report only: nothing is set up by itself, and you add the charger by hand
+with the entities the report names.
+
 ## Upgrading a row to *tested live*
 
 Run SEM with your hardware and tell us what happened — an issue with your brand, the config-flow result and a note that the first cycles worked is enough. Every confirmation is cited here.
