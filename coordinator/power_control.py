@@ -99,6 +99,47 @@ def native_power_scale(
         hass, entity_id, require_explicit_unit=require_explicit_unit)
 
 
+def clamp_to_entity_range(
+    attrs,
+    watts: float,
+    scale: float,
+    *,
+    round_down_to_step: bool = False,
+) -> float:
+    """Clamp a watt value to a number entity's own min/max (#523).
+
+    ``min``/``max``/``step`` are the entity's NATIVE units, so they are
+    scaled to watts with ``scale`` (from :func:`native_power_scale`); the
+    result stays in watts. Home Assistant REFUSES a ``number.set_value``
+    outside the range, and a non-blocking call never hears about it — the
+    register keeps its old value while the writer believes it moved
+    (RienduPre's Sessy setpoint stuck at 0, #523; Arne's charge limit stuck
+    at 1560 W, #820). ONE clamp for every power write.
+
+    ``round_down_to_step`` is for a ceiling (a charge cap): rounding it up
+    to the next step would let through more than was decided.
+    """
+    if not isinstance(attrs, Mapping):
+        return watts
+    lo = attrs.get("min")
+    lo_w = (float(lo) * scale
+            if isinstance(lo, (int, float)) and math.isfinite(lo) else None)
+    if round_down_to_step:
+        step = attrs.get("step")
+        if (isinstance(step, (int, float)) and math.isfinite(step)
+                and step > 0):
+            step_w = float(step) * scale
+            base = lo_w or 0.0
+            # a hair of tolerance so 2.4 kW / 0.1 kW is 24 steps, not 23
+            watts = base + math.floor((watts - base) / step_w + 1e-9) * step_w
+    if lo_w is not None:
+        watts = max(lo_w, watts)
+    hi = attrs.get("max")
+    if isinstance(hi, (int, float)) and math.isfinite(hi):
+        watts = min(float(hi) * scale, watts)
+    return watts
+
+
 def is_valid_power_control_entity(
     hass,
     entity_id: str,

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Charge pacing checks the inverter took the limit** (#820). Below the buffer the battery gets full power again.
+
 # [2.2.0-beta.2] — 30.09.2026
 
 - 🐛 **Removing SEM no longer switches a charger back on when SEM was set to watch only** (#1027). Watching sends no command, not even during removal.
