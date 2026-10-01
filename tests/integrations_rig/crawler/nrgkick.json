@@ -1,0 +1,24 @@
+{
+ "chargers": [],
+ "near_misses": [
+  {
+   "entities": 60,
+   "offer": {
+    "ev_charging_power_sensor": "sensor.nrgkick_test_l1_active_power",
+    "ev_current_control_entity": "number.nrgkick_test_charging_current"
+   },
+   "proposed_roles": [
+    "ev_current_control"
+   ]
+  }
+ ],
+ "proposals": [
+  {
+   "ev_current_control": [
+    "number.nrgkick_test_charging_current",
+    "per_charger"
+   ]
+  }
+ ],
+ "vehicles": []
+}

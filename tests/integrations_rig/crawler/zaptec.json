@@ -1,0 +1,32 @@
+{
+ "chargers": [],
+ "near_misses": [
+  {
+   "entities": 11,
+   "offer": {},
+   "proposed_roles": [
+    "ev_current_control"
+   ]
+  },
+  {
+   "entities": 29,
+   "offer": {
+    "ev_charging_power_sensor": "sensor.zaptec_go2_zap012345_total_charge_power",
+    "ev_current_control_entity": "number.zaptec_go2_zap012345_charger_max_current",
+    "ev_session_energy_sensor": "sensor.zaptec_go2_zap012345_completed_session_energy"
+   },
+   "proposed_roles": [
+    "ev_current_control"
+   ]
+  }
+ ],
+ "proposals": [
+  {
+   "ev_current_control": [
+    "number.abbastova_available_current",
+    "per_charger"
+   ]
+  }
+ ],
+ "vehicles": []
+}

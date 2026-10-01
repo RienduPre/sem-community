@@ -1,0 +1,31 @@
+{
+ "chargers": [],
+ "near_misses": [
+  {
+   "entities": 42,
+   "offer": {
+    "ev_charging_power_sensor": "sensor.openevse_mock_config_charging_power",
+    "ev_connected_sensor": "binary_sensor.openevse_mock_config_vehicle_connected",
+    "ev_current_control_entity": "number.openevse_mock_config_charge_rate",
+    "ev_session_energy_sensor": "sensor.openevse_mock_config_usage_this_session"
+   },
+   "proposed_roles": [
+    "ev_current_control",
+    "vehicle_range"
+   ]
+  }
+ ],
+ "proposals": [
+  {
+   "ev_current_control": [
+    "number.openevse_mock_config_charge_rate",
+    "per_charger"
+   ],
+   "vehicle_range": [
+    "sensor.openevse_mock_config_vehicle_range",
+    "none"
+   ]
+  }
+ ],
+ "vehicles": []
+}

@@ -1,0 +1,25 @@
+{
+ "chargers": [],
+ "near_misses": [],
+ "proposals": [
+  {
+   "battery_power": [
+    "sensor.energy_site_battery_power",
+    "set_option"
+   ],
+   "grid_power": [
+    "sensor.energy_site_grid_power",
+    "set_option"
+   ],
+   "solar_power": [
+    "sensor.energy_site_solar_power",
+    "set_option"
+   ],
+   "vehicle_range": [
+    "sensor.test_battery_range",
+    "none"
+   ]
+  }
+ ],
+ "vehicles": []
+}
