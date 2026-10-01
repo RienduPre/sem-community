@@ -5168,13 +5168,16 @@ whose status sensor is disabled keeps its only charger. Two things keep a unit t
 call a meter, each looked for on the WHOLE device, disabled entities included: a charger mark, or an
 entity with the same translation key as one the evidence bound to a charger role. The review of this
 fix found the second one: a second Easee with its status disabled, or renamed (the brand function
-reads ids), mapped exactly like the Equalizer and was dropped. Transports (`mqtt`) are skipped:
+reads ids), mapped exactly like the Equalizer and was dropped. That check needs the keys, so where
+the evidence's charger roles carry none, nothing is dropped: SEM cannot tell a meter from a box whose
+roles are off, and the heal below acts on this answer (the second review). Transports (`mqtt`) are skipped:
 devices on one transport are not neighbours. The report lists the meter under `meters`, and the
 diagnostics download carries it. The near miss now waits for the whole platform (transports keep
 the old per-device answer). `_drop_meters_saved_as_chargers` removes, at setup and before the
-charger list is read, the one thing SEM itself saved wrong: a charger whose id is the stable id
-setup gave that meter and which binds no charger role. A list it empties sends the same setup back
-to discovery. A side effect, pinned: the config path now reads the GUARDED mapping like the report,
+charger list is read, the one thing SEM itself saved wrong: a charger that binds no charger role,
+whose power sensor is still the meter's, and whose id is the stable id setup gave that meter (or,
+saved before v1.7.5, whose stored `_device_id` is the meter's). A list it empties sends the same
+setup back to discovery. A side effect, pinned: the config path now reads the GUARDED mapping like the report,
 so a unit whose only role a guard removed is no longer returned as a charger with no roles.
 **Guard:** `tests/test_1036_meter_beside_charger.py` — the Equalizer's real entities, translation
 keys and disabled flags, with the pre-fix rule spelled out; config path, primary pick and report,
@@ -5182,18 +5185,20 @@ in both registry orders; the "next to" pins (alone, a disabled status, two charg
 with its roles disabled or renamed, a live or disabled mark, a transport); an oracle that puts one
 meter beside one box on every brand platform and must cover a literal list of 16 brands; an AST pin
 that both walks call the helper; the near-miss order in both directions; the diagnostics download;
-the heal (SEM's save removed, the user's charger and the user's edit kept, a real charger kept, no
-registry walk on a normal install, and an AST pin that setup heals before it reads the list).
-Fourteen mutants are killed.
+the no-keys case; the heal (SEM's save removed, a pre-v1.7.5 save removed, the user's charger, a
+role or a power sensor the user set, and a real charger kept, no registry walk on a normal install,
+and an AST pin that setup heals before it reads the list). Eighteen mutants are killed. No test runs
+a whole `async_setup_entry` through the heal; the order pin and a trace stand in for it.
 **Sweep question:** for every per-unit "is this an X?" — can the unit answer alone, or is the
 answer in the unit next to it? And if the wrong answer was saved, what makes SEM ask again?
 **Left for Guido:** (1) No evidence, no drop: an Equalizer beside an Easee whose status AND session
-are both disabled or missing, or an Easee account with only an Equalizer, still offers the meter —
-first. (2) A meter whose entity ids hit a loose name rule binds a charger role and is kept: openWB
+are both disabled or missing, an integration that gives its entities no translation keys, or an
+Easee account with only an Equalizer, still offers the meter — first. (2) A meter whose entity ids hit a loose name rule binds a charger role and is kept: openWB
 and V2C bind any id with `connect`, go-e MQTT any id with `car` (`carport`). (3) A second box that
 maps to nothing (all its state sensors disabled) beside a detected charger is no longer a near miss
 in either order; before, it was one only when listed first. (4) The report decides meters before the
 roster can turn a sensors-only charger into a near miss, so the report can list a meter with no
 charger row of that brand; the config path is not affected. (5) The Equalizer is a real grid meter;
-offering it as SEM's grid source is a feature.
+offering it as SEM's grid source is a feature. (6) A Repair keyed by the removed charger's id is not
+cleared — the same leftover the `remove_charger` service has.
 Refs #1036 #886 #964 #915 #814.

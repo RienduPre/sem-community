@@ -2119,9 +2119,11 @@ def _drop_meters_saved_as_chargers(hass, chargers):
     never corrects itself: it keeps reading the grid import as EV power and
     keeps steering the meter.
 
-    Only SEM's own save is removed. The id must be the one setup gave that
-    meter, and the charger must bind no role only a charger has — a charger
-    the user built or edited is left alone. When the list is then empty,
+    Only SEM's own save is removed: a charger that binds no role only a
+    charger has, whose power sensor is still the meter's, and whose id is
+    the one setup gave that meter — or, saved before v1.7.5, whose stored
+    ``_device_id`` is the meter's. A charger the user pointed at a role, or
+    at another power sensor, is left alone. When the list is then empty,
     setup's own discovery runs again and saves the real charger. Returns a
     new list if anything changed, else ``None``."""
     from .hardware_detection import (
@@ -2135,8 +2137,15 @@ def _drop_meters_saved_as_chargers(hass, chargers):
         return None
     meters: List[Dict[str, Any]] = []
     discover_all_ev_chargers_from_registry(hass, meters_out=meters)
-    meter_ids = {stable_discovered_charger_id(m) for m in meters}
-    dropped = [c for c in suspects if c.get("id") in meter_ids]
+    def _is_this_meter(c, m) -> bool:
+        if (c.get("ev_charging_power_sensor") or None) not in (
+                None, m.get("ev_charging_power_sensor")):
+            return False
+        return (c.get("id") == stable_discovered_charger_id(m)
+                or (bool(c.get("_device_id"))
+                    and c.get("_device_id") == m.get("_device_id")))
+
+    dropped = [c for c in suspects if any(_is_this_meter(c, m) for m in meters)]
     if not dropped:
         return None
     _LOGGER.warning(

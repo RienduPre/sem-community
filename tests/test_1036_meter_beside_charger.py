@@ -286,6 +286,18 @@ class TestOnlyNextToACharger:
         assert sorted(c["_device_id"] for c in found) == [
             "box-EH123456", "eq-QP123456"]
 
+    def test_without_keys_to_compare_nothing_is_dropped(self):
+        # The review of this fix: with no translation keys SEM cannot tell
+        # the Equalizer from a second box whose roles are switched off — and
+        # the heal at setup would act on that guess. So it does not guess.
+        def bare(ents):
+            for e in ents:
+                e.translation_key = None
+            return ents
+        found = _config_walk(bare(_equalizer()) + bare(_charger()))
+        assert sorted(c["_device_id"] for c in found) == [
+            "box-EH123456", "eq-QP123456"]
+
     def test_a_disabled_mark_on_the_device_keeps_it_too(self):
         marked = _equalizer() + [
             _ent("number.easee_equalizer_qp123456_charging_current",
@@ -309,11 +321,14 @@ class TestOnlyNextToACharger:
         assert meters_beside_chargers("easee", units) == set()
 
     def test_a_transport_platform_has_no_neighbours(self):
+        plug = _ent("binary_sensor.jb_plug", "jb", key="plug")
         units = {
             "juicebox": ({"ev_connected_sensor": "binary_sensor.jb_plug",
-                          "ev_charging_power_sensor": "sensor.jb_power"}, []),
+                          "ev_charging_power_sensor": "sensor.jb_power"},
+                         [plug]),
             "heat_pump": ({"ev_charging_power_sensor": "sensor.hp_power"},
-                          []),
+                          [_ent("sensor.hp_power", "hp", "power",
+                                key="power")]),
         }
         assert meters_beside_chargers("mqtt", units) == set()
         # …and the same two units on an integration's own platform:
@@ -323,30 +338,33 @@ class TestOnlyNextToACharger:
 def _meter_for(platform):
     p = f"sensor.{platform}_meter"
     return [
-        _ent(f"{p}_import_power", "meter", "power", platform, unit="W"),
-        _ent(f"{p}_export_power", "meter", "power", platform, unit="W"),
-        _ent(f"{p}_import_energy", "meter", "energy", platform, unit="kWh"),
-        _ent(f"{p}_export_energy", "meter", "energy", platform, unit="kWh"),
-        _ent(f"{p}_total_energy", "meter", "energy", platform, unit="kWh"),
-        _ent(f"{p}_current", "meter", "current", platform, unit="A"),
+        _ent(f"{p}_{k}", "meter", dc, platform, unit=u, key=k)
+        for k, dc, u in (("import_power", "power", "W"),
+                         ("export_power", "power", "W"),
+                         ("import_energy", "energy", "kWh"),
+                         ("export_energy", "energy", "kWh"),
+                         ("total_energy", "energy", "kWh"),
+                         ("current", "current", "A"))
     ]
 
 
 def _box_for(platform):
     n = f"{platform}_box"
     return [
-        _ent(f"binary_sensor.{n}_plug", "box", "plug", platform),
+        _ent(f"binary_sensor.{n}_plug", "box", "plug", platform, key="plug"),
         _ent(f"binary_sensor.{n}_charging", "box", "battery_charging",
-             platform),
-        _ent(f"sensor.{n}_status", "box", None, platform),
+             platform, key="charging"),
+        _ent(f"sensor.{n}_status", "box", None, platform, key="status"),
         _ent(f"sensor.{n}_charging_power", "box", "power", platform,
-             unit="W"),
+             unit="W", key="charging_power"),
         _ent(f"sensor.{n}_session_energy", "box", "energy", platform,
-             unit="kWh"),
+             unit="kWh", key="session_energy"),
         _ent(f"number.{n}_charging_current", "box", "current", platform,
-             unit="A"),
-        _ent(f"switch.{n}_charging", "box", None, platform),
-        _ent(f"select.{n}_charge_mode", "box", None, platform),
+             unit="A", key="charging_current"),
+        _ent(f"switch.{n}_charging", "box", None, platform,
+             key="charging_switch"),
+        _ent(f"select.{n}_charge_mode", "box", None, platform,
+             key="charge_mode"),
     ]
 
 
@@ -511,6 +529,21 @@ class TestTheSavedEqualizerIsRemoved:
     def test_a_saved_equalizer_the_user_edited_stays(self):
         saved = _saved_by_setup(_equalizer())
         saved[0]["ev_connected_sensor"] = "sensor.easee_home_eh123456_status"
+        assert _heal(saved, _equalizer() + _charger()) is None
+
+    def test_a_save_from_before_v1_7_5_is_removed_too(self):
+        # Setup then kept ``_platform`` / ``_device_id`` and used one id.
+        old = [{"id": "ev_charger", "name": "EV Charger",
+                "_platform": "easee", "_device_id": "eq-QP123456",
+                "ev_charging_power_sensor":
+                    "sensor.easee_equalizer_qp123456_import_power",
+                "ev_charger_service": "easee.set_charger_dynamic_limit"}]
+        assert _heal(old, _equalizer() + _charger()) == []
+
+    def test_a_saved_equalizer_with_another_power_sensor_stays(self):
+        saved = _saved_by_setup(_equalizer())
+        saved[0]["ev_charging_power_sensor"] = (
+            "sensor.easee_home_eh123456_power")
         assert _heal(saved, _equalizer() + _charger()) is None
 
     def test_a_saved_real_charger_stays(self):

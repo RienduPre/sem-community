@@ -1057,9 +1057,9 @@ def meters_beside_chargers(platform: str, units, disabled=()) -> set:
     must not lose its only charger to a guess. Only a bound role makes a
     unit the evidence.
 
-    Three things keep a unit that the roles alone would call a meter, each
-    looked for on the WHOLE device — its live entities and the ones the user
-    disabled (``disabled``: the platform's disabled registry entries):
+    Two things keep a unit that the roles alone would call a meter, each
+    looked for on the WHOLE device — its live entities and its disabled ones
+    (``disabled``: the platform's disabled registry entries):
 
     * a charger mark (a plug binary or a current control, #814);
     * an entity with the same translation key as one the evidence bound to
@@ -1067,6 +1067,11 @@ def meters_beside_chargers(platform: str, units, disabled=()) -> set:
       and survives the user renaming its id, which the brand functions read.
       A second Easee with its status disabled, or renamed to
       ``sensor.carport_toestand``, is still a charger.
+
+    That second check needs the keys. Where the evidence's charger roles
+    carry none, nothing is dropped: SEM cannot tell a meter from a second
+    box whose roles are switched off, and the heal at setup acts on this
+    answer.
 
     ``mqtt`` and the other transports are not integrations: the devices on
     them are not neighbours.
@@ -1093,6 +1098,8 @@ def meters_beside_chargers(platform: str, units, disabled=()) -> set:
             key = getattr(bound, "translation_key", None)
             if isinstance(key, str) and key:
                 charger_keys.add(key)
+    if not charger_keys:
+        return set()
 
     def _whole_device(ents) -> list:
         devices = {e.device_id for e in ents if getattr(e, "device_id", None)}
