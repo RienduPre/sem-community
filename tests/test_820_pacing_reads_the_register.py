@@ -307,3 +307,20 @@ async def test_a_refused_cap_is_on_the_surface():
     for _ in range(3):
         await SEMCoordinator._run_charge_pacing(fake, _soc(70.0))
     assert fake._charge_pacing_state["action"] == "write_refused"
+
+
+def test_an_unload_release_on_an_unreadable_register_keeps_the_record():
+    """Review: at unload the register read unavailable. Writing the raw
+    watt value could land 1000x off on a kW register. Write nothing, keep
+    the record so the next start releases it."""
+    from custom_components.solar_energy_management.coordinator.charge_pacing import (
+        async_release_pacing,
+    )
+    reg = Register(1.56, hi=10.0, unit="kW")
+    reg.state = SimpleNamespace(state="unavailable", attributes={})
+    h = reg.hass()
+    store = SimpleNamespace(async_remove=AsyncMock())
+    out = _run(async_release_pacing(h, (ENTITY, 1560.0, store), "unload"))
+    assert out is None
+    assert reg.writes == []
+    store.async_remove.assert_not_awaited()

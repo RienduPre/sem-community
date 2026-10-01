@@ -589,7 +589,16 @@ async def async_release_pacing(hass, held: tuple | None, reason: str) -> str | N
         # (#820) the captured value is in watts; the register takes its own
         # unit and range
         prepared = _fit(hass, entity, float(value))
-        native = prepared[0] if prepared is not None else float(value)
+        if prepared is None:
+            # The register cannot be read now (unavailable, no unit). A raw
+            # watt value could land 1000x off on a kW register, and a
+            # refused write goes unheard. Keep the record: the next
+            # lifetime adopts it and releases then (#949, #820 review).
+            _LOGGER.warning(
+                "charge pacing: %s unreadable on %s — the limit stays held "
+                "and is released at the next start", entity, reason)
+            return None
+        native = prepared[0]
         await hass.services.async_call(
             "number", "set_value",
             {"entity_id": entity, "value": native}, blocking=False)
