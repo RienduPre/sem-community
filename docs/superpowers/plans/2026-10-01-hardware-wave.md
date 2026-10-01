@@ -11,8 +11,8 @@ gets its own code path.
 not cover hardware integration, we connect to integrations with the crawler
 if possible." SEM drives a device only through the entities and services
 its Home Assistant integration exposes, and finds them by role. A brand is
-a **test fixture** built from its upstream entity and service list. It is
-never a code path: no `_wire_<brand>`, no `_discover_<brand>`, no
+proven by loading its **real integration** in the crawler rig (Task 0). It
+is never a code path: no `_wire_<brand>`, no `_discover_<brand>`, no
 `if platform == "<brand>"`.
 
 **Architecture:** Everything lands in the generic layer that already
@@ -56,9 +56,10 @@ wait for their reporters. #886 Juicebox is closed.
 
 ---
 
-## What each fixture shows today, and the role it needs
+## What each integration exposes today, and the role it needs
 
-Each fixture is the upstream source's own keys, read on 01.10.2026.
+Read from each upstream source on 01.10.2026; the rig (Task 0) re-proves
+it from the integration's real output.
 
 **Zaptec** ([custom-components/zaptec](https://github.com/custom-components/zaptec), master)
 - Installation device: number `available_current` (built only when the
@@ -132,33 +133,78 @@ Nothing else.
 
 ---
 
-## Task 0: Baseline
+## Task 0: The crawler rig — the real integrations, not hand-written fixtures
 
-**Files:** none.
+Guido, 01.10.2026: "we easily can test these integrations, even install
+them and test and use the crawler." Each target integration is loaded for
+real in a Home Assistant test instance, and SEM's crawler runs on the
+entities and services it actually creates. A pin bump that renames a key
+fails the rig.
 
-- [ ] **Step 1: suite and lint green before anything**
+**How each integration loads (checked 01.10.2026):**
 
-```bash
-SEM_SRC=/home/sem/sem-hw SEM_ROOT=/tmp/ha-hwfull ~/bin/semtest tests -rf > ~/claude-jobs/suite-hw-baseline.txt 2>&1; tail -2 ~/claude-jobs/suite-hw-baseline.txt
-cd /home/sem/sem-hw && ~/.venvs/sem-314/bin/python -m ruff check . -q
-```
-Expected: `0 failed`, no ruff output.
+| integration | source | how the rig loads it | data |
+|---|---|---|---|
+| `tesla_fleet`, `teslemetry`, `tessie` | HA core (in our pinned `homeassistant` 2026.8.2 wheel) | set up the core component with its API client patched | HA core's own fixtures at tag `2026.8.2`: `tests/components/<x>/fixtures/*.json` (`vehicle_data.json`, `products.json`, `live_status.json`, `site_info.json`; Tessie `vehicles.json`, `online.json`, `asleep.json`) and `snapshots/*.ambr` |
+| `tesla_wall_connector` | HA core | set up with `tesla_wall_connector` patched the way core's `conftest.py` does (`get_default_version_data`, `Vitals`, `Lifetime`, `WifiStatus`) | built from that conftest; core ships no JSON fixture for it |
+| `easee` | HACS `nordicopen/easee_hass` | vendored at a pinned commit; its client `pyeasee` patched | `nordicopen/pyeasee` `tests/fixtures/` (`chargers.json`, `charger-state.json`, `site.json`, `site-state.json`, `sites.json`) |
+| `myenergi` | HACS `CJNE/ha-myenergi` | vendored at a pinned commit | its own `tests/fixtures/` (`client.json`, `history_zappi.json`, …) and its `conftest.py` |
+| `lxp_modbus` (Luxpower) | HACS `ant0nkr/luxpower-ha-integration` | vendored at a pinned commit | its own `tests/` (`test_data.py`, coordinator tests) |
+| `eg4_web_monitor` | HACS `joyfulhouse/eg4_web_monitor` | vendored at a pinned commit | its own `tests/fixtures/` (`dongle_emulation`) and `conftest.py` |
+| `zaptec` | HACS `custom-components/zaptec` | vendored at a pinned commit | **no offline data**: its `tests/zaptec/` call the real cloud with a user account. The rig gets a minimal mock built from the payload keys its `zaptec/` API module reads (installation with and without `AvailableCurrent`, one charger). Smallest honest mock, named as such. |
 
-## Task 1: Brand fixtures from upstream source
+**Not feasible, and why:**
+
+- **No live crawler run on .175 for any of these.** Tesla Fleet,
+  Teslemetry, Tessie, Easee, Zaptec and myenergi are cloud integrations
+  that need an owner's account. Tesla Wall Connector and Luxpower Modbus
+  are local but need the box on the LAN. The live check is the owner's,
+  after the beta.
+- **phacc 0.13.356 ships no component test fixtures** (only `common.py`,
+  `diagnostics`, `recorder`), so the core fixture files are vendored at the
+  HA tag with the source link.
 
 **Files:**
-- Create: `tests/fixtures/integrations/{zaptec,tesla_fleet,tessie,teslemetry,tesla_wall_connector,myenergi,easee,eg4_web_monitor,lxp_modbus}.json`
-- Create: `tests/integration_fixture.py` (loads a fixture into fake devices + registry entries + services, the way `tests/test_923_real_installs.py` does)
+- Create: `tests/integrations_rig/` (test-only; `tests/` is already
+  excluded from the release zip by `scripts/build_release_zip.sh`
+  `EXCLUDE_DIRS` and checked by `scripts/verify_release_zip.py`
+  `MUST_NOT_SHIP`)
+  - `vendor/<domain>/` — each HACS integration at its pinned commit, with
+    `PIN` (repo, commit, date, licence)
+  - `core_fixtures/<domain>/` — HA core fixture files at tag `2026.8.2`,
+    with `SOURCE` (URL + tag)
+  - `rig.py` — loads one integration into a `hass` test instance
+    (custom_components path for vendored ones), patches its client with the
+    data above, runs setup, then runs SEM's crawler
+    (`hardware_detection` detection + roster near-miss + service census)
+    and returns the roles it found
+  - `PINS.md` — one table of every pin, and how to bump one
+- Create: `tests/test_integrations_rig.py` — every integration loads and
+  creates entities; the crawler's output per integration is recorded as a
+  snapshot (`syrupy`, the format HA core uses)
+- Modify: `tests/requirements_test.txt` only if a client library is needed
+  (`pyeasee`, `pymyenergi`, `zaptec` deps) — pinned, test-only
 
-- [ ] **Step 1:** for each integration, write its devices, entity keys
-  (`translation_key`, platform, unit, device class, options for selects)
-  and services (fields) exactly as its upstream source declares them, with
-  the source URL and commit date in the file.
-- [ ] **Step 2:** a test that loads every fixture and asserts nothing
-  crashes and today's crawler output is recorded.
-- [ ] **Step 3:** commit `test(#1032): integration fixtures from upstream source`.
+- [ ] **Step 1: baseline** — suite and ruff green on `/tmp/ha-hwfull`
+  (`~/bin/semtest tests -rf > ~/claude-jobs/suite-hw-baseline.txt`).
+- [ ] **Step 2:** load the three core Tesla car integrations and the Wall
+  Connector; assert entities exist with the upstream keys
+  (`charge_state_charge_current_request`,
+  `charge_state_user_charge_enable_request`, `vehicle_connected`,
+  `contactor_closed`).
+- [ ] **Step 3:** vendor and load Easee, myenergi, Luxpower, EG4; same
+  assertion on their keys and services.
+- [ ] **Step 4:** Zaptec with the minimal mock, two shapes (with and
+  without `available_current`).
+- [ ] **Step 5:** record the crawler snapshot per integration; confirm the
+  vendored code is absent from `scripts/build_release_zip.sh` output.
+- [ ] **Step 6:** commit `test(#1032): the crawler rig loads the real integrations`.
 
-## Task 2: The roles, one rule each, test first
+If an integration does not load on our pinned HA (an import that needs a
+newer core), record that in `PINS.md`, pick the newest commit that does,
+and say which keys may differ from the latest upstream.
+
+## Task 1: The roles, one rule each, test first (on the rig)
 
 For each role R1–R7, in that order:
 
@@ -166,9 +212,10 @@ For each role R1–R7, in that order:
 - Modify: `consts/role_lexicon.py` (the rule) and the generic reader in `hardware_detection.py` (R1 companion merge, R4 pairing, R5 options read)
 - Create: `tests/test_hw_wave_roles.py`
 
-- [ ] **Step 1:** failing test — the role is found on its brand fixtures
-  AND not found on every other fixture in `tests/fixtures/integrations/`
-  plus the existing real-install fixtures (`tests/test_923_real_installs.py`).
+- [ ] **Step 1:** failing test on the rig — the role is found in the
+  REAL output of its integrations (Task 0) AND not found in any other
+  rig integration or the existing real-install fixtures
+  (`tests/test_923_real_installs.py`).
 - [ ] **Step 2:** run, see it fail.
 - [ ] **Step 3:** add the rule; no brand name in any code.
 - [ ] **Step 4:** run the role tests, `tests/test_814_hardware_matrix.py`,
@@ -179,15 +226,15 @@ A lint test guards the rule itself: `tests/test_hw_wave_no_brand_branches.py`
 fails if `hardware_detection.py` gains a new `_wire_<x>` / `_discover_<x>`
 or a string compare on a platform name.
 
-## Task 3: Pipeline tests through the roles
+## Task 2: Pipeline tests through the roles (on the rig)
 
 **Files:** Modify `tests/test_split_grid_integration.py`.
 
-- [ ] One pipeline test per fixture: detection → config proposal →
+- [ ] One pipeline test per rig integration: detection → config proposal →
   coordinator writes the control the role named, observer OFF in the test.
 - [ ] Commit `test(#1032): pipeline tests for the role-found chargers`.
 
-## Task 4: Matrix and docs
+## Task 3: Matrix and docs
 
 - [ ] `consts/hardware_matrix.py`: rows for Tesla (Wall Connector + car),
   Zappi; Zaptec, Easee and EG4 evidence; status `implemented` until an owner
@@ -196,7 +243,7 @@ or a string compare on a platform name.
   the seven roles in plain words.
 - [ ] CHANGELOG `[Unreleased]`, one line (≤ 25 words).
 
-## Task 5: Prove it, then soak
+## Task 4: Prove it, then soak
 
 - [ ] Full suite on `/tmp/ha-hwfull`; ruff; CI on a draft PR.
 - [ ] ruflo reviewer, told to refute: "no role finds a control on a device
@@ -223,8 +270,8 @@ or a string compare on a platform name.
 | `_discover_wallbox`, `_discover_wallbox_mqtt`, `_discover_mqtt_brands`, `_discover_abl_emh1`, `_discover_garo`, `_discover_juicebox` | `ev_current_control` + R1, transport platforms stay excluded |
 | `_discover_ocpp` | its own protocol words; keep until a fixture proves R2/R6 cover it |
 
-Each removal is its own later branch: fixture first, prove the role finds
-the same entities, then delete the path.
+Each removal is its own later branch: load the integration in the rig,
+prove the role finds the same entities, then delete the path.
 
 ---
 
