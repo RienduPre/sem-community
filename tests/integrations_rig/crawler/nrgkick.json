@@ -9,7 +9,8 @@
    },
    "proposed_roles": [
     "ev_current_control"
-   ]
+   ],
+   "role_offer": true
   }
  ],
  "proposals": [
@@ -17,6 +18,24 @@
    "ev_current_control": [
     "number.nrgkick_test_charging_current",
     "per_charger"
+   ]
+  }
+ ],
+ "role_offers": [
+  {
+   "companions": 0,
+   "complete": true,
+   "kind": "charger",
+   "missing": null,
+   "offer": {
+    "ev_charging_power_sensor": "sensor.nrgkick_test_total_active_power",
+    "ev_current_control_entity": "number.nrgkick_test_charging_current"
+   },
+   "paired_vehicle": false,
+   "phase_service": null,
+   "roles": [
+    "current_number",
+    "power"
    ]
   }
  ],

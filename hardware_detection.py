@@ -2582,6 +2582,27 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                                key=lambda t: str(t[1]["unit"]))
            if bi not in paired_brand]
     )
+    # (#1032) the role crawler: what ANY integration's charger — or a car
+    # that charges — offers, by its own words (charger_roles.py). Report
+    # data only, never a binding; a device a brand path already turned into
+    # a charger is left to it. A companion device (R1) stops being a near
+    # miss: it belongs to the charger beside it.
+    try:
+        report["role_offers"] = _role_offers(hass, registry, report)
+        companions = {c.get("device_id") for o in report["role_offers"]
+                      for c in o.get("companions", ())}
+        offered = {o.get("device_id") for o in report["role_offers"]}
+        kept = []
+        for nm in report["near_misses"]:
+            if nm.get("device_id") in companions:
+                continue
+            if nm.get("device_id") in offered:
+                nm["role_offer"] = True
+            kept.append(nm)
+        report["near_misses"] = kept
+    except Exception:  # noqa: BLE001 — a new reader never costs the report
+        _LOGGER.debug("role offers failed", exc_info=True)
+        report["role_offers"] = []
     # (#848) the census rides every report — what is installed, what SEM
     # knows, and the two gap lines that turn installs into detection
     # findings.
@@ -2619,6 +2640,56 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     except Exception:  # noqa: BLE001 — a prior never costs the report
         report["roster_proposals"] = []
     return report
+
+
+def _service_fields_of(hass):
+    """``{service: [field, …]}`` per domain from HA's live service registry
+    (the schema's keys), or None when it cannot be asked."""
+    if hass is None or not bool(getattr(hass, "is_running", True)):
+        return None
+    services = getattr(hass, "services", None)
+    if services is None or not hasattr(services, "async_services"):
+        return None
+
+    def _of(domain: str) -> Dict[str, list]:
+        out: Dict[str, list] = {}
+        try:
+            for name, svc in ((services.async_services() or {})
+                              .get(str(domain), {}) or {}).items():
+                fields: list = []
+                schema = getattr(svc, "schema", None)
+                inner = getattr(schema, "schema", None)
+                if isinstance(inner, dict):
+                    fields = sorted(str(getattr(k, "schema", k)) for k in inner)
+                out[str(name)] = fields
+        except Exception:  # noqa: BLE001
+            return {}
+        return out
+    return _of
+
+
+def _role_offers(hass, registry, report) -> List[Dict[str, Any]]:
+    """(#1032) Run the generic charger-role reader over every device."""
+    from .charger_roles import build_role_offers
+
+    entries = [e for e in registry.entities.values() if not e.disabled_by]
+    units = group_entities_by_unit(entries)
+
+    def _entry_of(key):
+        for e in units.get(key, ()):
+            ce = getattr(e, "config_entry_id", None)
+            if ce:
+                return ce
+        return None
+
+    running = bool(getattr(hass, "is_running", True)) if hass is not None else False
+    state_of = ((lambda eid: hass.states.get(eid))
+                if (hass is not None and running) else None)
+    claimed = [c.get("device_id") for c in report.get("chargers", ())]
+    return build_role_offers(units, device_of=unit_device_id,
+                             entry_of=_entry_of,
+                             services_of=_service_fields_of(hass),
+                             state_of=state_of, claimed=claimed)
 
 
 def discover_ev_charger_from_registry(hass: HomeAssistant) -> Dict[str, str]:

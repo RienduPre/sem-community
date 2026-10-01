@@ -4,9 +4,11 @@
   {
    "entities": 3,
    "offer": {},
-   "proposed_roles": []
+   "proposed_roles": [],
+   "role_offer": false
   }
  ],
  "proposals": [],
+ "role_offers": [],
  "vehicles": []
 }

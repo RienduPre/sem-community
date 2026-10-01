@@ -25,8 +25,13 @@ def load_capture(name: str) -> Dict[str, Any]:
     return json.loads((CAPTURES / f"{name}.json").read_text())
 
 
-async def replay(hass, capture: Dict[str, Any]) -> Dict[str, str]:
-    """Register ``capture`` in ``hass``. Returns ``{device key: device id}``."""
+async def replay(hass, capture: Dict[str, Any], *,
+                 suffix: str = "") -> Dict[str, str]:
+    """Register ``capture`` in ``hass``. Returns ``{device key: device id}``.
+
+    ``suffix`` is appended to every object id and unique id, so two captures
+    that happen to use the same test names (two Tesla car integrations) can
+    live in one instance as two cars."""
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
     from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -37,20 +42,20 @@ async def replay(hass, capture: Dict[str, Any]) -> Dict[str, str]:
     dreg, ereg = dr.async_get(hass), er.async_get(hass)
     device_ids: Dict[str, str] = {}
     for key, meta in capture.get("devices", {}).items():
-        ident = tuple(key.split(":", 1)) if ":" in key else (domain, key)
+        ident = tuple((key + suffix).split(":", 1)) if ":" in key else (domain, key + suffix)
         dev = dreg.async_get_or_create(
             config_entry_id=entry.entry_id, identifiers={ident},
             name=meta.get("name"), model=meta.get("model"),
             manufacturer=meta.get("manufacturer"))
         device_ids[key] = dev.id
     for row in capture["entities"]:
-        eid = row["entity_id"]
+        eid = row["entity_id"] + suffix
         platform_domain, object_id = eid.split(".", 1)
         disabled = None
         if row.get("disabled_by"):
             disabled = er.RegistryEntryDisabler(row["disabled_by"])
         entry_row = ereg.async_get_or_create(
-            platform_domain, domain, row["unique_id"],
+            platform_domain, domain, row["unique_id"] + suffix,
             suggested_object_id=object_id,
             config_entry=entry,
             device_id=device_ids.get(row.get("device")),
@@ -59,15 +64,21 @@ async def replay(hass, capture: Dict[str, Any]) -> Dict[str, str]:
             unit_of_measurement=row.get("unit_of_measurement"),
             capabilities=row.get("capabilities") or None,
             disabled_by=disabled,
+            entity_category=(er.EntityCategory(row["entity_category"])
+                             if row.get("entity_category") in ("config", "diagnostic")
+                             else None),
         )
         if entry_row.entity_id != eid:
             ereg.async_update_entity(entry_row.entity_id, new_entity_id=eid)
         if not disabled:
             hass.states.async_set(eid, row.get("state") or "unknown",
                                   row.get("attributes") or {})
-    for service in capture.get("services", {}):
+    import voluptuous as vol
+    for service, fields in capture.get("services", {}).items():
         if not hass.services.has_service(domain, service):
-            hass.services.async_register(domain, service, _noop)
+            schema = vol.Schema({vol.Optional(f): object for f in fields},
+                                extra=vol.ALLOW_EXTRA)
+            hass.services.async_register(domain, service, _noop, schema=schema)
     await hass.async_block_till_done()
     return device_ids
 
@@ -102,7 +113,7 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
                 if str(r.get("platform") or "").split("_rig")[0] == domain]
 
     out: Dict[str, Any] = {"chargers": [], "near_misses": [], "vehicles": [],
-                           "proposals": []}
+                           "proposals": [], "role_offers": []}
     for c in mine(report.get("chargers")):
         out["chargers"].append({
             "control": c.get("control"),
@@ -113,6 +124,7 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
     for n in mine(report.get("near_misses")):
         offer = n.get("suggested_charger") or {}
         out["near_misses"].append({
+            "role_offer": bool(n.get("role_offer")),
             "entities": len(n.get("entities") or []),
             "proposed_roles": sorted((n.get("proposed_roles") or {}).keys()),
             "offer": {k: stable(v) for k, v in sorted(offer.items())
@@ -122,6 +134,16 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
     for v in mine(report.get("vehicles")):
         out["vehicles"].append({k: v[k] for k in sorted(v)
                                 if k not in ("device_id",)})
+    for o in mine(report.get("role_offers")):
+        out["role_offers"].append({
+            "kind": o.get("kind"), "roles": o.get("roles"),
+            "complete": o.get("complete"), "missing": o.get("missing"),
+            "companions": len(o.get("companions") or []),
+            "phase_service": (o.get("phase_service") or {}).get("service"),
+            "paired_vehicle": bool(o.get("paired_vehicle")),
+            "offer": {k: stable(v) for k, v in sorted(o.get("offer", {}).items())},
+        })
+    out["role_offers"].sort(key=lambda r: json.dumps(r, sort_keys=True))
     for p in report.get("roster_proposals") or []:
         if p.get("domain") == domain or p.get("platform") == domain:
             out["proposals"].append({

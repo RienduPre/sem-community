@@ -21,5 +21,27 @@
    ]
   }
  ],
+ "role_offers": [
+  {
+   "companions": 0,
+   "complete": true,
+   "kind": "vehicle",
+   "missing": null,
+   "offer": {
+    "ev_charging_power_sensor": "sensor.test_charger_power",
+    "ev_connected_sensor": "binary_sensor.test_charge_cable",
+    "ev_current_control_entity": "number.test_charge_current",
+    "ev_start_stop_entity": "switch.test_charge"
+   },
+   "paired_vehicle": false,
+   "phase_service": null,
+   "roles": [
+    "plug",
+    "power",
+    "vehicle_charge_current",
+    "vehicle_charge_switch"
+   ]
+  }
+ ],
  "vehicles": []
 }
