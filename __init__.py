@@ -2878,6 +2878,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     # (#935) Every charger is built by now, so take back any park a previous
     # lifetime left on the hardware — the reconciler cannot re-derive it
     # (PARK_OFF fires on an edge; an already-empty box at boot is not one).
+    # (#1027) A watching SEM adopts nothing; the record waits on disk, and
+    # this hook is what the first commanding cycle runs instead. Set FIRST,
+    # so no push or cycle below can look for it and find nothing.
+    coordinator._readopt_parked_chargers = lambda: hass.async_create_task(
+        _async_adopt_parked_chargers(hass, entry, coordinator))
+
+    # (#1027) Every device is built by now, so tell every one of them whether
+    # this SEM commands or only watches — BEFORE anything below can claim or
+    # release. ``send`` withholds only when the device knows, the documented
+    # default is "a device nobody told is a device that acts", and until here
+    # the only teller was the per-cycle push. A removal in the window between
+    # setup and the first cycle commanded real hardware.
+    try:
+        coordinator._push_observer_mode_to_devices()
+    except Exception as err:  # noqa: BLE001 — never fail a setup over a flag
+        # ERROR, not warning: every device is now holding the default, which
+        # is "I act", on an install that may be watching shared hardware.
+        _LOGGER.error("Could not tell the devices this SEM's mode, so each "
+                      "one holds the default and may command: %s", err)
+
     hass.async_create_task(_async_adopt_parked_chargers(hass, entry, coordinator))
 
     # (#923) ONE module verdict for every platform: captured here, after the
@@ -3290,7 +3310,17 @@ async def _async_adopt_parked_chargers(hass: HomeAssistant,
     steady state. Without this, park → restart → remove left the charger
     disabled with its own persisted dead-man failsafe holding it at 0 A, and
     nothing left on the system that knew why.
+
+    (#1027) Never while SEM is only watching. The COORDINATOR is asked, not
+    the devices: this runs before the first cycle, and a device learns its
+    mode on a cycle (``_push_observer_mode_to_devices``) — so a device asked
+    here would answer with the default, which is "I act". The record is left
+    where it is; the first cycle that can command adopts it.
     """
+    if bool(getattr(coordinator, "_observer_mode", False)):
+        _LOGGER.info("#1027 — watching only: no charger park adopted, and "
+                     "the record is left for a lifetime that can command")
+        return
     store = _park_store(hass, entry)
     if store is None:
         return
@@ -3307,6 +3337,37 @@ async def _async_adopt_parked_chargers(hass: HomeAssistant,
                      "left with: %s", len(ids), ", ".join(map(str, ids)))
     except Exception as e:  # noqa: BLE001 — never block a setup
         _LOGGER.debug("#935 park adoption skipped: %s", e)
+
+
+async def _async_say_the_park_is_unpaid(hass: HomeAssistant,
+                                        entry: SEMConfigEntry) -> None:
+    """(#1027) Name a park this SEM is leaving on the hardware, and why.
+
+    A SEM that only watches hands nothing back — the box may be another
+    SEM's, which is what the mode is for. But the record can still name a
+    box that an earlier, commanding lifetime of this entry really parked,
+    and a removal deletes SEM's own files: after this there is nothing left
+    that knows. So the log carries the one fact a person needs when they
+    find a charger that will not start, and what to do about it.
+
+    Never raises: a teardown always completes.
+    """
+    store = _park_store(hass, entry)
+    if store is None:
+        return
+    try:
+        record = await store.async_load() or {}
+        ids = [str(i) for i in (record.get("parked") or [])]
+        if not ids:
+            return
+        _LOGGER.warning(
+            "#1027 — SEM was only watching, so it is leaving %s exactly as "
+            "it is: %s. An earlier run of this SEM parked %s box(es), and a "
+            "parked box refuses to charge until something says yes. Start a "
+            "charge from the charger's own app to clear it.",
+            "them" if len(ids) > 1 else "it", ", ".join(ids), len(ids))
+    except Exception as e:  # noqa: BLE001 — a teardown always completes
+        _LOGGER.debug("#1027 park notice skipped: %s", e)
 
 
 async def _async_sweep_orphan_stores(hass: HomeAssistant) -> None:
@@ -3350,6 +3411,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
         # would otherwise grow the list. Guarded — coordinator may be
         # missing if setup never completed.
         if coordinator is not None:
+            # (#1027) What this LIFETIME was, captured before anything below
+            # can change it: ``async_release_batteries_on_unload`` sets
+            # observer mode ON part way down (#936), so every gate that asks
+            # "did SEM command anything here" must read this variable and not
+            # the flag. Read live, a gate moved below that line would answer
+            # "watching" for every install and silently stop handing hardware
+            # back — with no log and no failing test.
+            _was_observer = bool(getattr(coordinator, "_observer_mode", False))
+            # The re-adoption hook goes with the lifetime that owns it: it
+            # closes over this entry and this coordinator, and a hook left on
+            # a coordinator HA is done with keeps both alive.
+            try:
+                coordinator._readopt_parked_chargers = None
+            except Exception:  # noqa: BLE001 — teardown must finish
+                pass
             # (#936 — Guido, 08.09.2026: "on uninstall SEM should go to
             # observation mode on and then uninstall.") Observer ON first, so
             # nothing still in flight commands anything; then hand back ONLY
@@ -3390,11 +3466,27 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             # box parked (SEM is coming back in seconds and will decide
             # again), a disable hands it back now, a removal replays it
             # from async_remove_entry.
-            _parked = [
+            # (#1027) And never while SEM is only watching — the same gate
+            # ``async_release_export_guard`` and ``unload_release_reason``
+            # already carry. Asked of the LIFETIME (captured above), not of
+            # the devices: a device learns its mode on a cycle, and the
+            # documented default is "a device nobody told is a device that
+            # acts", so a removal between setup and the first cycle would
+            # otherwise command real hardware.
+            _parked = [] if _was_observer else [
                 dev for dev in (getattr(coordinator, "_ev_devices", None)
                                 or {}).values()
                 if getattr(dev, "_sem_parked", False)
             ]
+            if _was_observer:
+                # A record can still name a box, written by an earlier
+                # lifetime of this entry that really did park it. SEM does
+                # not touch it — on shared hardware the box may be another
+                # SEM's, and that is the whole point of the mode. But a
+                # removal takes SEM's own files with it, so this is the last
+                # moment anything can say so. Say it where a person looking
+                # for a charger that will not start can find it.
+                await _async_say_the_park_is_unpaid(hass, entry)
             if _parked:
                 if entry.disabled_by is not None:
                     for _dev in _parked:
