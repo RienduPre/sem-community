@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 # [Unreleased]
 
 - 🐛 **Charge pacing checks the inverter took the limit** (#820). Below the buffer the battery gets full power again.
+- 🐛 **The battery Diagnose button shows the charge limit** (#820): what the register holds and accepts, and the inverter's own refusals.
 
 # [2.2.0-beta.2] — 30.09.2026
 
