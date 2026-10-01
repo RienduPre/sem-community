@@ -4,6 +4,8 @@ from datetime import timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import time
+
 import pytest
 
 from custom_components.solar_energy_management.const import DOMAIN
@@ -159,6 +161,11 @@ class TestCoordinatorFacts:
     @pytest.mark.asyncio
     async def test_evaluate_sends_and_persists(self):
         c = _coordinator()
+        # The evaluator reads the real monotonic clock. A CI machine can be
+        # up for less than the 15-minute dark threshold, so "dark since 0"
+        # would not be dark long enough there; date the outage an hour back.
+        c._sensor_reader._sensor_unavailable_since = {
+            "sensor.solar": time.monotonic() - 3600.0}
         await c._evaluate_hints(*_inputs())
         c._notification_manager.notify_hint.assert_awaited()
         sent = [call.args[0] for call in c._notification_manager.notify_hint.await_args_list]
