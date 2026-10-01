@@ -66,10 +66,30 @@ class SEMEVStatusCard extends SEMLitBase {
         this._sessions = { ...this._sessions, [id]: { ...this._sessionState(id), ...patch } };
     }
 
-    async _toggleSessions(id) {
+    _toggleSessions(id) {
         const st = this._sessionState(id);
         this._setSessionState(id, { open: !st.open });
-        if (st.open || st.rows || st.loading || !this._hass?.callWS) return;
+    }
+
+    /**
+     * (#1024) Load each charger's rows once when the card first sees it,
+     * and again only when that charger's session ends — the plug going
+     * off, or its session energy dropping back to 0. Never per render.
+     */
+    _watchSessions(hass, prefix) {
+        if (!this._sessWatch) this._sessWatch = {};
+        for (const id of this._chargers) {
+            const conn = hass.states[`binary_sensor.sem_charger_${id}_connected`]?.state || '';
+            const sess = parseFloat(hass.states[`${prefix}charger_${id}_session_energy`]?.state) || 0;
+            const prev = this._sessWatch[id];
+            this._sessWatch[id] = { conn, sess };
+            const ended = prev && ((prev.conn === 'on' && conn === 'off') || (prev.sess > 0 && sess === 0));
+            if (!prev || ended) this._loadSessions(id);
+        }
+    }
+
+    async _loadSessions(id) {
+        if (this._sessionState(id).loading || !this._hass?.callWS) return;
         this._setSessionState(id, { loading: true });
         let rows = [];
         try {
@@ -82,7 +102,8 @@ class SEMEVStatusCard extends SEMLitBase {
         }
         const now = new Date();
         const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        this._setSessionState(id, { loading: false, rows, month: thisMonth });
+        const keep = this._sessionState(id).month;
+        this._setSessionState(id, { loading: false, rows, month: keep || thisMonth });
     }
 
     _downloadSessionsCsv(id, rows) {
@@ -132,7 +153,7 @@ class SEMEVStatusCard extends SEMLitBase {
                     </span>
                     <span class="metric-label">${headerRight} ${st.open ? '▴' : '▾'}</span>
                 </div>
-                ${!st.open ? nothing : st.loading || !st.rows ? html`
+                ${!st.open ? nothing : !st.rows ? html`
                     <div class="metric-label sessions-note">${this._t('sessions_loading')}</div>` : html`
                     <div class="metric-row sessions-month">
                         <span class="metric-value sessions-nav">
@@ -218,6 +239,9 @@ class SEMEVStatusCard extends SEMLitBase {
         }
 
         const prefix = this._config?.entity_prefix || DEFAULT_PREFIX;
+
+        // (#1024) session rows: once per charger, again when its session ends
+        this._watchSessions(hass, prefix);
 
         // Build reactivity key
         let key = [
