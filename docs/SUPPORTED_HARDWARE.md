@@ -123,6 +123,7 @@ What SEM finds shows in the hardware report (Diagnose). For now it is a
 report only: nothing is set up by itself, and you add the charger by hand
 with the entities the report names.
 
+
 ## Upgrading a row to *tested live*
 
 Run SEM with your hardware and tell us what happened — an issue with your brand, the config-flow result and a note that the first cycles worked is enough. Every confirmation is cited here.
