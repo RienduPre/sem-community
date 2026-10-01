@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Różnica licznika"
+      },
+      "pv_health": {
+        "name": "Stan PV",
+        "state": {
+          "green": "Dobry",
+          "yellow": "Średni",
+          "orange": "Słaby",
+          "red": "Zły"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 godziny",
           "8_hours": "8 godzin",
           "12_hours": "12 godzin"
+        }
+      },
+      "hints": {
+        "name": "Wskazówki",
+        "state": {
+          "off": "Wył.",
+          "weekly": "Notka tygodniowa",
+          "all": "Wszystkie wskazówki"
         }
       }
     },

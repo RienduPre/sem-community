@@ -118,6 +118,44 @@ def _power_on_offer_w(decision, charger_cfg: dict, config: dict,
     return offer
 
 
+def _session_charger_id(host: Any) -> Optional[str]:
+    """(#1024) Which charger the swapped-in session belongs to.
+
+    Inside the per-charger loop ``host._ev_device`` is that charger's
+    device, so the id is the key it is stored under. A legacy install
+    with no per-charger devices has no id to give.
+    """
+    dev = getattr(host, "_ev_device", None)
+    for cid, candidate in (getattr(host, "_ev_devices", None) or {}).items():
+        if candidate is dev:
+            return cid
+    return getattr(dev, "device_id", None)
+
+def _finished_session_record(host: Any) -> dict:
+    """(#1024) The stored shape of a finished session — everything the
+    EV card's session list and the CSV export show."""
+    cid = _session_charger_id(host)
+    det = (getattr(host, "_ev_taper_detectors", None) or {}).get(cid)
+    if det is None:
+        try:
+            det = host._ev_taper_detector
+        except Exception:  # noqa: BLE001 — a bare double has no detector
+            det = None
+    currency = getattr(getattr(getattr(host, "hass", None), "config", None),
+                       "currency", None)
+    return {
+        "timestamp": host._session_data.start_time,
+        "end": dt_util.now().isoformat(),
+        "charger_id": cid,
+        "energy_kwh": round(host._session_data.energy_kwh, 2),
+        "solar_share_pct": round(host._session_data.solar_share_pct, 1),
+        "cost": round(float(host._session_data.cost_chf or 0.0), 2),
+        "currency": currency if isinstance(currency, str) else "",
+        "duration_min": round(host._session_data.duration_minutes, 1),
+        "taper_detected": bool(getattr(det, "full_detected", False)),
+    }
+
+
 class EVControlMixin:
     """EV control methods for SEMCoordinator.
 
@@ -1164,6 +1202,19 @@ class EVControlMixin:
                         self._session_data.solar_share_pct,
                         self._storage.get_lifetime_ev_stats(),
                     )
+            # (#1024) The session record — ONE writer, here, where the
+            # session ends with THIS charger's data swapped in. It used to
+            # be written from ``_update_ev_intelligence`` on the fleet-wide
+            # disconnect with the primary's data, so a second charger's
+            # sessions were never recorded.
+            # Only a session that is still ACTIVE ends here. A finished
+            # session's data is kept for display, so gating on energy alone
+            # re-recorded it on every later plug + unplug without a charge —
+            # the old writer's bug, every August session stored twice.
+            if (self._session_data.active and self._session_data.energy_kwh > 0
+                    and self._storage):
+                self._storage.add_session_to_history(
+                    _finished_session_record(self))
             self._session_data.active = False
             self._last_ev_connected = False
             return

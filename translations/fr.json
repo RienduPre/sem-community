@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Écart compteur maison"
+      },
+      "pv_health": {
+        "name": "État du PV",
+        "state": {
+          "green": "Bon",
+          "yellow": "Moyen",
+          "orange": "Faible",
+          "red": "Mauvais"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 heures",
           "8_hours": "8 heures",
           "12_hours": "12 heures"
+        }
+      },
+      "hints": {
+        "name": "Indices",
+        "state": {
+          "off": "Désactivé",
+          "weekly": "Note hebdomadaire",
+          "all": "Tous les indices"
         }
       }
     },

@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Abweichung Hauszähler"
+      },
+      "pv_health": {
+        "name": "PV-Zustand",
+        "state": {
+          "green": "Gut",
+          "yellow": "Mässig",
+          "orange": "Schwach",
+          "red": "Schlecht"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 Stunden",
           "8_hours": "8 Stunden",
           "12_hours": "12 Stunden"
+        }
+      },
+      "hints": {
+        "name": "Hinweise",
+        "state": {
+          "off": "Aus",
+          "weekly": "Wochennotiz",
+          "all": "Alle Hinweise"
         }
       }
     },

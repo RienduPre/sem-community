@@ -547,6 +547,11 @@ class SensorReader:
         # (``repair_issues.UNAVAILABLE_REPAIR_THRESHOLD_S``). Cleared
         # on recovery.
         self._sensor_unavailable_since: dict[str, float] = {}
+        # (#1022) Solar downtime today: seconds every solar read was dark,
+        # accrued cycle to cycle, reset at midnight. Published as minutes.
+        self._last_cycle_mono: Optional[float] = None
+        self._last_solar_dark: bool = False
+        self._solar_dark_s_today: float = 0.0
         # Per-entity flag — was the Repair already raised this outage?
         # Avoids re-raising every cycle past the threshold.
         self._sensor_repair_raised: set[str] = set()
@@ -845,6 +850,8 @@ class SensorReader:
         self._battery_power_missing = False   # (#758) per-cycle
         self._input_reads = {}                # (#818) per-cycle
         self._input_dark = {}                 # (#818) per-cycle
+        # (#1022) the previous cycle's dark solar verdict has just ended
+        self._accrue_solar_downtime(time.monotonic())
         if self._energy_dashboard_config:
             readings = self._read_from_energy_dashboard()
         else:
@@ -862,6 +869,11 @@ class SensorReader:
         readings.dark_inputs = tuple(sorted(
             n for n, c in self._input_dark.items() if c))
         readings.solar_power_unavailable = self._all_dark("solar")
+        # (#1022) this cycle's verdict feeds the next accrual; publish the
+        # minutes so far today.
+        self._last_solar_dark = bool(readings.solar_power_unavailable)
+        readings.solar_downtime_min_today = round(
+            getattr(self, "_solar_dark_s_today", 0.0) / 60.0, 1)
         # (#925 audit) BOTH shapes of grid meter — a combined sensor tags
         # "grid", a split pair tags "grid_import"/"grid_export" and never
         # "grid", so asking about one category answered False forever for
@@ -2085,6 +2097,22 @@ class SensorReader:
                 )
 
         return self._battery_sign_inverted[bid]
+
+    def _accrue_solar_downtime(self, now_mono: float) -> None:
+        """(#1022) Add the time since the last cycle to today's solar
+        downtime when that cycle's solar reads were ALL dark. The day is
+        the coordinator's clock: it calls ``reset_solar_downtime`` when its
+        date rolls. Tolerates a reader built without ``__init__``."""
+        last = getattr(self, "_last_cycle_mono", None)
+        self._last_cycle_mono = now_mono
+        self._solar_dark_s_today = getattr(self, "_solar_dark_s_today", 0.0)
+        if last is not None and getattr(self, "_last_solar_dark", False):
+            self._solar_dark_s_today = (
+                getattr(self, "_solar_dark_s_today", 0.0) + max(0.0, now_mono - last))
+
+    def reset_solar_downtime(self) -> None:
+        """(#1022) A new day starts from zero."""
+        self._solar_dark_s_today = 0.0
 
     def _all_dark_any(self, *names: str) -> bool:
         """(#925 audit) ``_all_dark`` across SEVERAL contributing categories.

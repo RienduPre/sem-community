@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### ✨ Improvements
 
 - SEM shows a control only where your house can use it: price knobs need a dynamic tariff, the export guard an export limit. (#996)
+- **Charging sessions are kept** — the last 400, per charger, with a CSV export service. (#1024)
+- **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
+- **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 
 # [2.2.0-beta.2] — 30.09.2026
 

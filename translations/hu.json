@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Házmérő eltérés"
+      },
+      "pv_health": {
+        "name": "PV állapot",
+        "state": {
+          "green": "Jó",
+          "yellow": "Közepes",
+          "orange": "Gyenge",
+          "red": "Rossz"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 óra",
           "8_hours": "8 óra",
           "12_hours": "12 óra"
+        }
+      },
+      "hints": {
+        "name": "Tippek",
+        "state": {
+          "off": "Ki",
+          "weekly": "Heti üzenet",
+          "all": "Minden tipp"
         }
       }
     },

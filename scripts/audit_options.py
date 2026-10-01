@@ -207,13 +207,17 @@ def measure() -> dict:
         "duplicates": genuine,
         "number_entities": count_keys("number.py"),
         "switch_entities": count_keys("switch.py"),
-        "user_facing_controls": len(fields) + count_keys("number.py") + count_keys("switch.py"),
+        # (#1019) a select is a control a user meets like a switch is
+        "select_entities": count_keys("select.py"),
+        "user_facing_controls": (len(fields) + count_keys("number.py")
+                                 + count_keys("switch.py") + count_keys("select.py")),
         **_first_run(cf),
         # The inventory the #830 ratchet compares against.
         "inventory": {
             "config_fields": sorted(fields),
             "number_entities": entity_keys("number.py"),
             "switch_entities": entity_keys("switch.py"),
+            "select_entities": entity_keys("select.py"),
         },
     }
 
@@ -257,6 +261,7 @@ def main() -> int:
           "— same field on two pages a user meets in one pass")
     print(f"  number entities           {m['number_entities']:4}")
     print(f"  switch entities           {m['switch_entities']:4}")
+    print(f"  select entities           {m['select_entities']:4}")
     print(f"  TOTAL user-facing controls{m['user_facing_controls']:4}")
     print()
     print("  what a NEW user faces before SEM works:")

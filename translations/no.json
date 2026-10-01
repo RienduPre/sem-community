@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Husmåler-avvik"
+      },
+      "pv_health": {
+        "name": "PV-tilstand",
+        "state": {
+          "green": "God",
+          "yellow": "Middels",
+          "orange": "Svak",
+          "red": "Dårlig"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 timer",
           "8_hours": "8 timer",
           "12_hours": "12 timer"
+        }
+      },
+      "hints": {
+        "name": "Tips",
+        "state": {
+          "off": "Av",
+          "weekly": "Ukemelding",
+          "all": "Alle tips"
         }
       }
     },

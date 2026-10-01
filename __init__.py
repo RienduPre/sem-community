@@ -2928,6 +2928,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     try:
         await _async_register_services(hass, coordinator)
         await _async_register_phase_services(hass, coordinator)
+        # (#1024) The EV card reads the session list over this command.
+        from .session_history import async_register_websocket
+        async_register_websocket(hass)
         _LOGGER.debug("Services registered successfully")
     except Exception as err:
         _LOGGER.warning(
@@ -5743,6 +5746,32 @@ async def _async_register_phase_services(
         async_get_config,
         schema=vol.Schema({
             vol.Optional("entry_id"): cv.string,
+        }),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def async_export_session_history(call):
+        """(#1024) The stored charging sessions as rows and as CSV text.
+
+        For automations and scripts that keep their own log. The card
+        builds its own download from the same rows over the websocket
+        command; this is the path with no browser in it.
+        """
+        from .session_history import history_for, select_sessions, sessions_csv
+        data = call.data or {}
+        history = history_for(hass, data.get("entry_id")) or []
+        rows = select_sessions(history, charger_id=data.get("charger_id"),
+                               since=data.get("since"))
+        return {"rows": rows, "csv": sessions_csv(rows)}
+
+    hass.services.async_register(
+        DOMAIN,
+        "export_session_history",
+        async_export_session_history,
+        schema=vol.Schema({
+            vol.Optional("entry_id"): cv.string,
+            vol.Optional("charger_id"): cv.string,
+            vol.Optional("since"): cv.string,
         }),
         supports_response=SupportsResponse.ONLY,
     )

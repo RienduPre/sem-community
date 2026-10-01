@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Talomittarin ero"
+      },
+      "pv_health": {
+        "name": "PV:n kunto",
+        "state": {
+          "green": "Hyvä",
+          "yellow": "Kohtalainen",
+          "orange": "Heikko",
+          "red": "Huono"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 tuntia",
           "8_hours": "8 tuntia",
           "12_hours": "12 tuntia"
+        }
+      },
+      "hints": {
+        "name": "Vihjeet",
+        "state": {
+          "off": "Pois",
+          "weekly": "Viikkoviesti",
+          "all": "Kaikki vihjeet"
         }
       }
     },

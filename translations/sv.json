@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "Skillnad husmätare"
+      },
+      "pv_health": {
+        "name": "PV-hälsa",
+        "state": {
+          "green": "Bra",
+          "yellow": "Medel",
+          "orange": "Svag",
+          "red": "Dålig"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 timmar",
           "8_hours": "8 timmar",
           "12_hours": "12 timmar"
+        }
+      },
+      "hints": {
+        "name": "Tips",
+        "state": {
+          "off": "Av",
+          "weekly": "Veckonotis",
+          "all": "Alla tips"
         }
       }
     },

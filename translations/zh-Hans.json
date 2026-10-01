@@ -1371,6 +1371,15 @@
       },
       "house_meter_gap": {
         "name": "房屋电表差值"
+      },
+      "pv_health": {
+        "name": "光伏健康",
+        "state": {
+          "green": "良好",
+          "yellow": "一般",
+          "orange": "较差",
+          "red": "差"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1616,14 @@
           "4_hours": "4 小时",
           "8_hours": "8 小时",
           "12_hours": "12 小时"
+        }
+      },
+      "hints": {
+        "name": "提示",
+        "state": {
+          "off": "关闭",
+          "weekly": "每周摘要",
+          "all": "全部提示"
         }
       }
     },
