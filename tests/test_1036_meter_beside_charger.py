@@ -1,0 +1,335 @@
+"""#1036 — a meter device next to a charger is not a charger.
+
+Easee's integration ships the Equalizer as its own device beside the
+charger. The Equalizer measures the house's grid import and export, and
+``_discover_easee`` — like most brand functions — admits a device on a
+power reading alone. So SEM offered the Equalizer as a second charger, with
+the grid import as its charging power. Its entities come first in the
+registry, so it was also the PRIMARY charger: the one
+``discover_ev_charger_from_registry`` hands the config flow's first step and
+the coordinator's late setup, which then drives it.
+
+The entities below are the real ones from the Easee integration's own
+entity descriptions (nordicopen/easee_hass), as the hardware-wave crawler
+loaded them. The fix is generic, in the walk every brand shares — so the
+last class of pins runs the same meter beside every brand SEM knows.
+"""
+import ast
+import pathlib
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from custom_components.solar_energy_management import hardware_detection as hd
+from custom_components.solar_energy_management.hardware_detection import (
+    _CHARGER_ONLY_ROLES,
+    _EV_CHARGER_PLATFORMS,
+    _discover_easee,
+    apply_charger_discovery_guards,
+    build_detection_report,
+    discover_all_ev_chargers_from_registry,
+    discover_ev_charger_from_registry,
+    meters_beside_chargers,
+)
+
+_PKG = pathlib.Path(__file__).resolve().parent.parent
+
+
+def _ent(entity_id, device_id, device_class=None, platform="easee",
+         unit=None, disabled=False):
+    return SimpleNamespace(
+        entity_id=entity_id, platform=platform, device_id=device_id,
+        original_device_class=device_class,
+        disabled_by=("user" if disabled else None),
+        config_entry_id="entry-1",
+        unique_id=entity_id.split(".", 1)[1],
+        translation_key=None, entity_category=None,
+        original_unit_of_measurement=unit, unit_of_measurement=unit,
+    )
+
+
+def _equalizer(dev="eq-QP123456", name="easee_equalizer_qp123456"):
+    p = f"sensor.{name}"
+    return [
+        _ent(f"binary_sensor.{name}_online", dev, "connectivity"),
+        _ent(f"{p}_current", dev, "current", unit="A"),
+        _ent(f"{p}_export_energy", dev, "energy", unit="kWh"),
+        _ent(f"{p}_export_power", dev, "power", unit="kW"),
+        _ent(f"{p}_export_reactive_energy", dev, "energy", unit="kWh"),
+        _ent(f"{p}_export_reactive_power", dev, "power", unit="kW"),
+        _ent(f"{p}_import_energy", dev, "energy", unit="kWh"),
+        _ent(f"{p}_import_power", dev, "power", unit="kW"),
+        _ent(f"{p}_import_reactive_energy", dev, "energy", unit="kWh"),
+        _ent(f"{p}_import_reactive_power", dev, "power", unit="kW"),
+        _ent(f"{p}_temp_max", dev, "temperature", unit="°C"),
+        _ent(f"{p}_voltage", dev, "voltage", unit="V"),
+        _ent(f"switch.{name}_surplus", dev, "current"),
+    ]
+
+
+def _charger(dev="box-EH123456", name="easee_home_eh123456",
+             status=True, session=True):
+    p = f"sensor.{name}"
+    ents = [
+        _ent(f"binary_sensor.{name}_cable_locked", dev, "lock"),
+        _ent(f"binary_sensor.{name}_online", dev, "connectivity"),
+        _ent(f"{p}_circuit_current", dev, "current", unit="A"),
+        _ent(f"{p}_current", dev, "current", unit="A"),
+        _ent(f"{p}_dynamic_charger_limit", dev, "current", unit="A"),
+        _ent(f"{p}_energy_last_hour", dev, "energy", unit="kWh"),
+        _ent(f"{p}_lifetime_energy", dev, "energy", unit="kWh"),
+        _ent(f"{p}_max_charger_limit", dev, "current", unit="A"),
+        _ent(f"{p}_power", dev, "power", unit="kW"),
+        _ent(f"{p}_voltage", dev, "voltage", unit="V"),
+        _ent(f"switch.{name}_is_enabled", dev),
+        _ent(f"switch.{name}_smart_charging", dev),
+    ]
+    if session:
+        ents.append(_ent(f"{p}_session_energy", dev, "energy", unit="kWh"))
+    if status:
+        ents.append(_ent(f"{p}_status", dev))
+    return ents
+
+
+def _registry(entries):
+    reg = SimpleNamespace()
+    reg.entities = {e.entity_id: e for e in entries}
+    return reg
+
+
+def _config_walk(entries):
+    with patch.object(hd.entity_registry, "async_get",
+                      return_value=_registry(entries)):
+        return discover_all_ev_chargers_from_registry(MagicMock())
+
+
+def _primary(entries):
+    with patch.object(hd.entity_registry, "async_get",
+                      return_value=_registry(entries)):
+        return discover_ev_charger_from_registry(MagicMock())
+
+
+class TestTheEaseeEqualizer:
+    """The reporter's shape: the Equalizer first, the charger second."""
+
+    def test_the_brand_function_alone_admits_the_equalizer(self):
+        # The pre-fix rule, spelled out, so the pins below cannot pass
+        # because the Equalizer was never admitted in the first place.
+        eq = _equalizer()
+        mapping = _discover_easee(eq)
+        apply_charger_discovery_guards(mapping, eq)
+        assert mapping["ev_charging_power_sensor"] == (
+            "sensor.easee_equalizer_qp123456_import_power")
+        assert mapping["ev_service_device_id"] == "eq-QP123456"
+        assert not any(mapping.get(r) for r in _CHARGER_ONLY_ROLES)
+
+    def test_the_config_path_offers_only_the_charger(self):
+        found = _config_walk(_equalizer() + _charger())
+        assert [c["_device_id"] for c in found] == ["box-EH123456"]
+        assert found[0]["ev_charging_power_sensor"] == (
+            "sensor.easee_home_eh123456_power")
+
+    def test_the_primary_charger_is_the_charger_not_the_grid_meter(self):
+        # The late setup builds THE charger from this one — it read the
+        # house's grid import as EV power and steered the Equalizer.
+        primary = _primary(_equalizer() + _charger())
+        assert primary["ev_charging_power_sensor"] == (
+            "sensor.easee_home_eh123456_power")
+        assert primary["ev_service_device_id"] == "box-EH123456"
+
+    def test_the_order_of_the_registry_does_not_matter(self):
+        found = _config_walk(_charger() + _equalizer())
+        assert [c["_device_id"] for c in found] == ["box-EH123456"]
+
+    def test_the_report_names_the_equalizer_as_a_meter(self):
+        rep = build_detection_report(
+            registry=_registry(_equalizer() + _charger()))
+        assert [c["device_id"] for c in rep["chargers"]] == ["box-EH123456"]
+        assert [m["device_id"] for m in rep["meters"]] == ["eq-QP123456"]
+        assert {e["entity"] for e in rep["meters"][0]["entities"]} == {
+            e.entity_id for e in _equalizer()}
+        assert rep["near_misses"] == []
+
+    def test_the_report_says_nothing_on_a_plain_install(self):
+        rep = build_detection_report(registry=_registry(_charger()))
+        assert rep["meters"] == []
+        assert len(rep["chargers"]) == 1
+
+
+class TestANearMissWaitsForThePlatform:
+    """The report's near miss asked "has this brand a charger?" in registry
+    order, so a site device listed BEFORE its charger still read as "almost
+    supported — please report". The same order that made the Equalizer the
+    primary charger."""
+
+    def _site(self):
+        return [_ent("binary_sensor.easee_site_online", "site",
+                     "connectivity")]
+
+    def test_the_site_device_alone_is_a_near_miss(self):
+        # The pre-fix rule, so the next pin cannot pass vacuously.
+        rep = build_detection_report(registry=_registry(self._site()))
+        assert [n["device_id"] for n in rep["near_misses"]] == ["site"]
+
+    def test_listed_before_its_charger_it_is_not_one(self):
+        rep = build_detection_report(
+            registry=_registry(self._site() + _charger()))
+        assert rep["near_misses"] == []
+        assert [c["device_id"] for c in rep["chargers"]] == ["box-EH123456"]
+
+    def test_listed_after_its_charger_it_is_not_one_either(self):
+        rep = build_detection_report(
+            registry=_registry(_charger() + self._site()))
+        assert rep["near_misses"] == []
+
+
+class TestOnlyNextToACharger:
+    """The sibling is the evidence. Without one, nothing changes."""
+
+    def test_an_equalizer_alone_is_still_offered(self):
+        # No charger beside it: the pre-fix answer stands. Dropping a unit
+        # on missing roles alone would cost a box whose status sensor the
+        # user disabled its only charger.
+        found = _config_walk(_equalizer())
+        assert [c["_device_id"] for c in found] == ["eq-QP123456"]
+
+    def test_a_charger_with_its_status_disabled_is_still_offered_alone(self):
+        ents = _charger(status=False, session=False)
+        found = _config_walk(ents)
+        assert [c["_device_id"] for c in found] == ["box-EH123456"]
+        assert not any(found[0].get(r) for r in _CHARGER_ONLY_ROLES)
+
+    def test_two_chargers_are_two_chargers(self):
+        found = _config_walk(
+            _equalizer()
+            + _charger()
+            + _charger(dev="box-EH654321", name="easee_home_eh654321"))
+        assert [c["_device_id"] for c in found] == [
+            "box-EH123456", "box-EH654321"]
+
+    def test_a_second_charger_with_only_its_session_left_is_kept(self):
+        found = _config_walk(
+            _charger()
+            + _charger(dev="box-EH654321", name="easee_home_eh654321",
+                       status=False))
+        assert len(found) == 2
+
+    def test_a_unit_with_a_charger_mark_is_never_called_a_meter(self):
+        # A current number is a mark only a charger has (#814). Easee binds
+        # no number, so the mapping shows no charger role — the mark alone
+        # must keep the unit.
+        marked = _equalizer() + [
+            _ent("number.easee_equalizer_qp123456_charging_current",
+                 "eq-QP123456", "current", unit="A")]
+        found = _config_walk(marked + _charger())
+        assert sorted(c["_device_id"] for c in found) == [
+            "box-EH123456", "eq-QP123456"]
+
+    def test_a_marked_unit_is_not_the_evidence_either(self):
+        # A site limit is a mark on a device that is not a charger: it
+        # keeps its own unit, and it does not turn a neighbour into a meter.
+        site = [_ent("number.easee_site_max_current", "site", "current",
+                     unit="A"),
+                _ent("sensor.easee_site_power", "site", "power", unit="kW")]
+        units = {}
+        for dev, ents in (("site", site), ("eq-QP123456", _equalizer())):
+            mapping = _discover_easee(ents)
+            apply_charger_discovery_guards(mapping, ents)
+            units[dev] = (mapping, ents)
+        assert meters_beside_chargers("easee", units) == set()
+
+    def test_a_transport_platform_has_no_neighbours(self):
+        units = {
+            "juicebox": ({"ev_connected_sensor": "binary_sensor.jb_plug",
+                          "ev_charging_power_sensor": "sensor.jb_power"}, []),
+            "heat_pump": ({"ev_charging_power_sensor": "sensor.hp_power"},
+                          []),
+        }
+        assert meters_beside_chargers("mqtt", units) == set()
+        # …and the same two units on an integration's own platform:
+        assert meters_beside_chargers("easee", units) == {"heat_pump"}
+
+
+def _meter_for(platform):
+    p = f"sensor.{platform}_meter"
+    return [
+        _ent(f"{p}_import_power", "meter", "power", platform, unit="W"),
+        _ent(f"{p}_export_power", "meter", "power", platform, unit="W"),
+        _ent(f"{p}_import_energy", "meter", "energy", platform, unit="kWh"),
+        _ent(f"{p}_export_energy", "meter", "energy", platform, unit="kWh"),
+        _ent(f"{p}_total_energy", "meter", "energy", platform, unit="kWh"),
+        _ent(f"{p}_current", "meter", "current", platform, unit="A"),
+    ]
+
+
+def _box_for(platform):
+    n = f"{platform}_box"
+    return [
+        _ent(f"binary_sensor.{n}_plug", "box", "plug", platform),
+        _ent(f"binary_sensor.{n}_charging", "box", "battery_charging",
+             platform),
+        _ent(f"sensor.{n}_status", "box", None, platform),
+        _ent(f"sensor.{n}_charging_power", "box", "power", platform,
+             unit="W"),
+        _ent(f"sensor.{n}_session_energy", "box", "energy", platform,
+             unit="kWh"),
+        _ent(f"number.{n}_charging_current", "box", "current", platform,
+             unit="A"),
+        _ent(f"switch.{n}_charging", "box", None, platform),
+        _ent(f"select.{n}_charge_mode", "box", None, platform),
+    ]
+
+
+class TestEveryBrandSharesTheRule:
+    """The class lives in every brand function that admits a device on a
+    power reading. The rule sits in the walk they all share — so one meter
+    beside one box, on every platform SEM knows."""
+
+    def _platforms(self):
+        return [p for p, _fn in _EV_CHARGER_PLATFORMS
+                if p not in hd._TRANSPORT_PLATFORMS]
+
+    def test_no_brand_offers_the_meter_beside_its_box(self):
+        exercised, admitted_alone = [], []
+        fns = dict(_EV_CHARGER_PLATFORMS)
+        for platform in self._platforms():
+            meter = _meter_for(platform)
+            if fns[platform](list(meter)):
+                admitted_alone.append(platform)
+            found = _config_walk(meter + _box_for(platform))
+            boxes = [c for c in found if c.get("_device_id") == "box"]
+            if not any(any(c.get(r) for r in _CHARGER_ONLY_ROLES)
+                       for c in boxes):
+                continue   # this brand's names do not match the test box
+            exercised.append(platform)
+            assert not [c for c in found if c.get("_device_id") == "meter"], (
+                f"{platform}: the meter beside the box is offered as a "
+                "charger")
+            rep = build_detection_report(
+                registry=_registry(meter + _box_for(platform)))
+            assert "meter" not in {c["device_id"] for c in rep["chargers"]}, (
+                platform)
+        # Not vacuous: the pre-fix walk really did admit the meter on
+        # these brands, and the box really was a charger on them.
+        assert len(set(admitted_alone) & set(exercised)) >= 4, (
+            admitted_alone, exercised)
+
+    def test_both_binding_walks_ask_the_question(self):
+        # The class recurs by a third walk that maps unit by unit and
+        # forgets to look at the units beside it.
+        tree = ast.parse(
+            (_PKG / "hardware_detection.py").read_text(encoding="utf-8"))
+        wanted = {"discover_all_ev_chargers_from_registry",
+                  "build_detection_report"}
+        seen = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in wanted:
+                calls = {n.func.id for n in ast.walk(node)
+                         if isinstance(n, ast.Call)
+                         and isinstance(n.func, ast.Name)}
+                if "meters_beside_chargers" in calls:
+                    seen.add(node.name)
+        assert seen == wanted, f"not asking: {sorted(wanted - seen)}"
+
+    def test_the_diagnostics_download_carries_the_meters(self):
+        src = (_PKG / "diagnostics.py").read_text(encoding="utf-8")
+        assert '"meters"' in src

@@ -5142,3 +5142,41 @@ install where nobody ever said — which now boots "I act" and, since this chang
 so. One word fixes it and the blast radius is an install that currently commands going quiet, which
 is Guido's call, not a sweep.
 Refs #1027 #935 #936 #949 #955 #855 #908 #914 #740.
+
+### 114. A device judged alone when the device beside it is the evidence — GUARDED
+**Symptom:** an Easee install with an Equalizer shows TWO chargers. The second is the Equalizer, a
+grid meter, with the house's grid import as its charging power. Its entities come first in the
+registry, so it is also the FIRST charger: the one the config flow's first step suggests and the
+late setup (`_retry_ev_device_setup`) builds and drives on an install with no charger configured.
+**Root shape:** the discovery walks map one unit at a time and ask each unit "are you a charger?"
+alone. Most brand functions say yes to a power reading alone, so any meter an integration ships
+beside its charger passes. The unit cannot answer the question by itself; its sibling can — the
+same integration publishes car-present, charging, session and control roles for its chargers, and
+the meter has none of them. A second walk asked a related question the same way: the report's near
+miss checked "has this brand a charger?" against the chargers mapped SO FAR, so a site device listed
+before its charger still read as "almost supported".
+**Where it lives:** every walk that turns registry units into chargers —
+`discover_all_ev_chargers_from_registry` (and through it `discover_ev_charger_from_registry`, the
+config flow and the late setup) and `build_detection_report`. Not the prober: it needs a plug or a
+current control, which a meter does not have. The pre-fix walk admitted a meter beside a box on 17
+of the 22 brand platforms.
+**Closure:** `meters_beside_chargers`, asked by both walks after every unit of the platform is
+mapped. A unit is a meter when its guarded mapping binds no role in `_CHARGER_ONLY_ROLES` and it
+carries no charger mark, AND a sibling unit binds one. No sibling, no drop: a box whose status
+sensor is disabled keeps its only charger. A marked unit is kept and is not the evidence either (a
+site current limit is a mark on a device that is not a charger). Transports (`mqtt`) are skipped:
+devices on one transport are not neighbours. The report lists the meter under `meters`, and the
+diagnostics download carries it. The near miss now waits for the whole platform (transports keep
+the old per-device answer).
+**Guard:** `tests/test_1036_meter_beside_charger.py` — the Equalizer's real entities, with the
+pre-fix rule spelled out; config path, primary pick and report, in both registry orders; the
+"next to" pins (alone, a disabled status, two chargers, a mark, a transport); an oracle that puts
+one meter beside one box on every brand platform and needs at least four brands where the meter
+was really admitted before; an AST pin that both walks call the helper; the near-miss order in both
+directions. Eight mutants are killed.
+**Sweep question:** for every per-unit "is this an X?" — can the unit answer alone, or is the
+answer in the unit next to it?
+**Left for Guido:** a lone meter (an Easee account with only an Equalizer) is still offered as a
+charger — dropping on missing roles alone would also drop a box whose status the user disabled.
+The Equalizer is a real grid meter; offering it as SEM's grid source is a feature.
+Refs #1036 #964 #915 #814.
