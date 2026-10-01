@@ -17,6 +17,11 @@ calls. Control reuses what exists: a current `number`, a service
 phase-switch hook (`ev_phase_switch_entity`, `validate_phase_switch_entity`).
 No new user option: every choice is detected or fixed.
 
+**Rule (Guido, 01.10.2026): "we just go to the integration".** SEM drives
+each brand only through the entities and services its Home Assistant
+integration exposes. No extra APIs, no cloud calls of our own, no
+workarounds outside the integration.
+
 **Tech stack:** Python 3.14 / HA 2026.8 (CI floor 3.13 / HA 2026.2),
 `~/bin/semtest` with its own `SEM_ROOT`, worktree `/home/sem/sem-hw`,
 branch `feature/hardware-wave` off develop.
@@ -102,10 +107,10 @@ matched" for a device named `abbastova` with only installation entities:
 **Control SEM will use**, in order:
 
 1. `number.<installation>_available_current` when it exists (today's path).
-2. Otherwise start/stop only, through the charger's `resume_charging` /
-   `stop_charging_final` buttons, and a Repair in plain words: "Your Zaptec
-   account cannot set the current. SEM can only start and stop." Never
-   write `charger_max_current` every cycle (see decision 1).
+2. Otherwise start/stop only, through the integration's
+   `resume_charging` / `stop_charging_final` buttons, and a Repair in plain
+   words: "Your Zaptec account cannot set the current. SEM can only start
+   and stop." SEM writes nothing else on a Zaptec.
 
 **Also:** an installation device whose sibling charger device matched is
 a known companion, not news — no "please report" for it. (Strictly that
@@ -158,11 +163,12 @@ connected, charging = contactor closed, power), steer with the car's amp
 number and charge switch. SEM already steers a car's own amp number behind
 an Easee (#752, `tesla_ble`), so this is a pairing, not a new kind.
 
-**Risk:** the Tesla Fleet API bills per command. SEM changes amps often
-under solar. Rule, fixed, no option: write amps only on a change of at
-least 1 A and not more than once per 5 minutes on a Fleet-backed car;
-Teslemetry/Tessie/BLE keep SEM's normal pace. A car asleep ignores
-commands — read back the amp number and report a refused write the #820 way.
+Every car integration gets the same treatment — Tesla Fleet, Teslemetry,
+Tessie, BLE — through its own amps number and charge switch, at SEM's
+normal write pacing. No Fleet-specific rule.
+
+**Risk:** a car asleep ignores commands — read back the amp number and
+report a refused write the #820 way.
 
 **Files:**
 - Modify: `hardware_detection.py` (pairing: a Wall Connector device + one Tesla car device on the same install)
@@ -171,8 +177,8 @@ commands — read back the amp number and report a refused write the #820 way.
 - Modify: `tests/test_split_grid_integration.py` (a pipeline test, current via the car)
 
 - [ ] **Step 1:** failing tests — pairing found from upstream-shaped entities
-  for each of Fleet / Teslemetry / Tessie; no pairing with two cars (ask,
-  never guess); the Fleet write pace holds; a refused write is reported.
+  for each of Fleet / Teslemetry / Tessie / BLE; no pairing with two cars
+  (ask, never guess); a refused write is reported.
 - [ ] **Step 2–4:** fail, implement, pass.
 - [ ] **Step 5:** commit `feat: Tesla Wall Connector charges through the car's own controls`.
 
@@ -195,7 +201,8 @@ detected.
   `myenergi_stop_boost`) ([services.yaml](https://github.com/CJNE/ha-myenergi/blob/main/custom_components/myenergi/services.yaml)).
 - No amp number: a Zappi sets its own current in Eco/Eco+.
 
-**Control SEM will use:** the existing charge-mode path
+**Control SEM will use:** the integration's charge-mode select, through
+the existing charge-mode path
 (`SESSION_START_CHARGE_MODE`): start = `Fast` (grid allowed) or `Eco+`
 (solar only), stop = `Stopped`; the phase select feeds
 `ev_phase_switch_entity`. SEM decides *whether* and *how*; the Zappi
@@ -232,10 +239,11 @@ between one and three phases.
 - `set_charger_phase_mode` with `1_phase` / `auto_phase` / `3_phase` — a
   charger **setting**.
 
-**Control SEM will use:** the per-phase dynamic circuit limit (3-phase =
-all three at the amps; 1-phase = P1 at the amps, P2/P3 at 0), through a
-brand wiring helper beside `_wire_wattpilot`, so the existing phase-switch
-logic drives it. Decision 3 picks this over the phase-mode setting.
+**Control SEM will use:** the Easee integration's own
+`set_circuit_dynamic_limit` service (3-phase = all three at the amps;
+1-phase = P1 at the amps, P2/P3 at 0), through a brand wiring helper beside
+`_wire_wattpilot`, so the existing phase-switch logic drives it. Nothing
+outside the integration.
 
 **Risk:** a circuit with two chargers shares the limit — refuse to phase-
 switch when the circuit has more than one charger (detected, Repair).
@@ -306,17 +314,8 @@ Ship with control **off** until the reporter turns it on.
 
 ---
 
-## Decisions for Guido
+## Decision for Guido
 
-1. **Zaptec without a current limit:** start/stop only (plan), or also write
-   the charger's `charger_max_current` setting, which is a stored setting
-   and wears with every write?
-2. **Tesla Fleet API costs money per command:** support Fleet with a slow
-   fixed pace (plan), or support only Teslemetry, Tessie and BLE?
-3. **Easee phases:** per-phase circuit limit (plan, reversible, expires
-   with `time_to_live`) or the `set_charger_phase_mode` setting?
-4. **Zappi:** is a charger SEM can only start, stop and put in a mode
-   (no amps) worth shipping?
-5. **Order:** Tesla and Zappi have the most installs but no owner to prove
-   them yet; Zaptec, Easee and EG4 have reporters waiting. Keep this order
-   or build the three with reporters first?
+**Order:** Tesla and Zappi have the most installs but no owner to prove
+them yet; Zaptec, Easee and EG4 have reporters waiting. Keep this order
+(installs first) or build the three with reporters first?
