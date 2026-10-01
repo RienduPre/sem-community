@@ -1594,7 +1594,18 @@
     "hints": "Tipy",
     "weekly": "Týdenní zpráva",
     "all": "Všechny tipy",
-    "config_help_hints": "Krátké zprávy, když něco nesedí. Vyp.: žádné. Týdenní zpráva: jen nedělní přehled. Všechny: tichý senzor, náročná noc, rostoucí odběr ze sítě, levná elektřina při čekajícím autě, a týdenní zpráva."
+    "config_help_hints": "Krátké zprávy, když něco nesedí. Vyp.: žádné. Týdenní zpráva: jen nedělní přehled. Všechny: tichý senzor, náročná noc, rostoucí odběr ze sítě, levná elektřina při čekajícím autě, a týdenní zpráva.",
+    "sessions_title": "Relace",
+    "sessions_this_month": "{n} tento měsíc",
+    "sessions_more": "{n} dalších tento měsíc",
+    "sessions_stored": "{n} uloženo",
+    "sessions_col_session": "Relace",
+    "sessions_col_solar": "Slunce",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "slunce",
+    "sessions_csv": "CSV",
+    "sessions_none": "Tento měsíc žádné relace",
+    "sessions_loading": "Načítání…"
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3191,7 +3202,18 @@
     "hints": "Tips",
     "weekly": "Ugebesked",
     "all": "Alle tips",
-    "config_help_hints": "Korte beskeder når noget er galt. Fra: ingen. Ugebesked: kun søndagsoversigten. Alle tips: en tavs sensor, en tung nat, stigende netforbrug, billig strøm med ventende bil, og ugebeskeden."
+    "config_help_hints": "Korte beskeder når noget er galt. Fra: ingen. Ugebesked: kun søndagsoversigten. Alle tips: en tavs sensor, en tung nat, stigende netforbrug, billig strøm med ventende bil, og ugebeskeden.",
+    "sessions_title": "Sessioner",
+    "sessions_this_month": "{n} denne måned",
+    "sessions_more": "{n} flere denne måned",
+    "sessions_stored": "{n} gemt",
+    "sessions_col_session": "Session",
+    "sessions_col_solar": "Sol",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "sol",
+    "sessions_csv": "CSV",
+    "sessions_none": "Ingen sessioner denne måned",
+    "sessions_loading": "Indlæser…"
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4788,7 +4810,18 @@
     "hints": "Hinweise",
     "weekly": "Wochennotiz",
     "all": "Alle Hinweise",
-    "config_help_hints": "Kurze Meldungen, wenn etwas nicht stimmt. Aus: keine. Wochennotiz: nur die Sonntagsübersicht. Alle Hinweise: ein Sensor sendet nicht, eine schwere Nacht, steigender Netzbezug, günstiger Strom bei wartendem Auto, und die Wochennotiz."
+    "config_help_hints": "Kurze Meldungen, wenn etwas nicht stimmt. Aus: keine. Wochennotiz: nur die Sonntagsübersicht. Alle Hinweise: ein Sensor sendet nicht, eine schwere Nacht, steigender Netzbezug, günstiger Strom bei wartendem Auto, und die Wochennotiz.",
+    "sessions_title": "Ladevorgänge",
+    "sessions_this_month": "{n} diesen Monat",
+    "sessions_more": "{n} weitere diesen Monat",
+    "sessions_stored": "{n} gespeichert",
+    "sessions_col_session": "Ladevorgang",
+    "sessions_col_solar": "Solar",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "Solar",
+    "sessions_csv": "CSV",
+    "sessions_none": "Keine Ladevorgänge diesen Monat",
+    "sessions_loading": "Lädt…"
   },
   "en": {
     "% of limit": "% of limit",
@@ -6385,7 +6418,18 @@
     "hints": "Hints",
     "weekly": "Weekly note",
     "all": "All hints",
-    "config_help_hints": "Short messages when something is off. Off: none. Weekly note: the Sunday summary only. All hints: a sensor that stops sending, a heavy night, rising grid use, cheap power with the car idle, and the weekly note."
+    "config_help_hints": "Short messages when something is off. Off: none. Weekly note: the Sunday summary only. All hints: a sensor that stops sending, a heavy night, rising grid use, cheap power with the car idle, and the weekly note.",
+    "sessions_title": "Sessions",
+    "sessions_this_month": "{n} this month",
+    "sessions_more": "{n} more this month",
+    "sessions_stored": "{n} stored",
+    "sessions_col_session": "Session",
+    "sessions_col_solar": "Solar",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "solar",
+    "sessions_csv": "CSV",
+    "sessions_none": "No sessions this month",
+    "sessions_loading": "Loading…"
   },
   "es": {
     "% of limit": "% del límite",
@@ -7982,7 +8026,18 @@
     "hints": "Avisos",
     "weekly": "Nota semanal",
     "all": "Todos los avisos",
-    "config_help_hints": "Mensajes cortos cuando algo falla. Apagado: ninguno. Nota semanal: solo el resumen del domingo. Todos: sensor mudo, noche con mucho consumo, red en aumento, energía barata con el coche parado, y la nota semanal."
+    "config_help_hints": "Mensajes cortos cuando algo falla. Apagado: ninguno. Nota semanal: solo el resumen del domingo. Todos: sensor mudo, noche con mucho consumo, red en aumento, energía barata con el coche parado, y la nota semanal.",
+    "sessions_title": "Sesiones",
+    "sessions_this_month": "{n} este mes",
+    "sessions_more": "{n} más este mes",
+    "sessions_stored": "{n} guardadas",
+    "sessions_col_session": "Sesión",
+    "sessions_col_solar": "Solar",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "solar",
+    "sessions_csv": "CSV",
+    "sessions_none": "Sin sesiones este mes",
+    "sessions_loading": "Cargando…"
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9579,7 +9634,18 @@
     "hints": "Vihjeet",
     "weekly": "Viikkoviesti",
     "all": "Kaikki vihjeet",
-    "config_help_hints": "Lyhyitä viestejä, kun jokin on vialla. Pois: ei mitään. Viikkoviesti: vain sunnuntain yhteenveto. Kaikki: hiljainen anturi, raskas yö, kasvava verkosta otto, halpa sähkö auton odottaessa, ja viikkoviesti."
+    "config_help_hints": "Lyhyitä viestejä, kun jokin on vialla. Pois: ei mitään. Viikkoviesti: vain sunnuntain yhteenveto. Kaikki: hiljainen anturi, raskas yö, kasvava verkosta otto, halpa sähkö auton odottaessa, ja viikkoviesti.",
+    "sessions_title": "Lataukset",
+    "sessions_this_month": "{n} tässä kuussa",
+    "sessions_more": "{n} lisää tässä kuussa",
+    "sessions_stored": "{n} tallennettu",
+    "sessions_col_session": "Lataus",
+    "sessions_col_solar": "Aurinko",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "aurinkoa",
+    "sessions_csv": "CSV",
+    "sessions_none": "Ei latauksia tässä kuussa",
+    "sessions_loading": "Ladataan…"
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -11176,7 +11242,18 @@
     "hints": "Indices",
     "weekly": "Note hebdomadaire",
     "all": "Tous les indices",
-    "config_help_hints": "Messages courts quand quelque chose cloche. Désactivé : aucun. Note hebdomadaire : le résumé du dimanche seul. Tous : capteur muet, nuit chargée, réseau en hausse, courant bon marché voiture à l'arrêt, et la note hebdomadaire."
+    "config_help_hints": "Messages courts quand quelque chose cloche. Désactivé : aucun. Note hebdomadaire : le résumé du dimanche seul. Tous : capteur muet, nuit chargée, réseau en hausse, courant bon marché voiture à l'arrêt, et la note hebdomadaire.",
+    "sessions_title": "Sessions",
+    "sessions_this_month": "{n} ce mois",
+    "sessions_more": "{n} de plus ce mois",
+    "sessions_stored": "{n} enregistrées",
+    "sessions_col_session": "Session",
+    "sessions_col_solar": "Solaire",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "solaire",
+    "sessions_csv": "CSV",
+    "sessions_none": "Aucune session ce mois",
+    "sessions_loading": "Chargement…"
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12773,7 +12850,18 @@
     "hints": "Tippek",
     "weekly": "Heti üzenet",
     "all": "Minden tipp",
-    "config_help_hints": "Rövid üzenetek, ha valami nem stimmel. Ki: semmi. Heti üzenet: csak a vasárnapi összefoglaló. Minden tipp: néma érzékelő, nehéz éjszaka, növekvő hálózati fogyasztás, olcsó áram váró autóval, és a heti üzenet."
+    "config_help_hints": "Rövid üzenetek, ha valami nem stimmel. Ki: semmi. Heti üzenet: csak a vasárnapi összefoglaló. Minden tipp: néma érzékelő, nehéz éjszaka, növekvő hálózati fogyasztás, olcsó áram váró autóval, és a heti üzenet.",
+    "sessions_title": "Töltések",
+    "sessions_this_month": "{n} ebben a hónapban",
+    "sessions_more": "még {n} ebben a hónapban",
+    "sessions_stored": "{n} tárolva",
+    "sessions_col_session": "Töltés",
+    "sessions_col_solar": "Nap",
+    "sessions_col_min": "Perc",
+    "sessions_solar_word": "nap",
+    "sessions_csv": "CSV",
+    "sessions_none": "Nincs töltés ebben a hónapban",
+    "sessions_loading": "Betöltés…"
   },
   "it": {
     "% of limit": "% del limite",
@@ -14370,7 +14458,18 @@
     "hints": "Avvisi",
     "weekly": "Nota settimanale",
     "all": "Tutti gli avvisi",
-    "config_help_hints": "Messaggi brevi quando qualcosa non va. Spento: nessuno. Nota settimanale: solo il riepilogo della domenica. Tutti: sensore muto, notte pesante, rete in aumento, energia economica con auto ferma, e la nota settimanale."
+    "config_help_hints": "Messaggi brevi quando qualcosa non va. Spento: nessuno. Nota settimanale: solo il riepilogo della domenica. Tutti: sensore muto, notte pesante, rete in aumento, energia economica con auto ferma, e la nota settimanale.",
+    "sessions_title": "Sessioni",
+    "sessions_this_month": "{n} questo mese",
+    "sessions_more": "altre {n} questo mese",
+    "sessions_stored": "{n} salvate",
+    "sessions_col_session": "Sessione",
+    "sessions_col_solar": "Solare",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "solare",
+    "sessions_csv": "CSV",
+    "sessions_none": "Nessuna sessione questo mese",
+    "sessions_loading": "Caricamento…"
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -15967,7 +16066,18 @@
     "hints": "Hints",
     "weekly": "Weekbericht",
     "all": "Alle hints",
-    "config_help_hints": "Korte berichten als er iets mis is. Uit: geen. Weekbericht: alleen het zondagoverzicht. Alle hints: een stille sensor, een zware nacht, stijgend netverbruik, goedkope stroom met wachtende auto, en het weekbericht."
+    "config_help_hints": "Korte berichten als er iets mis is. Uit: geen. Weekbericht: alleen het zondagoverzicht. Alle hints: een stille sensor, een zware nacht, stijgend netverbruik, goedkope stroom met wachtende auto, en het weekbericht.",
+    "sessions_title": "Sessies",
+    "sessions_this_month": "{n} deze maand",
+    "sessions_more": "{n} meer deze maand",
+    "sessions_stored": "{n} bewaard",
+    "sessions_col_session": "Sessie",
+    "sessions_col_solar": "Zon",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "zon",
+    "sessions_csv": "CSV",
+    "sessions_none": "Geen sessies deze maand",
+    "sessions_loading": "Laden…"
   },
   "no": {
     "% of limit": "% av grense",
@@ -17564,7 +17674,18 @@
     "hints": "Tips",
     "weekly": "Ukemelding",
     "all": "Alle tips",
-    "config_help_hints": "Korte meldinger når noe er galt. Av: ingen. Ukemelding: bare søndagsoppsummeringen. Alle tips: en stille sensor, en tung natt, økende nettforbruk, billig strøm med ventende bil, og ukemeldingen."
+    "config_help_hints": "Korte meldinger når noe er galt. Av: ingen. Ukemelding: bare søndagsoppsummeringen. Alle tips: en stille sensor, en tung natt, økende nettforbruk, billig strøm med ventende bil, og ukemeldingen.",
+    "sessions_title": "Økter",
+    "sessions_this_month": "{n} denne måneden",
+    "sessions_more": "{n} flere denne måneden",
+    "sessions_stored": "{n} lagret",
+    "sessions_col_session": "Økt",
+    "sessions_col_solar": "Sol",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "sol",
+    "sessions_csv": "CSV",
+    "sessions_none": "Ingen økter denne måneden",
+    "sessions_loading": "Laster…"
   },
   "pl": {
     "% of limit": "% limitu",
@@ -19161,7 +19282,18 @@
     "hints": "Wskazówki",
     "weekly": "Notka tygodniowa",
     "all": "Wszystkie wskazówki",
-    "config_help_hints": "Krótkie wiadomości, gdy coś jest nie tak. Wył.: żadne. Notka tygodniowa: tylko niedzielne podsumowanie. Wszystkie: cichy czujnik, ciężka noc, rosnący pobór z sieci, tani prąd przy czekającym aucie, i notka tygodniowa."
+    "config_help_hints": "Krótkie wiadomości, gdy coś jest nie tak. Wył.: żadne. Notka tygodniowa: tylko niedzielne podsumowanie. Wszystkie: cichy czujnik, ciężka noc, rosnący pobór z sieci, tani prąd przy czekającym aucie, i notka tygodniowa.",
+    "sessions_title": "Sesje",
+    "sessions_this_month": "{n} w tym miesiącu",
+    "sessions_more": "{n} więcej w tym miesiącu",
+    "sessions_stored": "{n} zapisanych",
+    "sessions_col_session": "Sesja",
+    "sessions_col_solar": "Słońce",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "słońca",
+    "sessions_csv": "CSV",
+    "sessions_none": "Brak sesji w tym miesiącu",
+    "sessions_loading": "Ładowanie…"
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20758,7 +20890,18 @@
     "hints": "Dicas",
     "weekly": "Nota semanal",
     "all": "Todas as dicas",
-    "config_help_hints": "Mensagens curtas quando algo está errado. Desligado: nenhuma. Nota semanal: só o resumo de domingo. Todas: sensor mudo, noite pesada, consumo da rede a subir, energia barata com o carro parado, e a nota semanal."
+    "config_help_hints": "Mensagens curtas quando algo está errado. Desligado: nenhuma. Nota semanal: só o resumo de domingo. Todas: sensor mudo, noite pesada, consumo da rede a subir, energia barata com o carro parado, e a nota semanal.",
+    "sessions_title": "Sessões",
+    "sessions_this_month": "{n} este mês",
+    "sessions_more": "mais {n} este mês",
+    "sessions_stored": "{n} guardadas",
+    "sessions_col_session": "Sessão",
+    "sessions_col_solar": "Solar",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "solar",
+    "sessions_csv": "CSV",
+    "sessions_none": "Sem sessões este mês",
+    "sessions_loading": "A carregar…"
   },
   "ro": {
     "% of limit": "% din limită",
@@ -22355,7 +22498,18 @@
     "hints": "Indicii",
     "weekly": "Notă săptămânală",
     "all": "Toate indiciile",
-    "config_help_hints": "Mesaje scurte când ceva nu e în regulă. Oprit: niciunul. Notă săptămânală: doar rezumatul de duminică. Toate: senzor tăcut, noapte grea, consum din rețea în creștere, energie ieftină cu mașina în așteptare, și nota săptămânală."
+    "config_help_hints": "Mesaje scurte când ceva nu e în regulă. Oprit: niciunul. Notă săptămânală: doar rezumatul de duminică. Toate: senzor tăcut, noapte grea, consum din rețea în creștere, energie ieftină cu mașina în așteptare, și nota săptămânală.",
+    "sessions_title": "Sesiuni",
+    "sessions_this_month": "{n} luna aceasta",
+    "sessions_more": "încă {n} luna aceasta",
+    "sessions_stored": "{n} salvate",
+    "sessions_col_session": "Sesiune",
+    "sessions_col_solar": "Solar",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "solar",
+    "sessions_csv": "CSV",
+    "sessions_none": "Nicio sesiune luna aceasta",
+    "sessions_loading": "Se încarcă…"
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -23952,7 +24106,18 @@
     "hints": "Tips",
     "weekly": "Veckonotis",
     "all": "Alla tips",
-    "config_help_hints": "Korta meddelanden när något är fel. Av: inga. Veckonotis: bara söndagssammanfattningen. Alla tips: en tyst sensor, en tung natt, ökande nätuttag, billig el med väntande bil, och veckonotisen."
+    "config_help_hints": "Korta meddelanden när något är fel. Av: inga. Veckonotis: bara söndagssammanfattningen. Alla tips: en tyst sensor, en tung natt, ökande nätuttag, billig el med väntande bil, och veckonotisen.",
+    "sessions_title": "Sessioner",
+    "sessions_this_month": "{n} denna månad",
+    "sessions_more": "{n} till denna månad",
+    "sessions_stored": "{n} sparade",
+    "sessions_col_session": "Session",
+    "sessions_col_solar": "Sol",
+    "sessions_col_min": "Min",
+    "sessions_solar_word": "sol",
+    "sessions_csv": "CSV",
+    "sessions_none": "Inga sessioner denna månad",
+    "sessions_loading": "Laddar…"
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25549,6 +25714,17 @@
     "hints": "提示",
     "weekly": "每周摘要",
     "all": "全部提示",
-    "config_help_hints": "出现异常时发送简短消息。关闭：不发送。每周摘要：仅周日摘要。全部提示：传感器停止发送、夜间用电高、电网用电上升、电价便宜但车辆闲置，以及每周摘要。"
+    "config_help_hints": "出现异常时发送简短消息。关闭：不发送。每周摘要：仅周日摘要。全部提示：传感器停止发送、夜间用电高、电网用电上升、电价便宜但车辆闲置，以及每周摘要。",
+    "sessions_title": "充电记录",
+    "sessions_this_month": "本月 {n} 次",
+    "sessions_more": "本月还有 {n} 次",
+    "sessions_stored": "已存 {n} 次",
+    "sessions_col_session": "充电",
+    "sessions_col_solar": "光伏",
+    "sessions_col_min": "分钟",
+    "sessions_solar_word": "光伏",
+    "sessions_csv": "CSV",
+    "sessions_none": "本月无充电记录",
+    "sessions_loading": "加载中…"
   }
 }

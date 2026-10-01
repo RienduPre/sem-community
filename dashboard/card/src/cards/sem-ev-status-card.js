@@ -15,6 +15,9 @@ import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base
 import { resolveChargerSoc } from '../util/charger-soc.js';
 import { chargerStatusKey } from '../util/charger-status.js';
 import { evStripSegments, evStripWindow } from '../util/ev-strip.js';
+import {
+    sessionMonth, shiftMonth, rowsForMonth, monthTotals, sessionRowView, sessionsCsv,
+} from '../util/sessions.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 const CHARGER_COLORS = ['#8DC892', '#64B5F6'];
@@ -24,6 +27,7 @@ class SEMEVStatusCard extends SEMLitBase {
         return {
             ...super.properties,
             _showHelp: { state: true },
+            _sessions: { state: true },
         };
     }
 
@@ -32,6 +36,8 @@ class SEMEVStatusCard extends SEMLitBase {
         this._chargers = [];
         this._lastStateCount = 0;
         this._showHelp = false;
+        // (#1024) per charger: { open, loading, rows, month, all }
+        this._sessions = {};
         // #541: this card's plan strip ("next 12h from now") computes its time
         // axis from a per-render `now`. It re-renders on EV state changes, but
         // snap it fresh on app resume / tab focus so the axis can't lag after a
@@ -49,6 +55,125 @@ class SEMEVStatusCard extends SEMLitBase {
         // (#980 follow-up) the pause countdown's minute tick
         if (this._pauseTimer) { clearInterval(this._pauseTimer); this._pauseTimer = null; }
         document.removeEventListener('visibilitychange', this._boundVisibility);
+    }
+
+    // ── (#1024) Sessions ─────────────────────────────────────────────
+    _sessionState(id) {
+        return this._sessions[id] || { open: false, loading: false, rows: null, month: null, all: false };
+    }
+
+    _setSessionState(id, patch) {
+        this._sessions = { ...this._sessions, [id]: { ...this._sessionState(id), ...patch } };
+    }
+
+    async _toggleSessions(id) {
+        const st = this._sessionState(id);
+        this._setSessionState(id, { open: !st.open });
+        if (st.open || st.rows || st.loading || !this._hass?.callWS) return;
+        this._setSessionState(id, { loading: true });
+        let rows = [];
+        try {
+            const res = await this._hass.callWS({
+                type: 'solar_energy_management/session_history', charger_id: id,
+            });
+            rows = Array.isArray(res?.rows) ? res.rows : [];
+        } catch (_err) {
+            rows = [];
+        }
+        const now = new Date();
+        const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        this._setSessionState(id, { loading: false, rows, month: thisMonth });
+    }
+
+    _downloadSessionsCsv(id, rows) {
+        const blob = new Blob([sessionsCsv(rows)], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'sem-sessions-' + id + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    _renderSessions(id) {
+        const st = this._sessionState(id);
+        const lang = this._hass?.language || 'en';
+        const fill = (key, n) => (this._t(key) || '').split('{n}').join(String(n));
+        const rows = st.rows || [];
+        const now = new Date();
+        const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const nowTotals = monthTotals(rowsForMonth(rows, thisMonth));
+        const headerRight = st.rows
+            ? fill('sessions_this_month', nowTotals.count) + ' · ' + nowTotals.kwh.toFixed(1) + ' kWh'
+            : '';
+        const month = st.month || thisMonth;
+        const monthRows = rowsForMonth(rows, month);
+        const totals = monthTotals(monthRows);
+        const shown = st.all ? monthRows : monthRows.slice(0, 6);
+        const more = monthRows.length - shown.length;
+        const currency = totals.currency || semGetCurrency(this._hass) || '';
+        let monthName = month;
+        try {
+            monthName = new Date(month + '-15T12:00:00Z').toLocaleDateString(
+                lang, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+        } catch (_err) { /* keep YYYY-MM */ }
+        const oldest = rows.length ? sessionMonth(rows[rows.length - 1]) : month;
+        const canBack = month > oldest;
+        const canFwd = month < thisMonth;
+        const grid = 'display:grid;grid-template-columns:2.2fr .8fr .8fr .8fr .6fr;gap:6px;align-items:center;font-variant-numeric:tabular-nums;';
+        return html`
+            <div class="sessions-block">
+                <div class="strip-title sessions-head" @click=${() => this._toggleSessions(id)}>
+                    <span class="sessions-name">
+                        <ha-icon icon="mdi:history" style="--mdc-icon-size:13px;color:#8DC892"></ha-icon>
+                        <span>${this._t('sessions_title')}</span>
+                    </span>
+                    <span class="metric-label">${headerRight} ${st.open ? '▴' : '▾'}</span>
+                </div>
+                ${!st.open ? nothing : st.loading || !st.rows ? html`
+                    <div class="metric-label sessions-note">${this._t('sessions_loading')}</div>` : html`
+                    <div class="metric-row sessions-month">
+                        <span class="metric-value sessions-nav">
+                            <span class="nav ${canBack ? '' : 'off'}"
+                                  @click=${() => canBack && this._setSessionState(id, { month: shiftMonth(month, -1), all: false })}>‹</span>
+                            ${monthName}
+                            <span class="nav ${canFwd ? '' : 'off'}"
+                                  @click=${() => canFwd && this._setSessionState(id, { month: shiftMonth(month, 1), all: false })}>›</span>
+                        </span>
+                        <span class="metric-label">${totals.kwh.toFixed(1)} kWh · ${totals.solarPct} % ${this._t('sessions_solar_word')}${totals.cost === null ? '' : ' · ' + totals.cost.toFixed(2) + ' ' + currency}</span>
+                    </div>
+                    ${monthRows.length === 0 ? html`
+                        <div class="metric-label sessions-note">${this._t('sessions_none')}</div>` : html`
+                        <div class="ct-row" style="${grid}min-height:24px">
+                            <span class="metric-label">${this._t('sessions_col_session')}</span>
+                            <span class="metric-label num">kWh</span>
+                            <span class="metric-label num">${this._t('sessions_col_solar')}</span>
+                            <span class="metric-label num">${currency}</span>
+                            <span class="metric-label num">${this._t('sessions_col_min')}</span>
+                        </div>
+                        ${shown.map(r => {
+                            const v = sessionRowView(r, lang);
+                            return html`
+                                <div class="ct-row" style="${grid}">
+                                    <span class="metric-value sessions-day">${v.day} <span class="metric-label sessions-span">${v.span}</span></span>
+                                    <span class="metric-value num">${v.kwh}</span>
+                                    <span class="metric-value num" style="color:${v.solarHigh ? '#ff9800' : 'var(--primary-text-color, #e0e0e0)'}">${v.solar}</span>
+                                    <span class="metric-value num">${v.cost}</span>
+                                    <span class="metric-value num" style="font-weight:500">${v.min}</span>
+                                </div>`;
+                        })}`}
+                    <div class="ct-row sessions-foot">
+                        <span class="metric-label ${more > 0 ? 'clickable' : ''}"
+                              @click=${() => more > 0 && this._setSessionState(id, { all: true })}>${more > 0 ? fill('sessions_more', more) + ' · ' : ''}${fill('sessions_stored', rows.length)}</span>
+                        ${rows.length ? html`
+                            <span class="metric-value sessions-csv" @click=${() => this._downloadSessionsCsv(id, rows)}>
+                                <ha-icon icon="mdi:download" style="--mdc-icon-size:14px"></ha-icon>${this._t('sessions_csv')}
+                            </span>` : nothing}
+                    </div>`}
+            </div>
+        `;
     }
 
     _toggleHelp() {
@@ -825,6 +950,8 @@ class SEMEVStatusCard extends SEMLitBase {
                     <span>${fmt708('soc_info_line')}</span>
                 </div>` : nothing}
 
+                ${this._renderSessions(id)}
+
                 <div class="charge-target-group">
                     <div class="ct-title">
                         <ha-icon icon="mdi:target" style="--mdc-icon-size:14px;color:#8DC892"></ha-icon>
@@ -1564,6 +1691,24 @@ class SEMEVStatusCard extends SEMLitBase {
                 display: flex; align-items: center; gap: 6px;
                 font-size: 12px; color: #f06292; padding: 5px 0 2px;
             }
+            /* (#1024) Sessions list — approved mockup 01.10 */
+            .sessions-block {
+                margin: 10px 0 12px; padding: 8px 10px; border-radius: 12px;
+                background: rgba(255,255,255,0.03);
+            }
+            .sessions-head { justify-content: space-between; cursor: pointer; margin-bottom: 0; }
+            .sessions-name { display: flex; gap: 6px; align-items: center; }
+            .sessions-month { padding: 8px 0 4px; }
+            .sessions-nav { display: flex; gap: 10px; align-items: center; }
+            .sessions-nav .nav { color: #5BC8D8; cursor: pointer; padding: 0 2px; }
+            .sessions-nav .nav.off { opacity: 0.25; cursor: default; }
+            .sessions-block .num { text-align: right; }
+            .sessions-day { font-weight: 500; white-space: nowrap; }
+            .sessions-span { color: #b5b5b5; font-weight: 400; }
+            .sessions-foot { justify-content: space-between; min-height: 28px; }
+            .sessions-foot .clickable { cursor: pointer; }
+            .sessions-csv { color: #5BC8D8; display: flex; gap: 4px; align-items: center; cursor: pointer; }
+            .sessions-note { padding: 8px 0 4px; }
             /* 12h EV plan strip (#282, readability pass #464) */
             .plan-strip {
                 margin: 8px 0 2px; padding: 4px 0 2px;
