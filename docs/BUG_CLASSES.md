@@ -5173,7 +5173,7 @@ pre-fix rule spelled out; config path, primary pick and report, in both registry
 "next to" pins (alone, a disabled status, two chargers, a mark, a transport); an oracle that puts
 one meter beside one box on every brand platform and needs at least four brands where the meter
 was really admitted before; an AST pin that both walks call the helper; the near-miss order in both
-directions. Eight mutants are killed.
+directions; the diagnostics download carrying `meters`. Nine mutants are killed.
 **Sweep question:** for every per-unit "is this an X?" — can the unit answer alone, or is the
 answer in the unit next to it?
 **Left for Guido:** a lone meter (an Easee account with only an Equalizer) is still offered as a

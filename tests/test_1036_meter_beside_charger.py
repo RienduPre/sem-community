@@ -16,8 +16,11 @@ last class of pins runs the same meter beside every brand SEM knows.
 """
 import ast
 import pathlib
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from custom_components.solar_energy_management import hardware_detection as hd
 from custom_components.solar_energy_management.hardware_detection import (
@@ -330,6 +333,43 @@ class TestEveryBrandSharesTheRule:
                     seen.add(node.name)
         assert seen == wanted, f"not asking: {sorted(wanted - seen)}"
 
-    def test_the_diagnostics_download_carries_the_meters(self):
-        src = (_PKG / "diagnostics.py").read_text(encoding="utf-8")
-        assert '"meters"' in src
+
+
+class TestTheDiagnosticsDownload:
+    """The download takes a fixed list of report keys. A meter the report
+    names but the download drops is a meter the user never sees."""
+
+    @pytest.mark.asyncio
+    async def test_the_download_carries_the_meters(self, tmp_path):
+        from custom_components.solar_energy_management.diagnostics import (
+            async_get_config_entry_diagnostics,
+        )
+        rep = build_detection_report(
+            registry=_registry(_equalizer() + _charger()))
+        assert rep["meters"]   # not vacuous: there is a meter to carry
+
+        hass = MagicMock()
+        hass.config.config_dir = str(tmp_path)
+
+        async def _executor(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        hass.async_add_executor_job = _executor
+        coord = MagicMock()
+        coord.last_update_success = True
+        coord.update_interval = timedelta(seconds=10)
+        coord._observer_mode = False
+        coord._load_manager = None
+        coord._energy_dashboard_config = None
+        coord.data = {"detection_report": rep}
+        entry = MagicMock()
+        entry.entry_id = "entry_1036"
+        entry.version = 7
+        entry.domain = "solar_energy_management"
+        entry.data = {}
+        entry.options = {}
+        entry.runtime_data = coord
+        hass.data = {"solar_energy_management": {entry.entry_id: coord}}
+
+        result = await async_get_config_entry_diagnostics(hass, entry)
+        assert result["detection"]["meters"] == rep["meters"]
