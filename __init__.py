@@ -2322,6 +2322,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
 
     # Merge entry.data and entry.options for complete configuration
     full_config = {**entry.data, **entry.options}
+    # (#820) another integration's warning that names an entity SEM writes
+    # to (a refused set_value) is kept for the diagnose surface
+    try:
+        from .utils.log_buffer import written_entities as _written_entities
+        _buf = hass.data.get(f"{DOMAIN}_log_buffer")
+        if hasattr(_buf, "watch"):
+            _buf.watch(_written_entities(full_config))
+    except Exception:  # noqa: BLE001 — diagnostics never cost a setup
+        pass
     _LOGGER.debug("Configuration keys: %s", list(full_config.keys()))
 
     # The persisted toggles must be resolved BEFORE the coordinator exists.
@@ -6374,6 +6383,18 @@ async def _async_register_phase_services(
                     hass, coordinator)
             except Exception as exc:  # noqa: BLE001
                 payload["battery_actuation"] = {"error": str(exc)}
+            # (#820) the charge-pacing register: what it holds and accepts,
+            # what SEM believes, the record it would restore from, and the
+            # other integration's refusals that never reach SEM's own log
+            try:
+                from .coordinator.battery_diag import pacing_actuation_diag
+                pacing = await pacing_actuation_diag(hass, coordinator)
+                buf = hass.data.get(f"{DOMAIN}_log_buffer")
+                if hasattr(buf, "get_foreign_lines"):
+                    pacing["foreign_log"] = buf.get_foreign_lines()
+                payload["pacing_actuation"] = pacing
+            except Exception as exc:  # noqa: BLE001
+                payload["pacing_actuation"] = {"error": str(exc)}
 
         if section in ("all", "trace", "ev_chargers"):
             # Layered-trace observability (1.7.5) — the recent

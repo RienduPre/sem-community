@@ -151,8 +151,15 @@ RESTORE_VALUE = 5000.0
 
 def _coordinator(*, observer=False):
     hass = MagicMock()
-    hass.services.async_call = AsyncMock()
-    hass.states.get = MagicMock(return_value=SimpleNamespace(state=str(RESTORE_VALUE)))
+    # (#820) the register takes the writes it is sent: the pacer now checks
+    # the register, not its memory, so a register that never moved would be
+    # a refusal — a different test.
+    register = SimpleNamespace(state=str(RESTORE_VALUE))
+
+    async def _set_value(domain, service, data, blocking=False):
+        register.state = str(data["value"])
+    hass.services.async_call = AsyncMock(side_effect=_set_value)
+    hass.states.get = MagicMock(return_value=register)
     cfg = {
         "battery_charge_pacing_enabled": True,
         "battery_charge_power_limit_entity": "number.batt_charge_limit",
@@ -257,7 +264,10 @@ class TestPacingHoldsThroughABlink:
         call = hass.services.async_call.await_args
         assert call.args[0] == "number" and call.args[1] == "set_value"
         assert call.args[2]["entity_id"] == "number.batt_charge_limit"
-        assert call.args[2]["value"] == pytest.approx(RESTORE_VALUE)
+        # (#820) a release gives the larger of the capture and the pack's
+        # full charge power (the config's 10 kW here)
+        assert call.args[2]["value"] == pytest.approx(
+            max(RESTORE_VALUE, fake.config["battery_max_charge_power_w"]))
         assert fake._charge_pacing_writer.engaged is False
         hass.services.async_call.reset_mock()
         # Still dark: nothing more to restore, nothing written.
