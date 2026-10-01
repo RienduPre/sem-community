@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - SEM shows a control only where your house can use it: price knobs need a dynamic tariff, the export guard an export limit. (#996)
 
+# [2.2.0-beta.2] — 30.09.2026
+
+- 🐛 **Removing SEM no longer switches a charger back on when SEM was set to watch only** (#1027). Watching sends no command, not even during removal.
+
 # [2.1.0] — 30.09.2026
 
 The first stable release of the 2.1 line.

@@ -3430,16 +3430,20 @@ class CurrentControlDevice(ControllableDevice):
         _parked_it = False
         try:
             if domain and self.hass.services.has_service(domain, "disable"):
-                await self.send(domain, "disable", {})
-                _parked_it = True
-                _LOGGER.info(
-                    "%s: parked OFF on disconnect via %s.disable — the box "
-                    "holds the no until the next charge", self.name, domain)
+                # (#1027) The claim comes from the send, not from "it did not
+                # raise": ``send`` returns False when the command was withheld
+                # and the box therefore never heard it.
+                _parked_it = bool(await self.send(domain, "disable", {}))
+                if _parked_it:
+                    _LOGGER.info(
+                        "%s: parked OFF on disconnect via %s.disable — the box "
+                        "holds the no until the next charge", self.name, domain)
             elif self.start_stop_entity:
                 sdomain = self.start_stop_entity.split(".")[0]
                 if sdomain in ("switch", "input_boolean"):
-                    await self.send(sdomain, "turn_off", {"entity_id": self.start_stop_entity})
-                    _parked_it = True
+                    _parked_it = bool(await self.send(
+                        sdomain, "turn_off",
+                        {"entity_id": self.start_stop_entity}))
         except Exception as e:  # noqa: BLE001 — surfaced, never fatal
             _LOGGER.error("park_off(%s): disable failed: %s", self.name, e)
 
@@ -3491,6 +3495,33 @@ class CurrentControlDevice(ControllableDevice):
         nothing on the system that knew why — the precise sentence this whole
         issue opens with. Same hole #949 had just closed one layer over, for
         the inverter's charge limit.
+
+        (#1027) THE ONE GATE for the whole debt. While SEM is only watching,
+        ``send`` withholds every command and returns False — but both callers
+        read "the call did not raise" as "the box was parked" and took the debt
+        anyway. A rig watching a box another SEM controls wrote a park record
+        on every disconnect, adopted it after a restart, and handed the charger
+        back on removal — the first real command of its life, on hardware it
+        had never touched. Watching takes no debt and pays none, in either
+        direction: the record belongs to the lifetime that really parked the
+        box, and is left exactly as it is.
+        """
+        if getattr(self, "observer_mode", False):
+            _LOGGER.debug(
+                "%s: watching only — no park debt recorded (wanted %s)",
+                self.name, parked)
+            return
+        await self._write_park_record(parked)
+
+    async def _write_park_record(self, parked: bool) -> None:
+        """The record itself, with no gate in front of it.
+
+        (#1027 review) Separate from ``_remember_parked`` for one caller:
+        ``release_to_user`` has ALREADY decided, and it has awaited several
+        sends since. If the switch is flipped during those awaits, a gate
+        read a second time would keep the debt on a box that was just handed
+        back — and the next setup would adopt a park already paid, the
+        "#935, live on PROD 13.09" bug. One decision, one lifetime.
         """
         self._sem_parked = bool(parked)
         store = getattr(self, "_park_store", None)
@@ -3510,7 +3541,15 @@ class CurrentControlDevice(ControllableDevice):
                           exc_info=True)
 
     def adopt_park_state(self, parked_ids) -> None:
-        """Take over a park this install left behind in a previous lifetime."""
+        """Take over a park this install left behind in a previous lifetime.
+
+        (#1027) Not while SEM is only watching. Taking over a park is taking
+        on the duty to hand the box back, and a lifetime that commands nothing
+        cannot owe that. The record stays where it is — the first lifetime that
+        can command adopts it (see ``_push_observer_mode_to_devices``).
+        """
+        if getattr(self, "observer_mode", False):
+            return
         key = str(getattr(self, "charger_id", "") or self.name)
         if key in set(parked_ids or ()):
             self._sem_parked = True
@@ -3547,6 +3586,13 @@ class CurrentControlDevice(ControllableDevice):
         nothing to undo. Never raises — a teardown must always complete.
         """
         if not getattr(self, "_sem_parked", False):
+            return None
+        if getattr(self, "observer_mode", False):
+            # (#1027) A watching SEM has parked nothing, so it has nothing to
+            # hand back. #936 wrote this rule for batteries and #955 for the
+            # export cut; the charger was the one that still said yes here.
+            _LOGGER.info("#1027 %s: watching only — the box is left exactly "
+                         "as it is on %s", self.name, reason)
             return None
         did: list[str] = []
         # (#935 review) BOUNDED. ``hass.services.async_call`` takes no timeout
@@ -3603,8 +3649,10 @@ class CurrentControlDevice(ControllableDevice):
         # `sem.parked.<entry>` still naming this charger, so the next setup
         # adopted a park that had already been handed back — and the next
         # disable would "enable" a box SEM had not disabled. The debt is paid;
-        # the ledger has to say so.
-        await self._remember_parked(False)
+        # the record has to say so. (#1027) Written straight, without the
+        # gate: the decision was made at the top of this method, and the
+        # switch may have flipped during the awaits since.
+        await self._write_park_record(False)
         if not did:
             return None
         said = f"{self.name}: handed back on {reason} — " + ", ".join(did)

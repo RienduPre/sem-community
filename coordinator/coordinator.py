@@ -2840,6 +2840,36 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 dev.withheld_commands = []
             except Exception:  # noqa: BLE001 — a device that cannot be
                 continue       # told is left as it was, never crashed
+        # getattr, like the push's own caller above: this method is exercised
+        # on bare stubs in tests, and a stand-in must never crash a cycle.
+        _readopt = getattr(self, "_readopt_on_leaving_observer", None)
+        if _readopt is not None:
+            _readopt(obs)
+
+    def _readopt_on_leaving_observer(self, obs: bool) -> None:
+        """(#1027) The cycle SEM starts commanding again takes the park back.
+
+        A watching SEM adopts no charger park — taking one over is taking on
+        the duty to hand the box back, and it cannot owe that. So the record
+        stays on disk, and the first cycle after the switch goes off reads it.
+        Without this, a rig watched for an hour and then took control of a
+        box it did not know was parked: #935's hole, through the switch the
+        user is invited to use. The pacer's rule, one layer over (#949).
+        """
+        prev = getattr(self, "_observer_mode_told_devices", None)
+        try:
+            self._observer_mode_told_devices = obs
+        except Exception:  # noqa: BLE001 — a read-only stand-in in tests
+            return
+        if obs or prev is not True:
+            return
+        readopt = getattr(self, "_readopt_parked_chargers", None)
+        if not callable(readopt):
+            return
+        try:
+            readopt()
+        except Exception as err:  # noqa: BLE001 — never fail a cycle on this
+            _LOGGER.debug("park re-adoption not started: %s", err)
 
     def _sync_vacation_mode_from_switch(self) -> None:
         """Backstop the vacation switch flag from the entity each cycle (#594).
