@@ -52,6 +52,10 @@ const ESSENTIAL_CONTROLS = new Set([
     'electricity_import_rate',
     'electricity_export_rate',
     'dynamic_tariff_entity',
+    // (#1040) the one entity of Calendar mode, as the line above is for
+    // Dynamic. Only one of the two shows at a time, and without it the
+    // default view offers a mode it cannot set up.
+    'tariff_schedule_entity',
     // Battery: the safety floor. Everything else in that section is a
     // sensor override that detection normally supplies.
     'battery_discharge_protection_enabled',

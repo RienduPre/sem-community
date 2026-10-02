@@ -2761,9 +2761,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 _merge_form_input(self, self._data, user_input)
                 return await self.async_step_load_management()
 
-        # On a refused save, show the page as the user left it.
+        # On a refused save, show the page as the user left it — a field
+        # they emptied stays empty instead of refilling from storage.
+        left = dict(user_input or {})
+        if user_input is not None:
+            shown = (getattr(self, "cur_step", None) or {}).get("data_schema")
+            for key in _clearable_keys(shown):
+                left.setdefault(key, None)
         current_config = {**self.config_entry.data, **self.config_entry.options,
-                          **(user_input or {})}
+                          **left}
         _c = lambda key, fb: self._cfg(current_config, key, fb)
         currency = self.hass.config.currency or "EUR"
 

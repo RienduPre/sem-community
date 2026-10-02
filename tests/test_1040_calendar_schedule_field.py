@@ -101,18 +101,43 @@ class TestTheHelpersWeekAnswersEveryHour:
             ("00:00", "05:00", "cheap"), ("05:00", "24:00", "normal")]
 
     @pytest.mark.asyncio
-    async def test_the_next_cheap_window_is_found(self):
+    async def test_the_next_change_is_found_on_the_minute(self):
         p = _provider(_hass(REPORTER_WEEK))
         await _read(p)
-        noon = MON.replace(hour=12)
-        assert p._find_next_transition(noon, "nt") == MON + timedelta(days=1)
+        assert (p._find_next_transition(MON.replace(hour=12, minute=7), "nt")
+                == MON + timedelta(days=1))
+        assert (p._find_next_transition(MON.replace(hour=3, minute=58, second=33), "ht")
+                == MON.replace(hour=5))
 
-    def test_without_the_week_every_hour_got_the_current_tariff(self):
-        """The shape this fix removes, kept visible: the state answers for
-        NOW only, so before the week is read the strip is one block."""
+    def test_without_the_week_only_now_is_known(self):
+        """The state speaks for now. Copied to every hour it gave a strip of
+        one confident block and the peak rate at 02:00 (class 86)."""
         p = _provider(_hass(REPORTER_WEEK, state="on"))
+        assert p.get_price_level() is PriceLevel.NORMAL
+        assert p.get_price_level_at(MON.replace(hour=3)) is None
+        assert p.get_price_at(MON.replace(hour=2)) is None
         rows = p.get_schedule_for_day(MON.replace(hour=12))
-        assert len(rows) == 1 and rows[0]["tariff"] == "ht"
+        assert [(r["tariff"], r["level"]) for r in rows] == [(None, "no_prices")]
+
+    def test_without_the_week_the_state_still_speaks_until_its_next_event(self):
+        from homeassistant.util import dt as dt_util
+        now = dt_util.now()
+        hass = _hass(REPORTER_WEEK, state="off")
+        hass._states[HELPER].attributes = {"next_event": now + timedelta(hours=2)}
+        p = _provider(hass)
+        assert p.get_price_level_at(now + timedelta(hours=1)) is PriceLevel.CHEAP
+        assert p.get_price_level_at(now + timedelta(hours=3)) is None
+
+    @pytest.mark.asyncio
+    async def test_the_state_wins_over_a_stale_week_for_now(self):
+        """A week read before an edit must not overrule what the helper
+        says right now."""
+        from homeassistant.util import dt as dt_util
+        hass = _hass(_week([]), state="on")       # stale: no blocks at all
+        p = _provider(hass)
+        await _read(p)
+        assert p.get_price_level() is PriceLevel.NORMAL
+        assert p.get_price_at(dt_util.now()) == pytest.approx(0.36)
 
     @pytest.mark.asyncio
     async def test_a_day_with_no_block_has_one_price(self):
@@ -139,8 +164,9 @@ class TestTheHelpersWeekAnswersEveryHour:
 
 @pytest.mark.unit
 class TestReadingTheWeek:
-    def test_json_spelling_is_read_too(self):
-        week = _week([{"from": "05:00:00", "to": "24:00:00"}])
+    @pytest.mark.parametrize("end", ["24:00:00", "24:00", "23:59:59.999999"])
+    def test_json_and_yaml_spellings_are_read_too(self, end):
+        week = _week([{"from": "05:00:00", "to": end}])
         assert timetable_from_schedule(week)[0] == (0, time(5, 0), time.max)
 
     def test_an_answer_that_is_not_a_week_is_none_not_empty(self):
@@ -150,9 +176,15 @@ class TestReadingTheWeek:
 
     def test_a_block_the_helper_would_refuse_is_skipped(self):
         week = _week([{"from": "20:00", "to": "07:00"},
-                      {"from": "x", "to": "08:00"},
                       {"from": "09:00", "to": "10:00"}], days=("monday",))
         assert timetable_from_schedule(week) == [(0, time(9, 0), time(10, 0))]
+
+    def test_a_block_we_cannot_read_makes_the_week_unknown(self):
+        """Dropping it would turn "could not read" into "no peak then"."""
+        week = _week([{"from": "x", "to": "08:00"},
+                      {"from": "09:00", "to": "10:00"}], days=("monday",))
+        assert timetable_from_schedule(week) is None
+        assert timetable_from_schedule(_week(["09:00"])) is None
 
     @pytest.mark.asyncio
     async def test_it_asks_the_helper_by_entity(self):
@@ -214,6 +246,14 @@ class TestReadingTheWeek:
     async def test_no_service_no_call(self):
         hass = _hass(REPORTER_WEEK, has_service=False)
         p = _provider(hass)
+        assert await _read(p) is False
+        hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_hand_written_on_off_entity_is_not_asked_for_a_week(self):
+        hass = _hass(REPORTER_WEEK)
+        p = CalendarTariffProvider(hass, rules=[],
+                                   schedule_entity="input_boolean.ht")
         assert await _read(p) is False
         hass.services.async_call.assert_not_called()
 
@@ -305,6 +345,18 @@ class TestTheTariffPageHasTheField:
         mode = next(m for m in result["data_schema"].schema
                     if m.schema == "tariff_mode")
         assert mode.default() == "calendar"
+
+    @pytest.mark.asyncio
+    async def test_a_field_emptied_before_the_refusal_stays_empty(
+            self, mock_hass, config_entry):
+        flow = _flow(mock_hass, config_entry,
+                     {"dynamic_feedin_entity": "sensor.feed_in"})
+        flow.cur_step = await _step(flow, config_entry)     # what HA records
+        result = await _step(flow, config_entry, {"tariff_mode": "calendar"})
+        assert result["errors"]
+        feed = next(m for m in result["data_schema"].schema
+                    if m.schema == "dynamic_feedin_entity")
+        assert feed.description["suggested_value"] is None
 
     @pytest.mark.asyncio
     async def test_calendar_with_a_schedule_is_saved(self, mock_hass, config_entry):
