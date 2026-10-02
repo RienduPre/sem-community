@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.2.0-beta.4] — 02.10.2026
+
+- 🐛 **An Easee Equalizer is not a charger** (#1036). It measures the grid. Setup now finds the real charger, also where it had saved the Equalizer.
+
 # [2.2.0-beta.3] — 01.10.2026
 
 - 🐛 **Charge pacing checks the inverter took the limit** (#820). Below the buffer the battery gets full power again.
