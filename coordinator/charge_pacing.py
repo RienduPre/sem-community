@@ -420,11 +420,19 @@ class ChargePacingWriter:
         if self._taken and self._accepted_w is None:
             # adopted from a previous lifetime: what it reads now is taken
             self._accepted_w = register_w
+        # (#820, 02.10, decision) SEM rewrites when (a) the NEW cap differs
+        # from the last SENT cap by more than the deadband — a refused cap
+        # included — or (b) the register has moved away from the value it
+        # settled at (Arne's 1449) by more than the deadband: someone else
+        # changed it. It does NOT rewrite merely because the register sits
+        # at its accepted value and that is not the cap — the inverter
+        # applied its own number, and that is not a refusal.
         wish_changed = abs(target_w - self.last_written_w) > deadband
-        drifted = (bool(self._taken)
-                   and abs(register_w - self._accepted_w) > deadband)
+        moved_by_someone = (
+            self._taken is True and self._accepted_w is not None
+            and abs(register_w - self._accepted_w) > deadband)
         settled = "held" if self._taken else "write_refused"
-        if not (wish_changed or drifted):
+        if not (wish_changed or moved_by_someone):
             return settled
         if abs(register_w - target_w) <= deadband:
             return settled
@@ -438,10 +446,12 @@ class ChargePacingWriter:
                deadband: float, now: float) -> str:
         """(#820, 02.10) Did the register take the last write?
 
-        TAKEN only when the register is IN THE BAND — within one step or
-        10 % of what SEM sent, and never wider than the rewrite deadband, so
-        a value SEM would rewrite can never count as taken — AND has CHANGED
-        since the write. A reading equal to the pre-write value is "no
+        TAKEN only when the register is IN THE BAND — within one step, 10 %
+        of what SEM sent or 100 W, whichever is widest (Arne: wrote 1550 W,
+        reads 1449 W; the inverter applied its own number, and that is not
+        a refusal) — AND has CHANGED since the write. The rewrite rule in
+        ``apply`` keeps a taken-but-different value from being rewritten
+        every interval. A reading equal to the pre-write value is "no
         change yet": a Modbus register that has not been scanned since the
         write (review pass 2: 4600 read back twice after a 5000 write was
         judged taken, then "took the write as 4600 W" — before the hardware
@@ -453,7 +463,7 @@ class ChargePacingWriter:
         sent = self.last_written_w
         pre = self._pre_write_w
         changed = pre is None or abs(register_w - pre) >= 1.0
-        band = min(max(step_w, 0.10 * sent, 1.0), deadband)
+        band = max(step_w, 0.10 * sent, 100.0)
         in_band = abs(register_w - sent) <= band
         if in_band and changed:
             if self._taken is not True:

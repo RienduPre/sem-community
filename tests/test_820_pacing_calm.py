@@ -155,7 +155,7 @@ class TestATakenWriteIsNotARefusal:
     def test_the_inverter_applies_its_own_value(self):
         """SEM wanted 1550 (sent 1500), the inverter reads 1449."""
         clock = Clock()
-        reg = TemplateNumber(2500.0, applies=lambda v: 1455.0)
+        reg = TemplateNumber(2500.0, applies=lambda v: 1449.0)
         w = _writer(clock)
         h = reg.hass()
         assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
@@ -290,7 +290,7 @@ class TestNoHammering:
 
 
 class TestTheRegisterTookADifferentValue:
-    """Arne: SEM wrote 1550 W, the register reads ~1450 W. Register 33047 is
+    """Arne: SEM wrote 1550 W, the register reads 1449 W. Register 33047 is
     in 0.01 kW and the package divides by 10, and the inverter has its own
     limit — so a value can land as a different number than written. The
     write is TAKEN, and the difference is said, once."""
@@ -308,12 +308,12 @@ class TestTheRegisterTookADifferentValue:
         return w, h, reg, clock
 
     def test_the_difference_is_in_the_writer_state(self):
-        w, *_ = self._taken_at(1550.0, 1455.0)
-        assert w.applied_differs == (1455.0, 1550.0)
+        w, *_ = self._taken_at(1550.0, 1449.0)
+        assert w.applied_differs == (1449.0, 1550.0)
 
     def test_one_in_band_read_is_not_yet_a_settled_difference(self):
         clock = Clock()
-        reg = TemplateNumber(2500.0, step=10.0, applies=lambda v: 1455.0)
+        reg = TemplateNumber(2500.0, step=10.0, applies=lambda v: 1449.0)
         w = _writer(clock)
         h = reg.hass()
         _run(w.apply(h, ENTITY, 1550.0, observer=False))
@@ -328,30 +328,30 @@ class TestTheRegisterTookADifferentValue:
 
     def test_the_difference_is_said_once(self, caplog):
         with caplog.at_level(logging.WARNING):
-            w, h, reg, clock = self._taken_at(1550.0, 1455.0)
+            w, h, reg, clock = self._taken_at(1550.0, 1449.0)
             for _ in range(10):
                 clock.advance(10)
                 _run(w.apply(h, ENTITY, 1550.0, observer=False))
         lines = [r.getMessage() for r in caplog.records
                  if "took the write as" in r.getMessage()]
         assert len(lines) == 1, lines
-        assert "1455 W, not 1550 W" in lines[0]
+        assert "1449 W, not 1550 W" in lines[0]
         assert "unit" in lines[0] and "own limit" in lines[0]
 
     def test_the_diagnose_button_shows_it(self):
         from custom_components.solar_energy_management.coordinator.battery_diag import (
             pacing_actuation_diag,
         )
-        w, h, reg, clock = self._taken_at(1550.0, 1455.0)
+        w, h, reg, clock = self._taken_at(1550.0, 1449.0)
         coordinator = SimpleNamespace(
             config={"battery_charge_power_limit_entity": ENTITY},
             _charge_pacing_writer=w, _charge_pacing_state={})
         out = _run(pacing_actuation_diag(h, coordinator))
         assert out["writer"]["applied_differs"] == {
-            "register_w": 1455.0, "written_w": 1550.0}
+            "register_w": 1449.0, "written_w": 1550.0}
 
     def test_a_new_write_clears_it(self):
-        w, h, reg, clock = self._taken_at(1550.0, 1455.0)
+        w, h, reg, clock = self._taken_at(1550.0, 1449.0)
         reg.applies = None
         clock.advance(400)
         assert _run(w.apply(h, ENTITY, 2500.0, observer=False)) == "wrote"
@@ -409,9 +409,10 @@ class TestAStaleReadingIsNoChangeYet:
             _run(w.apply(h, ENTITY, 5000.0, observer=False))
         assert w._taken is None
 
-    def test_the_band_is_never_wider_than_the_deadband(self):
-        """sent 5000: 10 % is 500 W, the deadband 250 W. A scanned 4600
-        (400 off) is outside the band — SEM would rewrite it."""
+    def test_a_value_the_inverter_applied_is_taken_and_not_rewritten(self):
+        """sent 5000, the inverter settles at 4600 (changed since the
+        pre-write 3000, within 10 %): taken, said once, and NOT rewritten
+        every interval."""
         clock = Clock()
         reg = TemplateNumber(3000.0, hi=10000.0, applies=lambda v: 4600.0)
         w = _writer(clock)
@@ -419,7 +420,59 @@ class TestAStaleReadingIsNoChangeYet:
         _run(w.apply(h, ENTITY, 5000.0, observer=False))
         reg.scan()
         for _ in range(12):
+            clock.advance(300)
+            assert _run(w.apply(h, ENTITY, 5000.0, observer=False)) == "held"
+        assert w.applied_differs == (4600.0, 5000.0)
+        assert len(reg.writes) == 1
+
+
+class TestArnesSequenceEndToEnd:
+    """Decision (02.10): write 1550 → reads 1449 is TAKEN. Then the
+    register is left alone until the cap really moves or someone else
+    moves the register."""
+
+    def test_a_register_already_within_the_deadband_is_left_alone(self):
+        """1560 on the register, cap 1550: ten watts apart, inside the
+        deadband — nothing to write. (The sequence below starts from 1700
+        so that the first write is a real one.)"""
+        clock = Clock()
+        reg = TemplateNumber(1560.0, step=10.0)
+        w = _writer(clock)
+        assert _run(w.apply(reg.hass(), ENTITY, 1550.0, observer=False)) == "held"
+        assert reg.writes == []
+
+    def test_the_sequence(self):
+        clock = Clock()
+        reg = TemplateNumber(1700.0, step=10.0, applies=lambda v: 1449.0)
+        w = _writer(clock)
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
+        reg.scan()
+        for _ in range(2):
             clock.advance(10)
-            out = _run(w.apply(h, ENTITY, 5000.0, observer=False))
-        assert out == "write_refused"
-        assert w.applied_differs is None
+            assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert w._taken is True
+        assert w.applied_differs == (1449.0, 1550.0)
+        # 10 more cycles over 30 minutes, cap unchanged: no further write
+        for _ in range(10):
+            clock.advance(180)
+            assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert reg.writes == [1550.0]
+        # the cap moves to 1700: one write
+        reg.applies = None
+        clock.advance(10)
+        assert _run(w.apply(h, ENTITY, 1700.0, observer=False)) == "wrote"
+        reg.scan()
+        for _ in range(3):
+            clock.advance(120)
+            assert _run(w.apply(h, ENTITY, 1700.0, observer=False)) == "held"
+        assert reg.writes == [1550.0, 1700.0]
+        # someone sets the register to 2000 by hand: one write
+        reg.state.state = "2000.0"
+        clock.advance(10)
+        assert _run(w.apply(h, ENTITY, 1700.0, observer=False)) == "wrote"
+        reg.scan()
+        for _ in range(3):
+            clock.advance(120)
+            assert _run(w.apply(h, ENTITY, 1700.0, observer=False)) == "held"
+        assert reg.writes == [1550.0, 1700.0, 1700.0]
