@@ -3853,7 +3853,9 @@ def _discover_ohme(entities) -> Dict[str, str]:
     """Discover EV charger config from Ohme integration.
 
     Ohme uses sensor for status (Plugged in, Charging, Unplugged).
-    Charge mode via select entity (Max charge, Paused, etc.).
+    Charge mode via select entity. (#1039) Its options are ``max_charge``,
+    ``paused`` and ``smart_charge``; "Max charge" and "Paused" are only the
+    labels HA shows, and the select refuses a label.
     """
     result: Dict[str, str] = {}
     own = _own_names(entities)
@@ -3872,8 +3874,8 @@ def _discover_ohme(entities) -> Dict[str, str]:
             result.setdefault("ev_current_sensor", eid)
         if eid.startswith("select.") and "charge_mode" in name:
             result["ev_charge_mode_entity"] = eid
-            result["ev_charge_mode_start"] = "Max charge"
-            result["ev_charge_mode_stop"] = "Paused"
+            result["ev_charge_mode_start"] = "max_charge"
+            result["ev_charge_mode_stop"] = "paused"
     return result
 
 

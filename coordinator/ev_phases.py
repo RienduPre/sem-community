@@ -26,6 +26,8 @@ import math as _math
 
 from typing import Callable, Optional, Tuple
 
+from ..utils.select_option import listed_option
+
 # Below this draw the reading is ramp-up or trickle, not a measurement —
 # same floor the W/A EMA uses (#638).
 PHASE_MIN_WATTS = 400.0
@@ -98,16 +100,18 @@ def resolve_switch_values(entity_id: str, cfg: dict):
     return v1, v3, bool(v1 and v3)
 
 
-def phase_switch_command(entity_id: str, value: str):
+def phase_switch_command(entity_id: str, value: str, hass=None):
     """The one service call a phase switch turns into, or None.
 
     (domain, service, service_data) — the caller owns the actual call,
-    behind the same observer seam as every actuation.
+    behind the same observer seam as every actuation. (#1039) With ``hass``,
+    a select gets the option it LISTS for ``value``, never a label.
     """
     domain = str(entity_id or "").split(".", 1)[0]
     if domain in ("select", "input_select"):
         return domain, "select_option", {
-            "entity_id": entity_id, "option": str(value)}
+            "entity_id": entity_id,
+            "option": listed_option(hass, entity_id, str(value))}
     if domain in ("number", "input_number"):
         return domain, "set_value", {
             "entity_id": entity_id, "value": float(value)}

@@ -5308,3 +5308,40 @@ entity names, older than this class: Wallbox binds `…_maximum_icp_current`, th
 as its current control; V2C was #1034 (classes 56 and 89, closed). Class 114's residual (2) loses its `carport` case:
 go-e MQTT's `car` now reads the own name.
 Refs #1035 #962 #976 #804 #1036.
+
+### 116. A select written with the label a person sees, not the option it lists — GUARDED
+**Symptom:** on Home Assistant's own Ohme test data (HA 2026.8.2) SEM set the charge mode to
+"Max charge" and "Paused"; the select lists `max_charge` and `paused`, so HA refused every write
+and the charger never changed mode (#1039). Nothing else looks wrong: the entity is right, the
+call is made, and the error is one log line per start or stop.
+**Root shape:** HA's `select.select_option` takes an option exactly as the entity lists it in its
+`options` attribute. What the UI shows is the option's LABEL, translated through the
+integration's `translation_key`. A string typed from the UI — by a developer into a brand rule, or
+by a user into a config field — is the label, and the select refuses it. A compare against the
+select's state fails the same way, so a read-back waits for a value the select can never read.
+**Where it lives:** every select SEM writes: the charger's charge-mode start/stop, the hand-back
+and the amps-as-select current (all through `ControllableDevice.send`); the phase-switch select
+(`ev_phases.phase_switch_command`); GoodWe forced charge (`GoodWeChargeAdapter` wrote "Eco
+Charge"/"General", core lists `eco_charge`/`general` — broken on every core GoodWe); the
+battery direction select (`_direction_ready`) and power-strategy select (`GenericBatteryAdapter`,
+write and every compare); SG-Ready select contacts (`_contact_service`, `_contact_is_on`); the
+`set_option` service on SEM's own selects. Deye already checks each configured option against the
+select's list and refuses one it does not list.
+**Closure:** `utils/select_option.listed_option(hass, entity_id, value)` — a value the select lists
+is kept; otherwise the ONE listed option whose label (HA's translation cache: the user's language,
+then English) or whose own spelling is the same words; otherwise the value unchanged, for HA to
+refuse with its own error. Never a guess between two. The charger seam maps every select write, so
+observer mode records the option it would really send. Ohme detection now saves `max_charge` /
+`paused`; a config saved with the labels is mapped at write time, so it needs no migration.
+**Guard:** `tests/test_1039_listed_option.py` — a fake HA whose selects refuse unlisted options,
+for Ohme (start, stop, hand-back, observer, through the reconciler), GoodWe, the direction and
+strategy selects, SG-Ready and the phase switch; real HA labels from core's GoodWe translations in
+German and English; an AST check that every `select_option` in the package is in a function that
+calls `listed_option`, goes through the charger seam, or is on a short list with its reason.
+**Sweep question:** where SEM writes or compares a string against an entity with a fixed list —
+did the string come from that list, or from what a person saw?
+**Left for Guido:** (1) OpenWB detection saves "Instant Charging"/"Stop" and go-e "2"/"1"; not
+checked against their integrations' options here — the mapping covers a label either way. (2) The
+config flow's start/stop fields are free text; a dropdown of the chosen select's options would
+stop a wrong value at entry.
+Refs #1039 #1032.

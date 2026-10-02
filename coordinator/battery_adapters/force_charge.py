@@ -17,6 +17,8 @@ from enum import Enum
 
 from homeassistant.core import HomeAssistant
 
+from ...utils.select_option import listed_option
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -276,7 +278,9 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
     """GoodWe inverter forced charge via work mode entity.
 
     GoodWe uses a select entity to switch between work modes.
-    Forced charge = "Eco Charge" or "General" mode with SOC target.
+    Forced charge = ``eco_charge`` mode with SOC target; stop restores
+    ``general``. (#1039) Those are the options core's select LISTS — "Eco
+    charge mode" and "General mode" are its labels, which it refuses.
     """
 
     async def start_forced_charge(self, command: ChargeCommand) -> ChargeStatus:
@@ -301,7 +305,8 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
             await self.hass.services.async_call(
                 "select",
                 "select_option",
-                {"entity_id": work_mode_entity, "option": "Eco Charge"},
+                {"entity_id": work_mode_entity,
+                 "option": listed_option(self.hass, work_mode_entity, "eco_charge")},
             )
 
             self._active = True
@@ -335,7 +340,9 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
         back was retried on every cycle forever.
         """
         work_mode_entity = self.config.get("inverter_work_mode_entity", "")
-        normal_mode = self.config.get("inverter_normal_work_mode", "General")
+        normal_mode = listed_option(
+            self.hass, work_mode_entity,
+            self.config.get("inverter_normal_work_mode", "general"))
         if not work_mode_entity:
             self._active = False
             self._target_soc = 0.0
