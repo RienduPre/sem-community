@@ -1029,6 +1029,97 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     _reject_reboot_control(result, entities)
 
 
+#: (#1036) The roles only a charger fills: a car that is there, a charge
+#: that runs, a session, or a way to steer the box. A meter fills none of
+#: them — it measures power and energy, nothing else.
+_CHARGER_ONLY_ROLES = (
+    "ev_connected_sensor", "ev_charging_sensor", "ev_session_energy_sensor",
+    "ev_current_control_entity", "ev_start_stop_entity",
+    "ev_charge_mode_entity",
+)
+
+
+def meters_beside_chargers(platform: str, units, disabled=()) -> set:
+    """(#1036) The units of ONE integration that are meters next to its
+    charger — never chargers themselves.
+
+    A brand function admits a unit on a power reading alone, so a meter the
+    integration ships beside its charger became a second charger. Easee's
+    Equalizer measures the house's grid import: SEM offered it as a charger
+    with that import as its charging power — and, because its entities came
+    first, as the PRIMARY charger that setup saves and drives.
+
+    A unit is a meter here when its guarded mapping binds no role in
+    ``_CHARGER_ONLY_ROLES``, AND a sibling unit of the same integration does
+    bind one. The sibling is the evidence: the integration publishes those
+    roles for its chargers, and this unit has none of them. Without that
+    sibling nothing is dropped — a box whose status sensor the user disabled
+    must not lose its only charger to a guess. Only a bound role makes a
+    unit the evidence.
+
+    Two things keep a unit that the roles alone would call a meter, each
+    looked for on the WHOLE device — its live entities and its disabled ones
+    (``disabled``: the platform's disabled registry entries):
+
+    * a charger mark (a plug binary or a current control, #814);
+    * an entity with the same translation key as one the evidence bound to
+      a charger role. The key is the integration's own name for the entity
+      and survives the user renaming its id, which the brand functions read.
+      A second Easee with its status disabled, or renamed to
+      ``sensor.carport_toestand``, is still a charger.
+
+    That second check needs the keys. Where the evidence's charger roles
+    carry none, nothing is dropped: SEM cannot tell a meter from a second
+    box whose roles are switched off, and the heal at setup acts on this
+    answer.
+
+    ``mqtt`` and the other transports are not integrations: the devices on
+    them are not neighbours.
+
+    ``units`` is ``{unit_key: (mapping, entities)}`` with each mapping
+    already through ``apply_charger_discovery_guards``. Returns the keys of
+    the units that are meters.
+    """
+    if platform in _TRANSPORT_PLATFORMS:
+        return set()
+
+    def _binds_charger_role(mapping) -> bool:
+        return any(mapping.get(role) for role in _CHARGER_ONLY_ROLES)
+
+    evidence = [(mapping, ents) for mapping, ents in units.values()
+                if mapping and _binds_charger_role(mapping)]
+    if not evidence:
+        return set()
+    charger_keys = set()
+    for mapping, ents in evidence:
+        by_id = {str(e.entity_id): e for e in ents}
+        for role in _CHARGER_ONLY_ROLES:
+            bound = by_id.get(str(mapping.get(role) or ""))
+            key = getattr(bound, "translation_key", None)
+            if isinstance(key, str) and key:
+                charger_keys.add(key)
+    if not charger_keys:
+        return set()
+
+    def _whole_device(ents) -> list:
+        devices = {e.device_id for e in ents if getattr(e, "device_id", None)}
+        return list(ents) + [d for d in disabled
+                             if getattr(d, "device_id", None) in devices]
+
+    meters = set()
+    for key, (mapping, ents) in units.items():
+        if not mapping or _binds_charger_role(mapping):
+            continue
+        whole = _whole_device(ents)
+        if any(_charger_mark(e) for e in whole):
+            continue
+        if any(getattr(e, "translation_key", None) in charger_keys
+               for e in whole):
+            continue
+        meters.add(key)
+    return meters
+
+
 # ============================================================
 # (#964) One physical unit, one bucket — the grouping every registry
 # discovery path shares. ``device_id`` is the registry's own answer and
@@ -1391,7 +1482,7 @@ def unit_device_id(unit_key) -> Optional[str]:
 
 
 def discover_all_ev_chargers_from_registry(
-    hass: HomeAssistant,
+    hass: HomeAssistant, *, meters_out: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, str]]:
     """Auto-discover ALL EV chargers from known integrations via entity registry.
 
@@ -1401,6 +1492,10 @@ def discover_all_ev_chargers_from_registry(
 
     For charger integrations that expose multiple devices (e.g., 2 Wallbox
     Pulsars), each device produces a separate entry grouped by device_id.
+
+    (#1036) A meter beside a charger is not returned. ``meters_out``, when
+    given, receives each such meter in the shape it was returned in before
+    — so setup can find a meter it saved as the charger back then.
     """
     entity_reg = entity_registry.async_get(hass)
     chargers: List[Dict[str, str]] = []
@@ -1425,6 +1520,10 @@ def discover_all_ev_chargers_from_registry(
         ]
         if not entities:
             continue
+        disabled = [
+            e for e in entity_reg.entities.values()
+            if _matches_platform(str(e.platform or "")) and e.disabled_by
+        ]
 
         # Group entities by the physical unit they belong to: device_id
         # where the registry has one (e.g., 2 Wallbox Pulsars), and the
@@ -1432,14 +1531,33 @@ def discover_all_ev_chargers_from_registry(
         # device, and one bucket for "no device" mixes two boxes).
         devices = group_entities_by_unit(entities)
 
+        found = {}
         for unit_key, device_entities in devices.items():
-            device_id = unit_device_id(unit_key)
             result = discover_fn(device_entities)
             if result:
                 # (#886) never drive a charger through its offline fallback
                 # register; (#962) never read its advertised capability as a
                 # measurement.
                 apply_charger_discovery_guards(result, device_entities)
+            found[unit_key] = (result, device_entities)
+        # (#1036) a meter the integration ships beside its charger is not a
+        # second charger — and must never be the first one.
+        meters = meters_beside_chargers(platform, found, disabled)
+
+        for unit_key, (result, device_entities) in found.items():
+            device_id = unit_device_id(unit_key)
+            if unit_key in meters:
+                _LOGGER.info(
+                    "Not a charger: %s device %s is a meter beside a charger "
+                    "(#1036)", platform, device_id or unit_label(unit_key))
+                if meters_out is not None:
+                    was = dict(result)
+                    was["_platform"] = str(device_entities[0].platform or platform)
+                    if device_id:
+                        was["_device_id"] = device_id
+                    meters_out.append(was)
+                continue
+            if result:
                 # Preserve the registry's real domain for diagnostics/stable
                 # migration metadata (e.g. zaptec_custom), not just the
                 # canonical matcher name.
@@ -2818,6 +2936,10 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         # (#964) entities of a device-less platform that no unit could claim
         # — dropped from the role walk on purpose, never silently.
         "unattributed": [],
+        # (#1036) devices an integration ships beside its charger that only
+        # measure — Easee's Equalizer — named here instead of offered as a
+        # second charger.
+        "meters": [],
     }
 
     # (#964) the entities behind each charger row — the pairing key the
@@ -2830,6 +2952,12 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     _roles_state_of = ((lambda eid: hass.states.get(eid))
                        if (hass is not None and _hass_running) else None)
     _roles_services = _services_of(hass)
+
+    def _same_brand(a: str, b: str) -> bool:
+        """(#915) ``zaptec_sim`` and ``zaptec_custom`` are the brand
+        ``zaptec`` — the tolerance the discovery walk and the census apply."""
+        a, b = str(a or ""), str(b or "")
+        return a == b or a.startswith(f"{b}_") or b.startswith(f"{a}_")
 
     for platform, discover_fn in _EV_CHARGER_PLATFORMS:
         def _matches(ep: str, _this=platform) -> bool:
@@ -2851,12 +2979,31 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         for e in live:
             if str(e.entity_id) not in attributed:
                 report["unattributed"].append(_describe(e))
+        found = {}
         for unit_key, dev_entities in devices.items():
-            device_id = unit_device_id(unit_key)
             mapping = discover_fn(dev_entities) or {}
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
             apply_charger_discovery_guards(mapping, dev_entities)
+            found[unit_key] = (mapping, dev_entities)
+        # (#1036) the config path's rule, so the report shows what the flow
+        # will offer: a meter beside a charger is listed as a meter.
+        meters = meters_beside_chargers(
+            platform, found, [e for e in plat_entities if e.disabled_by])
+        # (#1036) near misses wait for the whole platform: whether this brand
+        # has a charger is known only once every unit has been mapped.
+        pending_near: List[Dict[str, Any]] = []
+        for unit_key, (mapping, dev_entities) in found.items():
+            device_id = unit_device_id(unit_key)
+            if unit_key in meters:
+                report["meters"].append({
+                    "platform": str(dev_entities[0].platform or platform),
+                    "device_id": device_id,
+                    "unit": unit_label(unit_key),
+                    "entities": [_describe(e) for e in dev_entities],
+                    "note": "a meter beside a charger, not a charger",
+                })
+                continue
             # (ruflo, 24.09 / #956) a hand-written brand function that finds
             # sensors but NO control claimed the device and the roster never
             # got to speak — go-eCharger's box has no current number, only a
@@ -2930,14 +3077,12 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 # ``zaptec`` — the tolerance the discovery walk and the census
                 # already apply, applied here too. Comparing the raw platform
                 # left the fork's installation device on the card as the last
-                # near miss (.46).
-                def _same_brand(a: str, b: str) -> bool:
-                    a, b = str(a or ""), str(b or "")
-                    return a == b or a.startswith(f"{b}_") or b.startswith(f"{a}_")
-                if any(_same_brand(c.get("platform"), platform)
-                       for c in report["chargers"]):
-                    continue
-                report["near_misses"].append({
+                # near miss (.46). (#1036) Asked once the platform is done,
+                # below: asked here, it only saw the chargers mapped BEFORE
+                # this device, so a site device listed first still read as
+                # "almost supported". A transport is not a brand: there the
+                # per-device answer stays as it was.
+                near = {
                     "platform": platform,
                     "device_id": device_id,
                     "entities": [_describe(e) for e in dev_entities],
@@ -2959,7 +3104,12 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                                             if k not in ("vehicle",
                                                          "current_is_setting")),
                     "missing": _offer_missing(_roles_offer(_roles)),
-                })
+                }
+                if platform not in _TRANSPORT_PLATFORMS:
+                    pending_near.append(near)
+                elif not any(_same_brand(c.get("platform"), platform)
+                             for c in report["chargers"]):
+                    report["near_misses"].append(near)
                 continue
             mapped: Dict[str, Any] = {}
             used = set()
@@ -2998,6 +3148,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 "device_id": device_id,
                 "entities": {str(e.entity_id) for e in dev_entities},
             })
+        if not any(_same_brand(c.get("platform"), platform)
+                   for c in report["chargers"]):
+            report["near_misses"].extend(pending_near)
 
     # (#1032) the same near-miss question asked of every integration the
     # brand walk does not cover — by the roles its own words carry. A charger
