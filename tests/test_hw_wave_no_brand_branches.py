@@ -93,3 +93,71 @@ def test_the_role_reader_names_no_integration():
                 if isinstance(n, ast.Constant) and isinstance(n.value, str)}
     named = sorted(literals & _integration_domains())
     assert not named, f"the role reader names integrations: {named}"
+
+
+#: (#1032 review) Every place the crawler compares a platform with an
+#: integration's name, today. Shrinks only: a pair leaves when its brand
+#: path folds into a role. The role reader itself is not on it.
+PLATFORM_NAME_COMPARES_TODAY = frozenset({
+    ("_matches_platform", "zaptec"), ("_matches_platform", "zaptec_"),
+    ("discover_all_ev_chargers_from_registry", "zaptec"),
+    ("build_detection_report", "zaptec"),
+    ("ocpp_charge_control_switch", "ocpp"),
+    ("wattpilot_force_buttons", "wattpilot"),
+    ("wire_current_entity", "ocpp"), ("wire_current_entity", "wattpilot"),
+})
+
+
+def _platform_name_compares() -> set:
+    domains = _integration_domains()
+    tree = ast.parse((ROOT / "hardware_detection.py").read_text())
+    found = set()
+
+    class V(ast.NodeVisitor):
+        def __init__(self):
+            self.fn = []
+
+        def visit_FunctionDef(self, n):
+            self.fn.append(n.name)
+            self.generic_visit(n)
+            self.fn.pop()
+
+        def _name(self):
+            return self.fn[-1] if self.fn else "<module>"
+
+        def visit_Compare(self, n):
+            parts = [n.left, *n.comparators]
+            lits = [p.value for p in parts if isinstance(p, ast.Constant)
+                    and isinstance(p.value, str) and p.value in domains]
+            lits += [e.value for p in parts
+                     if isinstance(p, (ast.Tuple, ast.Set, ast.List))
+                     for e in p.elts if isinstance(e, ast.Constant)
+                     and e.value in domains]
+            if lits and any("platform" in ast.unparse(p) for p in parts):
+                found.update((self._name(), x) for x in lits)
+            self.generic_visit(n)
+
+        def visit_Call(self, n):
+            f = n.func
+            if (isinstance(f, ast.Attribute) and f.attr in ("startswith", "endswith")
+                    and "platform" in ast.unparse(f.value)):
+                for a in n.args:
+                    if (isinstance(a, ast.Constant) and isinstance(a.value, str)
+                            and a.value.rstrip("_") in domains):
+                        found.add((self._name(), a.value))
+            self.generic_visit(n)
+
+    V().visit(tree)
+    return found
+
+
+def test_no_new_platform_name_compare():
+    new = sorted(_platform_name_compares() - PLATFORM_NAME_COMPARES_TODAY)
+    assert not new, (
+        f"new platform == '<integration>' compare(s) {new}: teach the "
+        "crawler the role instead")
+
+
+def test_the_platform_compare_list_only_shrinks():
+    gone = sorted(PLATFORM_NAME_COMPARES_TODAY - _platform_name_compares())
+    assert not gone, f"{gone} are gone — remove them from the list"

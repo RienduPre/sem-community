@@ -2904,10 +2904,14 @@ def _roles_pass(report, registry, brand_units, configured_entities,
     for u in brand_units:
         taken |= set(u["entities"])
     entries = [e for e in registry.entities.values() if not e.disabled_by]
+    def _brand_or_fork(p: str) -> bool:
+        # a fork of a brand integration (``<brand>_custom``) is that brand
+        return p in brand_platforms or any(p.startswith(f"{b}_")
+                                           for b in brand_platforms)
     units = group_entities_by_unit(
         [e for e in entries
-         if str(e.platform or "") not in brand_platforms | skip
-         and not str(e.platform or "").startswith("zaptec_")])
+         if str(e.platform or "") not in skip
+         and not _brand_or_fork(str(e.platform or ""))])
     entry_of: Dict[Any, Optional[str]] = {}
     roles_of: Dict[Any, Dict[str, Any]] = {}
     for key, ents in units.items():
