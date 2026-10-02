@@ -70,7 +70,7 @@ test('weekday follows the language', () => {
 test('CSV: the service columns, comma-safe, empty for missing', () => {
     const text = sessionsCsv([ROWS[2], R('2026-09-01T10:00:00+02:00', '', 1, 10, 0.1, 5, { charger_id: 'Garage, left' })]);
     const lines = text.trim().split('\n');
-    assert.equal(lines[0], 'start,end,charger,energy_kwh,solar_share_pct,cost,currency,duration_min');
-    assert.equal(lines[1], '2026-09-12T18:00:00+02:00,,,1,50,,,20');
+    assert.equal(lines[0], 'start,end,charger,energy_kwh,solar_share_pct,cost,currency,duration_min,energy_source');
+    assert.equal(lines[1], '2026-09-12T18:00:00+02:00,,,1,50,,,20,');
     assert.match(lines[2], /,"Garage, left",/);
 });

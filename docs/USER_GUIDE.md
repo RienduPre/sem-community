@@ -1240,8 +1240,15 @@ For your own log, call the service `solar_energy_management.export_session_histo
 from a script or automation. It returns the rows and the same rows as
 CSV text. Fields: `charger_id` (one charger), `since` (a date, `YYYY-MM-DD`).
 
-Sessions recorded before this version have no charger or cost stored;
-they show with those columns empty.
+A session's energy is the charger's own meter: its session counter, or
+else the rise of its lifetime counter. Only a charger with neither falls
+back to SEM's own measurement of its power. SEM's power flows give the
+split into solar, grid and battery, scaled to that total, and the cost
+follows the split. The CSV column `energy_source` says which was used:
+`charger_meter`, `lifetime_delta` or `sem_estimate`.
+
+Sessions recorded before this version have no charger, cost or source
+stored; they show with those columns empty.
 
 ---
 

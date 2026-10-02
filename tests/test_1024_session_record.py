@@ -12,6 +12,8 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from homeassistant.util import dt as dt_util
 
 from custom_components.solar_energy_management.coordinator.ev_control import (
@@ -159,6 +161,41 @@ class TestRecordOnSessionEnd:
         rec = h._storage.add_session_to_history.call_args.args[0]
         assert rec["charger_id"] is None
         assert rec["taper_detected"] is False
+
+
+class TestTheMeterIsTheTotal:
+    """PROD 02.10: KEBA's session meter 10.73 kWh, SEM's flow sum 7.36."""
+
+    def _charging_host(self, meter_entity_states):
+        h = _host(session_kwh=0.0)
+        h._session_data = SessionData()
+        h._last_ev_connected = False
+        h.config = {"update_interval": 10, "ev_chargers": [
+            {"id": "keba", "ev_session_energy_sensor": "sensor.keba_session"}]}
+        states = {}
+        h.hass.states.get = lambda eid: states.get(eid)
+        return h, states
+
+    def test_a_session_where_flows_cover_69_percent_records_the_meter(self):
+        h, states = self._charging_host({})
+        st = MagicMock()
+        st.attributes = {"unit_of_measurement": "kWh"}
+        states["sensor.keba_session"] = st
+        flows = PowerFlows(solar_to_ev=0.69 * 6000 * 0.6, grid_to_ev=0.69 * 6000 * 0.4)
+        n = 60
+        for i in range(n + 1):
+            st.state = str(round(6000 * 10 / 3600 / 1000 * i, 4))
+            p = SimpleNamespace(ev_connected=True, ev_power=6000.0, ev_connected_per_charger=None)
+            EVControlMixin._confirm_ev_connection(h, p)
+            EVControlMixin._update_session_tracking(h, p, flows)
+        meter_kwh = 6000 * 10 / 3600 / 1000 * n
+        assert h._session_data.energy_kwh == pytest.approx(meter_kwh, abs=0.001)
+        assert h._session_data.energy_source == "charger_meter"
+        assert h._session_data.solar_share_pct == pytest.approx(60.0, abs=0.1)
+        _unplug(h)
+        rec = h._storage.add_session_to_history.call_args.args[0]
+        assert rec["energy_kwh"] == pytest.approx(round(meter_kwh, 2))
+        assert rec["energy_source"] == "charger_meter"
 
 
 class TestOneWriter:

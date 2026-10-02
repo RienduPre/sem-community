@@ -1008,6 +1008,10 @@ class SessionData:
     solar_share_pct: float = 0
     cost_chf: float = 0
     avg_power_w: float = 0
+    #: (#1024) where the total came from: charger_meter | lifetime_delta |
+    #: sem_estimate — and the meter state behind it (session_energy.step).
+    energy_source: str = "sem_estimate"
+    meter: dict = field(default_factory=dict)
 
 
 
