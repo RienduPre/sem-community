@@ -2110,6 +2110,50 @@ def _heal_offline_current_control_in_list(hass, chargers):
     return healed if changed else None
 
 
+def _drop_meters_saved_as_chargers(hass, chargers):
+    """(#1036, bug class 114) Remove a meter that setup SAVED as the charger.
+
+    Before #1036, detection took Easee's Equalizer — a grid meter — as the
+    first charger, and zero-config setup saves the first charger it finds.
+    Detection re-runs only when NO charger is configured, so that install
+    never corrects itself: it keeps reading the grid import as EV power and
+    keeps steering the meter.
+
+    Only SEM's own save is removed: a charger that binds no role only a
+    charger has, whose power sensor is still the meter's, and whose id is
+    the one setup gave that meter — or, saved before v1.7.5, whose stored
+    ``_device_id`` is the meter's. A charger the user pointed at a role, or
+    at another power sensor, is left alone. When the list is then empty,
+    setup's own discovery runs again and saves the real charger. Returns a
+    new list if anything changed, else ``None``."""
+    from .hardware_detection import (
+        _CHARGER_ONLY_ROLES,
+        discover_all_ev_chargers_from_registry,
+    )
+    suspects = [c for c in chargers or []
+                if isinstance(c, dict)
+                and not any(c.get(r) for r in _CHARGER_ONLY_ROLES)]
+    if not suspects:
+        return None
+    meters: List[Dict[str, Any]] = []
+    discover_all_ev_chargers_from_registry(hass, meters_out=meters)
+    def _is_this_meter(c, m) -> bool:
+        if (c.get("ev_charging_power_sensor") or None) not in (
+                None, m.get("ev_charging_power_sensor")):
+            return False
+        return (c.get("id") == stable_discovered_charger_id(m)
+                or (bool(c.get("_device_id"))
+                    and c.get("_device_id") == m.get("_device_id")))
+
+    dropped = [c for c in suspects if any(_is_this_meter(c, m) for m in meters)]
+    if not dropped:
+        return None
+    _LOGGER.warning(
+        "Removed saved EV charger(s) %s: a meter beside a charger, not a "
+        "charger (#1036).", sorted(str(c.get("id")) for c in dropped))
+    return [c for c in chargers if not any(c is d for d in dropped)]
+
+
 # (#638) The kill-switch's unique_id is ``sem_{key}``, so renaming the
 # planner mints a new identity. Left alone HA would register a SECOND
 # switch and strand the first as an unavailable orphan — the user would
@@ -2293,6 +2337,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
             )
     except Exception as exc:  # noqa: BLE001 — a heal must never block setup
         _LOGGER.debug("Offline current-control heal skipped: %s", exc)
+
+    # (#1036) Remove a meter that zero-config setup saved as the charger
+    # (Easee's Equalizer). Runs before ``full_config`` is read, so an emptied
+    # list sends this same setup back to discovery for the real charger.
+    try:
+        _m_data = _drop_meters_saved_as_chargers(
+            hass, (entry.data or {}).get("ev_chargers"))
+        _m_opts = _drop_meters_saved_as_chargers(
+            hass, (entry.options or {}).get("ev_chargers"))
+        if _m_data is not None or _m_opts is not None:
+            _new_data = dict(entry.data or {})
+            _new_options = dict(entry.options or {})
+            if _m_data is not None:
+                _new_data["ev_chargers"] = _m_data
+            if _m_opts is not None:
+                _new_options["ev_chargers"] = _m_opts
+            hass.config_entries.async_update_entry(
+                entry, data=_new_data, options=_new_options,
+            )
+    except Exception as exc:  # noqa: BLE001 — a heal must never block setup
+        _LOGGER.debug("Meter-as-charger heal skipped: %s", exc)
 
     # Remove orphaned per-charger set-default button entities — the
     # button itself was retired in v1.7.0-beta.11 (#355 follow-up).

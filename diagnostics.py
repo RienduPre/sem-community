@@ -601,7 +601,9 @@ async def async_get_config_entry_diagnostics(
                   # (#887) cars found on a transport platform, named as cars
                   "vehicles",
                   # (#964) what the unit grouping could attribute to no box
-                  "unattributed")
+                  "unattributed",
+                  # (#1036) meters beside a charger, not offered as chargers
+                  "meters")
                  if _report.get(k) is not None}
 
     return {
