@@ -588,3 +588,86 @@ class TestAdoptionProvesTheRegister:
         h = reg.hass()
         assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
         assert reg.writes == [1550.0]
+
+
+class TestTheUnloadReleaseReadsTheRecord:
+    """Review 4: a writer that saw only observer cycles never adopts the
+    record. The unload must still hand the register back — from the
+    record, not from the writer's memory."""
+
+    def _prior_engagement(self):
+        store, reg = TestAdoptionProvesTheRegister()._lifetime_one()
+        assert store.data["restore_value"] == 1700.0
+        return store, reg
+
+    def _observer_only_lifetime(self, store, reg, cycles=3):
+        w = ChargePacingWriter(store=store)
+        w._clock = Clock(5000.0)
+        h = reg.hass()
+        n = len(reg.writes)
+        for _ in range(cycles):
+            assert _run(w.apply(h, ENTITY, 1550.0, observer=True)) == "observer"
+        assert len(reg.writes) == n, "an observer cycle wrote"
+        assert w._unconfirmed_cycles == 0 and w._taken is None
+        assert w.engaged is False
+        return w, h
+
+    def test_an_observer_only_lifetime_still_releases_from_the_record(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release, async_release_pacing,
+        )
+        store, reg = self._prior_engagement()
+        w, h = self._observer_only_lifetime(store, reg)
+        coordinator = SimpleNamespace(
+            _charge_pacing_writer=w,
+            config={"battery_max_charge_power_w": 5000.0})
+        held = _run(async_pending_pacing_release(coordinator))
+        assert held == (ENTITY, 5000.0, store), "max(restore 1700, hw max 5000)"
+        said = _run(async_release_pacing(h, held, "disabled"))
+        assert said and "5000" in said
+        assert reg.writes[-1] == 5000.0
+        assert store.data is None, "the record is dropped with the release"
+
+    def test_no_record_means_nothing_to_release(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release,
+        )
+        reg = TemplateNumber(1700.0, step=10.0)
+        w, h = self._observer_only_lifetime(FakeStore(), reg)
+        assert _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w, config={}))) is None
+
+    def test_a_record_with_nothing_to_put_back_is_kept(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release,
+        )
+        store = FakeStore({"entity_id": ENTITY, "restore_value": None,
+                           "cap_w": 1550.0})
+        w = ChargePacingWriter(store=store)
+        assert _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w, config={}))) is None
+        assert store.data is not None
+
+    def test_no_cycle_at_all_reads_the_record_through_the_store_factory(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release,
+        )
+        store, reg = self._prior_engagement()
+        held = _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=None, _charge_pacing_store=lambda: store,
+            config={"battery_max_charge_power_w": 5000.0})))
+        assert held == (ENTITY, 5000.0, store)
+
+    def test_the_memory_path_still_wins_when_engaged(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release,
+        )
+        store, reg = self._prior_engagement()
+        w = ChargePacingWriter(store=store)
+        w._clock = Clock(5000.0)
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert w.engaged
+        held = _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w, config={"battery_max_charge_power_w": 5000.0})))
+        assert held == (ENTITY, 5000.0, store)

@@ -751,6 +751,57 @@ def pending_pacing_release(coordinator) -> tuple | None:
     return (entity, value, getattr(writer, "_store", None))
 
 
+async def async_pending_pacing_release(coordinator) -> tuple | None:
+    """(#820, review 4) What the pacer holds down, read from the RECORD when
+    the writer's memory has nothing.
+
+    A writer that saw only observer cycles in its lifetime (HA came up with
+    observer on; "flip observer, then uninstall") never adopts the record,
+    so ``pending_pacing_release`` finds no engagement and the unload hands
+    nothing back — a real prior cap stays on the register forever, the
+    #949 failure class reopened. The record on disk is the truth; this
+    reads it. Observer cycles themselves stay fully read-only.
+
+    The value put back is the release rule's: the larger of the captured
+    value and the battery's full charge power. Never raises.
+    """
+    config = getattr(coordinator, "config", None) or {}
+    try:
+        hw_max = _as_float(config.get("battery_max_charge_power_w"))
+    except Exception:  # noqa: BLE001
+        hw_max = None
+
+    def _value(restore):
+        candidates = [v for v in (restore, hw_max) if v is not None and v > 0]
+        return max(candidates) if candidates else None
+
+    held = pending_pacing_release(coordinator)
+    if held:
+        entity, value, store = held
+        return (entity, _value(value) or value, store)
+    writer = getattr(coordinator, "_charge_pacing_writer", None)
+    store = getattr(writer, "_store", None) if writer is not None else None
+    if store is None:
+        factory = getattr(coordinator, "_charge_pacing_store", None)
+        try:
+            store = factory() if callable(factory) else None
+        except Exception:  # noqa: BLE001
+            store = None
+    if store is None:
+        return None
+    try:
+        record = await store.async_load()
+    except Exception:  # noqa: BLE001 — a lost record is not a lost unload
+        return None
+    if not isinstance(record, dict):
+        return None
+    entity = str(record.get("entity_id") or "")
+    value = _value(_as_float(record.get("restore_value")))
+    if not entity or value is None:
+        return None
+    return (entity, value, store)
+
+
 async def async_release_pacing(hass, held: tuple | None, reason: str) -> str | None:
     """Put the captured maximum back and drop the record. Never raises."""
     if not held:
