@@ -193,10 +193,65 @@ class TestARangeEndIsNotTheSetPoint:
 
     def test_a_floor_alone_is_dropped(self):
         """Monitor-only beats writing every cycle to the minimum."""
-        ents = _numbers("box", ("min_current", None), ("max_current", None))
+        ents = _numbers("box", ("min_current", None), ("charge_limit", None),
+                        ("led_level", None))
         result = {"ev_current_control_entity": "number.box_min_current"}
         _reject_range_end_current_control(result, ents)
         assert "ev_current_control_entity" not in result
+
+    def test_a_floor_goes_to_its_ceiling_when_there_is_no_set_point(self):
+        """A ceiling alone stays, so a floor beside it must go to it: else
+        the order of the two would decide whether SEM can steer the box."""
+        ents = _numbers("box", ("min_current", None), ("max_current", None))
+        result = {"ev_current_control_entity": "number.box_min_current"}
+        _reject_range_end_current_control(result, ents)
+        assert result["ev_current_control_entity"] == "number.box_max_current"
+
+    def test_a_min_max_pair_answers_the_same_in_either_order(self):
+        rows = [
+            ("sensor", "charging_power", "power", "W"),
+            ("binary_sensor", "plug_connected", "plug", None),
+            ("number", "min_charging_current", "current", "A"),
+            ("number", "max_charging_current", "current", "A"),
+        ]
+        answers = set()
+        for order in (rows, list(reversed(rows))):
+            ents = [_entry(f"{dom}.wb_{own}", "wallbox", "wb-1", dc, unit)
+                    for dom, own, dc, unit in order]
+            answers.add(_discover(ents)[0].get("ev_current_control_entity"))
+        assert answers == {"number.wb_max_charging_current"}
+
+    def test_two_set_points_leave_a_floor_dropped(self):
+        ents = _numbers("box", ("intensity", "other"), ("current", "intensity"),
+                        ("min_intensity", "min_intensity"))
+        result = {"ev_current_control_entity": "number.box_min_intensity"}
+        _reject_range_end_current_control(result, ents)
+        assert "ev_current_control_entity" not in result
+
+    def test_only_the_side_with_the_word_is_compared(self):
+        """The id says "max", the key does not: the key is not a twin
+        test, or a sibling sharing the key would be taken (review)."""
+        ents = _numbers("box", ("max_current", "connector_current"),
+                        ("led_current", "connector_current"))
+        result = {"ev_current_control_entity": "number.box_max_current"}
+        _reject_range_end_current_control(result, ents)
+        assert result["ev_current_control_entity"] == "number.box_max_current"
+
+    def test_a_device_word_on_a_transport_is_not_a_floor(self):
+        """On mqtt the device name stays in every id. "min" is Swedish
+        for "my": "Min JuiceBox" keeps its live control."""
+        ents = [_entry(f"{dom}.min_juicebox_{own}", "mqtt", "jb-1", dc, unit)
+                for dom, own, dc, unit in (
+                    ("sensor", "power", "power", "W"),
+                    ("sensor", "energy_lifetime", "energy", "kWh"),
+                    ("sensor", "status", None, None),
+                    ("number", "max_current_online_wanted", "current", "A"),
+                )]
+        result = {"ev_current_control_entity":
+                  "number.min_juicebox_max_current_online_wanted"}
+        apply_charger_discovery_guards(result, ents)
+        assert result["ev_current_control_entity"] == \
+            "number.min_juicebox_max_current_online_wanted"
 
     def test_a_ceiling_alone_stays(self):
         """Alfen, Wallbox, Zaptec and OCPP drive a "max current" number and
@@ -278,9 +333,11 @@ class TestAnotherCircuitIsNotTheCar:
     def test_each_circuit_is_swapped_for_the_car(self):
         for circuit in ("house_power", "home_power", "photovoltaic_power",
                         "pv_power", "solar_power", "battery_power",
-                        "grid_power", "inverter_power", "household_power"):
+                        "grid_power", "inverter_power", "household_power",
+                        "mains_power", "evu_power", "akku_power",
+                        "shaper_live_power"):
             ents = _powers("box", ("charge_power", None), (circuit, None),
-                           ("led", None))
+                       ("led", None))
             result = {"ev_charging_power_sensor": f"sensor.box_{circuit}"}
             _reject_capability_sensor(result, ents)
             assert result["ev_charging_power_sensor"] == \
@@ -328,6 +385,40 @@ class TestAnotherCircuitIsNotTheCar:
         result = {"ev_charging_power_sensor": "sensor.box_photovoltaik_leistung"}
         _reject_capability_sensor(result, ents)
         assert result["ev_charging_power_sensor"] == "sensor.box_ladeleistung"
+
+    def test_a_device_word_on_a_transport_is_not_a_circuit(self):
+        """#1035's phase swap must survive a JuiceBox its owner called
+        "Home JuiceBox": on mqtt "home" stays in every id (review)."""
+        ents = [_entry(f"sensor.home_juicebox_{own}", "mqtt", "jb-1", dc, unit)
+                for own, dc, unit in (
+                    ("power", "power", "W"), ("power_l1", "power", "W"),
+                    ("energy_lifetime", "energy", "kWh"),
+                    ("status", None, None))]
+        result = {"ev_charging_power_sensor": "sensor.home_juicebox_power_l1"}
+        _reject_capability_sensor(result, ents)
+        assert result["ev_charging_power_sensor"] == \
+            "sensor.home_juicebox_power"
+
+    def test_a_small_unit_with_a_renamed_id_keeps_its_reading(self):
+        """Under eight ids one rename hides the device name; "home" in it
+        is still not a circuit (review)."""
+        ents = [
+            _entry("sensor.home_charger_power", "x", "d", "power", "W"),
+            _entry("sensor.home_charger_energy", "x", "d", "energy", "kWh"),
+            _entry("number.home_charger_intensity", "x", "d", "current", "A"),
+            _entry("sensor.car_power_peak", "x", "d", "power", "W"),
+        ]
+        result = {"ev_charging_power_sensor": "sensor.home_charger_power"}
+        _reject_capability_sensor(result, ents)
+        assert result["ev_charging_power_sensor"] == "sensor.home_charger_power"
+
+    def test_among_equals_the_car_wins_over_the_alphabet(self):
+        ents = _powers("box", ("house_power", None), ("apparent_power", None),
+                       ("ev_charging_power", None))
+        result = {"ev_charging_power_sensor": "sensor.box_house_power"}
+        _reject_capability_sensor(result, ents)
+        assert result["ev_charging_power_sensor"] == \
+            "sensor.box_ev_charging_power"
 
     def test_a_circuit_never_takes_a_reading_another_role_holds(self):
         ents = (_powers("box", ("house_energy", None), dc="energy", unit="kWh")

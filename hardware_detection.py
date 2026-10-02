@@ -622,16 +622,11 @@ class EVChargerDetector:
         # matches". For the roles that must carry a MEASUREMENT, try the
         # candidates that claim to measure first, and fall back to a
         # capability-named match only when the install offers nothing else.
-        # (#1034) The same for a reading of another circuit — the house, the
-        # solar array, the home battery — that the box meters beside the car.
         if sensor_type in ("ev_charging_power", "ev_session_energy",
                            "ev_total_energy"):
-            def _measures_the_car(eid: str) -> bool:
-                return (_measures_the_quantity(eid)
-                        and not _id_segments(eid) & _OTHER_CIRCUIT_SEGMENTS)
             candidates = (
-                [c for c in candidates if _measures_the_car(c[0])]
-                + [c for c in candidates if not _measures_the_car(c[0])]
+                [c for c in candidates if _measures_the_quantity(c[0])]
+                + [c for c in candidates if not _measures_the_quantity(c[0])]
             )
         for entity_id, description, exists, priority in candidates:
             if exists:
@@ -776,8 +771,14 @@ _WRONG_QUANTITY_SEGMENTS = frozenset({"export", "exported", "reactive"})
 #: ``charge_power``, all ``device_class: power``.
 _OTHER_CIRCUIT_SEGMENTS = frozenset({
     "photovoltaic", "pv", "fv", "solar", "house", "home", "household",
-    "grid", "battery", "inverter",
+    "grid", "mains", "utility", "evu", "battery", "akku", "ess", "inverter",
+    "shaper",
 })
+
+#: (#1034) Words that name the CAR's side of the box. Among replacements
+#: of equal rank, one that says it is about the charge wins over the
+#: alphabet.
+_CAR_SEGMENTS = frozenset({"charge", "charging", "ev", "car", "vehicle"})
 
 #: (#1034) The words that make a current number one END of a range the
 #: owner sets, not the set-point SEM writes every cycle.
@@ -894,10 +895,31 @@ def _key_words(entry) -> List[str]:
     return [w for w in key.lower().split("_") if w]
 
 
-def _names_another_circuit(entry, own: Dict[str, str]) -> bool:
+def _carried_by_most(entities, own: Dict[str, str]) -> frozenset:
+    """(#1034) The words more than half of a unit's ids carry.
+
+    A box does not publish most of its entities about the house, or about
+    a minimum. Such a word is the device's name where ``_own_names`` could
+    not take it off: on a transport, or on a small unit with one id
+    renamed (a JuiceBox its owner called "Home JuiceBox"). Three ids at
+    least: on fewer, half is one id."""
+    rows = [set(_own_words(e, own)) for e in entities]
+    if len(rows) < 3:
+        return frozenset()
+    counts: Dict[str, int] = {}
+    for words in rows:
+        for w in words:
+            counts[w] = counts.get(w, 0) + 1
+    return frozenset(w for w, n in counts.items() if n * 2 > len(rows))
+
+
+def _names_another_circuit(entry, own: Dict[str, str],
+                           common: frozenset = frozenset()) -> bool:
     """(#1034) Is this reading about the house, the solar array, the home
-    battery or the grid — a circuit the box meters beside the car?"""
-    words = set(_own_words(entry, own)) | set(_key_words(entry))
+    battery or the grid — a circuit the box meters beside the car?
+    ``common`` is ``_carried_by_most``: the device's words, never the
+    entity's."""
+    words = (set(_own_words(entry, own)) - common) | set(_key_words(entry))
     return bool(words & _OTHER_CIRCUIT_SEGMENTS)
 
 
@@ -1094,7 +1116,9 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
         # own — exactly the move that put us in #962.
         return None
     own = _own_names(entities)
+    common = _carried_by_most(entities, own)
     candidates = []
+    car: Dict[str, bool] = {}
     for e in entities:
         eid = str(e.entity_id)
         if eid == bound_eid or eid in taken or not eid.startswith("sensor."):
@@ -1105,14 +1129,17 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
             continue
         if not _measures_the_quantity(eid) or _is_phase_leg(own.get(eid, eid)):
             continue
-        if _names_another_circuit(e, own):
+        if _names_another_circuit(e, own, common):
             continue
         if sum_of is not None and _without_phase(eid) != _without_phase(sum_of):
             continue
         candidates.append(eid)
+        car[eid] = bool((set(_own_words(e, own)) | set(_key_words(e)))
+                        & _CAR_SEGMENTS)
     if not candidates:
         return None
-    return min(candidates, key=lambda c: _rank_measurand(c, role))
+    return min(candidates, key=lambda c: (
+        _rank_measurand(c, role)[0], not car[c], c))
 
 
 def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
@@ -1160,6 +1187,7 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
     """
     by_id = {str(e.entity_id): e for e in entities}
     own = _own_names(entities)
+    common = _carried_by_most(entities, own)
     for role in _MEASURAND_ROLES:
         eid = result.get(role)
         if not eid:
@@ -1171,7 +1199,7 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
             # about, and a blind swap would be a guess of its own.
             continue
         measures = _measures_the_quantity(eid)
-        circuit = _names_another_circuit(entry, own)
+        circuit = _names_another_circuit(entry, own, common)
         one_phase = _is_phase_leg(own.get(eid, eid))
         if measures and not circuit and not one_phase:
             continue
@@ -1208,31 +1236,44 @@ def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
         result.pop("ev_current_control_entity", None)
 
 
-def _set_point_twin(bound, entities, own: Dict[str, str]) -> Optional[str]:
-    """(#1034) The number named like ``bound`` without its min/max word:
-    ``…_intensity`` for ``…_min_intensity``. Compared on the own names, or
-    on the translation keys, which hold in every language. Same device
-    class and unit family. None when there is no such number, or more than
-    one: that is a choice this guard does not make."""
+def _range_twins(bound, entities, own: Dict[str, str],
+                 common: frozenset) -> Tuple[set, set]:
+    """(#1034) The numbers named like ``bound`` but for its min/max word,
+    as (set-points, ceilings): ``…_intensity`` and ``…_max_intensity`` for
+    ``…_min_intensity``. Compared only on the side that holds the word:
+    the own name, less the device's words (``common``), or the translation
+    key, which holds in every language. Same device class and unit family.
+    """
     ends = _RANGE_FLOOR_SEGMENTS | _RANGE_CEILING_SEGMENTS
-    want_name = [w for w in _own_words(bound, own) if w not in ends]
-    want_key = [w for w in _key_words(bound) if w not in ends]
+    sides = []
+    if set(_own_words(bound, own)) & (ends - common):
+        sides.append((lambda e: _own_words(e, own), ends - common))
+    if set(_key_words(bound)) & ends:
+        sides.append((_key_words, ends))
     want_dc = getattr(bound, "original_device_class", None)
     want_unit = _unit_family(bound)
     bound_eid = str(bound.entity_id)
-    twins = set()
-    for e in entities:
-        eid = str(e.entity_id)
-        if eid == bound_eid or not eid.startswith("number."):
+    numbers = [e for e in entities
+               if str(e.entity_id) != bound_eid
+               and str(e.entity_id).startswith("number.")
+               and getattr(e, "original_device_class", None) == want_dc
+               and _unit_family(e) == want_unit]
+    set_points: set = set()
+    ceilings: set = set()
+    for words_of, cut in sides:
+        base = [w for w in words_of(bound) if w not in cut]
+        if not base:
             continue
-        if getattr(e, "original_device_class", None) != want_dc:
-            continue
-        if _unit_family(e) != want_unit:
-            continue
-        if ((want_name and _own_words(e, own) == want_name)
-                or (want_key and _key_words(e) == want_key)):
-            twins.add(eid)
-    return twins.pop() if len(twins) == 1 else None
+        for e in numbers:
+            words = words_of(e)
+            if [w for w in words if w not in cut] != base:
+                continue
+            hit = set(words) & cut
+            if not hit:
+                set_points.add(str(e.entity_id))
+            elif not hit & _RANGE_FLOOR_SEGMENTS:
+                ceilings.add(str(e.entity_id))
+    return set_points, ceilings
 
 
 def _reject_range_end_current_control(result: Dict[str, str],
@@ -1245,11 +1286,13 @@ def _reject_range_end_current_control(result: Dict[str, str],
     last one, so registry order bound the floor: every SEM write would move
     the floor and leave the charge where it was.
 
-    When the unit has the set-point twin, swap to it. When it has none, a
-    floor is DROPPED — monitor-only beats driving the wrong knob, the rule
-    the offline register follows — but a ceiling STAYS: on Alfen, Wallbox,
-    Zaptec and OCPP the "max current" number is the only one, and it is
-    the control. The words are read from the own name and the translation
+    A range end swaps to its one set-point twin. Without one, a ceiling
+    STAYS — on Alfen, Wallbox, Zaptec and OCPP the "max current" number is
+    the only one, and it is the control — and a floor goes to its ceiling
+    twin, so the order of the two never decides. A floor with neither is
+    DROPPED: monitor-only beats driving the wrong knob, the rule the
+    offline register follows. Two set-points are a choice this guard does
+    not make. The words are read from the own name and the translation
     key, never from the device name.
     """
     eid = result.get("ev_current_control_entity")
@@ -1259,19 +1302,24 @@ def _reject_range_end_current_control(result: Dict[str, str],
     if entry is None:
         return
     own = _own_names(entities)
-    words = set(_own_words(entry, own)) | set(_key_words(entry))
+    common = _carried_by_most(entities, own)
+    words = (set(_own_words(entry, own)) - common) | set(_key_words(entry))
     floor = bool(words & _RANGE_FLOOR_SEGMENTS)
     if not floor and not words & _RANGE_CEILING_SEGMENTS:
         return
-    twin = _set_point_twin(entry, entities, own)
-    if twin:
-        result["ev_current_control_entity"] = twin
-    elif floor:
-        _LOGGER.info(
-            "discovery: %s is a minimum, not the current set-point, and no "
-            "set-point was found — not adopting it as the control (#1034)",
-            eid)
-        result.pop("ev_current_control_entity", None)
+    set_points, ceilings = _range_twins(entry, entities, own, common)
+    if len(set_points) == 1:
+        result["ev_current_control_entity"] = set_points.pop()
+        return
+    if not floor:
+        return
+    if not set_points and len(ceilings) == 1:
+        result["ev_current_control_entity"] = ceilings.pop()
+        return
+    _LOGGER.info(
+        "discovery: %s is a minimum, not the current set-point, and no "
+        "set-point was found — not adopting it as the control (#1034)", eid)
+    result.pop("ev_current_control_entity", None)
 
 
 #: (#804) The roles SEM COMMANDS. A reboot entity in any of them is a
