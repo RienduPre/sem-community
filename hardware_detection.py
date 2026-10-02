@@ -822,11 +822,91 @@ def _measures_the_quantity(entity_id: str) -> bool:
 
 
 def _is_phase_leg(entity_id: str) -> bool:
-    """One leg of a polyphase reading (``…_power_l2``, ``…_phase_3_power``)."""
+    """One leg of a polyphase reading (``…_power_l2``, ``…_phase_3_power``).
+
+    (#1035) The number must FOLLOW the word: ``phase_3`` is one leg, while
+    ``3_phase_power`` is the sum of all three."""
     segs = _id_segments(entity_id)
     if segs & _PHASE_SEGMENTS:
         return True
-    return "phase" in segs and bool(segs & {"1", "2", "3"})
+    tokens = _name_tokens(entity_id)
+    return any(word == "phase" and nxt in ("1", "2", "3")
+               for word, nxt in zip(tokens, tokens[1:]))
+
+
+def _own_names(entities) -> Dict[str, str]:
+    """(#1035) Each entity's OWN name: its object id without the device name
+    in front of it.
+
+    Home Assistant builds an entity id from the device name and the entity's
+    name, so a word in the device name is in every id of that device. A
+    brand rule that tests a word against the whole id therefore matches
+    every entity of the device, and registry order picks among them. The
+    Peblar's default device name is "Peblar EV Charger": "charge" was in
+    ``switch.peblar_ev_charger_force_single_phase``, and SEM bound that
+    switch to start and stop the charge.
+
+    The device part is the leading words that EVERY entity of the unit
+    shares, and never a whole id: each keeps at least its last word, so a
+    device's main entity (named by the device alone, GARO's
+    ``switch.garo_laddbox``) keeps the word that names it. Nothing is
+    removed for one entity alone, which shares with nobody, nor on a
+    transport (mqtt, modbus, …), where the device name is the only mark of
+    the brand, nor for a ``_WholeIds`` unit.
+
+    Each value starts with ``_``, so a hint that carries its own boundary
+    (``"_state"``) still matches the first word of the entity's own name.
+    """
+    tokens: Dict[str, List[str]] = {}
+    platforms = set()
+    for e in entities:
+        eid = str(getattr(e, "entity_id", "") or "")
+        if eid:
+            tokens[eid] = _name_tokens(eid)
+            platforms.add(str(getattr(e, "platform", "") or ""))
+    shared = 0
+    if (len(tokens) > 1 and not platforms & _TRANSPORT_PLATFORMS
+            and not isinstance(entities, _WholeIds)):
+        rows = list(tokens.values())
+        shared = min(len(t) for t in rows) - 1
+        for other in rows[1:]:
+            shared = min(shared, _shared_leading_tokens(rows[0], other))
+    return {eid: "_" + "_".join(t[shared:]) for eid, t in tokens.items()}
+
+
+class _WholeIds(list):
+    """(#1035) A unit whose brand rules read the WHOLE entity id, device name
+    included: the rule SEM used before #1035. ``_discover_unit`` asks it one
+    thing only — see there."""
+
+
+def _discover_unit(discover_fn, entities) -> Dict[str, str]:
+    """(#1035) A brand function's answer for one unit.
+
+    The brand rules read each entity's own name (``_own_names``). A word
+    that only the device name holds tells no entity apart, so a control or
+    a status it alone named is not bound: that pick was registry order.
+
+    A measurand READ role (power, total and session energy) is the one
+    exception, for the reason bug class 89 swaps and never drops: a charger
+    with no power reading is worse than one whose reading the device name
+    picked, and the guards that run next still swap a capability or a
+    single phase for the measurement. So such a role, left empty by the own
+    names, keeps the answer the whole id gives — unless that entity already
+    holds another role.
+    """
+    result = discover_fn(entities)
+    if not result:
+        return result
+    missing = [r for r in _MEASURAND_ROLES if not result.get(r)]
+    if not missing:
+        return result
+    whole = discover_fn(_WholeIds(entities)) or {}
+    for role in missing:
+        eid = whole.get(role)
+        if eid and eid not in result.values():
+            result[role] = eid
+    return result
 
 
 def _unit_family(entry) -> Optional[str]:
@@ -883,6 +963,7 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
         # Nothing identifies the family. A swap here would be a guess of its
         # own — exactly the move that put us in #962.
         return None
+    own = _own_names(entities)
     candidates = []
     for e in entities:
         eid = str(e.entity_id)
@@ -892,7 +973,7 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
             continue
         if _unit_family(e) != want_unit:
             continue
-        if not _measures_the_quantity(eid) or _is_phase_leg(eid):
+        if not _measures_the_quantity(eid) or _is_phase_leg(own.get(eid, eid)):
             continue
         candidates.append(eid)
     if not candidates:
@@ -926,17 +1007,24 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
     pre-#962 binding stands, and a name SEM merely finds suspicious can
     never cost a user their charger.
 
+    (#1035) ONE PHASE of the reading is swapped the same way. A matcher
+    that keeps the last power sensor it sees took Peblar's
+    ``…_power_phase_3`` over ``…_power``, so SEM saw a third of a
+    three-phase charge. Whether a sensor is one phase is read from its own
+    name, never from the device name in front of it.
+
     Brand-agnostic on purpose: every read matcher, hand-written or hinted,
     funnels through the discovery choke point, so the class cannot recur
     unnoticed in the next brand.
     """
     by_id = {str(e.entity_id): e for e in entities}
+    own = _own_names(entities)
     for role in _MEASURAND_ROLES:
         eid = result.get(role)
         if not eid:
             continue
         eid = str(eid)
-        if _measures_the_quantity(eid):
+        if _measures_the_quantity(eid) and not _is_phase_leg(own.get(eid, eid)):
             continue
         entry = by_id.get(eid)
         if entry is None:
@@ -1533,7 +1621,7 @@ def discover_all_ev_chargers_from_registry(
 
         found = {}
         for unit_key, device_entities in devices.items():
-            result = discover_fn(device_entities)
+            result = _discover_unit(discover_fn, device_entities)
             if result:
                 # (#886) never drive a charger through its offline fallback
                 # register; (#962) never read its advertised capability as a
@@ -2101,6 +2189,7 @@ def charger_from_near_miss(dev_entities, platform: str,
             return {}
         out = {"ev_charger_service": service,
                "ev_service_param_name": control["param"]}
+    own = _own_names(dev_entities)
     for e in dev_entities:
         eid = str(e.entity_id)
         dc = str(getattr(e, "original_device_class", "") or "")
@@ -2111,7 +2200,7 @@ def charger_from_near_miss(dev_entities, platform: str,
         elif eid.startswith("binary_sensor.") and dc in ("power", "running",
                                                          "battery_charging"):
             out.setdefault("ev_charging_sensor", eid)
-        elif eid.startswith("sensor.") and dc == "energy" and "session" in eid:
+        elif eid.startswith("sensor.") and dc == "energy" and "session" in own.get(eid, ""):
             out.setdefault("ev_session_energy_sensor", eid)
     # (#886/#962) the offer must name the entities SEM would actually use —
     # the same guards the config path applies, or the near miss proposes a
@@ -2529,7 +2618,7 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 report["unattributed"].append(_describe(e))
         found = {}
         for unit_key, dev_entities in devices.items():
-            mapping = discover_fn(dev_entities) or {}
+            mapping = _discover_unit(discover_fn, dev_entities) or {}
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
             apply_charger_discovery_guards(mapping, dev_entities)
@@ -2791,8 +2880,10 @@ def _discover_keba(entities) -> Dict[str, str]:
     """Discover EV charger config from KEBA integration entities."""
     result: Dict[str, str] = {}
 
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
 
         if eid.startswith("binary_sensor.") and dc == "plug":
@@ -2801,9 +2892,9 @@ def _discover_keba(entities) -> Dict[str, str]:
             result["ev_charging_sensor"] = eid
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result["ev_total_energy_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "session" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "session" in name:
             result["ev_session_energy_sensor"] = eid
         if eid.startswith("sensor.") and dc == "current":
             result["ev_current_sensor"] = eid
@@ -2822,11 +2913,13 @@ def _discover_easee(entities) -> Dict[str, str]:
     """Discover EV charger config from Easee integration."""
     result: Dict[str, str] = {}
     device_id = None
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
         # Easee uses sensor (not binary_sensor) for status (#68)
-        if eid.startswith("sensor.") and "status" in eid and dc is None:
+        if eid.startswith("sensor.") and "status" in name and dc is None:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
             if entry.device_id:
@@ -2835,9 +2928,9 @@ def _discover_easee(entities) -> Dict[str, str]:
             result["ev_charging_power_sensor"] = eid
             if entry.device_id:
                 device_id = entry.device_id
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result["ev_total_energy_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "session" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "session" in name:
             result["ev_session_energy_sensor"] = eid
     if result:
         # Use dynamic limit (preferred, no flash wear) over max_limit
@@ -2856,18 +2949,20 @@ def _discover_easee(entities) -> Dict[str, str]:
 def _discover_goecharger(entities) -> Dict[str, str]:
     """Discover EV charger config from go-eCharger integration."""
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
         if eid.startswith("binary_sensor.") and dc == "plug":
             result["ev_connected_sensor"] = eid
-        if eid.startswith("binary_sensor.") and "charg" in eid:
+        if eid.startswith("binary_sensor.") and "charg" in name:
             result["ev_charging_sensor"] = eid
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result["ev_total_energy_sensor"] = eid
-        if eid.startswith("number.") and ("amp" in eid or "current" in eid):
+        if eid.startswith("number.") and ("amp" in name or "current" in name):
             result["ev_current_control_entity"] = eid
     return result
 
@@ -2875,21 +2970,23 @@ def _discover_goecharger(entities) -> Dict[str, str]:
 def _discover_wallbox(entities) -> Dict[str, str]:
     """Discover EV charger config from Wallbox integration."""
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("binary_sensor.") and "plug" in eid:
+        if eid.startswith("binary_sensor.") and "plug" in name:
             result["ev_connected_sensor"] = eid
-        if eid.startswith("binary_sensor.") and "charg" in eid:
+        if eid.startswith("binary_sensor.") and "charg" in name:
             result["ev_charging_sensor"] = eid
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result["ev_total_energy_sensor"] = eid
-        if eid.startswith("number.") and "current" in eid:
+        if eid.startswith("number.") and "current" in name:
             result["ev_current_control_entity"] = eid
         # Wallbox pause/resume switch
-        if eid.startswith("switch.") and "pause" in eid:
+        if eid.startswith("switch.") and "pause" in name:
             result["ev_start_stop_entity"] = eid
     return result
 
@@ -2904,12 +3001,14 @@ def _discover_zaptec(entities) -> Dict[str, str]:
     """
     result: Dict[str, str] = {}
     device_id = None
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
         if entry.device_id and not device_id:
             device_id = entry.device_id
         dc = entry.original_device_class
-        eid_lower = eid.lower()
+        # (#1035) the words the integration wrote, not the device name
+        name = own.get(str(eid), "").lower()
         # (#804/#562) unique_id first, entity-id substring as fallback:
         # entity ids are localised (a Dutch install says kabel/laden, not
         # cable/charging) while the integration's unique_ids keep fixed
@@ -2917,27 +3016,27 @@ def _discover_zaptec(entities) -> Dict[str, str]:
         _uid = str(getattr(entry, "unique_id", "") or "").lower()
         if eid.startswith("binary_sensor.") and (
             _uid.endswith("cable_connected") or _uid.endswith("_connected")
-            or "cable" in eid_lower or "connect" in eid_lower
+            or "cable" in name or "connect" in name
         ):
             result["ev_connected_sensor"] = eid
         if eid.startswith("binary_sensor.") and (
-            _uid.endswith("_charging") or "charg" in eid_lower
+            _uid.endswith("_charging") or "charg" in name
         ):
             result["ev_charging_sensor"] = eid
         if eid.startswith("sensor.") and (
             dc == "power" or _uid.endswith("charge_power")
-            or ("power" in eid_lower and "energy" not in eid_lower and "kwh" not in eid_lower)
+            or ("power" in name and "energy" not in name and "kwh" not in name)
         ):
             result["ev_charging_power_sensor"] = eid
             if entry.device_id:
                 device_id = entry.device_id
         if eid.startswith("sensor.") and (
-            (dc == "energy" and ("total" in eid_lower or "session" in eid_lower))
-            or "meter_value_kwh" in eid_lower
-            or "signed_meter_value_kwh" in eid_lower
-            or "total_charge_energy" in eid_lower
+            (dc == "energy" and ("total" in name or "session" in name))
+            or "meter_value_kwh" in name
+            or "signed_meter_value_kwh" in name
+            or "total_charge_energy" in name
         ):
-            if "session" in eid_lower:
+            if "session" in name:
                 result["ev_session_energy_sensor"] = eid
             else:
                 result["ev_total_energy_sensor"] = eid
@@ -2961,7 +3060,7 @@ def _discover_zaptec(entities) -> Dict[str, str]:
             if uid.endswith("charger_max_current"):
                 result["ev_current_control_entity"] = eid
             elif ("ev_current_control_entity" not in result
-                    and "current" in eid_lower
+                    and "current" in name
                     and "available_current" not in uid
                     and "min_current" not in uid
                     and not uid.endswith("charger_min_current")):
@@ -2969,7 +3068,7 @@ def _discover_zaptec(entities) -> Dict[str, str]:
                 # differ — still never the installation limit or the min bound
                 result["ev_current_control_entity"] = eid
         if eid.startswith("button.") and (
-            "resume" in eid_lower or uid.endswith("resume_charging")
+            "resume" in name or uid.endswith("resume_charging")
         ):
             result["ev_start_stop_entity"] = eid
 
@@ -3286,10 +3385,14 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     Name hints match on WORD boundaries (``_name_hit``); the ``not`` list
     stays a plain substring, because a negative may be broad."""
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = str(entry.entity_id)
         dom = eid.split(".", 1)[0]
         dc = getattr(entry, "original_device_class", None)
+        # (#1035) the hints read the entity's own name; the device name in
+        # front of it is in every id of the device and tells none apart.
+        name = own.get(eid, "")
         for rule in hints:
             if dom != rule["domain"]:
                 continue
@@ -3301,20 +3404,20 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
             if dc == REBOOT_DEVICE_CLASS and rule.get("device_class") != dc:
                 continue
             names = rule.get("names")
-            if names and not any(_name_hit(eid, n) for n in names):
+            if names and not any(_name_hit(name, n) for n in names):
                 continue
             # (#816) an optional SECOND any-of set, ANDed with the first —
             # "juicebox" AND "lifetime" — because brands on the shared mqtt
             # platform need conjunctions a single any-of cannot express.
             names2 = rule.get("names2")
-            if names2 and not any(_name_hit(eid, n) for n in names2):
+            if names2 and not any(_name_hit(name, n) for n in names2):
                 continue
             # (#917/#984) a NEGATIVE any-of, for siblings that share the
             # positive words: ``total_charged_energy`` beside
             # ``charged_energy``, ``charging_power_l1`` beside
             # ``charging_power``. Substring rules cannot say "not" otherwise.
             not_names = rule.get("not")
-            if not_names and any(n in eid for n in not_names):
+            if not_names and any(n in name for n in not_names):
                 continue
             result[rule["role"]] = eid
     return result
@@ -3356,22 +3459,24 @@ def _discover_goecharger_mqtt(entities) -> Dict[str, str]:
     Start/stop via select entity (frc: 0=neutral, 1=off, 2=on).
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
         if eid.startswith("binary_sensor.") and dc == "plug":
             result["ev_connected_sensor"] = eid
-        if eid.startswith("binary_sensor.") and "car" in eid:
+        if eid.startswith("binary_sensor.") and "car" in name:
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result["ev_total_energy_sensor"] = eid
         # Requested current (amp) — primary control
-        if eid.startswith("number.") and ("requested_current" in eid or eid.endswith("_amp")):
+        if eid.startswith("number.") and ("requested_current" in name or eid.endswith("_amp")):
             result["ev_current_control_entity"] = eid
         # Force state select (frc) — start/stop control
-        if eid.startswith("select.") and ("frc" in eid or "force_state" in eid):
+        if eid.startswith("select.") and ("frc" in name or "force_state" in name):
             result["ev_charge_mode_entity"] = eid
             result["ev_charge_mode_start"] = "2"  # force ON
             result["ev_charge_mode_stop"] = "1"   # force OFF
@@ -3385,21 +3490,23 @@ def _discover_openwb(entities) -> Dict[str, str]:
     Uses select entity for charge mode, number entity for current.
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("binary_sensor.") and ("plug" in eid or "connect" in eid):
+        if eid.startswith("binary_sensor.") and ("plug" in name or "connect" in name):
             result["ev_connected_sensor"] = eid
-        if eid.startswith("binary_sensor.") and "charg" in eid:
+        if eid.startswith("binary_sensor.") and "charg" in name:
             result["ev_charging_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "power" and "charg" in eid:
+        if eid.startswith("sensor.") and dc == "power" and "charg" in name:
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result["ev_total_energy_sensor"] = eid
-        if eid.startswith("number.") and "current" in eid:
+        if eid.startswith("number.") and "current" in name:
             result["ev_current_control_entity"] = eid
         # Charge mode select — start/stop control
-        if eid.startswith("select.") and "chargemode" in eid:
+        if eid.startswith("select.") and "chargemode" in name:
             result["ev_charge_mode_entity"] = eid
             result["ev_charge_mode_start"] = "Instant Charging"
             result["ev_charge_mode_stop"] = "Stop"
@@ -3427,10 +3534,12 @@ def _discover_ocpp(entities) -> Dict[str, str]:
     energies: list = []
     all_powers: list = []
     all_energies: list = []
+    own = _own_names(entities)
     for entry in entities:
         eid = str(entry.entity_id)
+        name = own.get(eid, "")
         dc = entry.original_device_class
-        if eid.startswith("sensor.") and "status" in eid and "connector" in eid:
+        if eid.startswith("sensor.") and "status" in name and "connector" in name:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
@@ -3441,9 +3550,9 @@ def _discover_ocpp(entities) -> Dict[str, str]:
             all_energies.append(eid)
             if _measures_the_quantity(eid):
                 energies.append(eid)
-        if eid.startswith("number.") and ("current" in eid or "limit" in eid):
+        if eid.startswith("number.") and ("current" in name or "limit" in name):
             result["ev_current_control_entity"] = eid
-        if eid.startswith("switch.") and "charge" in eid:
+        if eid.startswith("switch.") and "charge" in name:
             result["ev_start_stop_entity"] = eid
     # Swap-only, like the choke-point guard: a charge point that publishes
     # nothing but capabilities keeps the pre-#962 answer rather than losing
@@ -3464,19 +3573,21 @@ def _discover_ohme(entities) -> Dict[str, str]:
     Charge mode via select entity (Max charge, Paused, etc.).
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("sensor.") and "status" in eid:
+        if eid.startswith("sensor.") and "status" in name:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
         if eid.startswith("sensor.") and dc == "energy":
             result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("sensor.") and "current" in eid:
+        if eid.startswith("sensor.") and "current" in name:
             result.setdefault("ev_current_sensor", eid)
-        if eid.startswith("select.") and "charge_mode" in eid:
+        if eid.startswith("select.") and "charge_mode" in name:
             result["ev_charge_mode_entity"] = eid
             result["ev_charge_mode_start"] = "Max charge"
             result["ev_charge_mode_stop"] = "Paused"
@@ -3490,21 +3601,23 @@ def _discover_peblar(entities) -> Dict[str, str]:
     Current control via number entity (charge_limit).
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("sensor.") and "state" in eid and dc is None:
+        if eid.startswith("sensor.") and "state" in name and dc is None:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "session" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "session" in name:
             result.setdefault("ev_session_energy_sensor", eid)
-        if eid.startswith("sensor.") and dc == "energy" and "lifetime" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "lifetime" in name:
             result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("number.") and ("charge" in eid or "limit" in eid):
+        if eid.startswith("number.") and ("charge" in name or "limit" in name):
             result["ev_current_control_entity"] = eid
-        if eid.startswith("switch.") and "charge" in eid:
+        if eid.startswith("switch.") and "charge" in name:
             result["ev_start_stop_entity"] = eid
     return result
 
@@ -3516,20 +3629,22 @@ def _discover_v2c(entities) -> Dict[str, str]:
     Current control via number entity (intensity).
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("binary_sensor.") and "connect" in eid:
+        if eid.startswith("binary_sensor.") and "connect" in name:
             result["ev_connected_sensor"] = eid
-        if eid.startswith("binary_sensor.") and "charg" in eid:
+        if eid.startswith("binary_sensor.") and "charg" in name:
             result["ev_charging_sensor"] = eid
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
         if eid.startswith("sensor.") and dc == "energy":
             result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("number.") and ("intensity" in eid or "current" in eid):
+        if eid.startswith("number.") and ("intensity" in name or "current" in name):
             result["ev_current_control_entity"] = eid
-        if eid.startswith("switch.") and "pause" in eid:
+        if eid.startswith("switch.") and "pause" in name:
             result["ev_start_stop_entity"] = eid
     return result
 
@@ -3541,17 +3656,19 @@ def _discover_alfen(entities) -> Dict[str, str]:
     Current control via number entity (max_current).
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("sensor.") and "main_state" in eid:
+        if eid.startswith("sensor.") and "main_state" in name:
             result.setdefault("ev_connected_sensor", eid)
             result.setdefault("ev_charging_sensor", eid)
-        if eid.startswith("sensor.") and dc == "power" and "active_power" in eid:
+        if eid.startswith("sensor.") and dc == "power" and "active_power" in name:
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "meter_reading" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "meter_reading" in name:
             result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("number.") and "max_current" in eid:
+        if eid.startswith("number.") and "max_current" in name:
             result["ev_current_control_entity"] = eid
     return result
 
@@ -3563,20 +3680,22 @@ def _discover_openevse(entities) -> Dict[str, str]:
     Current control via number entity (max_current).
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("binary_sensor.") and "vehicle" in eid:
+        if eid.startswith("binary_sensor.") and "vehicle" in name:
             result["ev_connected_sensor"] = eid
-        if eid.startswith("sensor.") and "status" in eid:
+        if eid.startswith("sensor.") and "status" in name:
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "session" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "session" in name:
             result.setdefault("ev_session_energy_sensor", eid)
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
+        if eid.startswith("sensor.") and dc == "energy" and "total" in name:
             result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("number.") and "current" in eid:
+        if eid.startswith("number.") and "current" in name:
             result["ev_current_control_entity"] = eid
     return result
 
@@ -3588,18 +3707,20 @@ def _discover_blue_current(entities) -> Dict[str, str]:
     No dedicated current control entity — power-only monitoring.
     """
     result: Dict[str, str] = {}
+    own = _own_names(entities)
     for entry in entities:
         eid = entry.entity_id
+        name = own.get(str(eid), "")
         dc = entry.original_device_class
-        if eid.startswith("sensor.") and "vehicle_status" in eid:
+        if eid.startswith("sensor.") and "vehicle_status" in name:
             result["ev_connected_sensor"] = eid
-        if eid.startswith("sensor.") and "activity" in eid:
+        if eid.startswith("sensor.") and "activity" in name:
             result.setdefault("ev_charging_sensor", eid)
         if eid.startswith("sensor.") and dc == "power":
             result["ev_charging_power_sensor"] = eid
         if eid.startswith("sensor.") and dc == "energy":
             result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("sensor.") and ("avg_current" in eid or "max_usage" in eid):
+        if eid.startswith("sensor.") and ("avg_current" in name or "max_usage" in name):
             result.setdefault("ev_current_sensor", eid)
     return result
 
@@ -4406,12 +4527,17 @@ def ocpp_charge_control_switch(hass, number_entity_id: str):
         if entry is None or str(entry.platform or "") != "ocpp":
             return None
         dev = getattr(entry, "device_id", None)
-        for e in reg.entities.values():
+        device = [e for e in reg.entities.values()
+                  if str(getattr(e, "platform", "") or "") == "ocpp"
+                  and (dev is None or getattr(e, "device_id", None) == dev)]
+        # (#1035) the switch's own name: a charge point left at the
+        # integration's default name "charger" puts "charge" in every id.
+        own = _own_names(device)
+        for e in device:
             eid = str(getattr(e, "entity_id", "") or "")
-            if (str(getattr(e, "platform", "") or "") == "ocpp"
-                    and (dev is None or getattr(e, "device_id", None) == dev)
-                    and eid.startswith("switch.") and "charge" in eid
-                    and "availab" not in eid):
+            name = own.get(eid, "")
+            if (eid.startswith("switch.") and "charge" in name
+                    and "availab" not in name):
                 return eid
     except Exception:  # noqa: BLE001
         return None
