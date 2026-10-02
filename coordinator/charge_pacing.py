@@ -18,12 +18,21 @@ meanings a user must be able to tell apart on the card.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..utils.log_gate import log_on_change
 
 _LOGGER = logging.getLogger(__name__)
+
+#: (#820, 02.10) At most one cap write per this many seconds. The release to
+#: full power below the buffer is exempt: it goes at once.
+PACING_MIN_WRITE_INTERVAL_S = 300.0
+#: (#820) A write is judged refused only when the register has not moved
+#: for this long AND for this many cycles — a Modbus read-back is a scan late.
+PACING_REFUSE_AFTER_S = 90.0
+PACING_REFUSE_AFTER_CYCLES = 3
 
 #: (#820) The margin the solved pace is opened by, in percent. The solver
 #: finds the SMALLEST constant cap that lands the pack full in the last
@@ -272,6 +281,14 @@ class ChargePacingWriter:
         #: (#820) the last cap SEM put on the register, kept across a
         #: release — a register still holding it is SEM's, not the user's
         self._own_cap_w: float | None = None
+        #: (#820, 02.10) the register just before the last write, when it
+        #: was sent, and what it read once it took the write
+        self._pre_write_w: float | None = None
+        self._write_at: float | None = None
+        self._accepted_w: float | None = None
+        #: None = pending, True = taken, False = refused
+        self._taken: bool | None = None
+        self._clock = time.monotonic
         self._store = store
         #: nothing to adopt when nothing was persisted
         self._adopted: bool = store is None
@@ -284,6 +301,10 @@ class ChargePacingWriter:
         self.last_written_w = None
         self._confirmed = False
         self._unconfirmed_cycles = 0
+        self._pre_write_w = None
+        self._write_at = None
+        self._accepted_w = None
+        self._taken = None
 
     async def apply(self, hass, entity_id: str, cap_w, *,
                     observer: bool, hw_max_w: float | None = None) -> str:
@@ -373,33 +394,86 @@ class ChargePacingWriter:
                 else register_w)
             self.engaged_entity = str(entity_id)
             self.engaged = True
-        tol = max(100.0, _step_w(hass, entity_id))
-        if abs(register_w - target_w) < tol:
-            # The register holds the cap (or close enough) — whatever SEM
-            # remembers sending.
-            if (self.last_written_w is not None
-                    and abs(register_w - self.last_written_w) < tol):
-                self._confirm(entity_id)
-            return "held"
-        if (self.last_written_w is not None
-                and abs(target_w - self.last_written_w) < tol
-                and not self._confirmed):
-            # SEM sent this cap and the register has not shown it. One
-            # cycle is a slow bus; two is a register that refused it.
-            self._unconfirmed_cycles += 1
-            if self._unconfirmed_cycles < 2:
+        step_w = _step_w(hass, entity_id)
+        # (#820, 02.10) The deadband: a cap is rewritten only for a real
+        # difference — more than one step, 100 W or 5 % of the cap. Arne's
+        # cap jittered 1150↔1158 and SEM rewrote the register every few
+        # seconds.
+        deadband = max(step_w, 100.0, 0.05 * target_w)
+        now = self._clock()
+        if self.last_written_w is None:
+            if abs(register_w - target_w) <= deadband:
                 return "held"
-            log_on_change(
-                _LOGGER, f"charge_pacing:refused:{entity_id}", logging.WARNING,
-                "charge pacing: %s refused the cap — SEM wrote %.0f W, the "
-                "register still reads %.0f W. Check the entity's range and "
-                "that the inverter accepts writes.",
-                entity_id, self.last_written_w, register_w)
-            return "write_refused"
+            return await self._write(hass, entity_id, native, target_w,
+                                     register_w, now)
+        verdict = self._judge(entity_id, register_w, step_w, now)
+        if verdict == "pending":
+            return "held"
+        if self._taken and self._accepted_w is None:
+            # adopted from a previous lifetime: what it reads now is taken
+            self._accepted_w = register_w
+        wish_changed = abs(target_w - self.last_written_w) > deadband
+        drifted = (bool(self._taken)
+                   and abs(register_w - self._accepted_w) > deadband)
+        settled = "held" if self._taken else "write_refused"
+        if not (wish_changed or drifted):
+            return settled
+        if abs(register_w - target_w) <= deadband:
+            return settled
+        if (self._write_at is not None
+                and now - self._write_at < PACING_MIN_WRITE_INTERVAL_S):
+            return settled
+        return await self._write(hass, entity_id, native, target_w,
+                                 register_w, now)
+
+    def _judge(self, entity_id: str, register_w: float, step_w: float,
+               now: float) -> str:
+        """(#820, 02.10) Did the register take the last write?
+
+        TAKEN when it sits within one step or 10 % of what SEM sent, or has
+        moved toward it since before the write — an inverter may apply its
+        own value (Arne: sent 1500, reads 1449). REFUSED only when it has not
+        moved at all for a while. Judged once per write."""
+        sent = self.last_written_w
+        pre = self._pre_write_w
+        near = abs(register_w - sent) <= max(step_w, 0.10 * sent, 1.0)
+        moved_toward = (pre is not None
+                        and abs(register_w - sent) < abs(pre - sent) - 1.0)
+        if self._taken is True:
+            return "taken"
+        if self._taken is False and not (near or moved_toward):
+            return "refused"
+        if near or moved_toward:
+            # (a register that refused and then took it — a late scan —
+            # is taken from here on)
+            self._taken = True
+            self._accepted_w = register_w
+            self._confirm(entity_id)
+            return "taken"
+        self._unconfirmed_cycles += 1
+        waited = (self._write_at is None
+                  or now - self._write_at >= PACING_REFUSE_AFTER_S)
+        if self._unconfirmed_cycles < PACING_REFUSE_AFTER_CYCLES or not waited:
+            return "pending"
+        self._taken = False
+        log_on_change(
+            _LOGGER, f"charge_pacing:refused:{entity_id}", logging.WARNING,
+            "charge pacing: %s refused the cap — SEM wrote %.0f W, the "
+            "register still reads %.0f W. Check the entity's range and "
+            "that the inverter accepts writes.",
+            entity_id, sent, register_w)
+        return "refused"
+
+    async def _write(self, hass, entity_id: str, native: float,
+                     target_w: float, register_w: float, now: float) -> str:
         self.last_written_w = target_w
         self._own_cap_w = target_w
         self._confirmed = False
         self._unconfirmed_cycles = 0
+        self._pre_write_w = register_w
+        self._write_at = now
+        self._accepted_w = None
+        self._taken = None
         # Persisted BEFORE the write, and on every write: the record has to
         # describe a register that may already carry the cap, never one that
         # might not. The cap rides along so the next lifetime knows which
@@ -459,6 +533,11 @@ class ChargePacingWriter:
         self.restore_value = restore
         self.last_written_w = _as_float(record.get("cap_w"))
         self._own_cap_w = self.last_written_w
+        # (#820, 02.10) a cap from the previous lifetime counts as taken:
+        # what the register reads now is its accepted value
+        self._taken = True if self.last_written_w is not None else None
+        self._accepted_w = None
+        self._write_at = None
         # (#820) a record whose "value to restore" is SEM's own cap (a
         # capture from before #949) is no value to restore at all
         if (restore is not None and self.last_written_w is not None

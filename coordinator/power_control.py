@@ -124,6 +124,37 @@ def clamp_to_entity_range(
     lo = attrs.get("min")
     lo_w = (float(lo) * scale
             if isinstance(lo, (int, float)) and math.isfinite(lo) else None)
+    hi = attrs.get("max")
+    hi_w = (float(hi) * scale
+            if isinstance(hi, (int, float)) and math.isfinite(hi) else None)
+    step = attrs.get("step")
+    step_w = (float(step) * scale
+              if round_down_to_step and isinstance(step, (int, float))
+              and math.isfinite(step) and step > 0 else None)
+
+    def _floor(value: float) -> float:
+        # (#820, 02.10) The grid starts at ZERO. Arne's Sungrow template
+        # number has min 10 and step 100; a grid anchored at the min gave
+        # 1410 W and, with step 10, 1151 W — values off the step the user
+        # sees. A min that sits on its own step's grid is the same grid.
+        # The tiny tolerance keeps 2.4 kW / 0.1 kW at 24 steps, not 23.
+        return math.floor(value / step_w + 1e-9) * step_w
+
+    if step_w is not None:
+        watts = _floor(watts)
+    if hi_w is not None:
+        if step_w is not None and watts > hi_w:
+            # a capped ceiling is still a value on the step (#820 review)
+            hi_w = _floor(hi_w)
+        watts = min(hi_w, watts)
+    if lo_w is not None:
+        # The entity's own floor wins over the grid: Home Assistant
+        # accepts its min, and nothing lower.
+        watts = max(lo_w, watts)
+    return watts
+    lo = attrs.get("min")
+    lo_w = (float(lo) * scale
+            if isinstance(lo, (int, float)) and math.isfinite(lo) else None)
     if round_down_to_step:
         step = attrs.get("step")
         if (isinstance(step, (int, float)) and math.isfinite(step)
