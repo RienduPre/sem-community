@@ -21,6 +21,7 @@ Detection is integration-aware:
 """
 import json
 import logging
+import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -584,26 +585,21 @@ class EVChargerDetector:
                 return -20000 <= value <= 20000
 
             elif sensor_type in ["ev_connected", "ev_charging"]:
-                # Accept binary_sensor values AND regular sensor status values
-                # used by Easee, Wallbox, GoodWe, OCPP, Ohme, Alfen, etc. (#68, #105)
-                return state.state.lower() in (
-                    "on", "off", "true", "false", "0", "1",
-                    "connected", "disconnected", "ready_to_charge",
-                    "awaiting_start", "awaiting_authorization",
-                    "charging", "completed", "ready", "idle",
-                    "not_connected", "paused", "error",
-                    # OCPP status values
-                    "available", "preparing", "suspended_ev",
-                    "suspended_evse", "finishing", "faulted",
-                    # Ohme status values
-                    "plugged in", "unplugged",
-                    # Alfen status values
-                    "ev connected", "charging power on",
-                    # Peblar status values
-                    "no ev connected",
-                    # Blue Current status values
-                    "a", "b1", "b2", "c1", "c2", "d1", "d2", "e", "f",
+                # (#1038) Accept what the reader can read, asked of the word
+                # list the reader uses (status_enum.py). This check kept its
+                # own copy, which drifted: it had Ohme's label "plugged in",
+                # never the state ``plugged_in`` HA stores, and refused the
+                # sensor. An ENUM sensor is also judged by the options it
+                # lists, so a box caught in a fault at setup still passes.
+                from .coordinator.charger_adapters.status_enum import (
+                    knows_status,
                 )
+                if knows_status(state.state) or _is_finite_number(state.state):
+                    return True
+                options = (getattr(state, "attributes", None) or {}).get(
+                    "options") or ()
+                return isinstance(options, (list, tuple)) and any(
+                    knows_status(o) for o in options)
 
             else:
                 return True
@@ -720,6 +716,15 @@ class EVChargerDetector:
 
 # Backward compatibility alias
 HardwareDetector = EVChargerDetector
+
+
+def _is_finite_number(raw) -> bool:
+    """(#1038) The reader reads a number as a status (> 0 is on), so the
+    wizard accepts one too."""
+    try:
+        return math.isfinite(float(raw))
+    except (TypeError, ValueError):
+        return False
 
 
 # ============================================================

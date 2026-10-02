@@ -939,9 +939,11 @@ OHME = MockCharger(
     charge_mode_entity="select.ohme_home_pro_charge_mode",
     charge_mode_start="max_charge",
     charge_mode_stop="paused",
-    connected_state="Plugged in",
-    charging_state="Charging",
-    disconnected_state="Unplugged",
+    # (#1038) the states HA stores (ohme ChargerStatus), never the labels
+    # it shows: "Plugged in" is how the wizard's own list went wrong.
+    connected_state="plugged_in",
+    charging_state="charging",
+    disconnected_state="unplugged",
 )
 
 PEBLAR = MockCharger(
@@ -954,9 +956,11 @@ PEBLAR = MockCharger(
     energy_sensor="sensor.peblar_rocksolid_session_energy",
     current_entity="number.peblar_rocksolid_charge_limit",
     start_stop_entity="switch.peblar_rocksolid_charge",
-    connected_state="connected",
+    # (#1038) core's cp_state options (peblar/const.py): "suspended" is a
+    # car plugged in and paused, "no_ev_connected" the empty bay.
+    connected_state="suspended",
     charging_state="charging",
-    disconnected_state="no EV connected",
+    disconnected_state="no_ev_connected",
 )
 
 V2C = MockCharger(

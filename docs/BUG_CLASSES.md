@@ -2052,6 +2052,25 @@ sites*. Note also that delegation is not free — `_NOT_CHARGING` deliberately h
 cable-present idle states and cable-ABSENT ones, so cable presence had to become its own
 enumerated axis (`_CABLE_ABSENT` + `is_cable_present`) rather than be inferred as
 "anything not disconnected", which would have read an empty bay as occupied on OCPP, go-e and Ohme.
+**Live catch (#1038), shape (c) again — the copy #833 did not look for:** the setup wizard's check
+(`EVChargerDetector._validate_entity`) kept a third copy of the status words, and
+`validate_ev_configuration` is a hard gate on the setup and reconfigure forms. On Home Assistant's
+own Ohme test data (HA 2026.8.2) the status sensor stores `plugged_in`, `finished`,
+`pending_approval`; the reader knew all three, the wizard's copy had `"plugged in"` — the label HA
+shows, not the state it stores (class 116, read side) — so the form refused the sensor while the
+car sat plugged in. The same copy spelled Peblar `"no ev connected"`; core stores
+`no_ev_connected`, and `suspended` for a car plugged in and paused, which no list knew, so the
+reader also read that car as gone. **Closure:** the copy is deleted; the wizard asks
+`status_enum.knows_status`, accepts a number as the reader does, and judges an ENUM sensor by the
+`options` it lists, so a box caught in a fault at setup still passes. Peblar's two words joined the
+shared list. Dropped with the copy, because the reader never read them: `true`/`false`, `idle`,
+the bare IEC codes `a`…`f`. **Guard:** `tests/test_1038_wizard_reads_the_shared_words.py` — core's
+option lists for Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the real form
+check; every word the reader knows passes it; an AST check that `_validate_entity` names no status
+word. **Left for Guido:** the shared list still lacks words core really stores — Blue Current
+`vehicle_detected`/`standby`, NRGkick `standby`, Tesla Wall Connector `not_connected`/`waiting_car`
+— so the reader reads a Blue Current car at `vehicle_detected` as gone. Each needs its meaning
+checked at the source before it is mapped.
 **Closure:** import the owner and delete the literal, at **every** site in one pass — and where a
 literal is not a default at all, say so in the code rather than in a comment: `charge_stability`'s
 `or 0` was a sentinel meaning "config is silent, ask the adapter", and became a conditional so the
@@ -2069,7 +2088,7 @@ argument form and would have passed while three of the five 16s were still in th
 **Sweep question:** for a config key, grep the *readers* and compare their defaults before reading
 any logic — if they disagree, that is the bug, whatever the issue says it is about. And when a key
 has no write path, its default is not a fallback, it is the value.
-Refs #789 #788 #716 #746 #685 #678 #833.
+Refs #789 #788 #716 #746 #685 #678 #833 #1038.
 
 ### 47. One word names two axes, so every reader picks the axis it expected — GUARDED
 **Symptom:** a flag reads as an answer to a question it does not answer. Nothing misbehaves; the
@@ -5343,6 +5362,8 @@ translations in German and English; signs and symbols that must not match; an AS
 every `select_option` in the package is in a function that calls `listed_option`, goes through the
 charger seam, or is on a short list with its reason, and a second one for every function that
 writes through the `CONTACT_VALUE_SERVICES` table.
+The read side is the same shape: an ENUM sensor's state is the option key too, so a word list
+typed from the UI never matches it (#1038: Ohme `plugged_in`, Peblar `no_ev_connected`).
 **Sweep question:** where SEM writes or compares a string against an entity with a fixed list —
 did the string come from that list, or from what a person saw? And before mapping one: what
 happens on the hardware once a write that was always refused starts to LAND?
@@ -5368,4 +5389,4 @@ only on an Ohme the user gave a current entity or service. Supporting a start/st
 a feature. (7) Once it is built: the hand-back (`release_to_user`) writes the START mode, which for
 Ohme is `max_charge` — a full-power charge over the user's `smart_charge` — and with no current
 entity an IDLE decision after a restart cannot stop a box left in `max_charge`.
-Refs #1039 #1032 #955.
+Refs #1039 #1032 #955 #1038.

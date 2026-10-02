@@ -63,6 +63,10 @@ _NOT_CHARGING = frozenset({
     "charging finished, vehicle still connected",
     # Ohme (models.py ChargerStatus)
     "plugged_in", "plugged in", "finished", "unplugged",
+    # Peblar (HA core peblar/const.py PEBLAR_CP_STATE_TO_HOME_ASSISTANT):
+    # "suspended" is IEC state B, a car plugged in and not charging (#1038).
+    # Its "error" / "fault" / "invalid" stay unknown on purpose.
+    "suspended", "no_ev_connected",
     # OCPP 1.6 ChargePointStatus (lower-cased, both spellings of suspended)
     "available", "preparing", "suspendedev", "suspended_ev",
     "suspendedevse", "suspended_evse", "finishing", "reserved",
@@ -114,6 +118,8 @@ _CABLE_ABSENT = frozenset({
     "disconnected", "no car connected",
     # Ohme
     "unplugged",
+    # Peblar
+    "no_ev_connected",
     # OCPP 1.6 — "Available" is the connector with no EV attached
     "available",
     # go-e
@@ -141,6 +147,17 @@ def is_cable_present(raw: "str | None") -> "bool | None":
     if classify_charger_status(raw) == "unknown":
         return None
     return str(raw).strip().lower() not in _CABLE_ABSENT
+
+
+def knows_status(raw: "str | None") -> bool:
+    """Is this a status word this module maps to a class?
+
+    #1038: the setup wizard asks this instead of keeping its own list. Its
+    copy had drifted like the reader's did in #833 — it held Ohme's label
+    "plugged in", never the state ``plugged_in`` HA stores — so it refused
+    a status sensor the reader understood.
+    """
+    return classify_charger_status(raw) != "unknown"
 
 
 def classify_charger_status(raw: "str | None") -> str:
