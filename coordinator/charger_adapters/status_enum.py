@@ -129,6 +129,22 @@ _CABLE_ABSENT = frozenset({
 })
 
 
+# ── FAULT — the box reports a fault ────────────────────────────────────
+# SEM knows these words, but they say nothing about the cable or the
+# contactor, so ``classify_charger_status`` returns "unknown" for them and
+# every reader falls back exactly as before. They are listed so the setup
+# wizard does not refuse a status sensor caught in a fault (#1038).
+_FAULT = frozenset({
+    # Wallbox (core ChargerStatus.ERROR "Error"), NRGkick, Peblar, Tesla
+    # Wall Connector
+    "error",
+    # OCPP 1.6 ChargePointStatus "Faulted"
+    "faulted",
+    # Peblar (core cp_state)
+    "fault",
+})
+
+
 def is_cable_present(raw: "str | None") -> "bool | None":
     """Is a car plugged in, according to this charger's status string?
 
@@ -150,14 +166,17 @@ def is_cable_present(raw: "str | None") -> "bool | None":
 
 
 def knows_status(raw: "str | None") -> bool:
-    """Is this a status word this module maps to a class?
+    """Is this a charger status word this module knows — one it maps to a
+    class, or a fault?
 
     #1038: the setup wizard asks this instead of keeping its own list. Its
     copy had drifted like the reader's did in #833 — it held Ohme's label
     "plugged in", never the state ``plugged_in`` HA stores — so it refused
     a status sensor the reader understood.
     """
-    return classify_charger_status(raw) != "unknown"
+    if classify_charger_status(raw) != "unknown":
+        return True
+    return raw is not None and str(raw).strip().lower() in _FAULT
 
 
 def classify_charger_status(raw: "str | None") -> str:

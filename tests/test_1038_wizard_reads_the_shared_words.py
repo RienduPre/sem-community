@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -59,7 +60,7 @@ POWER = "sensor.charger_power"
 
 
 def _detector(state, options=None):
-    attrs = {"options": list(options)} if options is not None else {}
+    attrs = {"options": options} if options is not None else {}
     st = SimpleNamespace(state=state, attributes=attrs)
     pw = SimpleNamespace(state="0", attributes={"unit_of_measurement": "W"})
     hass = MagicMock()
@@ -143,6 +144,28 @@ class TestPeblarStoresTheKeyNotTheLabel:
         assert _plugged("charging") is True
         assert _charging("charging") is True
 
+    @pytest.mark.parametrize("state,expected", [
+        ("suspended", False),       # the status wins over a lagging 3 kW
+        ("charging", True),
+        ("no_ev_connected", False),
+        ("error", True),            # unknown: the power fallback, as before
+    ])
+    def test_the_adapter_reads_peblar_status(self, state, expected):
+        from custom_components.solar_energy_management.coordinator.charger_adapters import (
+            GenericAdapter,
+        )
+        from custom_components.solar_energy_management.coordinator.charger_types import (
+            ChargerPower,
+        )
+        dev = MagicMock()
+        dev.charging_status_entity = STATUS
+        dev.hass.states.get = lambda eid: (SimpleNamespace(state=state)
+                                           if eid == STATUS else None)
+        a = GenericAdapter(dev)
+        assert a.actual_charging(
+            ChargerPower(charger_id="peblar", power_w=3000.0)) is expected
+        assert a._status_class() != "locked"
+
     @pytest.mark.parametrize("state", ["error", "fault", "invalid"])
     def test_a_fault_says_nothing_about_the_cable(self, state):
         # unknown on purpose: the reader falls back, as before
@@ -152,22 +175,39 @@ class TestPeblarStoresTheKeyNotTheLabel:
 
 class TestASensorIsJudgedByTheOptionsItLists:
     """A sensor caught at setup in a state with no control meaning (a
-    fault, a boot) is still the right sensor when it lists words SEM reads."""
+    fault, a boot) is still the right sensor when its listed options let
+    the reader answer yes AND no for the role."""
+
+    @pytest.mark.parametrize("options", [OHME, PEBLAR], ids=["ohme", "peblar"])
+    @pytest.mark.parametrize("role", ["ev_connected", "ev_charging"])
+    def test_a_full_vocabulary_passes_in_every_state(self, options, role):
+        refused = [s for s in options if not _accepts(s, options, role)]
+        assert refused == [], f"the wizard refuses {refused}"
 
     @pytest.mark.parametrize("options", [
-        NRGKICK, BLUE_CURRENT_VEHICLE, BLUE_CURRENT_ACTIVITY, TESLA_WC,
-    ], ids=["nrgkick", "blue_current_vehicle", "blue_current_activity",
-            "tesla_wall_connector"])
-    def test_every_listed_state_passes(self, options):
-        refused = [s for s in options
-                   if s != "unavailable" and _wizard_errors(s, options)]
+        NRGKICK, BLUE_CURRENT_ACTIVITY, TESLA_WC,
+    ], ids=["nrgkick", "blue_current_activity", "tesla_wall_connector"])
+    def test_a_charging_status_passes_in_every_state(self, options):
+        # NRGkick's status and Blue Current's activity are what SEM binds
+        # as the charging sensor
+        refused = [s for s in options if s != "unavailable"
+                   and not _accepts(s, options, "ev_charging")]
         assert refused == [], f"the wizard refuses {refused}"
 
     def test_the_options_carry_it_not_the_state(self):
         # the proof that the options are read: the same state on a sensor
         # that lists nothing is refused
-        assert _accepts("wakeup", NRGKICK) is True
-        assert _accepts("wakeup") is False
+        assert _accepts("wakeup", NRGKICK, "ev_charging") is True
+        assert _accepts("wakeup", None, "ev_charging") is False
+
+    def test_one_known_word_is_not_enough(self):
+        # Blue Current vehicle_status lists "ready" but SEM cannot read
+        # "vehicle_detected" as plugged or not: refused, as before
+        assert _accepts("vehicle_detected", BLUE_CURRENT_VEHICLE,
+                        "ev_connected") is False
+        assert _accepts("standby", BLUE_CURRENT_VEHICLE, "ev_connected") is False
+        # a plug sensor must be able to say "no car": Tesla WC lists none
+        assert _accepts("booting", TESLA_WC, "ev_connected") is False
 
     @pytest.mark.parametrize("options", [
         # Peblar charge_current_limit_source, NRGkick cellular_mode: ENUM
@@ -175,11 +215,16 @@ class TestASensorIsJudgedByTheOptionsItLists:
         ["charging_cable", "current_limiter", "solar_charging"],
         ["no_service", "gsm", "lte_cat_m1", "lte_nb_iot"],
     ])
-    def test_a_list_with_no_status_word_is_still_refused(self, options):
-        assert _accepts(options[0], options) is False
+    @pytest.mark.parametrize("role", ["ev_connected", "ev_charging"])
+    def test_a_list_with_no_status_word_is_still_refused(self, options, role):
+        assert _accepts(options[0], options, role) is False
 
     def test_unavailable_is_refused_whatever_it_lists(self):
-        assert _accepts("unavailable", BLUE_CURRENT_ACTIVITY) is False
+        assert _accepts("unavailable", BLUE_CURRENT_ACTIVITY, "ev_charging") is False
+
+    @pytest.mark.parametrize("options", ["charging, paused", {"x": 1}, 7])
+    def test_options_that_are_not_a_list_are_refused(self, options):
+        assert _accepts("wakeup", options) is False
 
 
 class TestTheWizardAndTheReaderAgree:
@@ -193,11 +238,26 @@ class TestTheWizardAndTheReaderAgree:
         refused = [w for w in self.WORDS if not _accepts(w, role=role)]
         assert refused == [], f"the wizard refuses words the reader knows: {refused}"
 
-    @pytest.mark.parametrize("state", ["on", "off", "ON", "Paused", "0", "1",
-                                       "7.4"])
-    def test_binary_and_numbers_pass(self, state):
-        # the reader reads a number as on when > 0
+    @pytest.mark.parametrize("state", ["on", "off", "ON", "Paused", "0", "1"])
+    def test_binary_states_pass(self, state):
         assert _accepts(state) is True
+
+    @pytest.mark.parametrize("state", ["230.4", "1534.2", "3", "7.4"])
+    def test_any_other_number_is_not_a_plug(self, state):
+        # the reader would read it as on (> 0): a voltage or an energy
+        # total picked by mistake would show a car plugged in all the time
+        assert _accepts(state) is False
+        assert _plugged(state) is True
+
+    @pytest.mark.parametrize("state", ["Faulted", "Error", "fault"])
+    def test_a_box_caught_in_a_fault_passes_on_a_plain_sensor(self, state):
+        # OCPP "Faulted" and Wallbox "Error" are plain sensors, no options:
+        # the old list took them, and reconfigure must still save
+        assert _wizard_errors(state) == {}
+        # and they still mean nothing to the reader
+        assert se.classify_charger_status(state) == "unknown"
+        assert se.is_cable_present(state) is None
+        assert _plugged(state) is False
 
     @pytest.mark.parametrize("state", ["maybe", "idle", "true", "nan",
                                        "a", "b1", "firmware 1.2.3"])
@@ -210,9 +270,25 @@ class TestTheWizardAndTheReaderAgree:
         assert det._validate_entity(POWER, "ev_charging_power") is True
 
 
+def _status_word_lists(tree):
+    """Every tuple/list/set literal holding two or more status words other
+    than a bare on/off pair."""
+    found = []
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Tuple, ast.List, ast.Set)):
+            words = [e.value for e in n.elts
+                     if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                     and se.knows_status(e.value)
+                     and e.value.strip().lower() not in ("on", "off")]
+            if len(words) >= 2:
+                found.append((n.lineno, words))
+    return found
+
+
 class TestTheCopyIsGone:
-    """No status word may be written in the wizard's check again — the
-    words belong to status_enum.py, which the reader uses too."""
+    """No module but status_enum.py may write a list of status words again
+    — the words belong there, where the reader and the wizard both read
+    them."""
 
     def test_no_status_word_in_validate_entity(self):
         src = textwrap.dedent(inspect.getsource(
@@ -220,15 +296,28 @@ class TestTheCopyIsGone:
         found = sorted({
             n.value for n in ast.walk(ast.parse(src))
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
-            and se.classify_charger_status(n.value) != "unknown"
+            and se.knows_status(n.value)
         })
         assert found == [], (
             f"_validate_entity names status words {found} — ask "
             "status_enum.knows_status instead")
 
+    def test_no_word_list_anywhere_in_the_package(self):
+        root = Path(hd.__file__).parent
+        hits = []
+        for path in sorted(root.rglob("*.py")):
+            rel = path.relative_to(root).as_posix()
+            if rel.split("/")[0] in ("tests", "tools", "scripts") or \
+                    rel == "coordinator/charger_adapters/status_enum.py":
+                continue
+            for line, words in _status_word_lists(ast.parse(path.read_text())):
+                hits.append(f"{rel}:{line} {words}")
+        assert hits == [], (
+            "a private list of charger status words — they belong in "
+            "status_enum.py:\n" + "\n".join(hits))
+
     def test_the_lint_can_fail(self):
-        bad = 'def f(s):\n    return s in ("plugged in", "charging")\n'
-        found = {n.value for n in ast.walk(ast.parse(bad))
-                 if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                 and se.classify_charger_status(n.value) != "unknown"}
-        assert found == {"plugged in", "charging"}
+        bad = 'def f(s):\n    return s in ("on", "plugged in", "charging")\n'
+        assert _status_word_lists(ast.parse(bad)) == [
+            (2, ["plugged in", "charging"])]
+        assert _status_word_lists(ast.parse('x = ("on", "off")\n')) == []

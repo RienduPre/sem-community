@@ -2061,16 +2061,25 @@ shows, not the state it stores (class 116, read side) — so the form refused th
 car sat plugged in. The same copy spelled Peblar `"no ev connected"`; core stores
 `no_ev_connected`, and `suspended` for a car plugged in and paused, which no list knew, so the
 reader also read that car as gone. **Closure:** the copy is deleted; the wizard asks
-`status_enum.knows_status`, accepts a number as the reader does, and judges an ENUM sensor by the
-`options` it lists, so a box caught in a fault at setup still passes. Peblar's two words joined the
-shared list. Dropped with the copy, because the reader never read them: `true`/`false`, `idle`,
-the bare IEC codes `a`…`f`. **Guard:** `tests/test_1038_wizard_reads_the_shared_words.py` — core's
-option lists for Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the real form
-check; every word the reader knows passes it; an AST check that `_validate_entity` names no status
-word. **Left for Guido:** the shared list still lacks words core really stores — Blue Current
-`vehicle_detected`/`standby`, NRGkick `standby`, Tesla Wall Connector `not_connected`/`waiting_car`
-— so the reader reads a Blue Current car at `vehicle_detected` as gone. Each needs its meaning
-checked at the source before it is mapped.
+`status_enum.knows_status` — the words the reader maps, plus a `_FAULT` set (`error`, `faulted`,
+`fault`) that the reader still reads as unknown, so a plain OCPP or Wallbox sensor caught in a
+fault still saves. Numbers stay `0`/`1` only: the reader reads any number > 0 as on, so a voltage
+picked by mistake would show a car plugged in all the time. An ENUM sensor in any other state
+passes when its `options` let the reader answer yes AND no for the role; one known word is not
+enough. Peblar's two words joined the shared list. Dropped with the copy, because the reader never
+read them: `true`/`false`, `idle`, `not_connected` and `no ev connected` on a plain sensor, the
+bare IEC codes `a`…`f`. A fourth copy, in the coordinator's per-charger loop (`== "on"`, so Ohme
+`charging` read as not charging; nothing read the result), now takes the reader's per-charger
+answer. **Guard:** `tests/test_1038_wizard_reads_the_shared_words.py` — core's option lists for
+Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the real form check; every
+word the reader knows passes it; an AST lint over the package for any tuple, list or set of two or
+more status words outside `status_enum.py`. **Left for Guido:** the shared list still lacks words
+core really stores — Blue Current `vehicle_detected`/`standby`, NRGkick `standby`, Tesla Wall
+Connector `not_connected`/`waiting_car` — so a Blue Current `vehicle_status` is still refused
+except at `ready`, and the reader reads a car at `vehicle_detected` as gone. Each needs its meaning
+checked at the source before it is mapped. Older and separate: `_discover_peblar` and
+`_discover_easee` take a status sensor only with no device class, but core's Peblar `cp_state` is
+`enum`, so registry discovery never binds it (the glob prefill does, on an English install).
 **Closure:** import the owner and delete the literal, at **every** site in one pass — and where a
 literal is not a default at all, say so in the code rather than in a comment: `charge_stability`'s
 `or 0` was a sentinel meaning "config is silent, ask the adapter", and became a conditional so the
