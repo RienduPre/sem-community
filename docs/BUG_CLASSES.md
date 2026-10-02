@@ -2505,6 +2505,20 @@ guard holds for a hand-written brand shape too, so the closure is at the class l
 instance. **Sweep question:** for every entity a detector binds to an actuation role, can the
 integration expose a SECOND entity that fits the same shape but governs a different mode/state — and
 does the matcher separate them, or pick by ordering? Refs #886 #816 #683 #698.
+**Second instance — #1034, one end of a range:** HA's own V2C Trydan test data publishes three
+current numbers: `intensity` (the set-point), `min_intensity` and `max_intensity`. The V2C rule kept
+the last one named "intensity", so registry order bound the FLOOR: every SEM write would move the
+minimum and leave the charge alone. The qualifier is a RANGE END, not a mode. `_reject_range_end_current_control`
+runs at the same choke point, right after the offline guard: a control whose own name or translation
+key says `min`/`minimum`/`max`/`maximum` swaps to its set-point twin (the number named like it
+without that word, same device class and unit; the key is compared too, so a German or renamed id
+still finds it; two twins are a choice it does not make). With no twin a FLOOR is dropped (this
+class's actuation rule) and a CEILING stays — on Alfen, Wallbox, Zaptec and OCPP the "max current"
+number is the only one and IS the control. Guard: `tests/test_1034_range_and_circuit.py` — HA's V2C
+in all 144 orders of its numbers and power sensors, the brand rule's raw answer spelled out, and an
+every-platform oracle with `min_`/`max_charging_current` first and last. **Left for Guido:** a V2C
+SAVED before this fix keeps `min_intensity` (detection re-runs only with no charger configured; the
+#886 heal swaps only `offline`).
 
 ### 57. Belt-and-suspenders actuation — a wrapper does the action AND delegates to a layer that does it again — GUARDED
 **Symptom:** one logical actuation reaches the hardware TWICE, a few milliseconds apart. No error, no
@@ -3898,6 +3912,15 @@ it without the phase (`_without_phase`), so a device's grid, solar or battery po
 for it. `_is_phase_leg` reads the entity's own name (class 115) and wants the number AFTER the word:
 `phase_3` is a leg, `3_phase_power` is the sum.
 Guard: `tests/test_1035_own_name.py::TestOnePhaseIsSwappedForTheTotal`.
+**Third instance — #1034, another circuit:** a box with its own clamps meters more than the car.
+HA's V2C publishes `charge_power`, `house_power`, `photovoltaic_power` (key `fv_power`) and
+`battery_power`, all `device_class: power`; its rule kept the last, the solar output. The guard now
+also swaps a read role whose own name or translation key names another circuit
+(`_OTHER_CIRCUIT_SEGMENTS`: photovoltaic, pv, fv, solar, house, home, household, grid, battery,
+inverter), and `_measured_twin` never offers one. Swap only, like the rest of this class. The own name
+keeps a device called "Solar Carport" from flagging its own charge; the key keeps a German
+`…_photovoltaik_leistung` visible. The glob prefill demotes the same words. Guard:
+`tests/test_1034_range_and_circuit.py`.
 **Residual, CLOSED in #964 (class 90):** the sibling search this class installs is only as
 honest as the bucket it searches — and two of the three discovery sites grouped device-less
 entities into ONE bucket per platform, so the best-ranked sibling could belong to the other
@@ -5271,6 +5294,6 @@ Peblar gets no start/stop (its switch is not called "charge"; before, it got the
 switch), and a phase named `fase_3`/`fas_3` is not seen as one phase. Reading Peblar's unique-id
 keys (`…_charge`, `…_power_total`) would fix both — brand code, so not here. (8) Seen on HA's own
 entity names, older than this class: Wallbox binds `…_maximum_icp_current`, the site's grid limit,
-as its current control; V2C is #1034. Class 114's residual (2) loses its `carport` case:
+as its current control; V2C was #1034 (classes 56 and 89, closed). Class 114's residual (2) loses its `carport` case:
 go-e MQTT's `car` now reads the own name.
 Refs #1035 #962 #976 #804 #1036.
