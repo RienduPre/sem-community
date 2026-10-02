@@ -27,8 +27,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
-from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
+from .consts.devices import (
+    REBOOT_DEVICE_CLASS, names_a_charge_pause, names_a_reboot)
 from .utils.select_option import pick_listed
+from .utils.switch_sense import charge_pause_twin, integration_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -309,6 +311,17 @@ def _key_words(entry) -> List[str]:
     if not isinstance(key, str):
         return []
     return [w for w in key.lower().split("_") if w]
+
+
+def _pauses_the_charge(entry) -> bool:
+    """(#1042) A switch that pauses the CHARGE — and nothing else: V2C's
+    "Pause dynamic control modulation" pauses the box's solar modulation.
+
+    Read on the name the run time reads it by (``integration_name``: the
+    translation key, the same in every language, then the integration's
+    own name). A switch bound on any other name would be driven as
+    on-while-charging — the bug."""
+    return names_a_charge_pause(integration_name(entry))
 
 
 def _what_it_is(entities) -> Dict[str, List[str]]:
@@ -3923,7 +3936,8 @@ def _discover_v2c(entities) -> Dict[str, str]:
     """Discover EV charger config from V2C Trydan integration.
 
     V2C uses binary_sensor for connected/charging status.
-    Current control via number entity (intensity).
+    Current control via number entity (intensity). Start/stop is the
+    session pause, which is ON while paused (#1042).
     """
     result: Dict[str, str] = {}
     own = _own_names(entities)
@@ -3941,7 +3955,10 @@ def _discover_v2c(entities) -> Dict[str, str]:
             result.setdefault("ev_total_energy_sensor", eid)
         if eid.startswith("number.") and ("intensity" in name or "current" in name):
             result["ev_current_control_entity"] = eid
-        if eid.startswith("switch.") and "pause" in name:
+        # (#1042) The session pause ("Pause session", key ``paused``), on
+        # while paused. "Pause dynamic control modulation" is registered
+        # after it and also says "pause"; the last-wins test bound it.
+        if eid.startswith("switch.") and _pauses_the_charge(entry):
             result["ev_start_stop_entity"] = eid
     return result
 
@@ -4923,7 +4940,20 @@ def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> Non
     Two construction sites once carried this unevenly — the retry path had
     none of it — which is the shape that hid the export guard's silent
     no-op (bug class 93): a second producer without the field.
+
+    * (#1042) a saved start/stop switch that pauses something other than
+      the charge is swapped for the device's one pause of the charge
+      (``charge_pause_twin``).
     """
+    saved = getattr(device, "start_stop_entity", None)
+    twin = charge_pause_twin(hass, saved) if saved else None
+    if twin:
+        device.start_stop_entity = twin
+        _LOGGER.warning(
+            "Charger '%s': the saved start/stop switch %s pauses something "
+            "other than the charge; SEM uses %s, the same device's pause of "
+            "the charge. Save %s under Configuration → EV chargers to stop "
+            "this message (#1042)", charger_id, saved, twin, twin)
     if not current_entity_id:
         return
     platform = entity_platform(hass, current_entity_id)

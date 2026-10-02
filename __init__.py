@@ -6267,6 +6267,7 @@ async def _async_register_phase_services(
         """
         from .coordinator.charger_types import ChargerPower
         from .coordinator.charger_adapters import adapter_for
+        from .utils.switch_sense import on_means_paused as _on_means_paused
 
         out: dict = {}
         devs = getattr(coordinator, "_ev_devices", {}) or {}
@@ -6300,6 +6301,10 @@ async def _async_register_phase_services(
                 "current_entity_state": _state(getattr(dev, "current_entity_id", None)),
                 "start_stop_entity": getattr(dev, "start_stop_entity", None),
                 "start_stop_state": _state(getattr(dev, "start_stop_entity", None)),
+                # (#1042) True when the switch is named for the pause, so
+                # its "on" is the stop (V2C's "Pause session").
+                "start_stop_on_means_paused": _on_means_paused(
+                    hass, getattr(dev, "start_stop_entity", None)),
                 "status_entity": getattr(dev, "charging_status_entity", None),
                 "status_raw": _state(getattr(dev, "charging_status_entity", None)),
                 "believed_setpoint_a": getattr(dev, "_current_setpoint", None),
