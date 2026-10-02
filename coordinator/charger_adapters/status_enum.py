@@ -160,6 +160,15 @@ _IEC_PILOT = frozenset({
 })
 
 
+
+# ── The words a charge-mode SELECT offers to STOP ─────────────────────────
+# (R5, #1032) A select is read by what it offers: one of these options means
+# "do not charge". They are status-shaped words, so they live here with the
+# rest of the vocabulary (#1038: no second copy anywhere in the package).
+SELECT_STOP_WORDS = frozenset({
+    "stopped", "stop", "paused", "pause", "off", "disabled",
+})
+
 def is_cable_present(raw: "str | None") -> "bool | None":
     """Is a car plugged in, according to this charger's status string?
 

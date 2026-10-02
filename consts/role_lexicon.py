@@ -609,8 +609,8 @@ VEHICLE_CONTROL_RULES: Final[Dict[str, Dict[str, Any]]] = {
 #: are what tell the charge mode (``Fast``/``Eco``/``Eco+``/``Stopped``) from
 #: the phase setting (``1``/``3``/``auto``). A charge-mode select must offer a
 #: way to stop AND a way to charge; a phase select must offer 1 and 3.
-SELECT_STOP_OPTIONS: Final[tuple] = ("stopped", "stop", "paused", "pause",
-                                     "off", "disabled")
+# The stop words live with the status vocabulary (status_enum.SELECT_STOP_WORDS,
+# #1038: one copy); the reader imports them from there.
 SELECT_CHARGE_OPTIONS: Final[tuple] = ("fast", "eco", "eco+", "pv", "solar",
                                        "now", "boost", "max charge",
                                        "minpv", "smart charge")

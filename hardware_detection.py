@@ -2127,7 +2127,8 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
                 continue
             opts = _select_options(e, state_of)
             go = _pick_option(opts, lex.SELECT_CHARGE_OPTIONS)
-            halt = _pick_option(opts, lex.SELECT_STOP_OPTIONS)
+            from .coordinator.charger_adapters.status_enum import SELECT_STOP_WORDS
+            halt = _pick_option(opts, tuple(sorted(SELECT_STOP_WORDS)))
             if go and halt and "charge_mode" not in roles:
                 roles["charge_mode"] = {"entity": str(e.entity_id),
                                         "start": go, "stop": halt}
