@@ -228,6 +228,57 @@ class TestARangeEndIsNotTheSetPoint:
         _reject_range_end_current_control(result, ents)
         assert "ev_current_control_entity" not in result
 
+    def test_a_floor_with_two_ceilings_is_dropped(self):
+        ents = _numbers("box", ("min_current", "min_current"),
+                        ("max_current", "other"),
+                        ("led", "max_current"))
+        result = {"ev_current_control_entity": "number.box_min_current"}
+        _reject_range_end_current_control(result, ents)
+        assert "ev_current_control_entity" not in result
+
+    def test_two_set_points_beat_a_ceiling_and_drop_the_floor(self):
+        ents = _numbers("box", ("intensity", "other"), ("current", "intensity"),
+                        ("max_intensity", "max_intensity"),
+                        ("min_intensity", "min_intensity"))
+        result = {"ev_current_control_entity": "number.box_min_intensity"}
+        _reject_range_end_current_control(result, ents)
+        assert "ev_current_control_entity" not in result
+
+    def test_a_minimum_is_not_a_ceiling(self):
+        ents = _numbers("box", ("min_current", None),
+                        ("minimum_current", None), ("led", None))
+        result = {"ev_current_control_entity": "number.box_min_current"}
+        _reject_range_end_current_control(result, ents)
+        assert "ev_current_control_entity" not in result
+
+    def test_on_a_transport_the_device_name_comes_off_in_front_only(self):
+        """mqtt keeps the device name in every id. "Min Laddbox" still has
+        a floor of its own, and "Max Box" a floor beside its ceiling."""
+        def _mqtt(device, owns):
+            return [_entry(f"number.{device}_{own}", "mqtt", "m-1", "current",
+                           "A") for own in owns] + [
+                _entry(f"sensor.{device}_power", "mqtt", "m-1", "power", "W")]
+        ents = _mqtt("min_laddbox", ("min_current", "current"))
+        result = {"ev_current_control_entity": "number.min_laddbox_min_current"}
+        _reject_range_end_current_control(result, ents)
+        assert result["ev_current_control_entity"] == \
+            "number.min_laddbox_current"
+        ents = _mqtt("max_box", ("min_current", "max_current"))
+        result = {"ev_current_control_entity": "number.max_box_min_current"}
+        _reject_range_end_current_control(result, ents)
+        assert result["ev_current_control_entity"] == "number.max_box_max_current"
+
+    def test_a_word_in_front_of_half_the_ids_is_not_the_device(self):
+        ents = [
+            _entry("number.min_current", "mqtt", "m-1", "current", "A"),
+            _entry("number.min_voltage", "mqtt", "m-1", "voltage", "V"),
+            _entry("number.current", "mqtt", "m-1", "current", "A"),
+            _entry("sensor.power", "mqtt", "m-1", "power", "W"),
+        ]
+        result = {"ev_current_control_entity": "number.min_current"}
+        _reject_range_end_current_control(result, ents)
+        assert result["ev_current_control_entity"] == "number.current"
+
     def test_only_the_side_with_the_word_is_compared(self):
         """The id says "max", the key does not: the key is not a twin
         test, or a sibling sharing the key would be taken (review)."""
@@ -398,6 +449,15 @@ class TestAnotherCircuitIsNotTheCar:
         _reject_capability_sensor(result, ents)
         assert result["ev_charging_power_sensor"] == \
             "sensor.home_juicebox_power"
+
+    def test_on_a_transport_a_circuit_beside_the_device_name_is_seen(self):
+        ents = [_entry(f"sensor.home_evse_{own}", "mqtt", "m-1", dc, unit)
+                for own, dc, unit in (
+                    ("power", "power", "W"), ("home_power", "power", "W"),
+                    ("energy", "energy", "kWh"), ("status", None, None))]
+        result = {"ev_charging_power_sensor": "sensor.home_evse_home_power"}
+        _reject_capability_sensor(result, ents)
+        assert result["ev_charging_power_sensor"] == "sensor.home_evse_power"
 
     def test_a_small_unit_with_a_renamed_id_keeps_its_reading(self):
         """Under eight ids one rename hides the device name; "home" in it

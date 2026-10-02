@@ -2515,9 +2515,10 @@ without that word, same device class and unit; the key is compared too, so a Ger
 still finds it; only the side that holds the word is compared; two twins are a choice it does not
 make). With no set-point a CEILING stays — on Alfen, Wallbox, Zaptec and OCPP the "max current"
 number is the only one and IS the control — so a FLOOR goes to its ceiling twin (else the order of
-the pair would decide), and a floor with neither is dropped (this class's actuation rule). A word
-more than half the unit's ids carry is the device's (`_carried_by_most`): on mqtt the device name
-stays in every id, and "Min JuiceBox" (Swedish "my") must not read as a floor. Guard: `tests/test_1034_range_and_circuit.py` — HA's V2C
+the pair would decide), and a floor with neither is dropped (this class's actuation rule). Where
+`_own_names` takes nothing off (mqtt, a small unit with one id renamed), the leading words more than
+half the unit's ids share are the device's (`_what_it_is`): "Min JuiceBox" (Swedish "my") is not a
+floor, but its `…_min_current` still is. Guard: `tests/test_1034_range_and_circuit.py` — HA's V2C
 in all 144 orders of its numbers and power sensors, the brand rule's raw answer spelled out, and an
 every-platform oracle with `min_`/`max_charging_current` first and last. **Left for Guido:** a V2C
 SAVED before this fix keeps `min_intensity` (detection re-runs only with no charger configured; the
@@ -3922,9 +3923,9 @@ also swaps a read role whose own name or translation key names another circuit
 (`_OTHER_CIRCUIT_SEGMENTS`: photovoltaic, pv, fv, solar, house, home, household, grid, battery,
 inverter, mains, utility, evu, akku, ess, shaper), and `_measured_twin` never offers one; among
 equal ranks a candidate naming the car (`charge`, `ev`, `car`, `vehicle`) beats the alphabet. Swap
-only, like the rest of this class. The own name, less the words most of the unit carries, keeps a
-device called "Solar Carport" or an mqtt "Home JuiceBox" from flagging its own charge (the review
-found the latter undid #1035's phase swap); the key keeps a German `…_photovoltaik_leistung`
+only, like the rest of this class. `_what_it_is` keeps a device called "Solar Carport" or an mqtt
+"Home JuiceBox" from flagging its own charge (the review found the latter undid #1035's phase
+swap); the key keeps a German `…_photovoltaik_leistung`
 visible. The word list is English plus the keys: an unlisted word (`consumption`) is not seen —
 fail-open, like the capability list. The glob prefill is unchanged: it reads whole ids, so a device
 name would demote a real reading. Guard: `tests/test_1034_range_and_circuit.py`; on the 16 rig
