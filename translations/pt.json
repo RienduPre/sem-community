@@ -1374,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Diferença do contador"
+      },
+      "pv_health": {
+        "name": "Estado FV",
+        "state": {
+          "green": "Bom",
+          "yellow": "Razoável",
+          "orange": "Fraco",
+          "red": "Mau"
+        }
       }
     },
     "binary_sensor": {
@@ -1610,6 +1619,14 @@
           "4_hours": "4 horas",
           "8_hours": "8 horas",
           "12_hours": "12 horas"
+        }
+      },
+      "hints": {
+        "name": "Dicas",
+        "state": {
+          "off": "Desligado",
+          "weekly": "Nota semanal",
+          "all": "Todas as dicas"
         }
       }
     },

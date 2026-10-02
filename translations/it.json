@@ -1374,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Scarto contatore casa"
+      },
+      "pv_health": {
+        "name": "Stato FV",
+        "state": {
+          "green": "Buono",
+          "yellow": "Discreto",
+          "orange": "Scarso",
+          "red": "Cattivo"
+        }
       }
     },
     "binary_sensor": {
@@ -1610,6 +1619,14 @@
           "4_hours": "4 ore",
           "8_hours": "8 ore",
           "12_hours": "12 ore"
+        }
+      },
+      "hints": {
+        "name": "Avvisi",
+        "state": {
+          "off": "Spento",
+          "weekly": "Nota settimanale",
+          "all": "Tutti gli avvisi"
         }
       }
     },

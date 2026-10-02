@@ -1374,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Rozdíl měřiče"
+      },
+      "pv_health": {
+        "name": "Stav FV",
+        "state": {
+          "green": "Dobrý",
+          "yellow": "Průměrný",
+          "orange": "Slabý",
+          "red": "Špatný"
+        }
       }
     },
     "binary_sensor": {
@@ -1610,6 +1619,14 @@
           "4_hours": "4 hodiny",
           "8_hours": "8 hodin",
           "12_hours": "12 hodin"
+        }
+      },
+      "hints": {
+        "name": "Tipy",
+        "state": {
+          "off": "Vyp.",
+          "weekly": "Týdenní zpráva",
+          "all": "Všechny tipy"
         }
       }
     },

@@ -377,10 +377,49 @@ When the battery is held, the grid pays for the whole house; when it is
 open, the battery does. A rate in between — grid up to the peak limit,
 battery for the rest — is not built.
 
-## Every control is shown (#996 open)
+## Controls follow what the house can use (2.2, #996)
 
-A house on a flat tariff still sees the price controls, which can do nothing
-there. Hiding a control this house cannot use is planned, not built.
+A control your house cannot use is not created: price thresholds need a
+dynamic tariff, the export guard an export-limit entity, forecast rows a
+forecast, kWh-per-kWp sensors a plant size, ROI rows an investment figure.
+Wire the thing and the control appears after one automatic reload.
+
+Three things to know:
+
+- The export limit and the forecast are read from the entity registry (the
+  entity exists and is enabled), never from a live reading. An outage removes
+  nothing.
+- "Not there" is stored only after six reads over ten minutes while Home
+  Assistant is running, and takes effect at the next reload. Until then SEM
+  keeps the control rather than guess.
+- A custom dashboard that names one of these entities shows it as
+  unavailable on a house that lacks the capability.
+
+## Charge pacing drives one charge-limit entity (#820)
+
+Pacing writes one number: the battery charge-power limit you named. A house
+with two inverters paces the one that owns that entity; the other charges as
+it likes. Pacing both needs a second limit entity, which SEM does not take yet.
+
+## Charge pacing writes at most every five minutes (#820)
+
+A pacing cap is rewritten only for a real change (more than a step, 100 W or
+5 %), and at most once every five minutes. The release to full power below
+the buffer goes at once. A cap the inverter applies as its own number (you
+asked for 1550 W, it holds 1449 W) counts as taken and is left alone.
+
+## PV health: the snow flag needs a temperature source (#1022)
+
+`sensor.sem_pv_health` claims snow only when it is freezing. Without an
+outdoor temperature entity or a weather entity, the flag stays off. The
+colour needs three settled days before it shows.
+
+## Charger roles: cloud-only integrations are proven from their source (#1032)
+
+The crawler's roles are tested against each integration's real output. Zaptec
+and Easee only run with an account, so their test data comes from their
+source code, the weakest kind of proof. A report from a real box is what
+turns such a row into tested-live.
 
 ## KEBA: Off and Pause hold for about 10 minutes
 

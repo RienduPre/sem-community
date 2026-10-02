@@ -2772,6 +2772,10 @@ class SEMConfigCard extends SEMLitBase {
                 opts, 'config_help_notif_mobile', false)}
             ${this._renderOptionSelect('mobile_notification_service', 'config_notif_service',
                 notifyServices, opts, 'config_help_notif_service', '')}
+            ${/* (#1019) Hints: one select for five categories —
+                  off / weekly note / all. The entity is the source of truth,
+                  the card stages. */ ''}
+            ${this._renderSelect('select.sem_hints', 'hints', T, 'config_help_hints')}
         `;
     }
 

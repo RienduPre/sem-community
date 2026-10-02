@@ -3006,6 +3006,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool:
     try:
         await _async_register_services(hass, coordinator)
         await _async_register_phase_services(hass, coordinator)
+        # (#1024) The EV card reads the session list over this command.
+        from .session_history import async_register_websocket
+        async_register_websocket(hass)
         _LOGGER.debug("Services registered successfully")
     except Exception as err:
         _LOGGER.warning(
@@ -5628,8 +5631,12 @@ async def _async_register_phase_services(
         # name (number.py CONFIG_KEY_MAP, #542) — the naive number.sem_<key>
         # check missed them (the legionella dual-path confusion). Reverse-map
         # option key → entity suffix so they entity-route like any other.
-        from .number import CONFIG_KEY_MAP as _NUM_MAP
+        from .number import CONFIG_KEY_MAP as _NUM_MAP, NUMBER_TYPES as _NUM_TYPES
+        from .coordinator.install_modules import (
+            entity_kept as _entity_kept, presence_of as _presence_of,
+        )
         _OPTION_TO_ENTITY = {v: k for k, v in _NUM_MAP.items()}
+        _NUMBER_KEYS = {d.key for d in _NUM_TYPES}
 
         # (#636) Load-management peaks have LIVE updaters but no number
         # entities — pre-fix they fell to the unrouted → entry-write →
@@ -5656,6 +5663,14 @@ async def _async_register_phase_services(
                     persist_global_option(hass, target_entry, _c2, key, value)
                     continue
             _ent_suffix = _OPTION_TO_ENTITY.get(key, key)
+            # (#996) A tunable whose number entity this house does not get
+            # (its capability is absent) has nothing to refresh and nothing
+            # built from it: store it without a reload (the #462 rule), so
+            # it is in place if the capability appears.
+            if (_coord is not None and _ent_suffix in _NUMBER_KEYS
+                    and not _entity_kept("number", _ent_suffix, _presence_of(_coord))):
+                persist_global_option(hass, target_entry, _coord, key, value)
+                continue
             if hass.states.get(f"number.sem_{_ent_suffix}") is not None:
                 await hass.services.async_call(
                     "number", "set_value",
@@ -5814,6 +5829,32 @@ async def _async_register_phase_services(
         async_get_config,
         schema=vol.Schema({
             vol.Optional("entry_id"): cv.string,
+        }),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def async_export_session_history(call):
+        """(#1024) The stored charging sessions as rows and as CSV text.
+
+        For automations and scripts that keep their own log. The card
+        builds its own download from the same rows over the websocket
+        command; this is the path with no browser in it.
+        """
+        from .session_history import history_for, select_sessions, sessions_csv
+        data = call.data or {}
+        history = history_for(hass, data.get("entry_id")) or []
+        rows = select_sessions(history, charger_id=data.get("charger_id"),
+                               since=data.get("since"))
+        return {"rows": rows, "csv": sessions_csv(rows)}
+
+    hass.services.async_register(
+        DOMAIN,
+        "export_session_history",
+        async_export_session_history,
+        schema=vol.Schema({
+            vol.Optional("entry_id"): cv.string,
+            vol.Optional("charger_id"): cv.string,
+            vol.Optional("since"): cv.string,
         }),
         supports_response=SupportsResponse.ONLY,
     )

@@ -1374,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "House meter difference"
+      },
+      "pv_health": {
+        "name": "PV health",
+        "state": {
+          "green": "Good",
+          "yellow": "Fair",
+          "orange": "Poor",
+          "red": "Bad"
+        }
       }
     },
     "binary_sensor": {
@@ -1610,6 +1619,14 @@
           "4_hours": "4 hours",
           "8_hours": "8 hours",
           "12_hours": "12 hours"
+        }
+      },
+      "hints": {
+        "name": "Hints",
+        "state": {
+          "off": "Off",
+          "weekly": "Weekly note",
+          "all": "All hints"
         }
       }
     },

@@ -221,6 +221,10 @@ class PowerReadings:
     #: that was fine. The reader knows the names; now they travel.
     dark_inputs: tuple = ()
     solar_power_unavailable: bool = False
+    #: (#1022) minutes every solar read came back dark today — the PV
+    #: health sensor's downtime figure. Adds up in the reader, resets at
+    #: midnight.
+    solar_downtime_min_today: float = 0.0
     grid_power_unavailable: bool = False
     battery_power_all_unavailable: bool = False
     # (#910) True for a cycle in which a charger's power read was a blink
@@ -1004,6 +1008,10 @@ class SessionData:
     solar_share_pct: float = 0
     cost_chf: float = 0
     avg_power_w: float = 0
+    #: (#1024) where the total came from: charger_meter | lifetime_delta |
+    #: sem_estimate — and the meter state behind it (session_energy.step).
+    energy_source: str = "sem_estimate"
+    meter: dict = field(default_factory=dict)
 
 
 

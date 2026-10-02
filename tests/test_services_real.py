@@ -97,7 +97,13 @@ async def test_set_option_tunable_refreshes_number_entity(
     the user-visible state actually changed.
     """
     _seed_sem_input_sensors(sem_real_hass)
-    await _setup_sem(sem_real_hass, sem_config_entry)
+    # (#996) The price thresholds exist only on a dynamic tariff — the
+    # house this test needs is one where the knob can act.
+    sem_config_entry.add_to_hass(sem_real_hass)
+    sem_real_hass.config_entries.async_update_entry(
+        sem_config_entry, options={**sem_config_entry.options, "tariff_mode": "dynamic"})
+    assert await sem_real_hass.config_entries.async_setup(sem_config_entry.entry_id)
+    await sem_real_hass.async_block_till_done()
 
     # Read the initial state to know what we're changing from.
     initial = sem_real_hass.states.get("number.sem_cheap_price_threshold")
@@ -462,6 +468,27 @@ async def test_diagnose_recent_logs_come_from_ring_buffer(
     )
     # Version comes from the cached manifest read (warmed off-loop at setup)
     assert response["payload"]["version"] not in ("unknown", "0.0.0")
+
+
+@pytest.mark.asyncio
+async def test_set_option_for_a_knob_this_house_lacks_is_stored_without_reload(
+    sem_real_hass, sem_config_entry,
+) -> None:
+    """(#996) On a flat tariff the price thresholds are not built. Setting
+    one still stores it — in place for the day the tariff turns dynamic —
+    and must not reload SEM (the #462/#467 rule)."""
+    _seed_sem_input_sensors(sem_real_hass)
+    await _setup_sem(sem_real_hass, sem_config_entry)
+    assert sem_real_hass.states.get("number.sem_cheap_price_threshold") is None
+    before = sem_config_entry.runtime_data
+
+    await sem_real_hass.services.async_call(
+        DOMAIN, "set_option", {"options": {"cheap_price_threshold": 0.11}}, blocking=True)
+    await sem_real_hass.async_block_till_done()
+
+    assert sem_config_entry.runtime_data is before
+    assert sem_config_entry.options["cheap_price_threshold"] == 0.11
+    assert before.config["cheap_price_threshold"] == 0.11
 
 
 @pytest.mark.asyncio

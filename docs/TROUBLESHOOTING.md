@@ -935,6 +935,42 @@ and it becomes a row in the support matrix.
 
 The Repair clears itself the moment a write is reflected.
 
+## The battery charge limit does not follow SEM's pacing (2.2, #820)
+
+Press **Diagnose** in the Battery section of the Configuration tab. The
+`pacing_actuation` block shows:
+
+- `register` — what the limit entity holds now, and its min, max and step.
+- `writer` — what SEM last sent, and whether the register ever showed it.
+- `decision` — the cap SEM wants and its `action`: `held` is fine;
+  `write_refused` means the register did not move for 90 seconds;
+  `applied_differs` means the inverter took the write as another number.
+- `foreign_log` — lines other integrations logged about that entity.
+
+The usual causes:
+
+- **A template number drops a write while its script runs.** Home Assistant
+  logs "set_value: Already running". SEM now writes at most every five
+  minutes, so this should be gone. If the lines keep coming, something else
+  writes the same entity: an automation, a second energy manager, a wallbox
+  that manages the battery.
+- **The inverter applies its own value or ignores the register in its
+  current mode.** Set the number by hand in Developer Tools → States and
+  watch whether it holds. If it does not hold by hand, SEM cannot do better;
+  check the inverter's mode and the integration's unit.
+- **Writes are coming faster than the inverter can take.** They are not any
+  more: one per five minutes, and only for a real change.
+
+## A control is missing from the dashboard (2.2, #996)
+
+SEM does not create a control your house cannot use. On a flat tariff there
+are no price thresholds; without an export-limit entity no export guard;
+without a forecast no forecast rows; without a plant size no kWh-per-kWp
+sensors; without an investment figure no ROI rows. Wire the thing and the
+control appears after one reload. SEM never removes a control because of an
+outage, and when it has not looked yet it keeps the control. What SEM
+decided is on `sensor.sem_diag_ed_config` (attribute `install_modules`).
+
 ## A charger control entity is broken
 
 A number/switch SEM uses to command your wallbox exists in the registry but
@@ -1205,6 +1241,17 @@ then press the button again. Nothing is lost by waiting — SEM reads the
 counter's history, so pressing it a month from now recovers that month too.
 Live recording continues meanwhile at one night per day, so the wait is a
 delay, never a dead end.
+
+## SEM found my charger but set up nothing (2.2, #1032)
+
+Since 2.2 SEM reads what any integration offers — a start and a stop button,
+a charge-mode select, a car's own charging amps and switch, a service with
+current fields — and turns that into an **offer**. The offer pre-fills the
+setup wizard and the add-charger step. It is never saved by itself: you
+confirm it. A charger that is already configured, or already driven through
+its services, gets no offer. If the offer picks the wrong entity, the
+detection report in the diagnostics download shows what it read; attach it
+to an issue.
 
 ## SEM proposed a service for my charger, but there is no button (2.1, #956)
 

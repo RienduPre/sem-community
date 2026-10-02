@@ -1374,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Diferență contor"
+      },
+      "pv_health": {
+        "name": "Stare PV",
+        "state": {
+          "green": "Bună",
+          "yellow": "Medie",
+          "orange": "Slabă",
+          "red": "Proastă"
+        }
       }
     },
     "binary_sensor": {
@@ -1610,6 +1619,14 @@
           "4_hours": "4 ore",
           "8_hours": "8 ore",
           "12_hours": "12 ore"
+        }
+      },
+      "hints": {
+        "name": "Indicii",
+        "state": {
+          "off": "Oprit",
+          "weekly": "Notă săptămânală",
+          "all": "Toate indiciile"
         }
       }
     },

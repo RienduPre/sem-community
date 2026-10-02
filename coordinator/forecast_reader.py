@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.const import STATE_UNKNOWN, STATE_UNAVAILABLE
 from homeassistant.util import dt as dt_util
 
@@ -142,6 +142,12 @@ OPEN_METEO_UNIQUE_SUFFIXES = {
 #: minute of quiet before we conclude anything.
 PREFERRED_GRACE_CYCLES: int = 6
 
+def ha_is_running(hass) -> bool:
+    """(#996) True only once Home Assistant has finished starting. A
+    registry probe before that can miss an integration that loads later."""
+    return getattr(hass, "state", None) is CoreState.running
+
+
 FORECAST_SOURCES: dict = {
     "solcast": (SOLCAST_PLATFORM, "SOLCAST_ENTITIES"),
     "forecast_solar": (FORECAST_SOLAR_PLATFORM, "FORECAST_SOLAR_ENTITIES"),
@@ -149,6 +155,7 @@ FORECAST_SOURCES: dict = {
     # is no hardcoded fallback map to hand the locator (#687).
     "open_meteo": (OPEN_METEO_SOLAR_PLATFORM, None),
 }
+FORECAST_PLATFORMS = frozenset(platform for platform, _ in FORECAST_SOURCES.values())
 
 
 @dataclass
@@ -484,6 +491,39 @@ class ForecastReader:
     @_last_source_detection_path.setter
     def _last_source_detection_path(self, value: Optional[str]) -> None:
         self.__detection_path = value
+
+    def installed_answer(self) -> Optional[bool]:
+        """(#996) Does this house HAVE a forecast integration? A registry
+        fact — an enabled entity of Solcast, Forecast.Solar or Open-Meteo —
+        not "can I read a forecast right now". A cloud outage leaves the
+        entities registered and so cannot make the forecast rows ABSENT;
+        only removing or disabling the integration can. The live read
+        (``read_forecast``) keeps driving control decisions as before.
+
+        True at any time; False only while Home Assistant is running (an
+        integration may register after SEM on a restart); None when the
+        registry cannot be read. A hit is cached 60 s — a full registry walk
+        per cycle is waste, and removal is judged over minutes anyway."""
+        now = self._mono_time()
+        cached = getattr(self, "_installed_cache", None)
+        if cached is not None and now - cached[0] < 60:
+            found = cached[1]
+        else:
+            try:
+                from homeassistant.helpers import entity_registry as er
+                entries = list(er.async_get(self.hass).entities.values())
+            except Exception:  # noqa: BLE001 — no registry, no answer
+                return None
+            found = any(
+                getattr(e, "platform", None) in FORECAST_PLATFORMS
+                and getattr(e, "disabled_by", None) is None
+                for e in entries)
+            # Only a hit is cached: a miss is looked at again next cycle, so
+            # an integration installed or enabled is seen at once.
+            self._installed_cache = (now, True) if found else None
+        if found:
+            return True
+        return False if ha_is_running(self.hass) else None
 
     @property
     def requested_source(self) -> Optional[str]:

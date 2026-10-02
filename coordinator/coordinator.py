@@ -33,6 +33,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util import dt as dt_util
 
+from ..consts.core import CAPABILITY_MISS_CONFIRM_READS, CAPABILITY_MISS_HOLD_S
 from ..const import (
     DOMAIN,
     DEFAULT_UPDATE_INTERVAL,
@@ -97,6 +98,12 @@ from ..utils.log_gate import log_on_change
 from ..analytics.energy_assistant import EnergyAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _capability_clock() -> float:
+    """(#996) The clock the capability miss streak is measured on — its own
+    name so a test can move it without moving the event loop's."""
+    return time.monotonic()
 
 
 def _f_or_none(value):
@@ -1819,7 +1826,102 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
     def install_presence(self) -> Dict[Module, Presence]:
         """(#923) What this install has right now — see install_modules.py."""
-        return module_verdict(self.config, self._ed_raw_config, self._ed_answered)
+        # Called through the class so a bare test double (a SimpleNamespace
+        # with the three attributes) still gets a verdict.
+        return module_verdict(self.config, self._ed_raw_config, self._ed_answered,
+                              runtime=SEMCoordinator._runtime_facts(self))
+
+    def _runtime_facts(self) -> Dict[str, Optional[bool]]:
+        """(#996) The two capability answers only the entity registry can
+        give: a forecast integration and the inverter's export-limit entity.
+
+        A live hit counts at any time; a live miss only from a read taken
+        while Home Assistant was running — before that an integration may
+        simply load after SEM. When there is no live answer, the last running-time verdict stored
+        for this entry stands in, so a restart does not rebuild rows an
+        earlier running read had removed (or drop rows it had kept). No
+        live answer and nothing stored is None — UNKNOWN keeps every row."""
+        live = SEMCoordinator._live_runtime_facts(self)
+        storage = getattr(self, "_storage", None)
+        stored: Dict[str, bool] = {}
+        if storage is not None:
+            try:
+                stored = storage.get_capability_verdicts()
+            except Exception:  # noqa: BLE001 — no store is "nothing stored"
+                stored = {}
+        changed = False
+        now = _capability_clock()
+        for name, value in live.items():
+            to_store = SEMCoordinator._confirmed_capability(self, name, value, now)
+            if to_store is not None and storage is not None:
+                try:
+                    changed = storage.set_capability_verdict(name, to_store) or changed
+                except Exception:  # noqa: BLE001
+                    pass
+        if changed:
+            hass = getattr(self, "hass", None)
+            try:
+                hass.async_create_task(storage.async_save_energy_now())
+            except Exception:  # noqa: BLE001 — saved with the next cycle's write
+                pass
+        return {name: (value if value is not None else stored.get(name))
+                for name, value in live.items()}
+
+    def _confirmed_capability(self, name: str, value: Optional[bool],
+                              now: float) -> Optional[bool]:
+        """(#996) What may be REMEMBERED for a runtime capability this read.
+
+        A hit is remembered at once. A miss only once it has held for
+        ``CAPABILITY_MISS_CONFIRM_READS`` reads in a row and at least
+        ``CAPABILITY_MISS_HOLD_S`` — the SOC-step confirm streak again: a
+        forecast unavailable for one cycle (``cached_source_lost_redetected``)
+        must not become "no forecast" for the next restart. "Not asked"
+        neither confirms nor breaks a streak."""
+        streaks = getattr(self, "_capability_miss_streak", None)
+        if not isinstance(streaks, dict):
+            streaks = {}
+            try:
+                self._capability_miss_streak = streaks
+            except Exception:  # noqa: BLE001 — a frozen stand-in: no memory
+                pass
+        if value is None:
+            return None
+        if value is True:
+            streaks.pop(name, None)
+            return True
+        count, since = streaks.get(name, (0, now))
+        count += 1
+        streaks[name] = (count, since)
+        if (count >= CAPABILITY_MISS_CONFIRM_READS
+                and now - since >= CAPABILITY_MISS_HOLD_S):
+            return False
+        return None
+
+    def _live_runtime_facts(self) -> Dict[str, Optional[bool]]:
+        """(#996) What the readers say right now; None for "not asked"."""
+        # A HIT is definitive at any time — Solcast found before HA says it is
+        # running is Solcast. A MISS counts only from a read taken while HA
+        # was running; the readers answer None for an earlier one, and the
+        # caller then falls back to the stored running-time verdict.
+        facts: Dict[str, Optional[bool]] = {"solar_forecast": None, "export_limit": None}
+        reader = getattr(self, "_forecast_reader", None)
+        if reader is not None:
+            try:
+                # (#996) a registry fact — installed and enabled — never
+                # "readable right now": an outage must not make it ABSENT.
+                facts["solar_forecast"] = reader.installed_answer()
+            except Exception:  # noqa: BLE001 — no answer is UNKNOWN, never a crash
+                pass
+        sensors = getattr(self, "_sensor_reader", None)
+        if sensors is not None:
+            config = self.config or {}
+            try:
+                facts["export_limit"] = sensors.export_limit_answer(
+                    config.get("solar_production_sensor")
+                    or config.get("solar_power_sensor"))
+            except Exception:  # noqa: BLE001
+                pass
+        return facts
 
     def _check_module_growth(self) -> None:
         """(#923) Hardware SEM only DISCOVERS — a battery added to HA's Energy
@@ -1829,7 +1931,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         at_setup = self.setup_presence
         if not isinstance(at_setup, dict) or self.config_entry is None:
             return  # still setting up: the platforms read the fresh verdict
-        key = f"{DOMAIN}_module_reload_at"
+        # (#996) per entry: one entry's reload must not hold back another's.
+        key = f"{DOMAIN}_module_reload_at_{self.config_entry.entry_id}"
         now_ts = dt_util.utcnow().timestamp()
         grown = module_reload_due(
             at_setup, self.install_presence(), now_ts, self.hass.data.get(key))
@@ -4461,6 +4564,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 charging_context.available_power,
             )
 
+            # (#1019) Hints — after the notifications, off unless a switch
+            # says otherwise; never raises into the cycle.
+            try:
+                await self._evaluate_hints(power, energy, costs, performance, tariff_data)
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("hint evaluation failed", exc_info=True)
+
             # Step 13: Persist data
             if self._storage:
                 self._storage.import_energy_calculator_state(
@@ -4517,6 +4627,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 await self._storage.async_save_daily_throttled()
 
             self._initial_update_done = True
+            # (#996) The live runtime answers are read every cycle; a
+            # capability present now that the platforms were built without
+            # (enabled entity, renamed entity, new integration) reloads once,
+            # rate-limited per entry. One mechanism for every such change.
+            try:
+                self._check_module_growth()
+            except Exception:  # noqa: BLE001 — a growth check never costs a cycle
+                _LOGGER.debug("#996 module growth check failed", exc_info=True)
             result = sem_data.to_dict()
             # (#699) the cards' atomic balance set — built HERE, where the
             # home-hold state lives, so a known-incoherent cycle ships the
@@ -4890,6 +5008,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             result["battery_last_night_date"] = _pe.get("battery_last_night_date")
             result["forecast_trust_d1"] = _pe.get("forecast_trust_d1")
             result["forecast_trust_d2"] = _pe.get("forecast_trust_d2")
+            # (#1022) PV health: the colour is the state, the numbers ride
+            # on the one sensor as attributes.
+            _pvh = self._pv_health_verdict(power, forecast_data)
+            result["pv_health"] = _pvh.state
+            result["pv_health_attrs"] = _pvh.as_attributes()
             result["battery_overnight_need_kwh"] = _pe.get("battery_overnight_need_kwh")
             result["battery_expected_refill_kwh"] = _pe.get("battery_expected_refill_kwh")
             result["battery_refill_clipped_kwh"] = _pe.get("battery_refill_clipped_kwh")
@@ -5349,6 +5472,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 self._today_surplus_hours = [False] * 24
                 self._today_ev_hours = [False] * 24
                 self._tracker_date = today_date
+                # (#1022) the solar downtime figure is per day — same clock
+                _rdr = getattr(self, "_sensor_reader", None)
+                if _rdr is not None and hasattr(_rdr, "reset_solar_downtime"):
+                    _rdr.reset_solar_downtime()
             # (#645) Decay is checked against its OWN persisted date, NOT the
             # in-memory tracker above — a restart re-initialises the tracker to
             # today and would swallow the rollover.
@@ -12314,6 +12441,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 solar_share_pct=saved.get("solar_share_pct", 0.0),
                 cost_chf=saved.get("cost_chf", 0.0),
                 avg_power_w=saved.get("avg_power_w", 0.0),
+                energy_source=saved.get("energy_source", "sem_estimate"),
+                meter=dict(saved.get("meter") or {}),
             )
 
         # Multi-charger (#112): restore all chargers
@@ -12427,6 +12556,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 "solar_share_pct": sd.solar_share_pct,
                 "cost_chf": sd.cost_chf,
                 "avg_power_w": sd.avg_power_w,
+                "energy_source": getattr(sd, "energy_source", "sem_estimate"),
+                "meter": dict(getattr(sd, "meter", None) or {}),
             })
         return payload
 
@@ -12708,21 +12839,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             self._ev_taper_detector.update_energy(ev_increment, hw_total)
 
         # Reset on disconnect
-        if self._last_ev_connected and not power.ev_connected:
-            if self._session_data.energy_kwh > 0:
-                self._ev_taper_detector.on_session_end(
-                    self._session_data.energy_kwh,
-                    end_soc=self._cycle_vehicle_soc,
-                )
-                if self._storage:
-                    self._storage.add_session_to_history({
-                        "timestamp": self._session_data.start_time,
-                        "energy_kwh": round(self._session_data.energy_kwh, 2),
-                        "solar_share_pct": round(self._session_data.solar_share_pct, 1),
-                        "duration_min": round(self._session_data.duration_minutes, 1),
-                        "taper_detected": self._ev_taper_detector.full_detected,
-                    })
-            self._ev_taper_detector.reset_session()
+        self._finish_fleet_session(power)
 
         # Stall detection → full charge: if car is connected AND SEM has
         # been commanding a charge AND the EV still draws 0 W for ~3 min,
@@ -13541,6 +13658,27 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         Used for temperature-corrected EV consumption prediction (#106).
         Falls back to 15°C (spring-like) if no weather data available.
         """
+        temp = self._outdoor_temperature_or_none()
+        return 15.0 if temp is None else temp  # Safe default
+
+    def _finish_fleet_session(self, power) -> None:
+        """Reset the primary detector on the fleet disconnect. (#1024) The
+        session RECORD is not written here: ``ev_control.
+        _update_session_tracking`` writes it where the session ends, per
+        charger."""
+        if self._last_ev_connected and not power.ev_connected:
+            if self._session_data.energy_kwh > 0:
+                self._ev_taper_detector.on_session_end(
+                    self._session_data.energy_kwh,
+                    end_soc=self._cycle_vehicle_soc,
+                )
+            self._ev_taper_detector.reset_session()
+
+    def _outdoor_temperature_or_none(self) -> Optional[float]:
+        """(#1022) The outdoor temperature, or None when nothing reports
+        one. The 15 °C fallback above is fine for a consumption estimate
+        and wrong for a snow flag — a made-up spring day can never say
+        "freezing", so that caller asks here."""
         # Try configured entity first
         temp_entity = self.config.get("outdoor_temperature_entity", "")
         if temp_entity:
@@ -13560,7 +13698,150 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 except (ValueError, TypeError):
                     pass
 
-        return 15.0  # Safe default
+        return None
+
+    def _hint_facts(self, power, energy, costs, performance, tariff_data,
+                    now_mono: Optional[float] = None):
+        """(#1019) What the hint engine sees this cycle, from what the
+        coordinator already has. Night is SEM's own day/night clock
+        (``time_manager.is_night_mode``) — the one source the whole
+        coordinator uses, which the compressed-sun simulation moves."""
+        import time as _time
+
+        from .hints import HintFacts, enabled_categories
+
+        now_mono = _time.monotonic() if now_mono is None else float(now_mono)
+        cfg = self.config or {}
+        enabled = enabled_categories(cfg.get("hints", "off"))
+
+        dark: dict = {}
+        since = getattr(getattr(self, "_sensor_reader", None),
+                        "_sensor_unavailable_since", None) or {}
+        for entity_id, t0 in dict(since).items():
+            state = self.hass.states.get(entity_id)
+            name = None
+            if state is not None:
+                name = (getattr(state, "attributes", None) or {}).get("friendly_name")
+            dark[entity_id] = (str(name or entity_id), max(0.0, now_mono - float(t0)))
+
+        from .price_signal import is_cheap_name
+        price_cheap = is_cheap_name(getattr(tariff_data, "tariff_price_level", None))
+        dynamic = str(cfg.get("tariff_mode") or "") == "dynamic"
+
+        idle: list = []
+        conn = getattr(power, "ev_connected_per_charger", None) or {}
+        chrg = getattr(power, "ev_charging_per_charger", None) or {}
+        chargers = cfg.get("ev_chargers") or []
+        if chargers and conn:
+            for c in chargers:
+                cid = c.get("id")
+                if conn.get(cid) and not chrg.get(cid, False):
+                    idle.append(str(c.get("name") or cid))
+        elif getattr(power, "ev_connected", False) and not getattr(power, "ev_charging", False):
+            idle.append("EV")
+
+        currency = getattr(getattr(self.hass, "config", None), "currency", None)
+        return HintFacts(
+            now=dt_util.now(),
+            night=bool(self.time_manager.is_night_mode()),
+            enabled=enabled,
+            home_w=float(getattr(power, "home_consumption_power", 0.0) or 0.0),
+            daily_solar_kwh=float(getattr(energy, "daily_solar", 0.0) or 0.0),
+            daily_import_kwh=float(getattr(energy, "daily_grid_import", 0.0) or 0.0),
+            daily_home_kwh=float(getattr(energy, "daily_home", 0.0) or 0.0),
+            daily_ev_kwh=float(getattr(energy, "daily_ev", 0.0) or 0.0),
+            daily_cost=float(getattr(costs, "daily_net_cost", 0.0) or 0.0),
+            self_use_pct=float(getattr(performance, "self_consumption_rate", 0.0) or 0.0),
+            currency=currency if isinstance(currency, str) else "",
+            dark_inputs=dark,
+            price_cheap=price_cheap,
+            dynamic_tariff=dynamic,
+            idle_plugged_cars=tuple(idle),
+        )
+
+    async def _evaluate_hints(self, power, energy, costs, performance, tariff_data) -> None:
+        """(#1019) Run the engine once per cycle. With ``hints`` off
+        nothing is built, nothing is stored. The engine's state is restored
+        from the energy store on first use and written back on every run."""
+        from .hints import HintEngine, enabled_categories
+
+        cfg = self.config or {}
+        if not any(enabled_categories(cfg.get("hints", "off")).values()):
+            return
+        engine = getattr(self, "_hint_engine", None)
+        if engine is None:
+            stored = {}
+            if self._storage is not None:
+                try:
+                    stored = self._storage.get_hints_state() or {}
+                except Exception:  # noqa: BLE001
+                    stored = {}
+            engine = HintEngine(stored)
+            self._hint_engine = engine
+        hints = engine.evaluate(self._hint_facts(power, energy, costs, performance, tariff_data))
+        nm = getattr(self, "_notification_manager", None)
+        for hint in hints:
+            if nm is not None:
+                await nm.notify_hint(hint)
+        if self._storage is not None:
+            self._storage.set_hints_state(engine.to_dict())
+
+    def _pv_health_verdict(self, power, forecast_data, now_mono: Optional[float] = None):
+        """(#1022) PV health from what SEM already keeps: the forecast
+        ledger's settled days (today never counts — it is still settling),
+        the reader's dark minutes, and a two-hour "dark under a bright
+        forecast" clock for the snow flag. Never raises: a missing piece
+        gives no verdict, not an error."""
+        import time as _time
+
+        from ..analytics.pv_health import (
+            SNOW_EXPECT_W, SNOW_YIELD_SHARE, pv_health,
+        )
+
+        now_mono = _time.monotonic() if now_mono is None else float(now_mono)
+        days: list = []
+        led = getattr(self, "_forecast_ledger", None)
+        if led is not None:
+            try:
+                # Today is still settling. The date is the coordinator's own
+                # day clock (``_tracker_date``), not a second one (#645).
+                tracker = getattr(self, "_tracker_date", None)
+                all_days = [str(d) for d in led.days()]
+                today_s = str(tracker) if tracker is not None else (
+                    max(all_days) if all_days else "")
+                for day in led.days():
+                    if str(day) >= today_s:
+                        continue
+                    forecast = led.forecast_for(day, 0)
+                    if forecast is None:
+                        forecast = led.forecast_for(day, 1)
+                    days.append((forecast, led.actual_for(day)))
+            except Exception:  # noqa: BLE001 — a half-restored ledger is no verdict
+                days = []
+
+        expect_w = float(getattr(forecast_data, "forecast_power_now_w", 0.0) or 0.0)
+        solar_w = float(getattr(power, "solar_power", 0.0) or 0.0)
+        low_now = expect_w >= SNOW_EXPECT_W and solar_w < SNOW_YIELD_SHARE * expect_w
+        low_since = getattr(self, "_pv_low_since_mono", None)
+        if low_now:
+            if low_since is None:
+                low_since = now_mono
+        else:
+            low_since = None
+        self._pv_low_since_mono = low_since
+        low_for_s = None if low_since is None else now_mono - low_since
+
+        try:
+            temp = self._outdoor_temperature_or_none()
+        except Exception:  # noqa: BLE001
+            temp = None
+        freezing = None if temp is None else temp <= 0.0
+
+        return pv_health(
+            days,
+            float(getattr(power, "solar_downtime_min_today", 0.0) or 0.0),
+            freezing, expect_w, solar_w, low_for_s,
+        )
 
     # Solar charging state sets
     def _restore_per_charger_detectors(self, ev_intel_state) -> None:
