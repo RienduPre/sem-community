@@ -288,6 +288,10 @@ class ChargePacingWriter:
         self._accepted_w: float | None = None
         #: None = pending, True = taken, False = refused
         self._taken: bool | None = None
+        #: (#820, 02.10) ``(register_w, written_w)`` when the register took
+        #: the write but settled on another value (a unit scale in the
+        #: integration, or the inverter's own limit); None otherwise
+        self.applied_differs: tuple[float, float] | None = None
         self._clock = time.monotonic
         self._store = store
         #: nothing to adopt when nothing was persisted
@@ -305,6 +309,7 @@ class ChargePacingWriter:
         self._write_at = None
         self._accepted_w = None
         self._taken = None
+        self.applied_differs = None
 
     async def apply(self, hass, entity_id: str, cap_w, *,
                     observer: bool, hw_max_w: float | None = None) -> str:
@@ -449,6 +454,16 @@ class ChargePacingWriter:
             self._taken = True
             self._accepted_w = register_w
             self._confirm(entity_id)
+            if abs(register_w - sent) > max(step_w, 1.0):
+                # (02.10, Arne: wrote 1550 W, reads 1449 W) Taken, but as
+                # another number. Said once; visible in Diagnose.
+                self.applied_differs = (register_w, sent)
+                log_on_change(
+                    _LOGGER, f"charge_pacing:applied:{entity_id}",
+                    logging.WARNING,
+                    "charge pacing: %s took the write as %.0f W, not %.0f W "
+                    "— check the integration's unit and the inverter's own "
+                    "limit", entity_id, register_w, sent)
             return "taken"
         self._unconfirmed_cycles += 1
         waited = (self._write_at is None
@@ -474,6 +489,7 @@ class ChargePacingWriter:
         self._write_at = now
         self._accepted_w = None
         self._taken = None
+        self.applied_differs = None
         # Persisted BEFORE the write, and on every write: the record has to
         # describe a register that may already carry the cap, never one that
         # might not. The cap rides along so the next lifetime knows which

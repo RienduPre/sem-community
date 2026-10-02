@@ -22,6 +22,7 @@ Three faults, each a test class below:
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -258,3 +259,60 @@ class TestNoHammering:
         assert _run(w.apply(h, ENTITY, None, observer=False,
                             hw_max_w=5000.0)) == "restored"
         assert reg.writes == [1200.0, 5000.0]
+
+
+class TestTheRegisterTookADifferentValue:
+    """Arne: SEM wrote 1550 W, the register reads 1449 W. Register 33047 is
+    in 0.01 kW and the package divides by 10, and the inverter has its own
+    limit — so a value can land as a different number than written. The
+    write is TAKEN, and the difference is said, once."""
+
+    def _taken_at(self, wrote, reads):
+        clock = Clock()
+        reg = TemplateNumber(2500.0, step=10.0, applies=lambda v: reads)
+        w = _writer(clock)
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, wrote, observer=False)) == "wrote"
+        reg.scan()
+        clock.advance(10)
+        assert _run(w.apply(h, ENTITY, wrote, observer=False)) == "held"
+        return w, h, reg, clock
+
+    def test_the_difference_is_in_the_writer_state(self):
+        w, *_ = self._taken_at(1550.0, 1449.0)
+        assert w.applied_differs == (1449.0, 1550.0)
+
+    def test_a_value_within_a_step_is_not_a_difference(self):
+        w, *_ = self._taken_at(1550.0, 1545.0)
+        assert w.applied_differs is None
+
+    def test_the_difference_is_said_once(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            w, h, reg, clock = self._taken_at(1550.0, 1449.0)
+            for _ in range(10):
+                clock.advance(10)
+                _run(w.apply(h, ENTITY, 1550.0, observer=False))
+        lines = [r.getMessage() for r in caplog.records
+                 if "took the write as" in r.getMessage()]
+        assert len(lines) == 1, lines
+        assert "1449 W, not 1550 W" in lines[0]
+        assert "unit" in lines[0] and "own limit" in lines[0]
+
+    def test_the_diagnose_button_shows_it(self):
+        from custom_components.solar_energy_management.coordinator.battery_diag import (
+            pacing_actuation_diag,
+        )
+        w, h, reg, clock = self._taken_at(1550.0, 1449.0)
+        coordinator = SimpleNamespace(
+            config={"battery_charge_power_limit_entity": ENTITY},
+            _charge_pacing_writer=w, _charge_pacing_state={})
+        out = _run(pacing_actuation_diag(h, coordinator))
+        assert out["writer"]["applied_differs"] == {
+            "register_w": 1449.0, "written_w": 1550.0}
+
+    def test_a_new_write_clears_it(self):
+        w, h, reg, clock = self._taken_at(1550.0, 1449.0)
+        reg.applies = None
+        clock.advance(400)
+        assert _run(w.apply(h, ENTITY, 2500.0, observer=False)) == "wrote"
+        assert w.applied_differs is None
