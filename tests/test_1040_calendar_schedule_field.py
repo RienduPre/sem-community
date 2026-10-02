@@ -129,6 +129,36 @@ class TestTheHelpersWeekAnswersEveryHour:
         assert p.get_price_level_at(now + timedelta(hours=3)) is None
 
     @pytest.mark.asyncio
+    async def test_the_minute_before_an_edge_reads_the_week_past_it(self):
+        """The state's word ends at its next_event, however close."""
+        from homeassistant.util import dt as dt_util
+        from custom_components.solar_energy_management.tariff import (
+            calendar_provider as mod,
+        )
+        now = dt_util.now().replace(hour=4, minute=59, second=30, microsecond=0)
+        edge = now.replace(minute=0, second=0) + timedelta(hours=1)
+        hass = _hass(REPORTER_WEEK, state="off")
+        hass._states[HELPER].attributes = {"next_event": edge}
+        p = _provider(hass)
+        await _read(p)
+        with patch.object(mod.dt_util, "now", return_value=now):
+            assert p.get_price_level() is PriceLevel.CHEAP
+            assert p.get_price_level_at(edge) is PriceLevel.NORMAL
+            assert p._find_next_transition(now, "ht") == edge
+
+    def test_an_unreadable_helper_is_no_answer_not_one_price(self):
+        hass = _hass(REPORTER_WEEK, state="unavailable")
+        assert _provider(hass).get_tariff_data().level_absence == "no_prices"
+
+    @pytest.mark.asyncio
+    async def test_a_week_with_no_block_today_is_one_price(self):
+        hass = _hass(_week([]), state="off")
+        p = _provider(hass)
+        await _read(p)
+        td = p.get_tariff_data()
+        assert td.price_level is None and td.level_absence == "flat"
+
+    @pytest.mark.asyncio
     async def test_the_state_wins_over_a_stale_week_for_now(self):
         """A week read before an edit must not overrule what the helper
         says right now."""

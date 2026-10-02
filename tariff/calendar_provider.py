@@ -347,13 +347,18 @@ class CalendarTariffProvider(TariffProvider):
         """
         now = dt_util.now()
         try:
-            if abs(when - now) <= self._NOW_SLACK:
-                return True
             nxt = (getattr(state, "attributes", None) or {}).get("next_event")
             if isinstance(nxt, str):
                 nxt = dt_util.parse_datetime(nxt)
-            return isinstance(nxt, datetime) and now <= when < nxt
-        except TypeError:       # a naive moment against an aware one
+            if not isinstance(nxt, datetime):
+                nxt = None
+            if nxt is not None and when >= nxt:
+                return False    # past the next edge, the state is old news
+            # A caller's "now" was taken a moment before ours, never after.
+            if timedelta(0) <= now - when <= self._NOW_SLACK:
+                return True
+            return nxt is not None and now <= when
+        except (TypeError, ValueError):     # naive vs aware, bad timestamp
             return False
 
     def _schedule_word(self, when: datetime) -> Optional[str]:

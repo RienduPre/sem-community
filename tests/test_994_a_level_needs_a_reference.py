@@ -805,6 +805,8 @@ class TestTheCalendarAsksTheThingThatDecides:
     def test_a_schedule_helper_that_is_gone_says_nothing(self):
         p = self._cal(rules=[], schedule="schedule.tariff", states={})
         assert p.get_price_level_at(self.MON) is None
+        # (#1040) asked about NOW too — another hour is unknown anyway.
+        assert p.get_price_level() is None
 
     def test_a_mis_cased_rule_word_still_means_high_tariff(self):
         """``_get_tariff_at`` returned the word verbatim and the decision
@@ -990,6 +992,8 @@ class TestAnInputSemCannotReadIsNotAnInputSayingNo:
                   if state is not None else {})
         p = self._cal(rules=[], schedule="schedule.t", states=states)
         assert p.get_price_level_at(self.MON) is None
+        # (#1040) asked about NOW too — another hour is unknown anyway.
+        assert p.get_price_level() is None
 
     def test_a_schedule_helper_that_reads_still_answers(self):
         # (#1040) for now; another hour needs the helper's week.
