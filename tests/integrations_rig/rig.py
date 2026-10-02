@@ -113,7 +113,7 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
                 if str(r.get("platform") or "").split("_rig")[0] == domain]
 
     out: Dict[str, Any] = {"chargers": [], "near_misses": [], "vehicles": [],
-                           "proposals": []}
+                           "proposals": [], "meters": []}
     for c in mine(report.get("chargers")):
         out["chargers"].append({
             "control": c.get("control"),
@@ -135,6 +135,10 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
                       if k not in ("id", "name")},
         })
     out["near_misses"].sort(key=lambda r: json.dumps(r, sort_keys=True))
+    for m in mine(report.get("meters")):
+        out["meters"].append({k: stable(m[k]) for k in sorted(m)
+                              if not isinstance(m[k], (dict, list))
+                              and k not in ("device_id",)})
     for v in mine(report.get("vehicles")):
         out["vehicles"].append({k: (stable(v[k]) if not isinstance(v[k], dict)
                                     else {kk: stable(vv) for kk, vv in sorted(v[k].items())})

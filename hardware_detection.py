@@ -2419,6 +2419,12 @@ def charger_from_near_miss(dev_entities, platform: str,
             return {}
         out = {"ev_charger_service": service,
                "ev_service_param_name": control["param"]}
+    # (#1032) the charging power is the whole box's reading, not one phase
+    # leg or a clamp on something else (the rig: NRGkick's first power
+    # sensor is L1)
+    best_power = _charging_power(dev_entities, vehicle=False)
+    if best_power:
+        out["ev_charging_power_sensor"] = best_power
     for e in dev_entities:
         eid = str(e.entity_id)
         dc = str(getattr(e, "original_device_class", "") or "")
