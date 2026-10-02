@@ -94,6 +94,7 @@ export const CSV_COLUMNS = [
     ['start', 'timestamp'], ['end', 'end'], ['charger', 'charger_id'],
     ['energy_kwh', 'energy_kwh'], ['solar_share_pct', 'solar_share_pct'],
     ['cost', 'cost'], ['currency', 'currency'], ['duration_min', 'duration_min'],
+    ['energy_source', 'energy_source'],
 ];
 
 function csvCell(v) {

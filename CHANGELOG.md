@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - SEM shows a control only where your house can use it: price knobs need a dynamic tariff, the export guard an export limit. (#996)
 - **Charging sessions are kept** — the last 400, per charger, with a CSV export service. (#1024)
+- 🐛 **Session energy comes from the charger's own meter** (#1024). SEM's sum read up to 31 % low.
 - **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 - **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)

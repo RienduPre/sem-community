@@ -12435,6 +12435,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 solar_share_pct=saved.get("solar_share_pct", 0.0),
                 cost_chf=saved.get("cost_chf", 0.0),
                 avg_power_w=saved.get("avg_power_w", 0.0),
+                energy_source=saved.get("energy_source", "sem_estimate"),
+                meter=dict(saved.get("meter") or {}),
             )
 
         # Multi-charger (#112): restore all chargers
@@ -12548,6 +12550,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 "solar_share_pct": sd.solar_share_pct,
                 "cost_chf": sd.cost_chf,
                 "avg_power_w": sd.avg_power_w,
+                "energy_source": getattr(sd, "energy_source", "sem_estimate"),
+                "meter": dict(getattr(sd, "meter", None) or {}),
             })
         return payload
 

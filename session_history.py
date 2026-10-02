@@ -34,6 +34,7 @@ CSV_COLUMNS = (
     ("cost", "cost"),
     ("currency", "currency"),
     ("duration_min", "duration_min"),
+    ("energy_source", "energy_source"),
 )
 
 
