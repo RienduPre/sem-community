@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 # [Unreleased]
 
 - 🐛 **Setup accepts the Ohme status sensor when the car is plugged in** (#1038). A paused Peblar car no longer reads as unplugged.
+- 🐛 **Calendar tariff mode has a field for its times** (#1040). Pick a Schedule helper; its blocks are the peak hours.
 
 # [2.2.0-beta.7] — 02.10.2026
 
