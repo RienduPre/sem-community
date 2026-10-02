@@ -7525,8 +7525,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 ("night" if not ledger else
                  (("soc_expired" if soc_expired else "soc_unknown")
                   if soc is None else "none")))
+        # (#820) a release gives the pack its full charge power, not only
+        # the value the register happened to hold when pacing engaged
         action = await self._charge_pacing_writer.apply(
-            self.hass, entity, cap, observer=self._observer_mode)
+            self.hass, entity, cap, observer=self._observer_mode,
+            hw_max_w=float(self.config.get(
+                "battery_max_charge_power_w", 5000.0) or 5000.0))
         _bv = (getattr(self, "_sink_verdicts", None) or {}).get("battery")
         self._charge_pacing_state = {
             "enabled": enabled,

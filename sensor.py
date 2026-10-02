@@ -1319,7 +1319,7 @@ SENSOR_TYPES = [
     # (#820) charge pacing — state is the cap in W (unknown while idle);
     # attributes carry reason/action/full_at. Daily-moving, no recorder churn.
     # State is the ACTION token (idle/wrote/held/restored/observer, and
-    # #949's no_limit_entity/limit_unreadable) — never
+    # #949's no_limit_entity/limit_unreadable, #820's write_refused) — never
     # None once evaluated, so the sensor is never `unavailable` and its
     # reason stays readable. The cap rides the attributes. (26.08: as a W
     # value it went unavailable whenever the cap was None — which is most

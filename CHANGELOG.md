@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 
+# [2.2.0-beta.5] — 02.10.2026
+
+- 🐛 **SEM uses the Peblar's charge switch and total power** (#1035), not its single-phase switch and one phase. Detection ignores words in the device name.
+
+# [2.2.0-beta.4] — 02.10.2026
+
+- 🐛 **An Easee Equalizer is not a charger** (#1036). It measures the grid. Setup now finds the real charger, also where it had saved the Equalizer.
+
+# [2.2.0-beta.3] — 01.10.2026
+
+- 🐛 **Charge pacing checks the inverter took the limit** (#820). Below the buffer the battery gets full power again.
+- 🐛 **The battery Diagnose button shows the charge limit** (#820): what the register holds and accepts, and the inverter's own refusals.
+
 # [2.2.0-beta.2] — 30.09.2026
 
 - 🐛 **Removing SEM no longer switches a charger back on when SEM was set to watch only** (#1027). Watching sends no command, not even during removal.

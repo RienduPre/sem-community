@@ -21,6 +21,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from ..utils.log_gate import log_on_change
+
 _LOGGER = logging.getLogger(__name__)
 
 #: (#820) The margin the solved pace is opened by, in percent. The solver
@@ -233,7 +235,17 @@ class ChargePacingWriter:
       putting the cap back, and SEM reporting healthy throughout. Adoption
       writes nothing of its own — a still-wanted cap dedupes, a finished
       pacing restores the real value;
-    * writes dedupe at 100 W (the force-discharge writer's threshold);
+    * (#820, 01.10) the REGISTER is the truth, not SEM's memory of what it
+      sent: every cap is clamped to the entity's own min/max/step and unit
+      (Home Assistant refuses an out-of-range ``number.set_value``, and a
+      non-blocking call never hears it), the repeat check compares with
+      what the register holds (100 W, or one step if coarser), and a
+      write the register never takes is reported as ``write_refused`` —
+      once, never re-sent every cycle (#538);
+    * a release gives the pack the larger of the captured value and the
+      hardware maximum, clamped to the register: below the buffer means
+      full power, and a capture of SEM's own cap is never taken for the
+      user's setting;
     * observer mode never writes — the decision is still published, so the
       rig shows what WOULD happen (the house observer seam). It never adopts
       either: consuming the record of a real engagement is a side effect,
@@ -252,14 +264,34 @@ class ChargePacingWriter:
         self.engaged_entity: str = ""
         self.restore_value: float | None = None
         self.last_written_w: float | None = None
+        #: (#820) did the register ever show ``last_written_w``? Until it
+        #: does, a mismatch is a write that may still be on the bus.
+        self._confirmed: bool = False
+        #: (#820) cycles the register has not shown an unconfirmed write
+        self._unconfirmed_cycles: int = 0
+        #: (#820) the last cap SEM put on the register, kept across a
+        #: release — a register still holding it is SEM's, not the user's
+        self._own_cap_w: float | None = None
         self._store = store
         #: nothing to adopt when nothing was persisted
         self._adopted: bool = store is None
 
+    def _release_state(self) -> None:
+        """Pacing no longer holds the register."""
+        self.engaged = False
+        self.engaged_entity = ""
+        self.restore_value = None
+        self.last_written_w = None
+        self._confirmed = False
+        self._unconfirmed_cycles = 0
+
     async def apply(self, hass, entity_id: str, cap_w, *,
-                    observer: bool) -> str:
-        """Returns a short action token:
-        wrote|held|restored|idle|observer|no_limit_entity|limit_unreadable."""
+                    observer: bool, hw_max_w: float | None = None) -> str:
+        """Returns a short action token: wrote|held|write_refused|restored|
+        idle|observer|no_limit_entity|limit_unreadable.
+
+        ``hw_max_w`` is the battery's full charge power: what a release
+        gives back when the captured value is lower (#820)."""
         if not observer:
             await self._adopt(hass, entity_id)
         if not entity_id:
@@ -290,40 +322,84 @@ class ChargePacingWriter:
                     self.last_written_w = None
                     self._adopted = self._store is None
                     return "observer"
-                value = self.restore_value
-                self.engaged = False
-                self.engaged_entity = ""
-                self.restore_value = None
-                self.last_written_w = None
-                if value is None:
+                # (#820) Below the buffer is full power. Arne's register read
+                # 1560 W when pacing engaged, so 1560 was "the value to put
+                # back" and the pack never got its maximum. Give back the
+                # larger of the capture and the hardware maximum, clamped
+                # to what the register can take.
+                candidates = [v for v in (self.restore_value, hw_max_w)
+                              if v is not None and v > 0]
+                if not candidates:
                     # Nothing to put back, and no way left to learn it. Keep
                     # the record: erasing it would remove the only trace that
                     # a register is still being held down (#949 review).
+                    self._release_state()
                     return "idle"
+                prepared = _fit(hass, entity_id, max(candidates))
+                if prepared is None:
+                    # The register cannot be read right now (a Modbus blip).
+                    # Stay engaged so the next cycle tries the release again
+                    # and unload still knows a cap is held (#820 review).
+                    return "limit_unreadable"
+                self._release_state()
+                native, _watts = prepared
                 await self._forget()
                 await hass.services.async_call(
                     "number", "set_value",
-                    {"entity_id": entity_id, "value": float(value)},
+                    {"entity_id": entity_id, "value": native},
                     blocking=False)
                 return "restored"
             return "idle"
         if observer:
             return "observer"
+        prepared = _fit(hass, entity_id, float(cap_w), ceiling=True)
+        if prepared is None:
+            # Not a power register SEM can scale to (or unreadable): the
+            # capture would be wrong and the write would be refused.
+            return "limit_unreadable"
+        native, target_w = prepared
+        register_w = _read_watts(hass, entity_id)
+        if register_w is None:
+            return "limit_unreadable"
         if not self.engaged:
             # The capture is the ONLY way back, so a register whose prior
-            # value cannot be read is a register SEM must not write. Before
-            # this the cap went on anyway and the restore was silently
-            # skipped for good (#949 review).
-            baseline = _read_number(hass, entity_id)
-            if baseline is None:
-                return "limit_unreadable"
-            self.restore_value = baseline
+            # value cannot be read is a register SEM must not write (#949
+            # review). (#820) A register still holding SEM's own last cap is
+            # not the user's setting: capture nothing, and the release falls
+            # back to the hardware maximum.
+            own = self._own_cap_w
+            self.restore_value = (
+                None if own is not None and abs(register_w - own) < 1.0
+                else register_w)
             self.engaged_entity = str(entity_id)
             self.engaged = True
-        if (self.last_written_w is not None
-                and abs(cap_w - self.last_written_w) < 100.0):
+        tol = max(100.0, _step_w(hass, entity_id))
+        if abs(register_w - target_w) < tol:
+            # The register holds the cap (or close enough) — whatever SEM
+            # remembers sending.
+            if (self.last_written_w is not None
+                    and abs(register_w - self.last_written_w) < tol):
+                self._confirm(entity_id)
             return "held"
-        self.last_written_w = float(cap_w)
+        if (self.last_written_w is not None
+                and abs(target_w - self.last_written_w) < tol
+                and not self._confirmed):
+            # SEM sent this cap and the register has not shown it. One
+            # cycle is a slow bus; two is a register that refused it.
+            self._unconfirmed_cycles += 1
+            if self._unconfirmed_cycles < 2:
+                return "held"
+            log_on_change(
+                _LOGGER, f"charge_pacing:refused:{entity_id}", logging.WARNING,
+                "charge pacing: %s refused the cap — SEM wrote %.0f W, the "
+                "register still reads %.0f W. Check the entity's range and "
+                "that the inverter accepts writes.",
+                entity_id, self.last_written_w, register_w)
+            return "write_refused"
+        self.last_written_w = target_w
+        self._own_cap_w = target_w
+        self._confirmed = False
+        self._unconfirmed_cycles = 0
         # Persisted BEFORE the write, and on every write: the record has to
         # describe a register that may already carry the cap, never one that
         # might not. The cap rides along so the next lifetime knows which
@@ -331,9 +407,19 @@ class ChargePacingWriter:
         await self._remember(entity_id)
         await hass.services.async_call(
             "number", "set_value",
-            {"entity_id": entity_id, "value": float(cap_w)},
+            {"entity_id": entity_id, "value": native},
             blocking=False)
         return "wrote"
+
+    def _confirm(self, entity_id: str) -> None:
+        """The register shows SEM's cap: a refusal, if one was logged, is
+        over. The gate logs the change once."""
+        if not self._confirmed and self._unconfirmed_cycles >= 2:
+            log_on_change(
+                _LOGGER, f"charge_pacing:refused:{entity_id}", logging.INFO,
+                "charge pacing: %s now holds the cap", entity_id)
+        self._confirmed = True
+        self._unconfirmed_cycles = 0
 
     # ─── the engagement, across lifetimes (#949) ───────────────────────
 
@@ -360,10 +446,11 @@ class ChargePacingWriter:
             _LOGGER.info(
                 "charge pacing: releasing %s — it is no longer the "
                 "charge-limit entity (restoring %s)", stored, restore)
-            if restore is not None:
+            prepared = _fit(hass, stored, restore) if restore is not None else None
+            if prepared is not None:
                 await hass.services.async_call(
                     "number", "set_value",
-                    {"entity_id": stored, "value": float(restore)},
+                    {"entity_id": stored, "value": prepared[0]},
                     blocking=False)
             await self._forget()
             return
@@ -371,6 +458,12 @@ class ChargePacingWriter:
         self.engaged_entity = stored
         self.restore_value = restore
         self.last_written_w = _as_float(record.get("cap_w"))
+        self._own_cap_w = self.last_written_w
+        # (#820) a record whose "value to restore" is SEM's own cap (a
+        # capture from before #949) is no value to restore at all
+        if (restore is not None and self.last_written_w is not None
+                and abs(restore - self.last_written_w) < 1.0):
+            self.restore_value = None
         _LOGGER.info(
             "charge pacing: adopted the cap this install was left with — "
             "%s at %s W, restores to %s W",
@@ -425,6 +518,48 @@ def _read_number(hass, entity_id: str) -> float | None:
     return _as_float(getattr(state, "state", None))
 
 
+def _scale(hass, entity_id: str) -> float | None:
+    from .power_control import native_power_scale
+    scale = native_power_scale(hass, entity_id)
+    return scale if scale is not None and scale > 0 else None
+
+
+def _read_watts(hass, entity_id: str) -> float | None:
+    """The register's value in watts, or None when it cannot be read."""
+    value = _read_number(hass, entity_id)
+    scale = _scale(hass, entity_id)
+    if value is None or scale is None:
+        return None
+    return value * scale
+
+
+def _step_w(hass, entity_id: str) -> float:
+    state = hass.states.get(entity_id)
+    attrs = getattr(state, "attributes", None) if state is not None else None
+    scale = _scale(hass, entity_id)
+    if not isinstance(attrs, dict) or scale is None:
+        return 0.0
+    step = _as_float(attrs.get("step"))
+    return step * scale if step and step > 0 else 0.0
+
+
+def _fit(hass, entity_id: str, watts: float, *, ceiling: bool = False):
+    """(#820) ``(native value, watts)`` the register can take, or None.
+
+    Scaled to the entity's unit and clamped to its range by the ONE shared
+    clamp (``power_control.clamp_to_entity_range``, #523). A cap is a
+    ceiling, so it rounds DOWN to the step."""
+    from .power_control import clamp_to_entity_range
+    scale = _scale(hass, entity_id)
+    if scale is None:
+        return None
+    state = hass.states.get(entity_id)
+    attrs = getattr(state, "attributes", None) if state is not None else None
+    fitted = clamp_to_entity_range(attrs, float(watts), scale,
+                                   round_down_to_step=ceiling)
+    return round(fitted / scale, 6), fitted
+
+
 def pending_pacing_release(coordinator) -> tuple | None:
     """(#949) What a still-engaged pacer is holding down, as
     ``(entity_id, restore_value, store)``, or None.
@@ -451,9 +586,22 @@ async def async_release_pacing(hass, held: tuple | None, reason: str) -> str | N
         return None
     entity, value, store = held
     try:
+        # (#820) the captured value is in watts; the register takes its own
+        # unit and range
+        prepared = _fit(hass, entity, float(value))
+        if prepared is None:
+            # The register cannot be read now (unavailable, no unit). A raw
+            # watt value could land 1000x off on a kW register, and a
+            # refused write goes unheard. Keep the record: the next
+            # lifetime adopts it and releases then (#949, #820 review).
+            _LOGGER.warning(
+                "charge pacing: %s unreadable on %s — the limit stays held "
+                "and is released at the next start", entity, reason)
+            return None
+        native = prepared[0]
         await hass.services.async_call(
             "number", "set_value",
-            {"entity_id": entity, "value": float(value)}, blocking=False)
+            {"entity_id": entity, "value": native}, blocking=False)
     except Exception:  # noqa: BLE001 — an unload must not fail on this
         _LOGGER.warning("charge pacing: could not release %s on %s",
                         entity, reason)
