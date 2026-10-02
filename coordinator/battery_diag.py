@@ -168,6 +168,11 @@ async def pacing_actuation_diag(hass, coordinator) -> dict:
                 "confirmed": bool(getattr(writer, "_confirmed", False)),
                 "unconfirmed_cycles": int(
                     getattr(writer, "_unconfirmed_cycles", 0) or 0),
+                # (02.10) taken, but as another number — Arne's 1550 → 1449
+                "applied_differs": (
+                    {"register_w": _ad[0], "written_w": _ad[1]}
+                    if (_ad := getattr(writer, "applied_differs", None))
+                    else None),
             }
             store = getattr(writer, "_store", None)
             if store is not None:

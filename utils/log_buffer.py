@@ -48,12 +48,33 @@ class SEMLogBuffer(logging.Handler):
         self._lines: deque[str] = deque(maxlen=capacity)
         self._foreign: deque[str] = deque(maxlen=FOREIGN_CAPACITY)
         self._watched: frozenset[str] = frozenset()
+        self._watched_ids: frozenset[str] = frozenset()
         self.setFormatter(logging.Formatter(_FORMAT))
 
     def watch(self, entity_ids) -> None:
         """(#820) The entities whose name in another logger's warning makes
         that warning worth keeping."""
         self._watched = frozenset(e for e in (entity_ids or ()) if e)
+        # (#820, 02.10 — mkaiser #654) A template number's set_value runs
+        # as a script; Home Assistant logs its "Already running" under a
+        # logger NAMED after the entity ("...script.<object_id>_set_value")
+        # and the message never carries the entity id. Match the logger
+        # name on the object id too.
+        self._watched_ids = frozenset(
+            e.split(".", 1)[1].lower() for e in self._watched if "." in e)
+
+    def _logger_names_entity(self, logger_name: str) -> bool:
+        """A dotted segment of the logger name that IS a watched object id,
+        or starts with it and an underscore ("<object_id>_set_value").
+        Anchored: a watched ``inv_1`` must not match ``other_inv_10_set_value``."""
+        ids = self._watched_ids
+        if not ids:
+            return False
+        for seg in logger_name.lower().split("."):
+            for oid in ids:
+                if seg == oid or seg.startswith(oid + "_"):
+                    return True
+        return False
 
     def offer_foreign(self, record: logging.LogRecord) -> None:
         """Keep a WARNING+ record from another logger when it names a
@@ -66,7 +87,8 @@ class SEMLogBuffer(logging.Handler):
                     "." + SEM_LOGGER_NAME) in record.name:
                 return  # SEM's own line is already in the main buffer
             message = record.getMessage()
-            if not any(e in message for e in watched):
+            if not (any(e in message for e in watched)
+                    or self._logger_names_entity(record.name)):
                 return
             line = (f"{self.formatter.formatTime(record)} FOREIGN "
                     f"{record.levelname} ({record.name}) {message}")

@@ -3534,7 +3534,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
             except Exception as exc:  # noqa: BLE001 — teardown must finish
                 _LOGGER.warning("export guard hand-back failed on unload: %s", exc)
             from .coordinator.charge_pacing import (
-                async_release_pacing, pending_pacing_release,
+                async_pending_pacing_release, async_release_pacing,
             )
             # (#935) The charger, on the same "only what SEM commanded"
             # rule and the same branch structure: a reload leaves a parked
@@ -3571,7 +3571,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: SEMConfigEntry) -> bool
                 else:
                     _PENDING_CHARGER_RELEASE[entry.entry_id] = _parked
 
-            _held = pending_pacing_release(coordinator)
+            # (#820 review 4) from the RECORD when the writer never adopted
+            # it — an observer-only lifetime holds the register just the same
+            _held = await async_pending_pacing_release(coordinator)
             if _held:
                 if entry.disabled_by is not None:
                     # Nothing is coming back — hand the register back now.
