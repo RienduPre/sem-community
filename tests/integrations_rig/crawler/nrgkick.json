@@ -5,6 +5,7 @@
   {
    "charger_roles": [
     "charge_switch",
+    "charging",
     "current_number",
     "phase_select",
     "power",
@@ -22,6 +23,7 @@
      "value_3p": "3"
     },
     "ev_charging_power_sensor": "sensor.nrgkick_test_total_active_power",
+    "ev_charging_sensor": "sensor.nrgkick_test_status",
     "ev_current_control_entity": "number.nrgkick_test_charging_current",
     "ev_session_energy_sensor": "sensor.nrgkick_test_charged_energy",
     "ev_start_stop_entity": "switch.nrgkick_test_charging_enabled",

@@ -2206,8 +2206,8 @@ def _charging_power(entries, *, vehicle: bool) -> Optional[str]:
         words = " ".join(_role_words(e)).lower() + " " + eid.lower()
         if vehicle and "charg" not in words:
             continue
-        if re.search(r"(reactive|export|import|generation|grid|battery|"
-                     r"photovolt|solar|_pv_|\bpv\b|monitor)", words):
+        if re.search(r"(reactive|export|import|generation|generator|grid|"
+                     r"battery|photovolt|solar|_pv_|\bpv\b|monitor)", words):
             continue
         leg = (bool(re.search(r"(?:_|-)(l[123]|phase_?[123]|ct[1-9]|[123])$", eid))
                or bool(re.search(r"phase_[123]", eid)))
@@ -2381,6 +2381,26 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
     charging = _charging_now(dev_entities)
     if charging:
         roles["charging"] = charging
+    # a status SENSOR read by its options with the charger-status vocabulary
+    # SEM's reader already uses (status_enum): options that say "cable in"
+    # and "cable out" make it the plug; one that says "charging", the
+    # charging state (Ohme's unplugged / plugged_in / charging)
+    if not vehicle and ("plug" not in roles or "charging" not in roles):
+        from .coordinator.charger_adapters.status_enum import (
+            classify_charger_status, is_cable_present,
+        )
+        for e in sorted(dev_entities, key=lambda x: str(x.entity_id)):
+            if not str(e.entity_id).startswith("sensor."):
+                continue
+            opts = [o.lower() for o in _select_options(e, state_of)]
+            if len(opts) < 2:
+                continue
+            cable = {is_cable_present(o) for o in opts}
+            if "plug" not in roles and True in cable and False in cable:
+                roles["plug"] = str(e.entity_id)
+            if ("charging" not in roles
+                    and any(classify_charger_status(o) == "charging" for o in opts)):
+                roles["charging"] = str(e.entity_id)
     # the session and lifetime meters, by their own words (a car's lifetime
     # energy is what it DROVE, not what a charger delivered)
     for e in ([] if vehicle else sorted(dev_entities, key=lambda x: str(x.entity_id))):
@@ -2390,11 +2410,14 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
         words = " ".join(_role_words(e)).lower() + " " + eid.lower()
         if re.search(r"day|week|month|year|hour|today|target|added", words):
             continue
-        if re.search(r"total|lifetime", words):
+        # "session" wins: Zaptec's ``total_charge_power_session`` is a
+        # session meter; NRGkick's ``charged_energy`` is this session's and
+        # its ``total_charged_energy`` the lifetime one
+        if "session" in words:
+            roles.setdefault("session_energy", eid)
+        elif re.search(r"total|lifetime", words):
             roles.setdefault("total_energy", eid)
-        elif "session" in words or re.search(r"(?:^|_)charged_energy\b", words):
-            # NRGkick's ``charged_energy`` is this session's; its
-            # ``total_charged_energy`` is the lifetime meter
+        elif re.search(r"(?:^|_)charged_energy\b", words):
             roles.setdefault("session_energy", eid)
     return roles
 
@@ -2906,6 +2929,12 @@ def _roles_pass(report, registry, brand_units, configured_entities,
             continue
         has_control = any(k in roles for k in _CHARGER_DRIVE_ROLES)
         if not (roles.get("power") and (roles.get("plug") or has_control)):
+            continue
+        # a device that also speaks for a GENERATOR (PV, an inverter) is
+        # energy hardware with a charger's word in it — Tesla's energy site
+        # reports its wall connector's state — not a charger itself
+        words = " ".join(w.lower() for e in ents for w in _role_words(e))
+        if any(m in words for m in lex.GENERATOR_MARKERS):
             continue
         apply_charger_discovery_guards(offer, ents)
         missing = _offer_missing(offer)
