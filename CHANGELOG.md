@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Setup accepts the Ohme status sensor when the car is plugged in** (#1038). A paused Peblar car no longer reads as unplugged.
+
 # [2.2.0-beta.7] — 02.10.2026
 
 - 🐛 **SEM writes the option a select lists, not the name it shows** (#1039). Ohme's "Max charge" becomes max_charge; the same for other mode settings.

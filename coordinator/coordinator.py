@@ -3230,7 +3230,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     # the OR of all chargers' plug sensors, so without this override
                     # every charger would report connected as soon as ANY car plugs in.
                     saved_ev_connected, saved_ev_charging = power.ev_connected, power.ev_charging
-                    pc_chrg_sensor = charger_cfg.get("ev_charging_sensor")
                     # #351 M7 — without this override the session-end check
                     # (which reads ``power.ev_connected``) would see the
                     # fleet-OR and never fire on THIS charger's unplug while
@@ -3242,15 +3241,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     pc_conn_map = getattr(power, "ev_connected_per_charger", None) or {}
                     if cid in pc_conn_map:
                         power.ev_connected = bool(pc_conn_map[cid])
-                    if pc_chrg_sensor:
-                        pc_state = self.hass.states.get(pc_chrg_sensor)
-                        if pc_state and pc_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                            power.ev_charging = pc_state.state == "on"
-                    else:
-                        # Symmetric fallback for ev_charging (#351 M7).
-                        pc_chg_map = getattr(power, "ev_charging_per_charger", None) or {}
-                        if cid in pc_chg_map:
-                            power.ev_charging = bool(pc_chg_map[cid])
+                    # ev_charging for this charger: the reader's per-charger
+                    # answer, from the shared status words. (#1038) This used
+                    # to re-read the sensor as ``== "on"``, so an Ohme at
+                    # ``charging`` read as not charging. Nothing in session
+                    # tracking reads it today; it is set so a future reader
+                    # gets this charger's answer, not the fleet's.
+                    pc_chg_map = getattr(power, "ev_charging_per_charger", None) or {}
+                    if cid in pc_chg_map:
+                        power.ev_charging = bool(pc_chg_map[cid])
                     was_connected_this_cid = self._last_ev_connected
                     self._update_session_tracking(power, charger_flows)
                     self._reset_per_charger_estimate_state(cid, was_connected_this_cid)
