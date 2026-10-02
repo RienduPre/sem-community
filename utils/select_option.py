@@ -16,6 +16,10 @@ Every select write SEM makes goes through :func:`listed_option`:
 3. otherwise the value is returned unchanged — HA refuses it with its own
    error, which names the options. SEM never guesses between two candidates.
 
+"The same words" ignores case and treats a space, ``_`` or ``-`` BETWEEN two
+letters or digits as one separator — nothing else. A sign or a symbol is
+meaning: ``-5`` is not ``5`` and ``Solar+`` is not ``Solar``.
+
 ``tests/test_1039_listed_option.py`` holds every select write in the package
 to this rule.
 """
@@ -23,16 +27,34 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
+
+from .log_gate import log_on_change
 
 _LOGGER = logging.getLogger(__name__)
 
-_WORDS = re.compile(r"[^\W_]+")
+_SEPARATOR = re.compile(r"(?<=[^\W_])[\s_-]+(?=[^\W_])")
 
 
 def _words(text: Any) -> str:
     """``"Max charge"``, ``"max_charge"`` and ``"MAX-CHARGE"`` are one key."""
-    return "_".join(_WORDS.findall(str(text).casefold()))
+    return _SEPARATOR.sub("_", str(text).strip().casefold())
+
+
+def pick_listed(options: Iterable[Any], wanted: str,
+                labels: Optional[Dict[str, List[str]]] = None) -> str:
+    """The option in ``options`` that ``wanted`` names — see the module doc.
+    ``labels`` maps an option to the labels HA shows for it."""
+    listed = [str(o) for o in options]
+    if wanted in listed:
+        return wanted
+    key = _words(wanted)
+    if not key:
+        return wanted
+    hits = [o for o in listed
+            if _words(o) == key
+            or any(_words(label) == key for label in (labels or {}).get(o, ()))]
+    return hits[0] if len(hits) == 1 else wanted
 
 
 def _labels(hass: Any, entity_id: str, options: List[str]) -> Dict[str, List[str]]:
@@ -79,13 +101,10 @@ def listed_option(hass: Any, entity_id: Any, wanted: Any) -> Any:
     options = [str(o) for o in options]
     if wanted in options:
         return wanted
-    key = _words(wanted)
-    labels = _labels(hass, str(entity_id), options)
-    hits = [o for o in options
-            if _words(o) == key
-            or any(_words(label) == key for label in labels.get(o, ()))]
-    if len(hits) != 1:
-        return wanted
-    _LOGGER.debug("%s: '%s' is not an option it lists — writing '%s' (#1039)",
-                  entity_id, wanted, hits[0])
-    return hits[0]
+    picked = pick_listed(options, wanted, _labels(hass, str(entity_id), options))
+    if picked != wanted:
+        log_on_change(
+            _LOGGER, f"listed_option:{entity_id}:{wanted}", logging.DEBUG,
+            "%s: '%s' is not an option it lists — it maps to '%s' (#1039)",
+            entity_id, wanted, picked)
+    return picked

@@ -5321,27 +5321,42 @@ by a user into a config field — is the label, and the select refuses it. A com
 select's state fails the same way, so a read-back waits for a value the select can never read.
 **Where it lives:** every select SEM writes: the charger's charge-mode start/stop, the hand-back
 and the amps-as-select current (all through `ControllableDevice.send`); the phase-switch select
-(`ev_phases.phase_switch_command`); GoodWe forced charge (`GoodWeChargeAdapter` wrote "Eco
-Charge"/"General", core lists `eco_charge`/`general` — broken on every core GoodWe); the
-battery direction select (`_direction_ready`) and power-strategy select (`GenericBatteryAdapter`,
-write and every compare); SG-Ready select contacts (`_contact_service`, `_contact_is_on`); the
-`set_option` service on SEM's own selects. Deye already checks each configured option against the
-select's list and refuses one it does not list.
+(`ev_phases.phase_switch_command`, `hass` now required); GoodWe forced charge
+(`GoodWeChargeAdapter` wrote "Eco Charge"/"General", core lists `eco_charge`/`general`; reached
+only when `inverter_work_mode_entity` is set by hand); the battery direction select
+(`_direction_ready`) and power-strategy select (`GenericBatteryAdapter`, write and every compare);
+SG-Ready select contacts (`_contact_service`, `_contact_is_on`); Deye's `_write_and_verify`; the
+`set_option` service on SEM's own selects; and the detection card's strategy check
+(`_gate_proposal`), which must judge a value as the runtime writes it.
 **Closure:** `utils/select_option.listed_option(hass, entity_id, value)` — a value the select lists
 is kept; otherwise the ONE listed option whose label (HA's translation cache: the user's language,
 then English) or whose own spelling is the same words; otherwise the value unchanged, for HA to
-refuse with its own error. Never a guess between two. The charger seam maps every select write, so
-observer mode records the option it would really send. Ohme detection now saves `max_charge` /
-`paused`; a config saved with the labels is mapped at write time, so it needs no migration.
+refuse with its own error. "The same words" ignores case and treats a space, `_` or `-` between two
+letters or digits as one separator, nothing else: `-5` is not `5`, `Solar+` is not `Solar` — a
+looser match would turn a refused write into an accepted one with another meaning. Never a guess
+between two. The charger seam maps every select write, so observer mode records the option it would
+really send. Ohme detection now saves `max_charge`/`paused`; a config saved with the labels is
+mapped at write time, so it needs no migration. A write that starts to LAND can change behaviour:
+GoodWe's stop, which fires once on every restart, now undoes only SEM's own forced charge (the
+select reads `eco_charge`) and hands back the mode it read before; a user's eco or peak shaving is
+left as found.
 **Guard:** `tests/test_1039_listed_option.py` — a fake HA whose selects refuse unlisted options,
 for Ohme (start, stop, hand-back, observer, through the reconciler), GoodWe, the direction and
-strategy selects, SG-Ready and the phase switch; real HA labels from core's GoodWe translations in
-German and English; an AST check that every `select_option` in the package is in a function that
-calls `listed_option`, goes through the charger seam, or is on a short list with its reason.
+strategy selects, SG-Ready, the phase switch and the card's check; real HA labels from core's
+GoodWe translations in German and English; signs and symbols that must not match; an AST check
+that every `select_option` in the package is in a function that calls `listed_option`, goes
+through the charger seam, or is on a short list with its reason, and a second one for every
+function that writes through the `CONTACT_VALUE_SERVICES` table.
 **Sweep question:** where SEM writes or compares a string against an entity with a fixed list —
 did the string come from that list, or from what a person saw?
 **Left for Guido:** (1) OpenWB detection saves "Instant Charging"/"Stop" and go-e "2"/"1"; not
 checked against their integrations' options here — the mapping covers a label either way. (2) The
 config flow's start/stop fields are free text; a dropdown of the chosen select's options would
-stop a wrong value at entry.
-Refs #1039 #1032.
+stop a wrong value at entry. (3) Found in review, older than this class and a different shape:
+Deye's `command_limit_export` / `command_release_export` compare the HA State OBJECT with an option
+string, so the prior mode is never saved and the export release restores nothing — a Deye cut to
+Zero Export To Load stays there. (4) Class 97, older: GoodWe's writes are not blocking and nothing
+reads them back, and `_direction_ready` never re-sends a write that did not fail but did not land.
+(5) SEM binds no current control for Ohme, so it only starts and stops it — at full power once the mode
+lands; the #940 dwell floor is all that limits cycling on a thin surplus.
+Refs #1039 #1032 #955.

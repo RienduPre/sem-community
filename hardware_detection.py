@@ -28,6 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
 from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
+from .utils.select_option import pick_listed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -2427,7 +2428,10 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
         values = dict(_lex.STRATEGY_VALUE_KEYS)
         for key, default in _lex.STRATEGY_VALUE_KEYS:
             values[key] = str((strategy_values or {}).get(key) or default)
-        missing = sorted({v for v in values.values() if v not in options})
+        # (#1039) judged as the runtime writes it: a value names an option
+        # when the select would take what SEM maps it to
+        missing = sorted({v for v in values.values()
+                          if pick_listed(options, v) not in options})
         if missing:
             prop["action"] = "options_unmapped"
             prop["options"] = options[:12]

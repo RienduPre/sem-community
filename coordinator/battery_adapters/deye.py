@@ -59,6 +59,7 @@ from homeassistant.util import dt as dt_util
 
 from ..charger_types import BatteryIntent, ExportIntent
 from .base import BatteryControlAdapter
+from ...utils.select_option import listed_option
 from .deye_schedule import (
     DeyeScheduleError,
     compile_deye_charge_window,
@@ -1065,6 +1066,9 @@ class DeyeBatteryAdapter(BatteryControlAdapter):
             data = {"entity_id": entity_id}
         elif kind == "select":
             service = "select_option"
+            # (#1039) the option the select lists — and the read-back below
+            # compares with the same mapped value
+            value = listed_option(self._hass, entity_id, value)
             data = {"entity_id": entity_id, "option": value}
         elif kind == "time":
             service = "set_value"

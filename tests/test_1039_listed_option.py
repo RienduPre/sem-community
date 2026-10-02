@@ -105,6 +105,29 @@ class TestListedOption:
         hass = self._hass(["Max charge", "max_charge"])
         assert listed_option(hass, "select.x", "MAX CHARGE") == "MAX CHARGE"
 
+    @pytest.mark.parametrize("wanted, options", [
+        ("-5", ["5", "10"]),
+        ("−5", ["5", "10"]),
+        ("solar", ["Solar+", "Grid"]),
+        ("Charge-", ["Charge+", "Off"]),
+        ("-1", ["0", "1"]),
+        (" ", ["-", "on"]),
+        ("+", ["-", "on"]),
+    ])
+    def test_a_sign_or_a_symbol_is_meaning_not_noise(self, wanted, options):
+        """Only a space, ``_`` or ``-`` between two letters or digits is a
+        separator. Anything else would turn a write HA refused — harmless —
+        into one it takes, with another meaning (review of #1039)."""
+        assert listed_option(_Hass({"select.x": ("a", options)}),
+                             "select.x", wanted) == wanted
+
+    def test_one_options_label_and_anothers_spelling_is_not_a_choice(self, monkeypatch):
+        from custom_components.solar_energy_management.utils import select_option
+        monkeypatch.setattr(select_option, "_labels",
+                            lambda *_: {"x": ["Auto mode"]})
+        hass = _Hass({"select.x": ("x", ["auto_mode", "x"])})
+        assert listed_option(hass, "select.x", "Auto mode") == "Auto mode"
+
     def test_no_match_returns_the_value_for_ha_to_refuse(self):
         hass = self._hass(OHME_OPTIONS)
         assert listed_option(hass, "select.x", "Turbo") == "Turbo"
@@ -308,6 +331,52 @@ class TestGoodWeForcedCharge:
             assert hass.reads(GOODWE_SELECT) == "general", saved
 
 
+    async def test_a_mode_sem_did_not_set_is_left_as_found(self):
+        """Before #1039 the stop wrote "General", which the select refused,
+        so it changed nothing. Now that it lands it must not move a GoodWe
+        the user keeps in eco or peak shaving — on a restart it fires once
+        whatever SEM did before (review of #1039)."""
+        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
+            ChargeCommandStatus,
+        )
+        hass = _Hass({GOODWE_SELECT: ("peak_shaving", GOODWE_OPTIONS)})
+        status = await self._adapter(hass).stop_forced_charge()
+        assert status.status is ChargeCommandStatus.IDLE
+        assert hass.options_sent(GOODWE_SELECT) == []
+        assert hass.reads(GOODWE_SELECT) == "peak_shaving"
+
+    async def test_the_users_own_mode_is_what_the_stop_hands_back(self):
+        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
+            ChargeCommand,
+        )
+        hass = _Hass({GOODWE_SELECT: ("eco", GOODWE_OPTIONS)})
+        a = self._adapter(hass)
+        await a.start_forced_charge(ChargeCommand(target_soc=80.0, max_power_w=3000))
+        assert hass.reads(GOODWE_SELECT) == "eco_charge"
+        await a.stop_forced_charge()
+        assert hass.reads(GOODWE_SELECT) == "eco"
+
+
+class TestStrategyGate:
+    def test_the_card_judges_a_value_as_the_runtime_writes_it(self):
+        """The detection card asked for an exact match, so a value the
+        runtime now maps (``API`` → ``api``) read as "options_unmapped"."""
+        from custom_components.solar_energy_management.hardware_detection import (
+            _gate_proposal,
+        )
+        state = SimpleNamespace(state="nom", attributes={
+            "options": ["api", "nom", "eco", "idle", "roi"]})
+        prop = {"entity": SEL, "action": "set_option"}
+        _gate_proposal(prop, "battery_power_strategy", lambda e: state,
+                       {"battery_strategy_active_value": "API"})
+        assert prop["action"] == "set_option"
+        prop = {"entity": SEL, "action": "set_option"}
+        _gate_proposal(prop, "battery_power_strategy", lambda e: state,
+                       {"battery_strategy_active_value": "turbo"})
+        assert prop["action"] == "options_unmapped"
+        assert prop["values_missing"] == ["turbo"]
+
+
 DIR = "select.batt_direction"
 SP = "number.batt_setpoint"
 
@@ -406,15 +475,13 @@ class TestPhaseSwitchSelect:
 #: charger path, whose one seam (``send``) maps every select write.
 ALLOWED = {
     ("consts/devices.py", "<module>"):
-        "the service table only; heat_pump_controller._contact_service "
-        "maps the value it writes",
-    ("coordinator/battery_adapters/deye.py", "_write_and_verify"):
-        "Deye checks every configured option against the select's own list "
-        "and refuses one it does not list (_validate_*) before any write",
+        "the service table only — every function that writes through it is "
+        "held to the rule by test_every_contact_table_write_maps_its_option",
     ("coordinator/battery_adapters/deye.py", "export_release_recipe"):
-        "the prior is read off the select, so it is an option it lists",
+        "builds a recipe and sends nothing; its option is a prior SEM read "
+        "off the select's own state, so one the select lists",
     ("coordinator/battery_adapters/deye.py", "export_dry_run"):
-        "a checked option or the prior read off the select — nothing is sent",
+        "says what WOULD be sent and sends nothing",
 }
 
 _SKIP = {"tests", "scripts", "tools", "dashboard", "__pycache__", "node_modules"}
@@ -470,6 +537,33 @@ def test_every_select_write_maps_its_option():
     assert not bad, (
         "these write a select option without listed_option() — a label "
         "would be refused by HA (#1039):\n  " + "\n  ".join(bad))
+
+
+def test_every_contact_table_write_maps_its_option():
+    """``CONTACT_VALUE_SERVICES`` names ``select_option`` once, in a table;
+    a function that builds a write from it never spells the service out, so
+    the scan above cannot see it. Any function that reads the table AND
+    builds a payload must map the value."""
+    found = []
+    for rel, path in _source_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for scope in ast.walk(tree):
+            if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            reads_table = any(
+                isinstance(n, ast.Name) and n.id in ("CONTACT_VALUE_SERVICES", "_CVS")
+                for n in ast.walk(scope))
+            builds_payload = any(
+                isinstance(n, ast.Dict) and any(
+                    isinstance(k, ast.Constant) and k.value == "entity_id"
+                    for k in n.keys)
+                for n in ast.walk(scope))
+            if reads_table and builds_payload:
+                found.append((rel, scope))
+    assert found, "the scan no longer finds the SG-Ready contact write"
+    bad = [f"{rel}:{s.lineno} in {s.name}" for rel, s in found
+           if not _mentions(s, "listed_option")]
+    assert not bad, f"a contact-table write without listed_option(): {bad}"
 
 
 def test_the_charger_seam_maps_select_writes():

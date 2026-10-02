@@ -100,12 +100,13 @@ def resolve_switch_values(entity_id: str, cfg: dict):
     return v1, v3, bool(v1 and v3)
 
 
-def phase_switch_command(entity_id: str, value: str, hass=None):
+def phase_switch_command(entity_id: str, value: str, hass):
     """The one service call a phase switch turns into, or None.
 
     (domain, service, service_data) — the caller owns the actual call,
-    behind the same observer seam as every actuation. (#1039) With ``hass``,
-    a select gets the option it LISTS for ``value``, never a label.
+    behind the same observer seam as every actuation. (#1039) ``hass`` is
+    required, not optional: a select gets the option it LISTS for ``value``,
+    never a label, and a caller that left it out would skip that silently.
     """
     domain = str(entity_id or "").split(".", 1)[0]
     if domain in ("select", "input_select"):

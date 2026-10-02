@@ -278,10 +278,26 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
     """GoodWe inverter forced charge via work mode entity.
 
     GoodWe uses a select entity to switch between work modes.
-    Forced charge = ``eco_charge`` mode with SOC target; stop restores
-    ``general``. (#1039) Those are the options core's select LISTS — "Eco
+    Forced charge = ``eco_charge`` mode with SOC target; stop restores the
+    mode the inverter was in before, else ``inverter_normal_work_mode``
+    (``general``). (#1039) Those are the options core's select LISTS — "Eco
     charge mode" and "General mode" are its labels, which it refuses.
     """
+
+    #: the option core's select lists for a forced charge
+    FORCE_MODE = "eco_charge"
+    #: the mode the select read before SEM's forced charge — None until seen
+    _restore_mode = None
+
+    def _work_mode(self, entity_id: str):
+        """What the work-mode select READS, or None when it cannot be read."""
+        try:
+            cur = getattr(self.hass.states.get(entity_id), "state", None)
+        except Exception:  # noqa: BLE001 — a read, never fatal
+            return None
+        if not isinstance(cur, str) or cur in ("", "unknown", "unavailable"):
+            return None
+        return cur
 
     async def start_forced_charge(self, command: ChargeCommand) -> ChargeStatus:
         """Start forced charge by setting work mode and SOC target."""
@@ -294,6 +310,11 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
                 message="No inverter_work_mode_entity configured",
             )
 
+        force_mode = listed_option(self.hass, work_mode_entity, self.FORCE_MODE)
+        prior = self._work_mode(work_mode_entity)
+        if prior is not None and prior != force_mode:
+            # (#1039) the user's own mode, handed back on stop
+            self._restore_mode = prior
         try:
             if soc_target_entity:
                 await self.hass.services.async_call(
@@ -305,8 +326,7 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
             await self.hass.services.async_call(
                 "select",
                 "select_option",
-                {"entity_id": work_mode_entity,
-                 "option": listed_option(self.hass, work_mode_entity, "eco_charge")},
+                {"entity_id": work_mode_entity, "option": force_mode},
             )
 
             self._active = True
@@ -338,16 +358,33 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
         set and there is no mode to restore. ``select_option`` with an empty
         ``entity_id`` is rejected by Home Assistant, and the FAILED that came
         back was retried on every cycle forever.
+
+        (#1039) Only SEM's own forced charge is undone. While the stop wrote
+        a label the select refused, it changed nothing; now that it lands,
+        an inverter that READS a mode other than the forced charge — the
+        user's eco or peak shaving — is left as found, on a restart too.
+        An unreadable select still gets the restore, as before.
         """
         work_mode_entity = self.config.get("inverter_work_mode_entity", "")
-        normal_mode = listed_option(
-            self.hass, work_mode_entity,
-            self.config.get("inverter_normal_work_mode", "general"))
         if not work_mode_entity:
             self._active = False
             self._target_soc = 0.0
             return _say_nothing_to_stop(
                 self, "no inverter_work_mode_entity configured")
+        current = self._work_mode(work_mode_entity)
+        if current is not None and current != listed_option(
+                self.hass, work_mode_entity, self.FORCE_MODE):
+            self._active = False
+            self._target_soc = 0.0
+            self._restore_mode = None
+            return ChargeStatus(
+                status=ChargeCommandStatus.IDLE,
+                message=f"Work mode is {current}, not a forced charge — left as found",
+            )
+        normal_mode = listed_option(
+            self.hass, work_mode_entity,
+            self._restore_mode
+            or self.config.get("inverter_normal_work_mode", "general"))
 
         try:
             await self.hass.services.async_call(
@@ -357,6 +394,7 @@ class GoodWeChargeAdapter(BatteryChargeAdapter):
             )
             self._active = False
             self._target_soc = 0.0
+            self._restore_mode = None
             return ChargeStatus(
                 status=ChargeCommandStatus.IDLE,
                 message=f"Restored {normal_mode} mode",
