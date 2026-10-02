@@ -3404,7 +3404,7 @@ class CurrentControlDevice(ControllableDevice):
                 domain = self.start_stop_entity.split(".")[0]
                 if self._start_switch_reads_running():
                     _LOGGER.debug(
-                        "%s: %s is already on — the session is running, no "
+                        "%s: %s already shows a running session, no "
                         "start sent (#976)", self.name, self.start_stop_entity)
                 elif domain in ("switch", "input_boolean"):
                     # (#1042) turn_off for a switch named for the pause

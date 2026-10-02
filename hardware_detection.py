@@ -27,8 +27,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
-from .consts.devices import REBOOT_DEVICE_CLASS, names_a_pause, names_a_reboot
+from .consts.devices import (
+    REBOOT_DEVICE_CLASS, names_a_charge_pause, names_a_reboot)
 from .utils.select_option import pick_listed
+from .utils.switch_sense import charge_pause_twin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -788,13 +790,6 @@ _OTHER_CIRCUIT_SEGMENTS = frozenset({
     "shaper",
 })
 
-#: (#1042) The words a pause of the CHARGE may carry beside "pause". A pause
-#: switch that names anything else pauses that thing: V2C's "Pause dynamic
-#: control modulation" (key ``pause_dynamic``) pauses the box's own solar
-#: modulation and leaves the charge running.
-_CHARGE_PAUSE_SEGMENTS = frozenset({
-    "pause", "paused", "session", "charge", "charging"})
-
 #: (#1034) Words that name the CAR's side of the box. Among replacements
 #: of equal rank, one that says it is about the charge wins over the
 #: alphabet.
@@ -916,14 +911,14 @@ def _key_words(entry) -> List[str]:
 
 
 def _pauses_the_charge(entry, own: Dict[str, str]) -> bool:
-    """(#1042) A switch that pauses the CHARGE — and nothing else.
+    """(#1042) A switch that pauses the CHARGE — and nothing else: V2C's
+    "Pause dynamic control modulation" pauses the box's solar modulation.
 
     The translation key first (the same in every language: a German V2C's
     "Vorgang pausieren" is key ``paused``), the own name without one. The
-    runtime reads which way it is on from the same name (``switch_sense``)."""
+    runtime reads which way it is on by the same rule (``switch_sense``)."""
     words = _key_words(entry) or _own_words(entry, own)
-    return (names_a_pause("_".join(words))
-            and not set(words) - _CHARGE_PAUSE_SEGMENTS)
+    return names_a_charge_pause("_".join(words))
 
 
 def _what_it_is(entities) -> Dict[str, List[str]]:
@@ -4971,7 +4966,20 @@ def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> Non
     Two construction sites once carried this unevenly — the retry path had
     none of it — which is the shape that hid the export guard's silent
     no-op (bug class 93): a second producer without the field.
+
+    * (#1042) a saved start/stop switch that pauses something other than
+      the charge is swapped for the device's one pause of the charge
+      (``charge_pause_twin``).
     """
+    saved = getattr(device, "start_stop_entity", None)
+    twin = charge_pause_twin(hass, saved) if saved else None
+    if twin:
+        device.start_stop_entity = twin
+        _LOGGER.warning(
+            "Charger '%s': the saved start/stop switch %s pauses something "
+            "other than the charge; SEM uses %s, the same device's pause of "
+            "the charge. Set it under Configuration → EV chargers to keep "
+            "it (#1042)", charger_id, saved, twin)
     if not current_entity_id:
         return
     platform = entity_platform(hass, current_entity_id)

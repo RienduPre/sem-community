@@ -13,11 +13,15 @@ charge. HA registers it after the session pause, and the V2C rule took the
 LAST switch with "pause" in its name.
 
 Bug class 118: a switch read by its state, not by what its name says "on"
-means. A switch says that in its name — HA's translation key first, the
-id's words when there is none — and every write to and read of a start/stop
-switch now goes through ``utils/switch_sense``. A name that also says
-"resume" (Wallbox's "Pause/resume") is on while it charges, so it stays as
-it was.
+means. The integration says that in the name it gives the switch — HA's
+translation key first, the entity's own name when it has none — and every
+write to and read of a start/stop switch now goes through
+``utils/switch_sense``. Only a pause of the charge and nothing else is on
+while stopped: Wallbox's "Pause/resume" is on while it charges, and a switch
+the owner made keeps "on = start".
+
+A V2C set up before the fix most likely saved the modulation pause; the
+builder swaps it for the device's session pause (``charge_pause_twin``).
 """
 from __future__ import annotations
 
@@ -30,7 +34,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.solar_energy_management.consts.devices import (
+    names_a_charge_pause,
     names_a_pause,
+    names_another_pause,
 )
 from custom_components.solar_energy_management.coordinator.charger_adapters import (
     GenericAdapter,
@@ -49,9 +55,12 @@ from custom_components.solar_energy_management.devices.base import (
 )
 from custom_components.solar_energy_management.hardware_detection import (
     _discover_v2c,
+    _own_names,
     discover_all_ev_chargers_from_registry,
+    wire_current_entity,
 )
 from custom_components.solar_energy_management.utils.switch_sense import (
+    charge_pause_twin,
     on_means_paused,
     reads_running,
     switch_service,
@@ -85,13 +94,15 @@ _REST = [
 ]
 
 
-def _row(eid, dc=None, unit=None, key=None, platform="v2c", device="v2c-1"):
+def _row(eid, dc=None, unit=None, key=None, platform="v2c", device="v2c-1",
+         original_name=None, has_entity_name=True):
     return SimpleNamespace(
         entity_id=eid, platform=platform, device_id=device,
         original_device_class=dc, device_class=None,
         unit_of_measurement=unit, translation_key=key,
         disabled_by=None, config_entry_id="e-v2c",
-        original_name=None, name=None)
+        original_name=original_name, has_entity_name=has_entity_name,
+        name=None)
 
 
 def _v2c(switches=None, rest=None):
@@ -129,19 +140,31 @@ def _discover(entries):
 
 class TestTheWords:
     @pytest.mark.parametrize("name", [
-        "paused", "pause_session", "evse_1_1_1_1_pause_session",
-        "pause_charge", "Pause session", "pause_dynamic"])
-    def test_a_pause_is_on_while_stopped(self, name):
-        assert names_a_pause(name)
+        "paused", "pause_session", "Pause session", "pause_charge",
+        "pause_charging", "Pause EV charging"])
+    def test_a_pause_of_the_charge(self, name):
+        assert names_a_charge_pause(name)
 
     @pytest.mark.parametrize("name", [
         "pause_resume",                       # Wallbox: on while it charges
-        "wallbox_pulsar_plus_pause_resume",
+        "pause_dynamic",                      # V2C: the solar modulation
+        "not_paused", "no_pause", "pause_inverted", "allow_pause",
+        "auto_pause_disabled",                # the opposite, or not a stop
+        "evse_1_1_1_1_pause_session",         # a device name is no own name
         "charging_enabled", "charge_control", "garo_laddbox",
-        "pausenraum_charge",                   # a word that only starts so
+        "pausenraum_charge",                  # a word that only starts so
         "", None])
-    def test_anything_else_is_on_while_it_charges(self, name):
-        assert not names_a_pause(name)
+    def test_anything_else(self, name):
+        assert not names_a_charge_pause(name)
+
+    def test_a_pause_of_anything(self):
+        assert names_a_pause("pause_dynamic")
+        assert not names_a_pause("pausenraum")
+
+    def test_a_pause_of_something_else(self):
+        assert names_another_pause("pause_dynamic")
+        for name in ("paused", "pause_session", "pause_resume", "charging"):
+            assert not names_another_pause(name), name
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -160,6 +183,12 @@ class TestTheSense:
         with _registry_patch([_row(sw, key="paused")]):
             assert on_means_paused(MagicMock(), sw)
 
+    def test_the_modulation_pause_keeps_its_old_sense(self):
+        """Not a stop control at all — SEM's writes to it stay as they were
+        (the builder swaps it, below)."""
+        with _registry_patch(_v2c()):
+            assert not on_means_paused(MagicMock(), PAUSE_DYNAMIC)
+
     def test_the_key_beats_a_renamed_id(self):
         """An owner who renamed NRGkick's "Charging enabled" to ``…_pause``
         renamed the label, not what on does."""
@@ -175,17 +204,38 @@ class TestTheSense:
             assert not on_means_paused(MagicMock(), sw)
             assert switch_service(MagicMock(), sw, run=True) == "turn_on"
 
-    def test_no_registry_entry_reads_the_id(self):
-        with _registry_patch([]):
-            assert on_means_paused(MagicMock(), "input_boolean.ev_pause")
-            assert not on_means_paused(MagicMock(), "switch.garo_laddbox")
+    def test_an_integration_without_keys_is_read_by_its_own_name(self):
+        sw = "switch.ohme_home_pause_charge"
+        with _registry_patch([_row(sw, platform="ohme",
+                                   original_name="Pause charge")]):
+            assert on_means_paused(MagicMock(), sw)
 
-    def test_no_registry_at_all_reads_the_id(self):
-        assert on_means_paused(None, "switch.ohme_pause_charge")
-        assert not on_means_paused(None, "switch.wb_enable")
+    def test_a_full_name_is_not_an_own_name(self):
+        """Without ``has_entity_name`` the name carries the device's."""
+        sw = "switch.ohme_home_pause_charge"
+        with _registry_patch([_row(sw, platform="ohme",
+                                   original_name="Ohme Home Pause charge",
+                                   has_entity_name=False)]):
+            assert not on_means_paused(MagicMock(), sw)
+
+    @pytest.mark.parametrize("sw,platform", [
+        ("switch.v2c_pause_inverted", "template"),   # an owner's workaround
+        ("input_boolean.ev_pause", "input_boolean"),
+    ])
+    def test_a_switch_the_owner_made_keeps_on_as_start(self, sw, platform):
+        with _registry_patch([_row(sw, platform=platform,
+                                   original_name=sw.split(".")[1],
+                                   has_entity_name=False)]):
+            assert not on_means_paused(MagicMock(), sw)
+
+    def test_no_registry_entry_keeps_on_as_start(self):
+        with _registry_patch([]):
+            assert not on_means_paused(MagicMock(), "switch.ev_pause")
+        assert not on_means_paused(None, "switch.ohme_pause_charge")
 
     def test_a_button_has_no_sense(self):
-        assert not on_means_paused(None, "button.v2c_pause")
+        with _registry_patch([_row("button.v2c_pause", key="paused")]):
+            assert not on_means_paused(MagicMock(), "button.v2c_pause")
 
     def test_writes_and_reads(self):
         with _registry_patch(_v2c()):
@@ -398,10 +448,16 @@ class TestV2cDetection:
             assert charger["ev_start_stop_entity"] == PAUSE, order
 
     def test_the_trap_is_real(self):
-        """Non-vacuous: the old rule — "pause" in the own name, last wins —
-        on HA's registration order binds the modulation pause."""
-        own_last = [e for e, _k in _SWITCHES if "pause" in e][-1]
-        assert own_last == PAUSE_DYNAMIC
+        """Non-vacuous: the old rule, run — "pause" in the own name, last
+        wins — on HA's registration order binds the modulation pause."""
+        rows = _v2c()
+        own = _own_names(rows)
+        old = None
+        for e in rows:
+            if e.entity_id.startswith("switch.") and \
+                    "pause" in own.get(e.entity_id, ""):
+                old = e.entity_id
+        assert old == PAUSE_DYNAMIC
 
     def test_a_german_v2c_binds_its_session_pause(self):
         rename = {
@@ -422,12 +478,78 @@ class TestV2cDetection:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# The heal: a V2C saved with the modulation pause
+# ═══════════════════════════════════════════════════════════════════════
+
+def _built(saved, rows):
+    """A charger as the builders leave it: ``wire_current_entity`` runs
+    after the saved start/stop entity is set."""
+    box = _Trydan(paused=True)
+    with _registry_patch(rows):
+        dev = _charger(box)
+        dev.start_stop_entity = saved
+        wire_current_entity(box.hass, dev, "v2c_trydan", NUM)
+    return box, dev
+
+
+class TestTheSavedModulationPause:
+    def test_it_is_swapped_for_the_session_pause(self):
+        _box, dev = _built(PAUSE_DYNAMIC, _v2c())
+        assert dev.start_stop_entity == PAUSE
+
+    @pytest.mark.asyncio
+    async def test_and_then_starts_the_charge(self):
+        box, dev = _built(PAUSE_DYNAMIC, _v2c())
+        with _registry_patch(_v2c()):
+            await dev.start_session()
+        assert box.switch_writes() == ["turn_off"]
+        assert box.paused is False
+
+    @pytest.mark.parametrize("saved", [
+        PAUSE, "switch.evse_1_1_1_1_lock_evse", None])
+    def test_anything_else_is_kept(self, saved):
+        _box, dev = _built(saved, _v2c())
+        assert dev.start_stop_entity == saved
+
+    def test_no_twin_no_swap(self):
+        rows = [r for r in _v2c() if r.entity_id != PAUSE]
+        _box, dev = _built(PAUSE_DYNAMIC, rows)
+        assert dev.start_stop_entity == PAUSE_DYNAMIC
+
+    def test_two_twins_no_guess(self):
+        rows = _v2c() + [_row("switch.evse_1_1_1_1_pause_charge",
+                              key="pause_charge")]
+        _box, dev = _built(PAUSE_DYNAMIC, rows)
+        assert dev.start_stop_entity == PAUSE_DYNAMIC
+
+    def test_another_device_is_not_a_twin(self):
+        rows = [r for r in _v2c() if r.entity_id != PAUSE] + [
+            _row("switch.evse_2_pause_session", key="paused", device="v2c-2")]
+        _box, dev = _built(PAUSE_DYNAMIC, rows)
+        assert dev.start_stop_entity == PAUSE_DYNAMIC
+
+    def test_wallbox_is_never_swapped(self):
+        sw = "switch.wallbox_pulsar_plus_pause_resume"
+        rows = [_row(sw, key="pause_resume", platform="wallbox",
+                     device="wb"),
+                _row("switch.wallbox_pulsar_plus_x", key="paused",
+                     platform="wallbox", device="wb")]
+        with _registry_patch(rows):
+            assert charge_pause_twin(MagicMock(), sw) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # The guard: no start/stop write or read spells on or off itself
 # ═══════════════════════════════════════════════════════════════════════
 
-_NAMES_THE_SWITCH = ("start_stop_entity", "_pause_switch_entity",
-                     "_discover_pause_switch")
+_NAMES_THE_SWITCH = ("start_stop_entity", "_start_stop_entity",
+                     "_pause_switch_entity", "_discover_pause_switch")
+# The config key names the switch only where its value is fetched — a list
+# of keys (a migration) does not.
+_CONFIG_KEY = "ev_start_stop_entity"
 _SPELLED = ("turn_on", "turn_off", "on", "off")
+_SPELLED_NAMES = ("STATE_ON", "STATE_OFF", "SERVICE_TURN_ON",
+                  "SERVICE_TURN_OFF")
 
 
 def _own_nodes(fn):
@@ -447,14 +569,28 @@ def _offenders(source: str, where: str = "<src>"):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         nodes = list(_own_nodes(fn))
-        names = any(
+        params = {a.arg for a in ast.walk(fn.args)
+                  if isinstance(a, ast.arg)}
+        fetched = [n.slice for n in nodes if isinstance(n, ast.Subscript)] + [
+            n.args[0] for n in nodes
+            if isinstance(n, ast.Call) and n.args
+            and isinstance(n.func, ast.Attribute) and n.func.attr == "get"]
+        names = bool(params & set(_NAMES_THE_SWITCH)) or any(
+            isinstance(k, ast.Constant) and k.value == _CONFIG_KEY
+            for k in fetched) or any(
             (isinstance(n, ast.Attribute) and n.attr in _NAMES_THE_SWITCH)
+            or (isinstance(n, ast.Name) and n.id in _NAMES_THE_SWITCH)
             or (isinstance(n, ast.Constant) and n.value in _NAMES_THE_SWITCH)
             for n in nodes)
         if not names:
             continue
-        spelled = sorted({n.value for n in nodes if isinstance(n, ast.Constant)
-                          and n.value in _SPELLED})
+        spelled = sorted(
+            {n.value for n in nodes if isinstance(n, ast.Constant)
+             and n.value in _SPELLED}
+            | {n.id for n in nodes if isinstance(n, ast.Name)
+               and n.id in _SPELLED_NAMES}
+            | {n.attr for n in nodes if isinstance(n, ast.Attribute)
+               and n.attr in _SPELLED_NAMES})
         if spelled:
             out.append(f"{where}:{fn.lineno} {fn.name} {spelled}")
     return out
@@ -483,6 +619,15 @@ class TestTheGuard:
         "async def f(self):\n"
         "    eid = self._discover_pause_switch()\n"
         "    service = 'turn_on' if x else 'turn_off'\n",
+        "def f(self):\n"
+        "    return self.hass.states.get(self._start_stop_entity).state "
+        "== STATE_ON\n",
+        "async def f(hass, start_stop_entity):\n"
+        "    await hass.services.async_call('switch', SERVICE_TURN_OFF, "
+        "{'entity_id': start_stop_entity})\n",
+        "def f(cfg, hass):\n"
+        "    return hass.states.get(cfg['ev_start_stop_entity']).state "
+        "== 'on'\n",
     ])
     def test_the_guard_catches_the_old_shapes(self, src):
         assert _offenders(src)
