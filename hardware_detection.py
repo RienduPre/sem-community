@@ -938,28 +938,51 @@ def _discover_unit(discover_fn, entities) -> Dict[str, str]:
     that only the device name holds tells no entity apart, so a control or
     a status it alone named is not bound: that pick was registry order.
 
-    A measurand READ role (power, total and session energy) is the one
-    exception, for the reason bug class 89 swaps and never drops: a charger
-    with no power reading is worse than one whose reading the device name
-    picked, and the guards that run next still swap a capability or a
-    single phase for the measurement. So such a role, left empty by the own
-    names, keeps the answer the whole id gives — unless that entity already
-    holds another role. It only fills a charger the own names found: a unit
-    that only the device name made a charger (a Zaptec installation its
-    owner called "Carport Charger") stays out.
+    Two roles left empty by the own names keep the answer the whole id
+    gives, unless another role already holds that entity:
+
+    * a measurand READ role (power, total and session energy), for the
+      reason bug class 89 swaps and never drops: a charger with no power
+      reading is worse than one whose reading the device name picked, and
+      the guards that run next still swap a capability or a single phase
+      for the measurement;
+    * the current control, when Home Assistant itself says what it is: the
+      unit's only ``number`` of ``device_class: current``. Entity ids are
+      built in the install's language — a German Peblar's limit is
+      ``number.peblar_ev_charger_ladestrombegrenzung`` — so the device
+      name was the only English word on it, and with no rival nothing was
+      left to registry order (the review of this fix).
+
+    The fallback only fills a charger the own names found: a unit that only
+    its device name made a charger (a Zaptec installation its owner called
+    "Carport Charger") stays out.
     """
     result = discover_fn(entities)
     if not result:
         return result
-    missing = [r for r in _MEASURAND_ROLES if not result.get(r)]
-    if not missing:
+    roles = [r for r in _MEASURAND_ROLES if not result.get(r)]
+    if not result.get("ev_current_control_entity"):
+        roles.append("ev_current_control_entity")
+    if not roles:
         return result
     whole = discover_fn(_WholeIds(entities)) or {}
-    for role in missing:
+    for role in roles:
         eid = whole.get(role)
-        if eid and eid not in result.values():
-            result[role] = eid
+        if not eid or eid in result.values():
+            continue
+        if role == "ev_current_control_entity" and not _the_current_number(
+                eid, entities):
+            continue
+        result[role] = eid
     return result
+
+
+def _the_current_number(eid: str, entities) -> bool:
+    """Is ``eid`` the unit's one ``number`` of ``device_class: current``?"""
+    numbers = [str(e.entity_id) for e in entities
+               if str(e.entity_id).startswith("number.")
+               and getattr(e, "original_device_class", None) == "current"]
+    return numbers == [str(eid)]
 
 
 def _unit_family(entry) -> Optional[str]:

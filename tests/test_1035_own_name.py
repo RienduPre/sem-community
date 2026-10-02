@@ -161,6 +161,32 @@ class TestThePeblarFromHomeAssistantsOwnTestData:
             assert charger["ev_start_stop_entity"] == \
                 "switch.peblar_ev_charger_charge", renamed
 
+    def test_a_german_or_dutch_peblar_keeps_its_current_control(self):
+        """HA builds ids in the install's language: the limit is
+        ``…_ladestrombegrenzung`` (de) or ``…_laadlimiet`` (nl), with no
+        English word but the device name. It is the unit's only current
+        number, so it stays the control (the review of this fix: without
+        it SEM set up no charger at all). The switch names are examples:
+        whatever they are, the single-phase switch is never start/stop."""
+        for limit, charge, single in (
+                ("ladestrombegrenzung", "laden", "einphasig_erzwingen"),
+                ("laadlimiet", "laden", "eenfasig_forceren")):
+            rename = {
+                "number.peblar_ev_charger_charge_limit":
+                    f"number.peblar_ev_charger_{limit}",
+                "switch.peblar_ev_charger_charge":
+                    f"switch.peblar_ev_charger_{charge}",
+                "switch.peblar_ev_charger_force_single_phase":
+                    f"switch.peblar_ev_charger_{single}",
+            }
+            entities = [_entry(rename.get(e, e), "peblar", "peblar-1", dc, u, k)
+                        for e, dc, u, k in _PEBLAR]
+            charger = _discover(entities)[0]
+            assert charger["ev_current_control_entity"] == \
+                f"number.peblar_ev_charger_{limit}"
+            assert charger.get("ev_start_stop_entity") != \
+                f"switch.peblar_ev_charger_{single}"
+
     def test_the_data_really_holds_the_trap(self):
         """No vacuous pass: the rule that was there, spelled out — a word
         tested against the whole id, the last match kept — hands back
@@ -249,6 +275,18 @@ class TestOwnNames:
         assert own["switch.peblar_ev_charger_force_single_phase"] == \
             "_force_single_phase"
         assert own["sensor.wallbox_uptime"] == "_wallbox_uptime"
+
+    def test_three_quarters_of_eight_is_enough(self):
+        ids = [f"sensor.peblar_ev_charger_x{i}" for i in range(6)] + [
+            "sensor.my_a", "sensor.my_b"]
+        own = _own_names([_entry(e, "peblar") for e in ids])
+        assert own["sensor.peblar_ev_charger_x0"] == "_x0"
+
+    def test_five_of_eight_is_not(self):
+        ids = [f"sensor.peblar_ev_charger_x{i}" for i in range(5)] + [
+            "sensor.my_a", "sensor.my_b", "sensor.other_c"]
+        own = _own_names([_entry(e, "peblar") for e in ids])
+        assert own["sensor.peblar_ev_charger_x0"] == "_peblar_ev_charger_x0"
 
     def test_a_small_unit_with_a_renamed_id_keeps_whole_names(self):
         own = _own_names([
@@ -351,6 +389,16 @@ class TestOnePhaseIsSwappedForTheTotal:
         _reject_capability_sensor(result, entities)
         assert result["ev_charging_power_sensor"] == "sensor.box_power_l3"
 
+    def test_a_total_named_sum_is_the_sum(self):
+        entities = [
+            _entry("sensor.box_power_l1", "x", device_class="power", unit="W"),
+            _entry("sensor.box_grid_power", "x", device_class="power", unit="W"),
+            _entry("sensor.box_power_sum", "x", device_class="power", unit="W"),
+        ]
+        result = {"ev_charging_power_sensor": "sensor.box_power_l1"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_charging_power_sensor"] == "sensor.box_power_sum"
+
     def test_a_total_named_total_is_the_sum(self):
         entities = [
             _entry("sensor.box_power_l3", "x", device_class="power", unit="W"),
@@ -396,6 +444,39 @@ class TestAReadRoleKeepsTheWholeIdAnswer:
             _entry("switch.charger_child_lock", "ocpp", "cp"),
         ]
         assert "ev_start_stop_entity" not in _discover_unit(_discover_ocpp, entities)
+
+    def test_a_number_ha_does_not_call_a_current_is_not_filled(self):
+        """The lone-number fallback trusts HA's ``device_class: current``,
+        never the device name alone."""
+        entities = [
+            _entry("sensor.charger_power_active_import", "ocpp", "cp", "power", "W"),
+            _entry("sensor.charger_status_connector", "ocpp", "cp"),
+            _entry("number.charger_led_brightness", "ocpp", "cp"),
+        ]
+        assert "ev_current_control_entity" not in _discover_unit(
+            _discover_ocpp, entities)
+
+    def test_two_current_numbers_are_a_choice_it_does_not_make(self):
+        """A rule that keeps the FIRST match, on a device whose name holds
+        its word: the whole-id answer is one of two current numbers."""
+        def _first_wins(entities):
+            own = _own_names(entities)
+            out = {"ev_charging_power_sensor": "sensor.ev_charger_power"}
+            for e in entities:
+                eid = str(e.entity_id)
+                if eid.startswith("number.") and "charg" in own[eid]:
+                    out.setdefault("ev_current_control_entity", eid)
+            return out
+        entities = [
+            _entry("sensor.ev_charger_power", "x", "d", "power", "W"),
+            _entry("number.ev_charger_stromgrenze", "x", "d", "current", "A"),
+            _entry("number.ev_charger_mindeststrom", "x", "d", "current", "A"),
+        ]
+        # non-vacuous: the whole id does answer, with the first number
+        assert _first_wins(hd._WholeIds(entities))["ev_current_control_entity"] \
+            == "number.ev_charger_stromgrenze"
+        assert "ev_current_control_entity" not in _discover_unit(
+            _first_wins, entities)
 
     def test_the_device_name_alone_never_makes_a_charger(self):
         """The fallback fills a charger the own names found; it never makes

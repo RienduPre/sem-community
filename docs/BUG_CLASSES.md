@@ -5239,7 +5239,10 @@ entity alone and the transports (`mqtt`, where the device name is the only mark 
 left whole. Every brand name test reads it. A control or a status that only the device name
 matched is no longer bound; a measurand READ role is the exception (`_discover_unit`): left empty
 by the own names, it keeps the whole-id answer unless another role holds that entity — class 89's
-swap-only rule. The fallback only fills a charger the own names found: a unit that only its
+swap-only rule. So does the current control when HA itself says what it is: the unit's only
+`number` of `device_class: current`. Ids are built in the install's language, so a German
+Peblar's limit is `…_ladestrombegrenzung` and the device name was its only English word; without
+this the second review found SEM set up no German or Dutch Peblar at all. The fallback only fills a charger the own names found: a unit that only its
 device name made a charger (a Zaptec installation called "Carport Charger") stays out.
 `_discover_ocpp` also skips the availability switch, as the #976 manual path already did, for the
 installs where no device name can be seen. **Guard:** `tests/test_1035_own_name.py` — HA's own
@@ -5249,7 +5252,7 @@ gives every platform in `_EV_CHARGER_PLATFORMS` a device named "EV Charger" and 
 with role-free entities first and last; an AST check that no brand function tests anything
 against `eid`/`eid_lower`/`entity_id` (plain, `str()`, `.lower()`), runs a regex over it or calls
 `_name_hit(eid, …)`, and that it catches each of those shapes; the read-role fallback and its
-limits. Thirteen mutants of the fix are killed. **Sweep question:** for every word test over an
+limits, a German and a Dutch Peblar. Nineteen mutants of the fix are killed. **Sweep question:** for every word test over an
 entity id — does it read the part the integration wrote for that entity, or the part the owner
 wrote for the device?
 **Left for Guido:** (1) a charger SAVED before this fix keeps its binding — detection re-runs only
@@ -5263,6 +5266,11 @@ sensor is `device_class: enum` and `_discover_peblar` asks for none, so no conne
 sensor is bound (a different shape). (4) The inverter-side `_DISCHARGE_CONTROL_PATTERNS` read whole
 ids too, some by brand name on purpose. (5) The glob matrix (`EV_INTEGRATION_PATTERNS`) is a
 config-flow prefill and was not changed. (6) An owner who renamed the TOTAL power sensor leaves
-the phase leg bound: the sum is found by name. Class 114's residual (2) loses its `carport` case:
+the phase leg bound: the sum is found by name. (7) Ids in other languages: a German or Dutch
+Peblar gets no start/stop (its switch is not called "charge"; before, it got the single-phase
+switch), and a phase named `fase_3`/`fas_3` is not seen as one phase. Reading Peblar's unique-id
+keys (`…_charge`, `…_power_total`) would fix both — brand code, so not here. (8) Seen on HA's own
+entity names, older than this class: Wallbox binds `…_maximum_icp_current`, the site's grid limit,
+as its current control; V2C is #1034. Class 114's residual (2) loses its `carport` case:
 go-e MQTT's `car` now reads the own name.
 Refs #1035 #962 #976 #804 #1036.
