@@ -34,7 +34,12 @@ def _offer(rep, platform):
 async def test_ohme(hass):
     m = _charger(await _rep(hass, "ohme"), "ohme")
     assert m["ev_charge_mode_entity"] == "select.ohme_home_pro_charge_mode"
+    # #1039 (v2.2.0-beta.7): the option the select LISTS, not its label
+    assert m["ev_charge_mode_start"] == "max_charge"
+    assert m["ev_charge_mode_stop"] == "paused"
     assert m["ev_charging_power_sensor"] == "sensor.ohme_home_pro_power"
+    assert m["ev_connected_sensor"] == "sensor.ohme_home_pro_status"
+    assert m["ev_charging_sensor"] == "sensor.ohme_home_pro_status"
 
 
 async def test_keba(hass):
@@ -94,9 +99,9 @@ async def test_peblar(hass):
     assert m["ev_charging_power_sensor"] == "sensor.peblar_ev_charger_power"
 
 
-@pytest.mark.xfail(strict=True, reason="#1034 (autopilot): V2C picks the "
-                   "minimum current and the PV power")
 async def test_v2c(hass):
+    """#1034 (autopilot, v2.2.0-beta.6): the min/max current is not the
+    set-point, and the PV power is not the car's."""
     m = _charger(await _rep(hass, "v2c"), "v2c")
     assert m["ev_current_control_entity"] == "number.evse_1_1_1_1_intensity"
     assert m["ev_charging_power_sensor"] == "sensor.evse_1_1_1_1_charge_power"
