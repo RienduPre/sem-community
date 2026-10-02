@@ -28,6 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
 from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
+from .utils.select_option import pick_listed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -167,6 +168,27 @@ _CAPABILITY_SEGMENTS = frozenset({
 #: flowing back out. ``reactive`` power is not charging power at all.
 _WRONG_QUANTITY_SEGMENTS = frozenset({"export", "exported", "reactive"})
 
+#: (#1034) A reading of ANOTHER circuit the box meters with its own clamps —
+#: the house, the solar array, the home battery, the grid — not of the car.
+#: The V2C Trydan publishes ``house_power``, ``photovoltaic_power`` (key
+#: ``fv_power``: "fotovoltaica") and ``battery_power`` beside
+#: ``charge_power``, all ``device_class: power``.
+_OTHER_CIRCUIT_SEGMENTS = frozenset({
+    "photovoltaic", "pv", "fv", "solar", "house", "home", "household",
+    "grid", "mains", "utility", "evu", "battery", "akku", "ess", "inverter",
+    "shaper",
+})
+
+#: (#1034) Words that name the CAR's side of the box. Among replacements
+#: of equal rank, one that says it is about the charge wins over the
+#: alphabet.
+_CAR_SEGMENTS = frozenset({"charge", "charging", "ev", "car", "vehicle"})
+
+#: (#1034) The words that make a current number one END of a range the
+#: owner sets, not the set-point SEM writes every cycle.
+_RANGE_FLOOR_SEGMENTS = frozenset({"min", "minimum", "minimal"})
+_RANGE_CEILING_SEGMENTS = frozenset({"max", "maximum", "maximal"})
+
 #: One LEG of a polyphase reading, never the charger's draw. Excluded from
 #: the replacement search outright: a third of the truth is not a fallback
 #: for the truth, and openWB, Alfen, Zaptec, go-e and KEBA all publish these
@@ -256,6 +278,72 @@ def _without_phase(entity_id: str) -> tuple:
             continue
         out.append(word)
     return (entity_id.split(".", 1)[0], *out)
+
+
+def _own_words(entry, own: Dict[str, str]) -> List[str]:
+    """(#1034) The words of an entity's own name — never the device name in
+    front of it (class 115)."""
+    eid = str(getattr(entry, "entity_id", "") or "")
+    name = own.get(eid) or _object_id(eid)
+    return [w for w in name.lower().split("_") if w]
+
+
+def _key_words(entry) -> List[str]:
+    """(#1034) The words of the integration's translation key. The key is
+    the same in every language and survives an id its owner renamed: a
+    German V2C's solar power is ``…_photovoltaik_leistung``, its key is
+    still ``fv_power``."""
+    key = getattr(entry, "translation_key", None)
+    if not isinstance(key, str):
+        return []
+    return [w for w in key.lower().split("_") if w]
+
+
+def _what_it_is(entities) -> Dict[str, List[str]]:
+    """(#1034) The words of each entity's own name, for reading WHAT it is:
+    a minimum, the house, the car.
+
+    ``_own_names`` keeps the device name where it must: on a transport,
+    where it is the only mark of the brand, and on a small unit with one
+    id renamed. To read what an entity is, those words are still the
+    device's ("Min JuiceBox" is Swedish for "my JuiceBox"; "Home EVSE" is
+    not the house). So where ``_own_names`` took nothing off, the LEADING
+    words more than half of the unit's ids share come off here — in front
+    only, so ``…_min_current`` keeps its "min". Three ids at least: on
+    fewer, half is one id. One word always stays."""
+    own = _own_names(entities)
+    rows: Dict[str, List[str]] = {}
+    whole = True
+    for e in entities:
+        eid = str(getattr(e, "entity_id", "") or "")
+        rows[eid] = _own_words(e, own)
+        whole = whole and rows[eid] == [
+            w for w in _object_id(eid).lower().split("_") if w]
+    prefix: List[str] = []
+    while whole and len(rows) >= 3:
+        at = len(prefix)
+        counts: Dict[str, int] = {}
+        for t in rows.values():
+            if len(t) > at + 1 and t[:at] == prefix:
+                counts[t[at]] = counts.get(t[at], 0) + 1
+        if not counts:
+            break
+        word, carried = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
+        if carried * 2 <= len(rows):
+            break
+        prefix.append(word)
+    return {eid: t[len(prefix):] if (prefix and t[:len(prefix)] == prefix
+                                     and len(t) > len(prefix)) else t
+            for eid, t in rows.items()}
+
+
+def _names_another_circuit(entry, words: Dict[str, List[str]]) -> bool:
+    """(#1034) Is this reading about the house, the solar array, the home
+    battery or the grid — a circuit the box meters beside the car?
+    ``words`` is ``_what_it_is``: never the device name."""
+    eid = str(getattr(entry, "entity_id", "") or "")
+    found = set(words.get(eid, ())) | set(_key_words(entry))
+    return bool(found & _OTHER_CIRCUIT_SEGMENTS)
 
 
 def _device_words(rows: List[List[str]]) -> List[str]:
@@ -440,6 +528,9 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
     the sibling named like it without the phase. A device can publish its
     grid, solar or battery power beside the charger's; one phase of the
     charge is closer to the truth than any of those.
+
+    (#1034) A reading of another circuit — house, solar, battery, grid — is
+    never the replacement either.
     """
     want_dc = getattr(bound_entry, "original_device_class", None)
     want_unit = _unit_family(bound_entry)
@@ -448,7 +539,9 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
         # own — exactly the move that put us in #962.
         return None
     own = _own_names(entities)
+    words = _what_it_is(entities)
     candidates = []
+    car: Dict[str, bool] = {}
     for e in entities:
         eid = str(e.entity_id)
         if eid == bound_eid or eid in taken or not eid.startswith("sensor."):
@@ -459,12 +552,17 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
             continue
         if not _measures_the_quantity(eid) or _is_phase_leg(own.get(eid, eid)):
             continue
+        if _names_another_circuit(e, words):
+            continue
         if sum_of is not None and _without_phase(eid) != _without_phase(sum_of):
             continue
         candidates.append(eid)
+        car[eid] = bool((set(words.get(eid, ())) | set(_key_words(e)))
+                        & _CAR_SEGMENTS)
     if not candidates:
         return None
-    return min(candidates, key=lambda c: _rank_measurand(c, role))
+    return min(candidates, key=lambda c: (
+        _rank_measurand(c, role)[0], not car[c], c))
 
 
 def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
@@ -499,29 +597,41 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
     three-phase charge. Whether a sensor is one phase is read from its own
     name, never from the device name in front of it.
 
+    (#1034) ANOTHER CIRCUIT is swapped too. A box with its own clamps
+    meters the house, the solar array or the home battery beside the car,
+    all as ``device_class: power``: the V2C Trydan's rule kept the last one,
+    ``…_photovoltaic_power``, so SEM would read the solar output as the
+    car's charge. Read from the own name and the translation key, so the
+    device name ("Solar Carport") never makes the charge look like one.
+
     Brand-agnostic on purpose: every read matcher, hand-written or hinted,
     funnels through the discovery choke point, so the class cannot recur
     unnoticed in the next brand.
     """
     by_id = {str(e.entity_id): e for e in entities}
     own = _own_names(entities)
+    words = _what_it_is(entities)
     for role in _MEASURAND_ROLES:
         eid = result.get(role)
         if not eid:
             continue
         eid = str(eid)
-        one_phase = _measures_the_quantity(eid)
-        if one_phase and not _is_phase_leg(own.get(eid, eid)):
-            continue
         entry = by_id.get(eid)
         if entry is None:
             # Not a member of the family we were handed — nothing to reason
             # about, and a blind swap would be a guess of its own.
             continue
+        measures = _measures_the_quantity(eid)
+        circuit = _names_another_circuit(entry, words)
+        one_phase = _is_phase_leg(own.get(eid, eid))
+        if measures and not circuit and not one_phase:
+            continue
         taken = {str(v) for k, v in result.items()
                  if k in _MEASURAND_ROLES and k != role}
+        # one phase alone is swapped only for the sum of the legs
+        sum_of = eid if measures and not circuit else None
         twin = _measured_twin(eid, entities, role, entry, taken=taken,
-                              sum_of=eid if one_phase else None)
+                              sum_of=sum_of)
         if twin:
             result[role] = twin
 
@@ -547,6 +657,91 @@ def _reject_offline_current_control(result: Dict[str, str], entities) -> None:
         result["ev_current_control_entity"] = online
     else:
         result.pop("ev_current_control_entity", None)
+
+
+def _range_twins(bound, entities,
+                 words: Dict[str, List[str]]) -> Tuple[set, set]:
+    """(#1034) The numbers named like ``bound`` but for its min/max word,
+    as (set-points, ceilings): ``…_intensity`` and ``…_max_intensity`` for
+    ``…_min_intensity``. Compared only on the side that holds the word:
+    the own name (``_what_it_is``) or the translation key, which holds in
+    every language. Same device class and unit family.
+    """
+    ends = _RANGE_FLOOR_SEGMENTS | _RANGE_CEILING_SEGMENTS
+    sides = []
+    if set(words.get(str(bound.entity_id), ())) & ends:
+        sides.append(lambda e: words.get(str(e.entity_id), []))
+    if set(_key_words(bound)) & ends:
+        sides.append(_key_words)
+    want_dc = getattr(bound, "original_device_class", None)
+    want_unit = _unit_family(bound)
+    bound_eid = str(bound.entity_id)
+    numbers = [e for e in entities
+               if str(e.entity_id) != bound_eid
+               and str(e.entity_id).startswith("number.")
+               and getattr(e, "original_device_class", None) == want_dc
+               and _unit_family(e) == want_unit]
+    set_points: set = set()
+    ceilings: set = set()
+    for words_of in sides:
+        base = [w for w in words_of(bound) if w not in ends]
+        if not base:
+            continue
+        for e in numbers:
+            these = words_of(e)
+            if [w for w in these if w not in ends] != base:
+                continue
+            hit = set(these) & ends
+            if not hit:
+                set_points.add(str(e.entity_id))
+            elif not hit & _RANGE_FLOOR_SEGMENTS:
+                ceilings.add(str(e.entity_id))
+    return set_points, ceilings
+
+
+def _reject_range_end_current_control(result: Dict[str, str],
+                                      entities) -> None:
+    """(#1034, bug class 56) A ``min`` or ``max`` current is one END of the
+    range the owner sets, not the set-point SEM writes every cycle.
+
+    The V2C Trydan publishes three current numbers: ``intensity`` (the
+    set-point), ``min_intensity`` and ``max_intensity``. Its rule kept the
+    last one, so registry order bound the floor: every SEM write would move
+    the floor and leave the charge where it was.
+
+    A range end swaps to its one set-point twin. Without one, a ceiling
+    STAYS — on Alfen, Wallbox, Zaptec and OCPP the "max current" number is
+    the only one, and it is the control — and a floor goes to its ceiling
+    twin, so the order of the two never decides. A floor with neither is
+    DROPPED: monitor-only beats driving the wrong knob, the rule the
+    offline register follows. Two set-points are a choice this guard does
+    not make. The words are read from the own name and the translation
+    key, never from the device name.
+    """
+    eid = result.get("ev_current_control_entity")
+    if not eid:
+        return
+    entry = next((e for e in entities if str(e.entity_id) == str(eid)), None)
+    if entry is None:
+        return
+    words = _what_it_is(entities)
+    found = set(words.get(str(eid), ())) | set(_key_words(entry))
+    floor = bool(found & _RANGE_FLOOR_SEGMENTS)
+    if not floor and not found & _RANGE_CEILING_SEGMENTS:
+        return
+    set_points, ceilings = _range_twins(entry, entities, words)
+    if len(set_points) == 1:
+        result["ev_current_control_entity"] = set_points.pop()
+        return
+    if not floor:
+        return
+    if not set_points and len(ceilings) == 1:
+        result["ev_current_control_entity"] = ceilings.pop()
+        return
+    _LOGGER.info(
+        "discovery: %s is a minimum, not the current set-point, and no "
+        "set-point was found — not adopting it as the control (#1034)", eid)
+    result.pop("ev_current_control_entity", None)
 
 
 #: (#804) The roles SEM COMMANDS. A reboot entity in any of them is a
@@ -598,6 +793,7 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     (#1032) The glob matrix that was a fifth path is retired; the wizard's
     prefill comes from these paths only."""
     _reject_offline_current_control(result, entities)
+    _reject_range_end_current_control(result, entities)
     _reject_capability_sensor(result, entities)
     _reject_reboot_control(result, entities)
 
@@ -1694,7 +1890,11 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
         values = dict(_lex.STRATEGY_VALUE_KEYS)
         for key, default in _lex.STRATEGY_VALUE_KEYS:
             values[key] = str((strategy_values or {}).get(key) or default)
-        missing = sorted({v for v in values.values() if v not in options})
+        # (#1039) the runtime's matcher, without HA's labels: a value names
+        # an option when it maps to one. Stricter than the runtime, never
+        # looser — a translated label still reads as unmapped here.
+        missing = sorted({v for v in values.values()
+                          if pick_listed(options, v) not in options})
         if missing:
             prop["action"] = "options_unmapped"
             prop["options"] = options[:12]
@@ -3650,7 +3850,9 @@ def _discover_ohme(entities) -> Dict[str, str]:
     """Discover EV charger config from Ohme integration.
 
     Ohme uses sensor for status (Plugged in, Charging, Unplugged).
-    Charge mode via select entity (Max charge, Paused, etc.).
+    Charge mode via select entity. (#1039) Its options are ``max_charge``,
+    ``paused`` and ``smart_charge``; "Max charge" and "Paused" are only the
+    labels HA shows, and the select refuses a label.
     """
     result: Dict[str, str] = {}
     own = _own_names(entities)
@@ -3669,8 +3871,8 @@ def _discover_ohme(entities) -> Dict[str, str]:
             result.setdefault("ev_current_sensor", eid)
         if eid.startswith("select.") and "charge_mode" in name:
             result["ev_charge_mode_entity"] = eid
-            result["ev_charge_mode_start"] = "Max charge"
-            result["ev_charge_mode_stop"] = "Paused"
+            result["ev_charge_mode_start"] = "max_charge"
+            result["ev_charge_mode_stop"] = "paused"
     return result
 
 
