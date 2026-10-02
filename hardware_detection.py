@@ -2588,7 +2588,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     # a charger is left to it. A companion device (R1) stops being a near
     # miss: it belongs to the charger beside it.
     try:
-        report["role_offers"] = _role_offers(hass, registry, report)
+        report["role_offers"] = _role_offers(hass, registry, report,
+                                             configured=configured_entities)
         companions = {c.get("device_id") for o in report["role_offers"]
                       for c in o.get("companions", ())}
         offered = {o.get("device_id") for o in report["role_offers"]}
@@ -2668,7 +2669,7 @@ def _service_fields_of(hass):
     return _of
 
 
-def _role_offers(hass, registry, report) -> List[Dict[str, Any]]:
+def _role_offers(hass, registry, report, configured=None) -> List[Dict[str, Any]]:
     """(#1032) Run the generic charger-role reader over every device."""
     from .charger_roles import build_role_offers
 
@@ -2686,10 +2687,19 @@ def _role_offers(hass, registry, report) -> List[Dict[str, Any]]:
     state_of = ((lambda eid: hass.states.get(eid))
                 if (hass is not None and running) else None)
     claimed = [c.get("device_id") for c in report.get("chargers", ())]
+    # what a brand path already binds, and what the user has configured —
+    # the KEBA lesson (.175, 02.10): a device-less box has no device id, so
+    # it is matched by its entities
+    claimed_entities = set(configured or ())
+    for c in report.get("chargers", ()):
+        for v in (c.get("mapped") or {}).values():
+            if isinstance(v, dict) and v.get("entity"):
+                claimed_entities.add(str(v["entity"]))
     return build_role_offers(units, device_of=unit_device_id,
                              entry_of=_entry_of,
                              services_of=_service_fields_of(hass),
-                             state_of=state_of, claimed=claimed)
+                             state_of=state_of, claimed=claimed,
+                             claimed_entities=claimed_entities)
 
 
 def discover_ev_charger_from_registry(hass: HomeAssistant) -> Dict[str, str]:

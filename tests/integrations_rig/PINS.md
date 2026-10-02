@@ -15,6 +15,7 @@ Nothing here ships: `tests/` is left out of the release zip
 |---|---|
 | `core-snapshot` | Home Assistant core's OWN test output for the integration (`tests/components/<domain>/snapshots/*.ambr`) at the tag. No SEM-written data. The snapshot does not record devices; they are rebuilt from `unique_id`. |
 | `live-load` | The real integration set up in a Home Assistant test instance, its client patched with test data (its own fixtures where it has them). |
+| `live-install` | The registry rows and states of a real device on a SEM test install, plus the integration's services at the tag. |
 | `declared` | Read from the integration's own entity descriptions at a commit, for cloud-only integrations that cannot run offline. Keys, device classes and units are the integration's; which entities an account gets, and the entity ids, are built the way it builds them, not observed. The weakest kind — said so in the capture. |
 
 ## Pins
@@ -34,6 +35,7 @@ Nothing here ships: `tests/` is left out of the release zip
 | `tesla_wall_connector` | live-load | home-assistant/core 2026.8.2, client `tesla-wall-connector==1.2.0` | values from core's own `conftest.py` |
 | `myenergi` | live-load | CJNE/ha-myenergi | `ce5aca11dfe87b1644d73962d38d5797a21bcde4` (2026-07-22), client `pymyenergi==0.2.3`, its own `tests/fixtures` |
 | `zaptec`, `zaptec_no_limit` | declared | custom-components/zaptec | `ba502a9971355e60b84b0356650a50e6ab403d11` (2026-08-26); `zaptec_no_limit` is an account without the right to set the current (#1032) |
+| `keba` | live-install | the real KEBA P30 on .175 (02.10.2026), services from core 2026.8.2 | a device-less, service-driven charger |
 | `easee` | declared | nordicopen/easee_hass | `ea85bb5fa9f093594a50606a786ee9fd03d6a662` (2026-09-22) |
 
 ## Refresh one

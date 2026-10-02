@@ -43,7 +43,8 @@ UPSTREAM_KEYS = {
 def test_every_capture_names_where_it_came_from():
     for name in capture_names():
         src = load_capture(name)["source"]
-        assert src["kind"] in ("core-snapshot", "live-load", "declared"), name
+        assert src["kind"] in ("core-snapshot", "live-load", "live-install",
+                               "declared"), name
         assert src.get("repo"), name
         assert src.get("tag") or src.get("commit"), name
 

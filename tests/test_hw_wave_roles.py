@@ -153,6 +153,48 @@ async def test_r6_a_site_current_service_is_report_data_only(hass):
     assert "ev_charger_service" not in chg["offer"]
 
 
+# ── a charger driven by services, or already set up, is not "read-only" ──
+
+def _keba_without_its_brand_path():
+    """The KEBA capture under a domain no brand path knows — what any
+    service-driven integration looks like to the role reader alone."""
+    cap = json.loads(json.dumps(load_capture("keba")))
+    cap["domain"] = "rig_svc_charger"
+    for e in cap["entities"]:
+        e["entity_id"] = e["entity_id"].replace("keba_p30", "svc_box")
+    return cap
+
+
+async def test_a_service_controlled_charger_is_not_read_only(hass):
+    """.175, 02.10: a real KEBA, controlled through keba.set_current, came
+    back as a read-only charger with 'missing control'."""
+    await replay(hass, _keba_without_its_brand_path())
+    rep = crawl(hass)
+    (o,) = [x for x in rep["role_offers"] if x["platform"] == "rig_svc_charger"]
+    assert o["kind"] == "charger", o
+    assert o["complete"] is True
+    assert o["offer"]["ev_charger_service"] == "rig_svc_charger.set_current"
+    assert o["offer"]["ev_service_param_name"] == "current"
+
+
+async def test_a_charger_sem_already_drives_gets_no_offer(hass):
+    """The real KEBA on .175: the brand path binds it, so no role offer."""
+    _, offers = await _offers(hass, "keba")
+    assert _by_platform(offers, "keba") == []
+
+
+async def test_a_configured_charger_gets_no_offer(hass):
+    from custom_components.solar_energy_management.hardware_detection import (
+        build_detection_report,
+    )
+    cap = _keba_without_its_brand_path()
+    await replay(hass, cap)
+    rep = build_detection_report(
+        hass, configured_entities={"sensor.svc_box_charging_power"})
+    assert [x for x in rep["role_offers"]
+            if x["platform"] == "rig_svc_charger"] == []
+
+
 # ── nothing becomes a charger that is not one ────────────────────────────
 
 @pytest.mark.parametrize("name", ["vicare"])

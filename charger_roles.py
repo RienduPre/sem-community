@@ -215,11 +215,27 @@ def unit_roles(entries, *, state_of: Optional[Callable] = None) -> Dict[str, Any
     return roles
 
 
+#: the field a current-setting service takes the amperes in (#956)
+_CURRENT_FIELDS = ("current", "max_current", "charging_current", "amps",
+                   "ampere", "amp", "current_a")
+
+
 def service_roles(domain: str, services: Dict[str, List[str]]) -> Dict[str, Any]:
-    """R6 — the integration's services read by their FIELDS."""
+    """R6 — the integration's services read by their FIELDS, plus the #956
+    rule: a service named like a current setter with a current field is a
+    CONTROL (KEBA's ``set_current``), so a charger driven by services is
+    never "read-only"."""
     out: Dict[str, Any] = {}
+    rule = lex.SERVICE_ROLE_RULES.get("ev_current_control") or {}
     for name in sorted(services or {}):
         fields = list(services[name] or [])
+        full = f"{domain}.{name}"
+        param = next((f for f in _CURRENT_FIELDS if f in fields), None)
+        if (rule and param
+                and any(re.search(p, full, re.I) for p in rule.get("any", ()))
+                and not any(re.search(p, full, re.I) for p in rule.get("not", ()))):
+            out.setdefault("current_service", {"service": full, "param": param,
+                                               "fields": fields})
         if all(f in fields for f in lex.SERVICE_PHASE_FIELDS):
             out.setdefault("phase_current_service",
                            {"service": f"{domain}.{name}", "fields": fields})
@@ -234,7 +250,7 @@ def service_roles(domain: str, services: Dict[str, List[str]]) -> Dict[str, Any]
 def _has_control(roles: Dict[str, Any]) -> bool:
     return any(k in roles for k in ("current_number", "start_stop_buttons",
                                     "charge_mode", "vehicle_charge_current",
-                                    "vehicle_charge_switch"))
+                                    "vehicle_charge_switch", "current_service"))
 
 
 def _offer(roles: Dict[str, Any]) -> Dict[str, Any]:
@@ -264,6 +280,9 @@ def _offer(roles: Dict[str, Any]) -> Dict[str, Any]:
         o["ev_start_service_data"] = json.dumps({"entity_id": start})
         o["ev_stop_service"] = "button.press"
         o["ev_stop_service_data"] = json.dumps({"entity_id": stop})
+    if roles.get("current_service") and "ev_current_control_entity" not in o:
+        o["ev_charger_service"] = roles["current_service"]["service"]
+        o["ev_service_param_name"] = roles["current_service"]["param"]
     if roles.get("phase_select"):
         o["_suggested_phase_switch"] = dict(roles["phase_select"])
     return o
@@ -274,23 +293,34 @@ def build_role_offers(units: Dict[Any, List[Any]], *,
                       entry_of: Callable[[Any], Optional[str]],
                       services_of: Optional[Callable[[str], Dict[str, list]]] = None,
                       state_of: Optional[Callable] = None,
-                      claimed: Iterable[Optional[str]] = ()) -> List[Dict[str, Any]]:
+                      claimed: Iterable[Optional[str]] = (),
+                      claimed_entities: Iterable[str] = ()) -> List[Dict[str, Any]]:
     """One offer per charger-shaped unit, with its companions (R1), the car
     that drives a read-only charger (R4) and the service roles (R6).
 
     ``units`` maps a unit key to its registry entries; ``device_of`` /
     ``entry_of`` give a unit's device id and config entry id; ``claimed`` is
-    the device ids a brand path already turned into a charger (left alone).
+    the device ids a brand path already turned into a charger, and
+    ``claimed_entities`` the entities SEM already binds or has configured — a
+    unit holding any of them is left alone (a device-less box like KEBA has
+    no device id to match on).
     """
     claimed = {c for c in claimed if c}
+    claimed_entities = {str(e) for e in claimed_entities if e}
     rows = []
     for key, entries in units.items():
         entries = [e for e in entries
                    if str(getattr(e, "platform", "") or "") not in _SKIP_PLATFORMS]
         if not entries:
             continue
+        if claimed_entities & {str(e.entity_id) for e in entries}:
+            continue
         platform = str(entries[0].platform or "")
         roles = unit_roles(entries, state_of=state_of)
+        if services_of and not roles.get("vehicle"):
+            srv = service_roles(platform, services_of(platform))
+            if srv.get("current_service"):
+                roles["current_service"] = srv["current_service"]
         rows.append({"key": key, "platform": platform,
                      "device_id": device_of(key), "entry_id": entry_of(key),
                      "roles": roles, "size": len(entries)})
