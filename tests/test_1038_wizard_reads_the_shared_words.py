@@ -327,6 +327,9 @@ def _status_word_lists(tree):
 _NOT_A_CHARGER_LIST = {
     # SEM's own home-battery status labels (battery_status_map)
     ("sensor.py", frozenset({"charging", "discharging"})),
+    # (#1042) the words in the NAME of a switch that pauses the charge
+    # (``_CHARGE_PAUSE_SEGMENTS``) — read from entity ids, never a state
+    ("hardware_detection.py", frozenset({"paused", "charging"})),
 }
 
 

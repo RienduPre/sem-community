@@ -2420,11 +2420,10 @@ class CurrentControlDevice(ControllableDevice):
         ``off``; this is the other half of that rule.
 
         Only a definite running state from a switch that reports its device
-        counts: ``on``, or ``off`` for a switch named for the pause (#1042,
-        V2C's "Pause session"). Anything unreadable still sends, as before,
-        and so does a switch with ``assumed_state`` (an optimistic template /
-        REST / command-line switch): its state may only echo SEM's last
-        command."""
+        counts: ``on``, or ``off`` for a switch named for the pause (#1042).
+        Anything unreadable still sends, as before, and so does a switch
+        with ``assumed_state`` (an optimistic template / REST / command-line
+        switch): its state may only echo SEM's last command."""
         ent = str(self.start_stop_entity or "")
         if not ent.startswith(("switch.", "input_boolean.")) or self.hass is None:
             return False
