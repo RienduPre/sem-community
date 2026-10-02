@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 - **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
 - 🐛 **An OCPP charger named "wallbox" no longer gets a refused start with every current change** (#976). SEM took it for a Wallbox-brand charger.
+- 🐛 **A V2C now charges when SEM starts it and pauses when SEM stops it** (#1042). SEM turned its "Pause session" switch on to charge.
 
 # [2.2.0-beta.8] — 02.10.2026
 
