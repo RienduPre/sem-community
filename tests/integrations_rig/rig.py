@@ -113,7 +113,7 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
                 if str(r.get("platform") or "").split("_rig")[0] == domain]
 
     out: Dict[str, Any] = {"chargers": [], "near_misses": [], "vehicles": [],
-                           "proposals": [], "role_offers": []}
+                           "proposals": []}
     for c in mine(report.get("chargers")):
         out["chargers"].append({
             "control": c.get("control"),
@@ -124,7 +124,11 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
     for n in mine(report.get("near_misses")):
         offer = n.get("suggested_charger") or {}
         out["near_misses"].append({
-            "role_offer": bool(n.get("role_offer")),
+            "charger_roles": n.get("charger_roles"),
+            "missing": n.get("missing"),
+            "companions": len(n.get("companions") or []),
+            "paired_vehicle": bool(n.get("paired_vehicle")),
+            "choose_vehicle": len(n.get("choose_vehicle") or []),
             "entities": len(n.get("entities") or []),
             "proposed_roles": sorted((n.get("proposed_roles") or {}).keys()),
             "offer": {k: stable(v) for k, v in sorted(offer.items())
@@ -132,18 +136,9 @@ def summary(report: Dict[str, Any], domain: str) -> Dict[str, Any]:
         })
     out["near_misses"].sort(key=lambda r: json.dumps(r, sort_keys=True))
     for v in mine(report.get("vehicles")):
-        out["vehicles"].append({k: v[k] for k in sorted(v)
-                                if k not in ("device_id",)})
-    for o in mine(report.get("role_offers")):
-        out["role_offers"].append({
-            "kind": o.get("kind"), "roles": o.get("roles"),
-            "complete": o.get("complete"), "missing": o.get("missing"),
-            "companions": len(o.get("companions") or []),
-            "phase_service": (o.get("phase_service") or {}).get("service"),
-            "paired_vehicle": bool(o.get("paired_vehicle")),
-            "offer": {k: stable(v) for k, v in sorted(o.get("offer", {}).items())},
-        })
-    out["role_offers"].sort(key=lambda r: json.dumps(r, sort_keys=True))
+        out["vehicles"].append({k: (stable(v[k]) if not isinstance(v[k], dict)
+                                    else {kk: stable(vv) for kk, vv in sorted(v[k].items())})
+                                for k in sorted(v) if k not in ("device_id",)})
     for p in report.get("roster_proposals") or []:
         if p.get("domain") == domain or p.get("platform") == domain:
             out["proposals"].append({

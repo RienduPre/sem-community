@@ -2,13 +2,19 @@
  "chargers": [],
  "near_misses": [
   {
+   "charger_roles": [],
+   "choose_vehicle": 0,
+   "companions": 0,
    "entities": 3,
+   "missing": [
+    "power reading",
+    "control"
+   ],
    "offer": {},
-   "proposed_roles": [],
-   "role_offer": false
+   "paired_vehicle": false,
+   "proposed_roles": []
   }
  ],
  "proposals": [],
- "role_offers": [],
  "vehicles": []
 }

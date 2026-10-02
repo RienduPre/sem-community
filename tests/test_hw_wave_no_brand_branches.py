@@ -11,7 +11,8 @@ These guards keep it that way:
   ``_discover_<x>`` function. The ones listed below exist today and are
   cleanup candidates (each folds into a role on its own branch, proven on
   the rig first) — the list may only SHRINK.
-* ``charger_roles.py`` — the role reader — names no integration at all.
+* the roster's role reader (the functions below, in hardware_detection.py)
+  names no integration at all.
 """
 from __future__ import annotations
 
@@ -74,9 +75,21 @@ def _integration_domains() -> set:
     return domains
 
 
+ROLE_READER = ("_role_words", "_rule_hits", "_first_hit", "_speaks_vehicle",
+               "_select_options", "_pick_option", "_charging_power",
+               "_plugged", "_charging_now", "_current_number_role",
+               "_is_stored_setting", "_service_current_role",
+               "_service_field_roles", "read_charger_roles", "_roles_offer",
+               "_offer_missing", "_roles_pass")
+
+
 def test_the_role_reader_names_no_integration():
-    tree = ast.parse((ROOT / "charger_roles.py").read_text())
-    literals = {n.value for n in ast.walk(tree)
+    tree = ast.parse((ROOT / "hardware_detection.py").read_text())
+    fns = {n.name: n for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    missing = [f for f in ROLE_READER if f not in fns]
+    assert not missing, missing
+    literals = {n.value for f in ROLE_READER for n in ast.walk(fns[f])
                 if isinstance(n, ast.Constant) and isinstance(n.value, str)}
     named = sorted(literals & _integration_domains())
-    assert not named, f"charger_roles.py names integrations: {named}"
+    assert not named, f"the role reader names integrations: {named}"

@@ -2,18 +2,26 @@
  "chargers": [],
  "near_misses": [
   {
+   "charger_roles": [
+    "current_number",
+    "plug",
+    "power"
+   ],
+   "choose_vehicle": 0,
+   "companions": 0,
    "entities": 42,
+   "missing": [],
    "offer": {
     "ev_charging_power_sensor": "sensor.openevse_mock_config_charging_power",
     "ev_connected_sensor": "binary_sensor.openevse_mock_config_vehicle_connected",
     "ev_current_control_entity": "number.openevse_mock_config_charge_rate",
     "ev_session_energy_sensor": "sensor.openevse_mock_config_usage_this_session"
    },
+   "paired_vehicle": false,
    "proposed_roles": [
     "ev_current_control",
     "vehicle_range"
-   ],
-   "role_offer": true
+   ]
   }
  ],
  "proposals": [
@@ -25,26 +33,6 @@
    "vehicle_range": [
     "sensor.openevse_mock_config_vehicle_range",
     "none"
-   ]
-  }
- ],
- "role_offers": [
-  {
-   "companions": 0,
-   "complete": true,
-   "kind": "charger",
-   "missing": null,
-   "offer": {
-    "ev_charging_power_sensor": "sensor.openevse_mock_config_charging_power",
-    "ev_connected_sensor": "binary_sensor.openevse_mock_config_vehicle_connected",
-    "ev_current_control_entity": "number.openevse_mock_config_charge_rate"
-   },
-   "paired_vehicle": false,
-   "phase_service": null,
-   "roles": [
-    "current_number",
-    "plug",
-    "power"
    ]
   }
  ],

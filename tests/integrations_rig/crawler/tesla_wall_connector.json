@@ -1,28 +1,23 @@
 {
  "chargers": [],
- "near_misses": [],
- "proposals": [],
- "role_offers": [
+ "near_misses": [
   {
-   "companions": 0,
-   "complete": false,
-   "kind": "read_only_charger",
-   "missing": [
-    "control"
-   ],
-   "offer": {
-    "ev_charging_power_sensor": "sensor.tesla_wall_connector_total_power",
-    "ev_charging_sensor": "binary_sensor.tesla_wall_connector_contactor_closed",
-    "ev_connected_sensor": "binary_sensor.tesla_wall_connector_vehicle_connected"
-   },
-   "paired_vehicle": false,
-   "phase_service": null,
-   "roles": [
+   "charger_roles": [
     "charging",
     "plug",
     "power"
-   ]
+   ],
+   "choose_vehicle": 0,
+   "companions": 0,
+   "entities": 19,
+   "missing": [
+    "control"
+   ],
+   "offer": {},
+   "paired_vehicle": false,
+   "proposed_roles": []
   }
  ],
+ "proposals": [],
  "vehicles": []
 }

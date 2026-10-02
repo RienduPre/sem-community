@@ -1754,12 +1754,34 @@ def _services_of(hass):
     if services is None or not hasattr(services, "async_services"):
         return None
 
-    def _of(domain: str) -> set:
+    def _of(domain: str) -> "_ServiceNames":
+        """The domain's service names (a set, as before); (#1032) each
+        name's fields ride along in ``.fields``, read from the service's own
+        schema, so a role can be read from what a service TAKES."""
+        out: Dict[str, list] = {}
         try:
-            return set((services.async_services() or {}).get(str(domain), {}) or ())
+            for name, svc in ((services.async_services() or {})
+                              .get(str(domain), {}) or {}).items():
+                fields: list = []
+                inner = getattr(getattr(svc, "schema", None), "schema", None)
+                if isinstance(inner, dict):
+                    fields = sorted(str(getattr(k, "schema", k)) for k in inner)
+                out[str(name)] = fields
         except Exception:  # noqa: BLE001
-            return set()
+            return _ServiceNames()
+        return _ServiceNames(out)
     return _of
+
+
+class _ServiceNames(set):
+    """A set of service names that also knows each one's fields."""
+
+    def __init__(self, fields: Optional[Dict[str, list]] = None) -> None:
+        super().__init__(fields or ())
+        self.fields: Dict[str, list] = dict(fields or {})
+
+    def get(self, name, default=None):
+        return self.fields.get(name, default)
 
 
 def propose_roles_from_roster(dev_entities, domain: str, *,
@@ -1949,8 +1971,288 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
             return
 
 
+# ============================================================
+# (#1032) Charger roles read from ANY integration's own words — the roster
+# learning what a charger, or a car that charges, offers beside a current
+# number. SEM connects to integrations; it does not cover hardware (Guido,
+# 01.10.2026). The rule tables live in consts/role_lexicon.py; nothing below
+# names an integration. Report data only, never a binding.
+# ============================================================
+
+def _role_words(entry) -> List[str]:
+    """An entity's own words: its translation key and its unique id."""
+    return [w for w in (str(getattr(entry, "translation_key", "") or ""),
+                        str(getattr(entry, "unique_id", "") or "")) if w]
+
+
+def _rule_hits(entry, rule) -> bool:
+    if not str(getattr(entry, "entity_id", "")).startswith(f"{rule['platform']}."):
+        return False
+    words = _role_words(entry)
+    if any(re.search(p, w, re.I) for p in rule.get("not", ()) for w in words):
+        return False
+    return any(re.search(p, w, re.I) for p in rule["any"] for w in words)
+
+
+def _first_hit(entries, rule) -> Optional[str]:
+    hits = sorted(str(e.entity_id) for e in entries if _rule_hits(e, rule))
+    return hits[0] if hits else None
+
+
+def _roles_dc(entry) -> str:
+    return str(getattr(entry, "original_device_class", "") or "")
+
+
+def _speaks_vehicle(entries) -> bool:
+    """A CAR's vocabulary: a vehicle marker, and none of a building's."""
+    from .consts import role_lexicon as lex
+    words = " ".join(w.lower() for e in entries for w in _role_words(e))
+    return (any(m in words for m in lex.VEHICLE_MARKERS)
+            and not any(m in words for m in lex.HOUSE_MARKERS))
+
+
+def _select_options(entry, state_of) -> List[str]:
+    opts = None
+    if state_of is not None:
+        st = state_of(str(entry.entity_id))
+        if st is not None:
+            opts = (getattr(st, "attributes", None) or {}).get("options")
+    if not opts:
+        opts = (getattr(entry, "capabilities", None) or {}).get("options")
+    return [str(o) for o in (opts or [])]
+
+
+def _pick_option(options: List[str], wanted) -> Optional[str]:
+    low = {o.lower(): o for o in options}
+    for w in wanted:
+        if w in low:
+            return low[w]
+    return None
+
+
+def _charging_power(entries, *, vehicle: bool) -> Optional[str]:
+    """The charging power reading: a power sensor that is not one phase leg
+    or a clamp on something else; on a car it must say it is the charger's."""
+    cands = []
+    for e in entries:
+        eid = str(e.entity_id)
+        if not eid.startswith("sensor.") or _roles_dc(e) != "power":
+            continue
+        words = " ".join(_role_words(e)).lower() + " " + eid.lower()
+        if vehicle and "charg" not in words:
+            continue
+        if re.search(r"(reactive|export|import|generation|grid|battery|"
+                     r"photovolt|solar|_pv_|\bpv\b|monitor)", words):
+            continue
+        leg = (bool(re.search(r"(?:_|-)(l[123]|phase_?[123]|ct[1-9]|[123])$", eid))
+               or bool(re.search(r"phase_[123]", eid)))
+        named = bool(re.search(r"charg|total|session", words))
+        cands.append((leg, not named, eid))
+    cands.sort()
+    return cands[0][2] if cands else None
+
+
+def _plugged(entries) -> Optional[str]:
+    plugs = sorted(str(e.entity_id) for e in entries
+                   if str(e.entity_id).startswith("binary_sensor.")
+                   and _roles_dc(e) == "plug")
+    if plugs:
+        return plugs[0]
+    cables = sorted(str(e.entity_id) for e in entries
+                    if str(e.entity_id).startswith("binary_sensor.")
+                    and _roles_dc(e) == "connectivity"
+                    and re.search(r"cable|plug", " ".join(_role_words(e)), re.I))
+    return cables[0] if cables else None
+
+
+def _charging_now(entries) -> Optional[str]:
+    hits = sorted(
+        str(e.entity_id) for e in entries
+        if str(e.entity_id).startswith("binary_sensor.")
+        and (_roles_dc(e) == "battery_charging"
+             or (_roles_dc(e) == "running"
+                 and re.search(r"charg|contactor", " ".join(_role_words(e)), re.I))))
+    return hits[0] if hits else None
+
+
+def _current_number_role(entries) -> Optional[str]:
+    from .consts import role_lexicon as lex
+    rule = lex.ROLE_RULES["ev_current_control"]
+    hits = []
+    for e in entries:
+        eid = str(e.entity_id)
+        if not eid.startswith("number."):
+            continue
+        for w in _role_words(e):
+            key = w.rsplit("-", 1)[-1]
+            if "ev_current_control" in (lex.role_for("number", key),
+                                        lex.role_for("number", w)):
+                hits.append(eid)
+                break
+            # ``amp``, ``charge_rate`` — a current only on a charger
+            if (any(re.search(p, key, re.I) for p in rule.get("charger_only_any", ()))
+                    and not any(re.search(p, key, re.I) for p in rule.get("not", ()))):
+                hits.append(eid)
+                break
+    return sorted(hits)[0] if hits else None
+
+
+def _is_stored_setting(entries, eid: Optional[str]) -> bool:
+    """A number filed under the CONFIG category is a stored setting (a box's
+    own maximum), not a live control: rewriting it every cycle wears the
+    box's memory and changes what the owner set."""
+    for e in entries:
+        if str(e.entity_id) == eid:
+            return str(getattr(e, "entity_category", "") or "").endswith("config")
+    return False
+
+
+def _service_current_role(domain: str, services: Dict[str, list]) -> Optional[Dict[str, Any]]:
+    """(#956 rule, read live) a current-setting service with a current field
+    is a CONTROL — a service-driven charger is never read-only."""
+    from .consts import role_lexicon as lex
+    rule = lex.SERVICE_ROLE_RULES.get("ev_current_control") or {}
+    for name in sorted(services or {}):
+        fields = list((services or {}).get(name) or [])
+        full = f"{domain}.{name}"
+        param = _current_field(fields)
+        if (rule and param
+                and any(re.search(p, full, re.I) for p in rule.get("any", ()))
+                and not any(re.search(p, full, re.I) for p in rule.get("not", ()))):
+            return {"service": full, "param": param, "fields": fields}
+    return None
+
+
+def _service_field_roles(domain: str, services: Dict[str, list]) -> Dict[str, Any]:
+    """R6 — services read by their FIELDS (report data)."""
+    from .consts import role_lexicon as lex
+    out: Dict[str, Any] = {}
+    for name in sorted(services or {}):
+        fields = list((services or {}).get(name) or [])
+        if all(f in fields for f in lex.SERVICE_PHASE_FIELDS):
+            out.setdefault("phase_service", {"service": f"{domain}.{name}",
+                                             "fields": fields})
+        cur = [f for f in fields if f in lex.SERVICE_SITE_CURRENT_FIELDS]
+        if cur:
+            out.setdefault("site_service", {"service": f"{domain}.{name}",
+                                            "param": cur[0], "fields": fields})
+    return out
+
+
+def read_charger_roles(dev_entities, domain: str, *, services_of=None,
+                       state_of=None) -> Dict[str, Any]:
+    """(#1032) Every charger role ONE device carries, by its own words:
+    R2 start/stop buttons, R3 a car's charge control, R5 a select read by its
+    options, R6 services by their fields (plus the #956 current service)."""
+    from .consts import role_lexicon as lex
+    roles: Dict[str, Any] = {}
+    vehicle = _speaks_vehicle(dev_entities)
+    if vehicle:
+        roles["vehicle"] = True
+        for role, rule in lex.VEHICLE_CONTROL_RULES.items():
+            hit = _first_hit(dev_entities, rule)
+            if hit:
+                roles[role] = hit
+    else:
+        cur = _current_number_role(dev_entities)
+        if cur:
+            roles["current_number"] = cur
+            if _is_stored_setting(dev_entities, cur):
+                roles["current_is_setting"] = True
+        start = _first_hit(dev_entities, lex.CHARGER_BUTTON_RULES["ev_start_button"])
+        stop = _first_hit(dev_entities, lex.CHARGER_BUTTON_RULES["ev_stop_button"])
+        if start and stop:
+            roles["start_stop_buttons"] = [start, stop]
+        for e in sorted(dev_entities, key=lambda x: str(x.entity_id)):
+            if not str(e.entity_id).startswith("select."):
+                continue
+            opts = _select_options(e, state_of)
+            go = _pick_option(opts, lex.SELECT_CHARGE_OPTIONS)
+            halt = _pick_option(opts, lex.SELECT_STOP_OPTIONS)
+            if go and halt and "charge_mode" not in roles:
+                roles["charge_mode"] = {"entity": str(e.entity_id),
+                                        "start": go, "stop": halt}
+            elif (all(p in opts for p in lex.SELECT_PHASE_OPTIONS)
+                  and "phase_select" not in roles):
+                roles["phase_select"] = {"entity": str(e.entity_id),
+                                         "value_1p": "1", "value_3p": "3"}
+        live = services_of(domain) if services_of else None
+        if live:
+            svc = _service_current_role(domain, live)
+            if svc:
+                roles["current_service"] = svc
+            roles.update(_service_field_roles(domain, live))
+    power = _charging_power(dev_entities, vehicle=vehicle)
+    if power:
+        roles["power"] = power
+    plug = _plugged(dev_entities)
+    if plug:
+        roles["plug"] = plug
+    charging = _charging_now(dev_entities)
+    if charging:
+        roles["charging"] = charging
+    return roles
+
+
+#: (#1032) the roles that can DRIVE a charger (not the #804 config keys)
+_CHARGER_DRIVE_ROLES = ("current_number", "start_stop_buttons", "charge_mode",
+                        "vehicle_charge_current", "vehicle_charge_switch",
+                        "current_service")
+
+
+def _roles_offer(roles: Dict[str, Any]) -> Dict[str, Any]:
+    """The charger config these roles fill — the keys the charger pickers
+    and the coordinator already use."""
+    o: Dict[str, Any] = {}
+    if roles.get("power"):
+        o["ev_charging_power_sensor"] = roles["power"]
+    if roles.get("plug"):
+        o["ev_connected_sensor"] = roles["plug"]
+    if roles.get("charging"):
+        o["ev_charging_sensor"] = roles["charging"]
+    if roles.get("current_number") and not (
+            roles.get("current_is_setting")
+            and (roles.get("start_stop_buttons") or roles.get("charge_mode"))):
+        o["ev_current_control_entity"] = roles["current_number"]
+    if roles.get("vehicle_charge_current"):
+        o["ev_current_control_entity"] = roles["vehicle_charge_current"]
+    if roles.get("vehicle_charge_switch"):
+        o["ev_start_stop_entity"] = roles["vehicle_charge_switch"]
+    if roles.get("charge_mode"):
+        cm = roles["charge_mode"]
+        o["ev_charge_mode_entity"] = cm["entity"]
+        o["ev_charge_mode_start"] = cm["start"]
+        o["ev_charge_mode_stop"] = cm["stop"]
+    if roles.get("start_stop_buttons"):
+        start, stop = roles["start_stop_buttons"]
+        o["ev_start_service"] = "button.press"
+        o["ev_start_service_data"] = json.dumps({"entity_id": start})
+        o["ev_stop_service"] = "button.press"
+        o["ev_stop_service_data"] = json.dumps({"entity_id": stop})
+    if roles.get("current_service") and "ev_current_control_entity" not in o:
+        o["ev_charger_service"] = roles["current_service"]["service"]
+        o["ev_service_param_name"] = roles["current_service"]["param"]
+    if roles.get("phase_select"):
+        o["_suggested_phase_switch"] = dict(roles["phase_select"])
+    return o
+
+
+def _offer_missing(offer: Dict[str, Any]) -> List[str]:
+    missing = []
+    if "ev_charging_power_sensor" not in offer:
+        missing.append("power reading")
+    if not any(k in offer for k in ("ev_current_control_entity",
+                                     "ev_start_stop_entity",
+                                     "ev_charge_mode_entity",
+                                     "ev_start_service",
+                                     "ev_charger_service")):
+        missing.append("control")
+    return missing
+
+
 def charger_from_near_miss(dev_entities, platform: str,
-                          proposed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          proposed: Optional[Dict[str, Any]] = None, *,
+                          roles: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """(#915) The charger config a near miss is one click away from.
 
     "Entities present, no role matched — please report" is the right thing to
@@ -1969,8 +2271,24 @@ def charger_from_near_miss(dev_entities, platform: str,
     control = proposed.get("ev_current_control") or {}
     current = control.get("entity")
     service = control.get("service")
+    # (#1032) a current number that is the box's stored SETTING is not the
+    # control when the box offers a live one (start/stop, a charge mode)
+    if current and roles and roles.get("current_is_setting") and \
+            current == roles.get("current_number") and \
+            (roles.get("start_stop_buttons") or roles.get("charge_mode")):
+        current = None
     if not current and not service:
-        return {}
+        # (#1032) no declared current key: the roles the device's own words
+        # carry (start/stop buttons, a charge-mode select, a current service)
+        if not roles:
+            return {}
+        out = _roles_offer(roles)
+        apply_charger_discovery_guards(out, dev_entities)
+        if _offer_missing(out):
+            return {}
+        out["id"] = f"{platform}_{str(getattr(dev_entities[0], 'device_id', '') or 'device')}"[:48]
+        out["name"] = (describe_domain(platform) or {}).get("name") or platform
+        return out
     if current:
         out: Dict[str, Any] = {"ev_current_control_entity": current}
     else:
@@ -2332,6 +2650,133 @@ def vehicle_from_device(dev_entities) -> Dict[str, Any]:
     return out
 
 
+def _roles_pass(report, registry, brand_units, configured_entities,
+                services_of, state_of) -> None:
+    """(#1032) The near-miss walk for the integrations ``_EV_CHARGER_PLATFORMS``
+    does not list, then R1 (companion devices) and R4 (a read-only charger
+    driven through the one car) across ALL near misses. Mutates ``report``."""
+    from .consts import role_lexicon as lex
+    brand_platforms = {p for p, _ in _EV_CHARGER_PLATFORMS}
+    skip = set(lex.OPAQUE_PLATFORMS) | set(_TRANSPORT_PLATFORMS) | {
+        "solar_energy_management"}
+    taken = {str(e) for e in (configured_entities or ()) if e}
+    for u in brand_units:
+        taken |= set(u["entities"])
+    entries = [e for e in registry.entities.values() if not e.disabled_by]
+    units = group_entities_by_unit(
+        [e for e in entries
+         if str(e.platform or "") not in brand_platforms | skip
+         and not str(e.platform or "").startswith("zaptec_")])
+    entry_of: Dict[Any, Optional[str]] = {}
+    roles_of: Dict[Any, Dict[str, Any]] = {}
+    for key, ents in units.items():
+        entry_of[key] = next((getattr(e, "config_entry_id", None) for e in ents
+                              if getattr(e, "config_entry_id", None)), None)
+        if taken & {str(e.entity_id) for e in ents}:
+            continue
+        platform = str(ents[0].platform or "")
+        roles = read_charger_roles(ents, platform, services_of=services_of,
+                                   state_of=state_of)
+        roles_of[key] = roles
+        offer = _roles_offer(roles)
+        if roles.get("vehicle"):
+            if roles.get("vehicle_charge_current"):
+                report["vehicles"].append({
+                    "platform": platform, "device_id": unit_device_id(key),
+                    "note": "vehicle", "charge_control": offer,
+                })
+            continue
+        has_control = any(k in roles for k in _CHARGER_DRIVE_ROLES)
+        if not (roles.get("power") and (roles.get("plug") or has_control)):
+            continue
+        apply_charger_discovery_guards(offer, ents)
+        missing = _offer_missing(offer)
+        nm = {
+            "platform": platform, "device_id": unit_device_id(key),
+            "entities": [{"entity": str(e.entity_id),
+                          "domain": str(e.entity_id).split(".", 1)[0],
+                          "device_class": getattr(e, "original_device_class", None)}
+                         for e in ents],
+            "note": "a charger SEM has no row for",
+            "roster": describe_domain(platform),
+            "proposed_roles": propose_roles_from_roster(
+                ents, platform, services_of=services_of),
+            "suggested_charger": {},
+            "charger_roles": sorted(k for k in roles
+                                    if k not in ("vehicle", "current_is_setting")),
+            "missing": missing,
+        }
+        if not missing:
+            offer["id"] = f"{platform}_{unit_device_id(key) or 'device'}"[:48]
+            offer["name"] = (describe_domain(platform) or {}).get("name") or platform
+            nm["suggested_charger"] = offer
+        report["near_misses"].append(nm)
+
+    # R1 — a device with no power reading of its own, on the same config
+    # entry as a charger near miss, is that charger's companion; its live
+    # current number replaces a charger's stored setting.
+    dev_entry: Dict[Optional[str], Optional[str]] = {}
+    dev_entities: Dict[Optional[str], list] = {}
+    for ukey, uents in group_entities_by_unit(entries).items():
+        did = unit_device_id(ukey)
+        if did:
+            dev_entities[did] = uents
+            dev_entry[did] = next(
+                (getattr(e, "config_entry_id", None) for e in uents
+                 if getattr(e, "config_entry_id", None)), None)
+    chargerish = [n for n in report["near_misses"]
+                  if n.get("suggested_charger") or n.get("charger_roles")]
+    companions = set()
+    for n in chargerish:
+        my_entry = dev_entry.get(n.get("device_id"))
+        if not my_entry:
+            continue
+        for other in report["near_misses"]:
+            did = other.get("device_id")
+            if (other is n or not did or dev_entry.get(did) != my_entry
+                    or other.get("suggested_charger")):
+                continue
+            ents = dev_entities.get(did, [])
+            if _charging_power(ents, vehicle=False):
+                continue
+            n.setdefault("companions", []).append(
+                {"device_id": did, "entities": len(ents)})
+            companions.add(did)
+            live = _current_number_role(ents)
+            sc = n.get("suggested_charger") or {}
+            if (live and not _is_stored_setting(ents, live) and sc
+                    and "ev_current_control_entity" not in sc):
+                sc["ev_current_control_entity"] = live
+    report["near_misses"] = [n for n in report["near_misses"]
+                             if n.get("device_id") not in companions]
+
+    # R4 — a charger that only reports, driven through the one car that has
+    # its own charge control; two cars are a question, not a guess
+    cars = [v for v in report["vehicles"] if v.get("charge_control")]
+    for n in report["near_misses"]:
+        if n.get("suggested_charger") or n.get("missing") != ["control"]:
+            continue
+        if len(cars) == 1:
+            ents = [e for e in entries if str(e.entity_id) in
+                    {x["entity"] for x in n.get("entities", ())}]
+            roles = read_charger_roles(ents, n["platform"], services_of=None,
+                                       state_of=state_of)
+            offer = _roles_offer(roles)
+            cc = cars[0]["charge_control"]
+            for k in ("ev_current_control_entity", "ev_start_stop_entity"):
+                if cc.get(k):
+                    offer[k] = cc[k]
+            if not _offer_missing(offer):
+                offer["id"] = f"{n['platform']}_{n.get('device_id') or 'device'}"[:48]
+                offer["name"] = (describe_domain(n["platform"]) or {}).get("name") \
+                    or n["platform"]
+                n["suggested_charger"] = offer
+                n["paired_vehicle"] = cars[0].get("device_id")
+                n["missing"] = []
+        elif len(cars) > 1:
+            n["choose_vehicle"] = sorted(str(c.get("device_id")) for c in cars)
+
+
 def build_detection_report(hass: Optional[HomeAssistant] = None,
                            registry=None, configured_entities=None,
                            strategy_values=None) -> Dict[str, Any]:
@@ -2378,6 +2823,13 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     # (#964) the entities behind each charger row — the pairing key the
     # prober comparison uses, never written into the report itself.
     brand_units: List[Dict[str, Any]] = []
+    # (#1032) what the role reader needs: live select options once HA runs,
+    # and each service's fields
+    _hass_running = (bool(getattr(hass, "is_running", True))
+                     if hass is not None else False)
+    _roles_state_of = ((lambda eid: hass.states.get(eid))
+                       if (hass is not None and _hass_running) else None)
+    _roles_services = _services_of(hass)
 
     for platform, discover_fn in _EV_CHARGER_PLATFORMS:
         def _matches(ep: str, _this=platform) -> bool:
@@ -2462,6 +2914,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                     continue
                 _proposed = propose_roles_from_roster(
                     dev_entities, platform, services_of=_services_of(hass))
+                _roles = read_charger_roles(
+                    dev_entities, platform, services_of=_roles_services,
+                    state_of=_roles_state_of)
                 if (platform in _TRANSPORT_PLATFORMS and not _proposed
                         and not _census_energy_shaped(dev_entities)):
                     continue
@@ -2499,7 +2954,11 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                     # A charger SEM can describe well enough to drive is an
                     # offer, not a bug report.
                     "suggested_charger": charger_from_near_miss(
-                        dev_entities, platform, _proposed),
+                        dev_entities, platform, _proposed, roles=_roles),
+                    "charger_roles": sorted(k for k in _roles
+                                            if k not in ("vehicle",
+                                                         "current_is_setting")),
+                    "missing": _offer_missing(_roles_offer(_roles)),
                 })
                 continue
             mapped: Dict[str, Any] = {}
@@ -2539,6 +2998,18 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 "device_id": device_id,
                 "entities": {str(e.entity_id) for e in dev_entities},
             })
+
+    # (#1032) the same near-miss question asked of every integration the
+    # brand walk does not cover — by the roles its own words carry. A charger
+    # SEM has no row for lands in ``near_misses`` with its offer; a car that
+    # charges lands in ``vehicles`` with its charge control. Units holding an
+    # entity SEM already binds or the user configured are not news (the KEBA
+    # lesson, .175 02.10: a device-less box has no device id to match on).
+    try:
+        _roles_pass(report, registry, brand_units, configured_entities,
+                    _roles_services, _roles_state_of)
+    except Exception:  # noqa: BLE001 — a new reader never costs the report
+        _LOGGER.debug("charger role pass failed", exc_info=True)
 
     # (#814 Pillar A) the prober runs beside the brand walk. A candidate on
     # a device no brand function claimed = "prober_only" (a shape we could
@@ -2582,28 +3053,6 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                                key=lambda t: str(t[1]["unit"]))
            if bi not in paired_brand]
     )
-    # (#1032) the role crawler: what ANY integration's charger — or a car
-    # that charges — offers, by its own words (charger_roles.py). Report
-    # data only, never a binding; a device a brand path already turned into
-    # a charger is left to it. A companion device (R1) stops being a near
-    # miss: it belongs to the charger beside it.
-    try:
-        report["role_offers"] = _role_offers(hass, registry, report,
-                                             configured=configured_entities)
-        companions = {c.get("device_id") for o in report["role_offers"]
-                      for c in o.get("companions", ())}
-        offered = {o.get("device_id") for o in report["role_offers"]}
-        kept = []
-        for nm in report["near_misses"]:
-            if nm.get("device_id") in companions:
-                continue
-            if nm.get("device_id") in offered:
-                nm["role_offer"] = True
-            kept.append(nm)
-        report["near_misses"] = kept
-    except Exception:  # noqa: BLE001 — a new reader never costs the report
-        _LOGGER.debug("role offers failed", exc_info=True)
-        report["role_offers"] = []
     # (#848) the census rides every report — what is installed, what SEM
     # knows, and the two gap lines that turn installs into detection
     # findings.
@@ -2641,65 +3090,6 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     except Exception:  # noqa: BLE001 — a prior never costs the report
         report["roster_proposals"] = []
     return report
-
-
-def _service_fields_of(hass):
-    """``{service: [field, …]}`` per domain from HA's live service registry
-    (the schema's keys), or None when it cannot be asked."""
-    if hass is None or not bool(getattr(hass, "is_running", True)):
-        return None
-    services = getattr(hass, "services", None)
-    if services is None or not hasattr(services, "async_services"):
-        return None
-
-    def _of(domain: str) -> Dict[str, list]:
-        out: Dict[str, list] = {}
-        try:
-            for name, svc in ((services.async_services() or {})
-                              .get(str(domain), {}) or {}).items():
-                fields: list = []
-                schema = getattr(svc, "schema", None)
-                inner = getattr(schema, "schema", None)
-                if isinstance(inner, dict):
-                    fields = sorted(str(getattr(k, "schema", k)) for k in inner)
-                out[str(name)] = fields
-        except Exception:  # noqa: BLE001
-            return {}
-        return out
-    return _of
-
-
-def _role_offers(hass, registry, report, configured=None) -> List[Dict[str, Any]]:
-    """(#1032) Run the generic charger-role reader over every device."""
-    from .charger_roles import build_role_offers
-
-    entries = [e for e in registry.entities.values() if not e.disabled_by]
-    units = group_entities_by_unit(entries)
-
-    def _entry_of(key):
-        for e in units.get(key, ()):
-            ce = getattr(e, "config_entry_id", None)
-            if ce:
-                return ce
-        return None
-
-    running = bool(getattr(hass, "is_running", True)) if hass is not None else False
-    state_of = ((lambda eid: hass.states.get(eid))
-                if (hass is not None and running) else None)
-    claimed = [c.get("device_id") for c in report.get("chargers", ())]
-    # what a brand path already binds, and what the user has configured —
-    # the KEBA lesson (.175, 02.10): a device-less box has no device id, so
-    # it is matched by its entities
-    claimed_entities = set(configured or ())
-    for c in report.get("chargers", ()):
-        for v in (c.get("mapped") or {}).values():
-            if isinstance(v, dict) and v.get("entity"):
-                claimed_entities.add(str(v["entity"]))
-    return build_role_offers(units, device_of=unit_device_id,
-                             entry_of=_entry_of,
-                             services_of=_service_fields_of(hass),
-                             state_of=state_of, claimed=claimed,
-                             claimed_entities=claimed_entities)
 
 
 def discover_ev_charger_from_registry(hass: HomeAssistant) -> Dict[str, str]:

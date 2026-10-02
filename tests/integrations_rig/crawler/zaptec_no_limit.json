@@ -2,32 +2,16 @@
  "chargers": [],
  "near_misses": [
   {
-   "entities": 29,
-   "offer": {
-    "ev_charging_power_sensor": "sensor.zaptec_go2_zap012345_total_charge_power",
-    "ev_current_control_entity": "number.zaptec_go2_zap012345_charger_max_current",
-    "ev_session_energy_sensor": "sensor.zaptec_go2_zap012345_completed_session_energy"
-   },
-   "proposed_roles": [
-    "ev_current_control"
+   "charger_roles": [
+    "current_number",
+    "power",
+    "site_service",
+    "start_stop_buttons"
    ],
-   "role_offer": true
-  }
- ],
- "proposals": [
-  {
-   "ev_current_control": [
-    "number.zaptec_go2_zap012345_charger_max_current",
-    "per_charger"
-   ]
-  }
- ],
- "role_offers": [
-  {
+   "choose_vehicle": 0,
    "companions": 1,
-   "complete": true,
-   "kind": "charger",
-   "missing": null,
+   "entities": 29,
+   "missing": [],
    "offer": {
     "ev_charging_power_sensor": "sensor.zaptec_go2_zap012345_total_charge_power",
     "ev_start_service": "button.press",
@@ -36,11 +20,16 @@
     "ev_stop_service_data": "{\"entity_id\": \"button.zaptec_go2_zap012345_stop_charging_final\"}"
    },
    "paired_vehicle": false,
-   "phase_service": null,
-   "roles": [
-    "current_number",
-    "power",
-    "start_stop_buttons"
+   "proposed_roles": [
+    "ev_current_control"
+   ]
+  }
+ ],
+ "proposals": [
+  {
+   "ev_current_control": [
+    "number.zaptec_go2_zap012345_charger_max_current",
+    "per_charger"
    ]
   }
  ],
