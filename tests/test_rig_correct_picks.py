@@ -57,6 +57,10 @@ async def test_nrgkick(hass):
     o = _offer(await _rep(hass, "nrgkick"), "nrgkick")
     assert o["ev_current_control_entity"] == "number.nrgkick_test_charging_current"
     assert o["ev_charging_power_sensor"] == "sensor.nrgkick_test_total_active_power"
+    assert o["ev_start_stop_entity"] == "switch.nrgkick_test_charging_enabled"
+    assert o["ev_session_energy_sensor"] == "sensor.nrgkick_test_charged_energy"
+    assert o["ev_total_energy_sensor"] == "sensor.nrgkick_test_total_charged_energy"
+    assert o["_suggested_phase_switch"]["entity"] == "number.nrgkick_test_phase_count"
 
 
 async def test_openevse(hass):

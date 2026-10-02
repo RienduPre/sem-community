@@ -4,9 +4,11 @@
  "near_misses": [
   {
    "charger_roles": [
+    "charge_switch",
     "current_number",
     "phase_select",
     "power",
+    "session_energy",
     "total_energy"
    ],
    "choose_vehicle": 0,
@@ -14,8 +16,16 @@
    "entities": 60,
    "missing": [],
    "offer": {
+    "_suggested_phase_switch": {
+     "entity": "number.nrgkick_test_phase_count",
+     "value_1p": "1",
+     "value_3p": "3"
+    },
     "ev_charging_power_sensor": "sensor.nrgkick_test_total_active_power",
-    "ev_current_control_entity": "number.nrgkick_test_charging_current"
+    "ev_current_control_entity": "number.nrgkick_test_charging_current",
+    "ev_session_energy_sensor": "sensor.nrgkick_test_charged_energy",
+    "ev_start_stop_entity": "switch.nrgkick_test_charging_enabled",
+    "ev_total_energy_sensor": "sensor.nrgkick_test_total_charged_energy"
    },
    "paired_vehicle": false,
    "proposed_roles": [

@@ -2212,9 +2212,12 @@ def _charging_power(entries, *, vehicle: bool) -> Optional[str]:
         leg = (bool(re.search(r"(?:_|-)(l[123]|phase_?[123]|ct[1-9]|[123])$", eid))
                or bool(re.search(r"phase_[123]", eid)))
         named = bool(re.search(r"charg|total|session", words))
-        cands.append((leg, not named, eid))
+        # a reading that says "power" over one that only shares the class
+        # (NRGkick's ``charging_rate`` carries the power class)
+        says_power = "power" in " ".join(_role_words(e)).lower() + eid.lower()
+        cands.append((leg, not says_power, not named, eid))
     cands.sort()
-    return cands[0][2] if cands else None
+    return cands[0][-1] if cands else None
 
 
 def _plugged(entries) -> Optional[str]:
@@ -2325,6 +2328,9 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
             roles["current_number"] = cur
             if _is_stored_setting(dev_entities, cur):
                 roles["current_is_setting"] = True
+        sw = _first_hit(dev_entities, lex.CHARGER_SWITCH_RULES["ev_charge_switch"])
+        if sw:
+            roles["charge_switch"] = sw
         start = _first_hit(dev_entities, lex.CHARGER_BUTTON_RULES["ev_start_button"])
         stop = _first_hit(dev_entities, lex.CHARGER_BUTTON_RULES["ev_stop_button"])
         if start and stop:
@@ -2352,7 +2358,11 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
             caps = getattr(e, "capabilities", None)
             caps = caps if isinstance(caps, dict) else {}
             lo, hi = caps.get("min"), caps.get("max")
-            if (isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+            # a range that excludes 1 or 3 is not a phase switch; no range
+            # published is taken at the key's word (the values are offered,
+            # never written without the user)
+            if lo is None or hi is None or (
+                    isinstance(lo, (int, float)) and isinstance(hi, (int, float))
                     and lo <= 1 and hi >= 3):
                 roles["phase_select"] = {"entity": str(e.entity_id),
                                          "value_1p": "1", "value_3p": "3"}
@@ -2380,15 +2390,18 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
         words = " ".join(_role_words(e)).lower() + " " + eid.lower()
         if re.search(r"day|week|month|year|hour|today|target|added", words):
             continue
-        if "session" in words:
-            roles.setdefault("session_energy", eid)
-        elif re.search(r"total|lifetime", words):
+        if re.search(r"total|lifetime", words):
             roles.setdefault("total_energy", eid)
+        elif "session" in words or re.search(r"(?:^|_)charged_energy\b", words):
+            # NRGkick's ``charged_energy`` is this session's; its
+            # ``total_charged_energy`` is the lifetime meter
+            roles.setdefault("session_energy", eid)
     return roles
 
 
 #: (#1032) the roles that can DRIVE a charger (not the #804 config keys)
 _CHARGER_DRIVE_ROLES = ("current_number", "start_stop_buttons", "charge_mode",
+                        "charge_switch",
                         "vehicle_charge_current", "vehicle_charge_switch",
                         "current_service")
 
@@ -2415,6 +2428,8 @@ def _roles_offer(roles: Dict[str, Any]) -> Dict[str, Any]:
         o["ev_current_control_entity"] = roles["vehicle_charge_current"]
     if roles.get("vehicle_charge_switch"):
         o["ev_start_stop_entity"] = roles["vehicle_charge_switch"]
+    if roles.get("charge_switch"):
+        o["ev_start_stop_entity"] = roles["charge_switch"]
     if roles.get("charge_mode"):
         cm = roles["charge_mode"]
         o["ev_charge_mode_entity"] = cm["entity"]
@@ -3884,24 +3899,6 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     return result
 
 
-def _discover_nrgkick(entities) -> Dict[str, str]:
-    """(#917) NRGkick — a data row, plus the phase-count number offered as
-    the #804 phase switch: it takes 1 or 3, so the values are the counts."""
-    result = _discover_from_hints(entities, _BRAND_HINTS["nrgkick"])
-    # Identity: the current control. A device on the brand's own platform
-    # that only reports is not a charger SEM can drive.
-    if "ev_current_control_entity" not in result:
-        return {}
-    for entry in entities:
-        eid = str(entry.entity_id)
-        if eid.startswith("number.") and eid.endswith("phase_count"):
-            result["_suggested_phase_switch"] = {
-                "entity": eid, "value_1p": "1", "value_3p": "3",
-            }
-            break
-    return result
-
-
 def _discover_chargepoint(entities) -> Dict[str, str]:
     """ChargePoint — a data row (#814); see _BRAND_HINTS."""
     return _discover_from_hints(entities, _BRAND_HINTS["chargepoint"])
@@ -4150,6 +4147,7 @@ def _discover_blue_current(entities) -> Dict[str, str]:
 #: role reader never reads this list; the coverage tests do.
 ROLE_PROVEN_PLATFORMS = (
     "openevse",
+    "nrgkick",
 )
 
 _EV_CHARGER_PLATFORMS = [
@@ -4174,8 +4172,7 @@ _EV_CHARGER_PLATFORMS = [
     # (#802/#814) data-row brands need no function — the generic matcher
     # applies their _BRAND_HINTS rows.
     ("wattpilot", lambda ents: _discover_wattpilot(ents)),
-    # (#917) NRGkick — a data row plus the phase-count offer.
-    ("nrgkick", _discover_nrgkick),
+    # (#917/#1032) nrgkick: found by the roster's roles
     # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus.
     ("ev_charger_modbus", _discover_abl_emh1),
     # (#816) GARO's custom integration domain.

@@ -569,6 +569,19 @@ CHARGER_BUTTON_RULES: Final[Dict[str, Dict[str, Any]]] = {
     },
 }
 
+#: A charger's own on/off for charging: a switch that says it enables
+#: charging (NRGkick ``charging_enabled``, Peblar ``charge``). Not a lock,
+#: a schedule, a boost or a phase mode.
+CHARGER_SWITCH_RULES: Final[Dict[str, Dict[str, Any]]] = {
+    "ev_charge_switch": {
+        "platform": "switch",
+        "any": (r"(?:^|_)charg(e|ing)_enabled?$", r"(?:^|_)charge_enable$",
+                r"(?:^|_)charg(e|ing)$"),
+        "not": (r"phase", r"lock", r"schedul", r"boost", r"solar", r"price",
+                r"precondition", r"from_grid", r"smart", r"approv"),
+    },
+}
+
 #: R3 — the charge control a CAR integration exposes: its charging-amps
 #: number and its charge switch. Read only on a device the vocabulary says is
 #: a vehicle (``VEHICLE_MARKERS``) — the same words on a house battery are a
