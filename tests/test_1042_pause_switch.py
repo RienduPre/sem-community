@@ -106,8 +106,10 @@ def _row(eid, dc=None, unit=None, key=None, platform="v2c", device="v2c-1",
 
 
 def _v2c(switches=None, rest=None):
-    return ([_row(e, key=k) for e, k in (switches or _SWITCHES)]
-            + [_row(e, dc, u, k) for e, dc, u, k in (rest or _REST)])
+    switches = _SWITCHES if switches is None else switches
+    rest = _REST if rest is None else rest
+    return ([_row(e, key=k) for e, k in switches]
+            + [_row(e, dc, u, k) for e, dc, u, k in rest])
 
 
 class _Registry:
@@ -470,11 +472,25 @@ class TestV2cDetection:
         assert charger["ev_start_stop_entity"] == rename[PAUSE]
 
     def test_without_keys_the_own_name_decides(self):
-        """An old registry row with no key: "Pause session" is the charge,
-        "Pause dynamic control modulation" is not."""
-        switches = [(e, None) for e, _k in reversed(_SWITCHES)]
-        raw = _discover_v2c(_v2c(switches))
+        """A row with no key but the integration's own name: "Pause session"
+        is the charge, "Pause dynamic control modulation" is not — and the
+        run time reads the one it binds the same way."""
+        names = {PAUSE: "Pause session",
+                 PAUSE_DYNAMIC: "Pause dynamic control modulation"}
+        rows = [_row(e, original_name=names.get(e))
+                for e, _k in reversed(_SWITCHES)] + _v2c(switches=[])
+        raw = _discover_v2c(rows)
         assert raw["ev_start_stop_entity"] == PAUSE
+        with _registry_patch(rows):
+            assert switch_service(MagicMock(), PAUSE, run=True) == "turn_off"
+
+    def test_a_name_the_run_time_cannot_read_is_not_bound(self):
+        """No key and no own name: SEM could not tell which way it is on,
+        so it does not take it as the start/stop (the #627 Repair says
+        so) rather than drive it as on-while-charging."""
+        rows = [_row(e, has_entity_name=False) for e, _k in _SWITCHES]
+        raw = _discover_v2c(rows + _v2c(switches=[]))
+        assert "ev_start_stop_entity" not in raw
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -511,10 +527,13 @@ class TestTheSavedModulationPause:
         _box, dev = _built(saved, _v2c())
         assert dev.start_stop_entity == saved
 
-    def test_no_twin_no_swap(self):
+    def test_no_twin_no_swap_and_says_so(self, caplog):
+        """Configured, so the #627 Repair stays quiet: the log speaks."""
         rows = [r for r in _v2c() if r.entity_id != PAUSE]
         _box, dev = _built(PAUSE_DYNAMIC, rows)
         assert dev.start_stop_entity == PAUSE_DYNAMIC
+        assert any("#1042" in r.getMessage() and r.levelname == "WARNING"
+                   for r in caplog.records)
 
     def test_two_twins_no_guess(self):
         rows = _v2c() + [_row("switch.evse_1_1_1_1_pause_charge",

@@ -26,7 +26,7 @@ def _registry(hass: Any):
     return er.async_get(hass)
 
 
-def _integration_name(entry: Any) -> Optional[str]:
+def integration_name(entry: Any) -> Optional[str]:
     """The name the INTEGRATION gave the entity, without the device name.
 
     The translation key first: it is the same in every language (a German
@@ -57,7 +57,7 @@ def on_means_paused(hass: Any, entity_id: Any) -> bool:
         return False
     if entry is None:
         return False
-    return names_a_charge_pause(_integration_name(entry))
+    return names_a_charge_pause(integration_name(entry))
 
 
 def switch_service(hass: Any, entity_id: Any, *, run: bool) -> str:
@@ -110,4 +110,13 @@ def charge_pause_twin(hass: Any, entity_id: Any) -> Optional[str]:
     except Exception as e:  # noqa: BLE001 — a heal never costs a setup
         _LOGGER.debug("charge_pause_twin(%s) failed: %s", eid, e)
         return None
-    return twins[0] if len(twins) == 1 else None
+    if len(twins) == 1:
+        return twins[0]
+    # Configured, so the #627 Repair stays quiet: say it here.
+    _LOGGER.warning(
+        "The start/stop switch %s pauses something other than the charge, "
+        "and its device has %d switches that pause the charge, so SEM "
+        "cannot pick one. SEM cannot stop this charger with %s. Name the "
+        "switch that pauses the charge under Configuration → EV chargers "
+        "(#1042)", eid, len(twins), eid)
+    return None

@@ -30,7 +30,7 @@ from homeassistant.helpers import entity_registry
 from .consts.devices import (
     REBOOT_DEVICE_CLASS, names_a_charge_pause, names_a_reboot)
 from .utils.select_option import pick_listed
-from .utils.switch_sense import charge_pause_twin
+from .utils.switch_sense import charge_pause_twin, integration_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -910,15 +910,15 @@ def _key_words(entry) -> List[str]:
     return [w for w in key.lower().split("_") if w]
 
 
-def _pauses_the_charge(entry, own: Dict[str, str]) -> bool:
+def _pauses_the_charge(entry) -> bool:
     """(#1042) A switch that pauses the CHARGE — and nothing else: V2C's
     "Pause dynamic control modulation" pauses the box's solar modulation.
 
-    The translation key first (the same in every language: a German V2C's
-    "Vorgang pausieren" is key ``paused``), the own name without one. The
-    runtime reads which way it is on by the same rule (``switch_sense``)."""
-    words = _key_words(entry) or _own_words(entry, own)
-    return names_a_charge_pause("_".join(words))
+    Read on the name the run time reads it by (``integration_name``: the
+    translation key, the same in every language, then the integration's
+    own name). A switch bound on any other name would be driven as
+    on-while-charging — the bug."""
+    return names_a_charge_pause(integration_name(entry))
 
 
 def _what_it_is(entities) -> Dict[str, List[str]]:
@@ -3965,7 +3965,7 @@ def _discover_v2c(entities) -> Dict[str, str]:
         # (#1042) The session pause ("Pause session", key ``paused``), on
         # while paused. "Pause dynamic control modulation" is registered
         # after it and also says "pause"; the last-wins test bound it.
-        if eid.startswith("switch.") and _pauses_the_charge(entry, own):
+        if eid.startswith("switch.") and _pauses_the_charge(entry):
             result["ev_start_stop_entity"] = eid
     return result
 
@@ -4978,8 +4978,8 @@ def wire_current_entity(hass, device, charger_id: str, current_entity_id) -> Non
         _LOGGER.warning(
             "Charger '%s': the saved start/stop switch %s pauses something "
             "other than the charge; SEM uses %s, the same device's pause of "
-            "the charge. Set it under Configuration → EV chargers to keep "
-            "it (#1042)", charger_id, saved, twin)
+            "the charge. Save %s under Configuration → EV chargers to stop "
+            "this message (#1042)", charger_id, saved, twin, twin)
     if not current_entity_id:
         return
     platform = entity_platform(hass, current_entity_id)
