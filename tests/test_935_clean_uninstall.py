@@ -313,7 +313,7 @@ class TestTheWallboxIsHandedBack:
         dev.charger_id = "ev_charger"
         dev._park_store = None
         for m in ("_remember_parked", "_write_park_record", "release_to_user",
-                  "session_start_mechanism", "_start_switch_reads_on"):
+                  "session_start_mechanism", "_start_switch_reads_running"):
             setattr(dev, m, getattr(CurrentControlDevice, m).__get__(dev))
         return dev
 

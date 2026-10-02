@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from ..consts.devices import names_a_reboot
 from ..utils.log_gate import log_on_change
 from ..utils.select_option import listed_option
+from ..utils.switch_sense import reads_running, switch_service
 
 # #392: KEBA's failsafe watchdog (and similar device-side timers on other
 # chargers) requires periodic *writes* to refresh — reads alone don't
@@ -2408,7 +2409,7 @@ class CurrentControlDevice(ControllableDevice):
         return (self.session_start_mechanism()
                 == SESSION_START_STOP_ENTITY)
 
-    def _start_switch_reads_on(self) -> bool:
+    def _start_switch_reads_running(self) -> bool:
         """(#976) The start/stop switch already shows a running session.
 
         A start then has nothing left to do, and it is not always harmless
@@ -2418,16 +2419,18 @@ class CurrentControlDevice(ControllableDevice):
         refusal as a notification. The reconciler's #536 ENABLE fires only on
         ``off``; this is the other half of that rule.
 
-        Only a definite ``on`` from a switch that reports its device counts.
-        Anything unreadable still sends, as before, and so does a switch with
-        ``assumed_state`` (an optimistic template / REST / command-line
-        switch): its ``on`` may only echo SEM's last command."""
+        Only a definite running state from a switch that reports its device
+        counts: ``on``, or ``off`` for a switch named for the pause (#1042,
+        V2C's "Pause session"). Anything unreadable still sends, as before,
+        and so does a switch with ``assumed_state`` (an optimistic template /
+        REST / command-line switch): its state may only echo SEM's last
+        command."""
         ent = str(self.start_stop_entity or "")
         if not ent.startswith(("switch.", "input_boolean.")) or self.hass is None:
             return False
         try:
             st = self.hass.states.get(ent)
-            if st is None or st.state != "on":
+            if st is None or reads_running(self.hass, ent, st.state) is not True:
                 return False
             return not (getattr(st, "attributes", None) or {}).get("assumed_state")
         except Exception:  # noqa: BLE001 — a read never costs a start
@@ -3400,12 +3403,15 @@ class CurrentControlDevice(ControllableDevice):
                 await self.send("select", "select_option", {"entity_id": self.charge_mode_entity, "option": self.charge_mode_start})
             elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
-                if self._start_switch_reads_on():
+                if self._start_switch_reads_running():
                     _LOGGER.debug(
                         "%s: %s is already on — the session is running, no "
                         "start sent (#976)", self.name, self.start_stop_entity)
                 elif domain in ("switch", "input_boolean"):
-                    await self.send(domain, "turn_on", {"entity_id": self.start_stop_entity})
+                    # (#1042) turn_off for a switch named for the pause
+                    await self.send(domain, switch_service(
+                        self.hass, self.start_stop_entity, run=True),
+                        {"entity_id": self.start_stop_entity})
                 elif domain == "button":
                     await self.send("button", "press", {"entity_id": self.start_stop_entity})
             elif mechanism == SESSION_START_CHARGER_SERVICE:
@@ -3480,7 +3486,8 @@ class CurrentControlDevice(ControllableDevice):
                 sdomain = self.start_stop_entity.split(".")[0]
                 if sdomain in ("switch", "input_boolean"):
                     _parked_it = bool(await self.send(
-                        sdomain, "turn_off",
+                        sdomain, switch_service(
+                            self.hass, self.start_stop_entity, run=False),
                         {"entity_id": self.start_stop_entity}))
         except Exception as e:  # noqa: BLE001 — surfaced, never fatal
             _LOGGER.error("park_off(%s): disable failed: %s", self.name, e)
@@ -3661,13 +3668,15 @@ class CurrentControlDevice(ControllableDevice):
                 did.append(f"{self.charge_mode_entity}={self.charge_mode_start}")
             elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
-                if self._start_switch_reads_on():
+                if self._start_switch_reads_running():
                     pass    # (#976) already on: nothing to hand back
                 elif domain in ("switch", "input_boolean"):
+                    service = switch_service(
+                        self.hass, self.start_stop_entity, run=True)
                     await _bounded(self.send(
-                        domain, "turn_on",
+                        domain, service,
                         {"entity_id": self.start_stop_entity}))
-                    did.append(f"{self.start_stop_entity} on")
+                    did.append(f"{self.start_stop_entity} {service}")
             elif mechanism == SESSION_START_CHARGER_SERVICE:
                 domain = self.charger_service.split(".", 1)[0]
                 if self.hass.services.has_service(domain, "enable"):
@@ -3725,8 +3734,11 @@ class CurrentControlDevice(ControllableDevice):
             elif self.start_stop_entity:
                 domain = self.start_stop_entity.split(".")[0]
                 if domain in ("switch", "input_boolean"):
-                    await self.send(domain, "turn_off", {"entity_id": self.start_stop_entity})
-                    stop_method = f"{domain}.turn_off={self.start_stop_entity}"
+                    # (#1042) turn_on for a switch named for the pause
+                    service = switch_service(
+                        self.hass, self.start_stop_entity, run=False)
+                    await self.send(domain, service, {"entity_id": self.start_stop_entity})
+                    stop_method = f"{domain}.{service}={self.start_stop_entity}"
                 elif domain == "button":
                     # (#804 B4a) The old code GUESSED a stop button by
                     # string-rewriting the start entity's id (resume→stop,

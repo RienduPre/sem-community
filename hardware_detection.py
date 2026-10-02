@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
-from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
+from .consts.devices import REBOOT_DEVICE_CLASS, names_a_pause, names_a_reboot
 from .utils.select_option import pick_listed
 
 _LOGGER = logging.getLogger(__name__)
@@ -788,6 +788,13 @@ _OTHER_CIRCUIT_SEGMENTS = frozenset({
     "shaper",
 })
 
+#: (#1042) The words a pause of the CHARGE may carry beside "pause". A pause
+#: switch that names anything else pauses that thing: V2C's "Pause dynamic
+#: control modulation" (key ``pause_dynamic``) pauses the box's own solar
+#: modulation and leaves the charge running.
+_CHARGE_PAUSE_SEGMENTS = frozenset({
+    "pause", "paused", "session", "charge", "charging"})
+
 #: (#1034) Words that name the CAR's side of the box. Among replacements
 #: of equal rank, one that says it is about the charge wins over the
 #: alphabet.
@@ -906,6 +913,17 @@ def _key_words(entry) -> List[str]:
     if not isinstance(key, str):
         return []
     return [w for w in key.lower().split("_") if w]
+
+
+def _pauses_the_charge(entry, own: Dict[str, str]) -> bool:
+    """(#1042) A switch that pauses the CHARGE — and nothing else.
+
+    The translation key first (the same in every language: a German V2C's
+    "Vorgang pausieren" is key ``paused``), the own name without one. The
+    runtime reads which way it is on from the same name (``switch_sense``)."""
+    words = _key_words(entry) or _own_words(entry, own)
+    return (names_a_pause("_".join(words))
+            and not set(words) - _CHARGE_PAUSE_SEGMENTS)
 
 
 def _what_it_is(entities) -> Dict[str, List[str]]:
@@ -3930,7 +3948,8 @@ def _discover_v2c(entities) -> Dict[str, str]:
     """Discover EV charger config from V2C Trydan integration.
 
     V2C uses binary_sensor for connected/charging status.
-    Current control via number entity (intensity).
+    Current control via number entity (intensity). Start/stop is the
+    session pause, which is ON while paused (#1042).
     """
     result: Dict[str, str] = {}
     own = _own_names(entities)
@@ -3948,7 +3967,10 @@ def _discover_v2c(entities) -> Dict[str, str]:
             result.setdefault("ev_total_energy_sensor", eid)
         if eid.startswith("number.") and ("intensity" in name or "current" in name):
             result["ev_current_control_entity"] = eid
-        if eid.startswith("switch.") and "pause" in name:
+        # (#1042) The session pause ("Pause session", key ``paused``), on
+        # while paused. "Pause dynamic control modulation" is registered
+        # after it and also says "pause"; the last-wins test bound it.
+        if eid.startswith("switch.") and _pauses_the_charge(entry, own):
             result["ev_start_stop_entity"] = eid
     return result
 

@@ -1,4 +1,5 @@
 """Device discovery patterns and load management constants for SEM."""
+import re as _re
 from typing import Final
 
 # Device discovery patterns for load management
@@ -119,3 +120,21 @@ def names_a_reboot(entity_id: str, device_class: object = None) -> bool:
         return True
     lowered = str(entity_id or "").lower()
     return any(word in lowered for word in REBOOT_WORDS)
+
+
+# (#1042) A switch named for the PAUSE is on while the charge is stopped.
+#
+# A switch says in its name what "on" means. Most charger switches are named
+# for the charge ("Charging enabled", "Charge control"): on is the charge.
+# V2C's "Pause session" (key ``paused``) is named for the pause: core's
+# ``turn_on`` calls ``evse.pause()``. A name that says both — Wallbox's
+# "Pause/resume" (key ``pause_resume``) — is on while it charges.
+PAUSE_WORDS: Final = frozenset({"pause", "paused"})
+RESUME_WORDS: Final = frozenset({"resume"})
+
+
+def names_a_pause(name: object) -> bool:
+    """True when ``name`` — a translation key, an object id or a label —
+    says pause and not resume. Whole words only: ``pausenraum`` is not one."""
+    words = set(_re.split(r"[^a-z0-9]+", str(name or "").lower()))
+    return bool(words & PAUSE_WORDS) and not words & RESUME_WORDS
