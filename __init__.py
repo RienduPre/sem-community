@@ -42,6 +42,7 @@ from .const import (
 )
 from .consts.core import DEFAULT_LOAD_MANAGEMENT_ENABLED
 from .coordinator.sensor_reader import GRID_TRIGGER_HINTS
+from .utils.select_option import listed_option
 from .coordinator import SEMCoordinator
 
 if TYPE_CHECKING:
@@ -5686,9 +5687,12 @@ async def _async_register_phase_services(
                     blocking=True,
                 )
             elif hass.states.get(f"select.sem_{key}") is not None:
+                # (#1039) the option the select lists, never its label
                 await hass.services.async_call(
                     "select", "select_option",
-                    {"entity_id": f"select.sem_{key}", "option": str(value)},
+                    {"entity_id": f"select.sem_{key}",
+                     "option": listed_option(
+                         hass, f"select.sem_{key}", str(value))},
                     blocking=True,
                 )
             else:

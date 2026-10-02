@@ -1037,7 +1037,7 @@ class EVControlMixin:
 
         if r.issue_switch is not None:
             value = v1 if r.issue_switch == 1 else v3
-            cmd = phase_switch_command(entity, value)
+            cmd = phase_switch_command(entity, value, self.hass)
             if cmd is not None:
                 domain, service, data = cmd
                 planner.note_switched(now)

@@ -2505,6 +2505,24 @@ guard holds for a hand-written brand shape too, so the closure is at the class l
 instance. **Sweep question:** for every entity a detector binds to an actuation role, can the
 integration expose a SECOND entity that fits the same shape but governs a different mode/state — and
 does the matcher separate them, or pick by ordering? Refs #886 #816 #683 #698.
+**Second instance — #1034, one end of a range:** HA's own V2C Trydan test data publishes three
+current numbers: `intensity` (the set-point), `min_intensity` and `max_intensity`. The V2C rule kept
+the last one named "intensity", so registry order bound the FLOOR: every SEM write would move the
+minimum and leave the charge alone. The qualifier is a RANGE END, not a mode. `_reject_range_end_current_control`
+runs at the same choke point, right after the offline guard: a control whose own name or translation
+key says `min`/`minimum`/`max`/`maximum` swaps to its set-point twin (the number named like it
+without that word, same device class and unit; the key is compared too, so a German or renamed id
+still finds it; only the side that holds the word is compared; two twins are a choice it does not
+make). With no set-point a CEILING stays — on Alfen, Wallbox, Zaptec and OCPP the "max current"
+number is the only one and IS the control — so a FLOOR goes to its ceiling twin (else the order of
+the pair would decide), and a floor with neither is dropped (this class's actuation rule). Where
+`_own_names` takes nothing off (mqtt, a small unit with one id renamed), the leading words more than
+half the unit's ids share are the device's (`_what_it_is`): "Min JuiceBox" (Swedish "my") is not a
+floor, but its `…_min_current` still is. Guard: `tests/test_1034_range_and_circuit.py` — HA's V2C
+in all 144 orders of its numbers and power sensors, the brand rule's raw answer spelled out, and an
+every-platform oracle with `min_`/`max_charging_current` first and last. **Left for Guido:** a V2C
+SAVED before this fix keeps `min_intensity` (detection re-runs only with no charger configured; the
+#886 heal swaps only `offline`).
 
 ### 57. Belt-and-suspenders actuation — a wrapper does the action AND delegates to a layer that does it again — GUARDED
 **Symptom:** one logical actuation reaches the hardware TWICE, a few milliseconds apart. No error, no
@@ -3898,6 +3916,22 @@ it without the phase (`_without_phase`), so a device's grid, solar or battery po
 for it. `_is_phase_leg` reads the entity's own name (class 115) and wants the number AFTER the word:
 `phase_3` is a leg, `3_phase_power` is the sum.
 Guard: `tests/test_1035_own_name.py::TestOnePhaseIsSwappedForTheTotal`.
+**Third instance — #1034, another circuit:** a box with its own clamps meters more than the car.
+HA's V2C publishes `charge_power`, `house_power`, `photovoltaic_power` (key `fv_power`) and
+`battery_power`, all `device_class: power`; its rule kept the last, the solar output. The guard now
+also swaps a read role whose own name or translation key names another circuit
+(`_OTHER_CIRCUIT_SEGMENTS`: photovoltaic, pv, fv, solar, house, home, household, grid, battery,
+inverter, mains, utility, evu, akku, ess, shaper), and `_measured_twin` never offers one; among
+equal ranks a candidate naming the car (`charge`, `ev`, `car`, `vehicle`) beats the alphabet. Swap
+only, like the rest of this class. `_what_it_is` keeps a device called "Solar Carport" or an mqtt
+"Home JuiceBox" from flagging its own charge (the review found the latter undid #1035's phase
+swap); the key keeps a German `…_photovoltaik_leistung`
+visible. The word list is English plus the keys: an unlisted word (`consumption`) is not seen —
+fail-open, like the capability list. The glob prefill is unchanged: it reads whole ids, so a device
+name would demote a real reading. Guard: `tests/test_1034_range_and_circuit.py`; on the 16 rig
+captures of `feature/hardware-wave` only V2C's answer changes. **Left for Guido:** Blue Current's
+`ev_current_sensor` is `setdefault` on `avg_current`, which `grid_avg_current` also holds; that role
+is outside this guard.
 **Residual, CLOSED in #964 (class 90):** the sibling search this class installs is only as
 honest as the bucket it searches — and two of the three discovery sites grouped device-less
 entities into ONE bucket per platform, so the best-ranked sibling could belong to the other
@@ -5271,6 +5305,67 @@ Peblar gets no start/stop (its switch is not called "charge"; before, it got the
 switch), and a phase named `fase_3`/`fas_3` is not seen as one phase. Reading Peblar's unique-id
 keys (`…_charge`, `…_power_total`) would fix both — brand code, so not here. (8) Seen on HA's own
 entity names, older than this class: Wallbox binds `…_maximum_icp_current`, the site's grid limit,
-as its current control; V2C is #1034. Class 114's residual (2) loses its `carport` case:
+as its current control; V2C was #1034 (classes 56 and 89, closed). Class 114's residual (2) loses its `carport` case:
 go-e MQTT's `car` now reads the own name.
 Refs #1035 #962 #976 #804 #1036.
+
+### 116. A select written with the label a person sees, not the option it lists — PARTIAL
+**Symptom:** on Home Assistant's own Ohme test data (HA 2026.8.2) SEM set the charge mode to
+"Max charge" and "Paused"; the select lists `max_charge` and `paused`, so HA refused every write
+and the charger never changed mode (#1039). Nothing else looks wrong: the entity is right, the
+call is made, and the error is one log line per start or stop.
+**Root shape:** HA's `select.select_option` takes an option exactly as the entity lists it in its
+`options` attribute. What the UI shows is the option's LABEL, translated through the
+integration's `translation_key`. A string typed from the UI — by a developer into a brand rule, or
+by a user into a config field — is the label, and the select refuses it. A compare against the
+select's state fails the same way, so a read-back waits for a value the select can never read.
+**Where it lives:** every select SEM writes: the charger's charge-mode start/stop, the hand-back
+and the amps-as-select current (all through `ControllableDevice.send`); the phase-switch select
+(`ev_phases.phase_switch_command`, `hass` now required); the battery direction select
+(`_direction_ready`) and power-strategy select (`GenericBatteryAdapter`, write and every compare);
+SG-Ready select contacts (`_contact_service`, `_contact_is_on`); the `set_option` service on SEM's
+own selects; the detection card's strategy check (`_gate_proposal`), which must judge a value as
+the runtime writes it. NOT closed: GoodWe forced charge and Deye's `_write_and_verify` (below).
+**Closure:** `utils/select_option.listed_option(hass, entity_id, value)` — a value the select lists
+is kept; otherwise the ONE listed option whose label (HA's translation cache: the user's language,
+then English) or whose own spelling is the same words; otherwise the value unchanged, for HA to
+refuse with its own error. "The same words" ignores case and treats a space, `_` or `-` between two
+letters or digits as one separator, nothing else; a `-` before a digit is a sign: `-5` is not `5`,
+`Offset -1` and `Offset - 1` are not `Offset 1`, `Solar+` is not `Solar`. A looser match would turn a refused write
+into an accepted one with another meaning. Never a guess between two. The charger seam maps every
+select write, so observer mode records the option it would really send. Ohme detection now saves
+`max_charge`/`paused`; a config saved with the labels is mapped at write time, so it needs no
+migration.
+**Guard:** `tests/test_1039_listed_option.py` — a fake HA whose selects refuse unlisted options,
+for Ohme (start, stop, hand-back, observer, through the reconciler), the direction and strategy
+selects, SG-Ready, the phase switch and the card's check; real HA labels from core's GoodWe
+translations in German and English; signs and symbols that must not match; an AST check that
+every `select_option` in the package is in a function that calls `listed_option`, goes through the
+charger seam, or is on a short list with its reason, and a second one for every function that
+writes through the `CONTACT_VALUE_SERVICES` table.
+**Sweep question:** where SEM writes or compares a string against an entity with a fixed list —
+did the string come from that list, or from what a person saw? And before mapping one: what
+happens on the hardware once a write that was always refused starts to LAND?
+**Left for Guido:** (1) GoodWe forced charge (`GoodWeChargeAdapter`) writes "Eco Charge" and
+"General"; core lists `general`, `eco`, `peak_shaving`, … and — built without the library's
+emulated modes — no `eco_charge` at all, so forced charge cannot work on core this way. The start
+call is not blocking, so SEM reports CHARGING anyway (class 97). Mapping was tried and pulled in
+review: a `general` that lands moves a user's eco or peak shaving on every restart, and handing
+back `eco` leaves the library's 24/7 charge slot active. Needs a GoodWe design. (2) Deye's
+`_write_and_verify` is not mapped: the force paths check each option against the list first, but
+`command_stop_force_discharge`, `command_limit_export` and `command_release_export` do not, and
+their "nothing to do" checks compare the raw config value, so a mapped write would land on every
+cycle. Older and a different shape: the two export paths compare the HA State OBJECT with an option
+string, so the prior mode is never saved and the release restores nothing — a Deye cut to Zero
+Export To Load stays there. (3) OpenWB detection saves "Instant Charging"/"Stop" and go-e "2"/"1";
+not checked against their integrations' options — the mapping covers a label either way. (4) The
+config flow's start/stop fields are free text; a dropdown of the chosen select's options would stop
+a wrong value at entry. (5) Class 97, older: `_direction_ready` never re-sends a write that did not
+fail but did not land. (6) Older and separate: both charger builders (`__init__` setup and
+`_retry_ev_device_setup`) skip a charger with no current control and no charger service, and a
+stock Ohme has only the mode select — so SEM builds no device for it and #1039's write is reached
+only on an Ohme the user gave a current entity or service. Supporting a start/stop-only charger is
+a feature. (7) Once it is built: the hand-back (`release_to_user`) writes the START mode, which for
+Ohme is `max_charge` — a full-power charge over the user's `smart_charge` — and with no current
+entity an IDLE decision after a restart cannot stop a box left in `max_charge`.
+Refs #1039 #1032 #955.

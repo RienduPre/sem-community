@@ -16,11 +16,38 @@ from typing import Optional
 from ..charger_types import BatteryIntent, ExportIntent
 from ..power_control import async_write_power_setpoint_verbose
 from .base import BatteryControlAdapter
+from ...utils.select_option import listed_option
 
 _LOGGER = logging.getLogger(__name__)
 
 
+class _StrategyOption:
+    """(#1039) A configured power-strategy value, read as the option the
+    strategy select LISTS. Every compare against the select's state and
+    every write uses it — a value typed as the label a person sees (``API``
+    for ``api``) would otherwise never be read as landed, and the user's own
+    mode would be captured as the "prior" to restore."""
+
+    def __set_name__(self, owner, name) -> None:
+        self._raw = f"{name}_raw"
+
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+        return listed_option(getattr(obj, "_hass", None),
+                             getattr(obj, "_strategy_entity", ""),
+                             getattr(obj, self._raw, None))
+
+    def __set__(self, obj, value) -> None:
+        setattr(obj, self._raw, value)
+
+
 class GenericBatteryAdapter(BatteryControlAdapter):
+    _strategy_active = _StrategyOption()
+    _strategy_idle = _StrategyOption()
+    _strategy_self_consume = _StrategyOption()
+    _strategy_off = _StrategyOption()
+
     def __init__(self, hass, config: dict) -> None:
         super().__init__(hass, config)
         self._discharge_control_entity = config.get(
@@ -214,6 +241,7 @@ class GenericBatteryAdapter(BatteryControlAdapter):
         is re-sent. No-op without a strategy entity."""
         if not self._strategy_entity:
             return
+        value = listed_option(self._hass, self._strategy_entity, value)
         import time as _time
         if self._read_strategy() == value:
             self._strategy_landed(value)

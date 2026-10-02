@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from ..charger_types import BatteryIntent, ExportIntent
+from ...utils.select_option import listed_option
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -600,10 +601,12 @@ class BatteryControlAdapter(ABC):
                     "(battery_power_direction_entity) — nothing written",
                 )
             return False
-        want = str(self._config.get(
+        # (#1039) the option the select lists — a label would be refused,
+        # and the read below would then wait for it forever
+        want = listed_option(self._hass, ent, str(self._config.get(
             "battery_direction_discharge_value" if watts > 0
             else "battery_direction_charge_value")
-            or ("discharge" if watts > 0 else "charge"))
+            or ("discharge" if watts > 0 else "charge")))
         st = self._hass.states.get(ent)
         if st is not None and str(getattr(st, "state", "")) == want:
             return True

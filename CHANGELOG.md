@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 - **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
 
+# [2.2.0-beta.7] — 02.10.2026
+
+- 🐛 **SEM writes the option a select lists, not the name it shows** (#1039). Ohme's "Max charge" becomes max_charge; the same for other mode settings.
+
+# [2.2.0-beta.6] — 02.10.2026
+
+- 🐛 **SEM sets the V2C Trydan's charge current and reads the car's power** (#1034), not the minimum current and the solar power.
+
 # [2.2.0-beta.5] — 02.10.2026
 
 - 🐛 **SEM uses the Peblar's charge switch and total power** (#1035), not its single-phase switch and one phase. Detection ignores words in the device name.
