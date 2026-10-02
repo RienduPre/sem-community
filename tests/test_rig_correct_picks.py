@@ -111,14 +111,22 @@ async def test_no_charger_offered(hass, name):
                 if n["platform"] == domain and n["suggested_charger"]]
 
 
-def test_every_role_proven_platform_has_a_rig_capture_and_a_pick_test():
-    from pathlib import Path
-
+def _role_proven():
     from custom_components.solar_energy_management.hardware_detection import (
         ROLE_PROVEN_PLATFORMS,
     )
+    return list(ROLE_PROVEN_PLATFORMS)
+
+
+@pytest.mark.parametrize("platform", _role_proven())
+async def test_every_role_proven_platform_is_found_on_its_rig_capture(hass, platform):
+    """A brand that left the brand list must still be FOUND, on its real
+    output: one complete offer with a power reading and a control."""
     from .integrations_rig.rig import capture_names
-    src = Path(__file__).read_text()
-    for p in ROLE_PROVEN_PLATFORMS:
-        assert p in capture_names(), f"{p}: no rig capture"
-        assert f"async def test_{p}(" in src, f"{p}: no correct-pick test"
+    assert platform in capture_names(), f"{platform}: no rig capture"
+    o = _offer(await _rep(hass, platform), platform)
+    assert o.get("ev_charging_power_sensor")
+    assert any(o.get(k) for k in ("ev_current_control_entity",
+                                  "ev_start_stop_entity",
+                                  "ev_charge_mode_entity",
+                                  "ev_start_service", "ev_charger_service"))
