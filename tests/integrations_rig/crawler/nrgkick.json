@@ -5,7 +5,8 @@
   {
    "charger_roles": [
     "current_number",
-    "power"
+    "power",
+    "total_energy"
    ],
    "choose_vehicle": 0,
    "companions": 0,

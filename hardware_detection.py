@@ -2352,6 +2352,19 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
     charging = _charging_now(dev_entities)
     if charging:
         roles["charging"] = charging
+    # the session and lifetime meters, by their own words (a car's lifetime
+    # energy is what it DROVE, not what a charger delivered)
+    for e in ([] if vehicle else sorted(dev_entities, key=lambda x: str(x.entity_id))):
+        eid = str(e.entity_id)
+        if not eid.startswith("sensor.") or _roles_dc(e) != "energy":
+            continue
+        words = " ".join(_role_words(e)).lower() + " " + eid.lower()
+        if re.search(r"day|week|month|year|hour|today|target|added", words):
+            continue
+        if "session" in words:
+            roles.setdefault("session_energy", eid)
+        elif re.search(r"total|lifetime", words):
+            roles.setdefault("total_energy", eid)
     return roles
 
 
@@ -2371,6 +2384,10 @@ def _roles_offer(roles: Dict[str, Any]) -> Dict[str, Any]:
         o["ev_connected_sensor"] = roles["plug"]
     if roles.get("charging"):
         o["ev_charging_sensor"] = roles["charging"]
+    if roles.get("session_energy"):
+        o["ev_session_energy_sensor"] = roles["session_energy"]
+    if roles.get("total_energy"):
+        o["ev_total_energy_sensor"] = roles["total_energy"]
     if roles.get("current_number") and not (
             roles.get("current_is_setting")
             and (roles.get("start_stop_buttons") or roles.get("charge_mode"))):

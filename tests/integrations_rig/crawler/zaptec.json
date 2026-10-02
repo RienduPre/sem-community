@@ -6,6 +6,7 @@
    "charger_roles": [
     "current_number",
     "power",
+    "session_energy",
     "site_service",
     "start_stop_buttons"
    ],
@@ -16,6 +17,7 @@
    "offer": {
     "ev_charging_power_sensor": "sensor.zaptec_go2_zap012345_total_charge_power",
     "ev_current_control_entity": "number.abbastova_available_current",
+    "ev_session_energy_sensor": "sensor.zaptec_go2_zap012345_completed_session_energy",
     "ev_start_service": "button.press",
     "ev_start_service_data": "{\"entity_id\": \"button.zaptec_go2_zap012345_resume_charging\"}",
     "ev_stop_service": "button.press",

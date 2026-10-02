@@ -6,7 +6,9 @@
    "charger_roles": [
     "current_number",
     "plug",
-    "power"
+    "power",
+    "session_energy",
+    "total_energy"
    ],
    "choose_vehicle": 0,
    "companions": 0,
