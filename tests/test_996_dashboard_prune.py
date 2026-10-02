@@ -46,9 +46,19 @@ def _dump(tpl):
 
 
 def test_the_plain_house_references_no_capability_entity():
+    """After the generator's prune, the plain house's dashboard names no
+    entity it does not have. (#1022 put sensor.sem_pv_health in the
+    template explicitly — a forecast entity — so the prune must drop it.)"""
+    from custom_components.solar_energy_management.features.dashboard_generator import (
+        DashboardGenerator,
+    )
     gone = absent_entity_ids(PLAIN)
     assert gone, "the plain house must lose something, or this test is vacuous"
-    dumped = _dump(_template())
+    tpl = _template()
+    assert "sensor.sem_pv_health" in _dump(tpl)   # the prune has work to do
+    DashboardGenerator._drop_entity_refs(object.__new__(DashboardGenerator),
+                                         tpl.get("views", []), gone)
+    dumped = _dump(tpl)
     leftovers = sorted(
         eid for eid in gone
         if re.search(rf"(?<![a-z0-9_.]){re.escape(eid)}(?![a-z0-9_])", dumped))
