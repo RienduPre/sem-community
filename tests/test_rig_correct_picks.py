@@ -85,9 +85,9 @@ async def test_myenergi(hass):
         "sensor.test_zappi_1_myenergi_test_zappi_1_power_ct_internal_load")
 
 
-@pytest.mark.xfail(strict=True, reason="#1035 (autopilot): Peblar picks the "
-                   "force-single-phase switch and one phase's power")
 async def test_peblar(hass):
+    """#1035 (autopilot, v2.2.0-beta.5): the brand rules read the entity's
+    own name."""
     m = _charger(await _rep(hass, "peblar"), "peblar")
     assert m["ev_current_control_entity"] == "number.peblar_ev_charger_charge_limit"
     assert m["ev_start_stop_entity"] == "switch.peblar_ev_charger_charge"

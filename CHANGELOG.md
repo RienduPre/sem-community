@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 - **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
 
+# [2.2.0-beta.5] — 02.10.2026
+
+- 🐛 **SEM uses the Peblar's charge switch and total power** (#1035), not its single-phase switch and one phase. Detection ignores words in the device name.
+
 # [2.2.0-beta.4] — 02.10.2026
 
 - 🐛 **An Easee Equalizer is not a charger** (#1036). It measures the grid. Setup now finds the real charger, also where it had saved the Equalizer.
