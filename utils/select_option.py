@@ -18,7 +18,8 @@ Every select write SEM makes goes through :func:`listed_option`:
 
 "The same words" ignores case and treats a space, ``_`` or ``-`` BETWEEN two
 letters or digits as one separator — nothing else. A sign or a symbol is
-meaning: ``-5`` is not ``5`` and ``Solar+`` is not ``Solar``.
+meaning: ``-5`` is not ``5``, ``Offset -1`` is not ``Offset 1`` and
+``Solar+`` is not ``Solar``.
 
 ``tests/test_1039_listed_option.py`` holds every select write in the package
 to this rule.
@@ -33,7 +34,8 @@ from .log_gate import log_on_change
 
 _LOGGER = logging.getLogger(__name__)
 
-_SEPARATOR = re.compile(r"(?<=[^\W_])[\s_-]+(?=[^\W_])")
+# A ``-`` right before a digit is a sign or a range, never a separator.
+_SEPARATOR = re.compile(r"(?<=[^\W_])(?![\s_]*-\d)[\s_-]+(?=[^\W_])")
 
 
 def _words(text: Any) -> str:

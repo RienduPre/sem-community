@@ -218,11 +218,9 @@ class TestTheDelegateSaysNothingToStop:
         status = await adapter.stop_forced_charge()
 
         assert status.status is fc.ChargeCommandStatus.IDLE
-        # (#1039) ``general`` is the option core's select lists; "General"
-        # was a label it refuses
         hass.services.async_call.assert_awaited_once_with(
             "select", "select_option",
-            {"entity_id": "select.work_mode", "option": "general"})
+            {"entity_id": "select.work_mode", "option": "General"})
 
     @pytest.mark.asyncio
     async def test_huawei_no_device_id_is_idle_and_silent(self) -> None:

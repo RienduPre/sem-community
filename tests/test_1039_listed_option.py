@@ -7,8 +7,10 @@ options, and HA's ``select.select_option`` refuses any option the entity
 does not list — so the charger never changed mode. Found by loading Home
 Assistant's own Ohme test data (HA 2026.8.2).
 
-The same mistake sat in GoodWe's forced charge: it wrote "Eco Charge" and
-"General", where core's select lists ``eco_charge`` and ``general``.
+GoodWe's forced charge writes "Eco Charge" and "General" the same way. It is
+NOT mapped here: core's select lists no forced-charge mode at all, and making
+those writes land would switch on a path never run on hardware. It is on the
+ALLOWED list below with that reason, for Guido.
 
 The fake hass below does what HA does: a select refuses an option it does
 not list, and takes one it does.
@@ -30,7 +32,6 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 OHME_SELECT = "select.ohme_home_pro_charge_mode"
 OHME_OPTIONS = ["smart_charge", "max_charge", "paused"]
-GOODWE_SELECT = "select.goodwe_inverter_operation_mode"
 GOODWE_OPTIONS = ["general", "off_grid", "backup", "eco", "peak_shaving",
                   "eco_charge", "eco_discharge"]
 
@@ -90,7 +91,7 @@ class TestListedOption:
         assert listed_option(hass, "select.x", "Max charge") == "max_charge"
         assert listed_option(hass, "select.x", "Paused") == "paused"
 
-    def test_the_goodwe_values_sem_wrote_become_the_options_core_lists(self):
+    def test_title_case_becomes_the_lower_case_option(self):
         hass = self._hass(GOODWE_OPTIONS)
         assert listed_option(hass, "select.x", "Eco Charge") == "eco_charge"
         assert listed_option(hass, "select.x", "General") == "general"
@@ -113,6 +114,8 @@ class TestListedOption:
         ("-1", ["0", "1"]),
         (" ", ["-", "on"]),
         ("+", ["-", "on"]),
+        ("Offset 1", ["Offset -1", "Offset 0", "Offset +1"]),
+        ("a_5", ["a_-5", "b"]),
     ])
     def test_a_sign_or_a_symbol_is_meaning_not_noise(self, wanted, options):
         """Only a space, ``_`` or ``-`` between two letters or digits is a
@@ -299,64 +302,6 @@ class TestOhmeDetection:
 
 # ── siblings: every other select SEM writes ───────────────────────────
 
-@pytest.mark.asyncio
-class TestGoodWeForcedCharge:
-    def _adapter(self, hass, **cfg):
-        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
-            GoodWeChargeAdapter,
-        )
-        return GoodWeChargeAdapter(hass, {
-            "battery_charge_platform": "goodwe",
-            "inverter_work_mode_entity": GOODWE_SELECT, **cfg})
-
-    async def test_forced_charge_selects_eco_charge(self):
-        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
-            ChargeCommand, ChargeCommandStatus,
-        )
-        hass = _Hass({GOODWE_SELECT: ("general", GOODWE_OPTIONS)})
-        status = await self._adapter(hass).start_forced_charge(
-            ChargeCommand(target_soc=80.0, max_power_w=3000))
-        assert status.status is ChargeCommandStatus.CHARGING
-        assert hass.reads(GOODWE_SELECT) == "eco_charge"
-
-    async def test_the_stop_restores_general_also_from_a_saved_label(self):
-        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
-            ChargeCommandStatus,
-        )
-        for saved in (None, "General"):
-            hass = _Hass({GOODWE_SELECT: ("eco_charge", GOODWE_OPTIONS)})
-            cfg = {} if saved is None else {"inverter_normal_work_mode": saved}
-            status = await self._adapter(hass, **cfg).stop_forced_charge()
-            assert status.status is ChargeCommandStatus.IDLE, saved
-            assert hass.reads(GOODWE_SELECT) == "general", saved
-
-
-    async def test_a_mode_sem_did_not_set_is_left_as_found(self):
-        """Before #1039 the stop wrote "General", which the select refused,
-        so it changed nothing. Now that it lands it must not move a GoodWe
-        the user keeps in eco or peak shaving — on a restart it fires once
-        whatever SEM did before (review of #1039)."""
-        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
-            ChargeCommandStatus,
-        )
-        hass = _Hass({GOODWE_SELECT: ("peak_shaving", GOODWE_OPTIONS)})
-        status = await self._adapter(hass).stop_forced_charge()
-        assert status.status is ChargeCommandStatus.IDLE
-        assert hass.options_sent(GOODWE_SELECT) == []
-        assert hass.reads(GOODWE_SELECT) == "peak_shaving"
-
-    async def test_the_users_own_mode_is_what_the_stop_hands_back(self):
-        from custom_components.solar_energy_management.coordinator.battery_adapters.force_charge import (
-            ChargeCommand,
-        )
-        hass = _Hass({GOODWE_SELECT: ("eco", GOODWE_OPTIONS)})
-        a = self._adapter(hass)
-        await a.start_forced_charge(ChargeCommand(target_soc=80.0, max_power_w=3000))
-        assert hass.reads(GOODWE_SELECT) == "eco_charge"
-        await a.stop_forced_charge()
-        assert hass.reads(GOODWE_SELECT) == "eco"
-
-
 class TestStrategyGate:
     def test_the_card_judges_a_value_as_the_runtime_writes_it(self):
         """The detection card asked for an exact match, so a value the
@@ -474,6 +419,18 @@ class TestPhaseSwitchSelect:
 #: writes a select and is not here must call ``listed_option`` — or be the
 #: charger path, whose one seam (``send``) maps every select write.
 ALLOWED = {
+    ("coordinator/battery_adapters/force_charge.py", "start_forced_charge"):
+        "GoodWe — left for Guido (class 116): core lists no forced-charge "
+        "mode, and a write that starts to land here runs SEM's charge on "
+        "hardware no one has tried it on",
+    ("coordinator/battery_adapters/force_charge.py", "stop_forced_charge"):
+        "GoodWe — left for Guido, as above: a 'General' that lands would move "
+        "a user's eco or peak shaving on every restart",
+    ("coordinator/battery_adapters/deye.py", "_write_and_verify"):
+        "Deye — left for Guido (class 116): the force paths check each option "
+        "against the select's list first; the export paths do not, and their "
+        "'nothing to do' checks compare the raw config value, so a mapped "
+        "write would land again on every cycle",
     ("consts/devices.py", "<module>"):
         "the service table only — every function that writes through it is "
         "held to the rule by test_every_contact_table_write_maps_its_option",
@@ -547,11 +504,15 @@ def test_every_contact_table_write_maps_its_option():
     found = []
     for rel, path in _source_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        names = {"CONTACT_VALUE_SERVICES"} | {
+            a.asname for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+            for a in n.names if a.name == "CONTACT_VALUE_SERVICES" and a.asname}
         for scope in ast.walk(tree):
             if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             reads_table = any(
-                isinstance(n, ast.Name) and n.id in ("CONTACT_VALUE_SERVICES", "_CVS")
+                (isinstance(n, ast.Name) and n.id in names)
+                or (isinstance(n, ast.Attribute) and n.attr == "CONTACT_VALUE_SERVICES")
                 for n in ast.walk(scope))
             builds_payload = any(
                 isinstance(n, ast.Dict) and any(
