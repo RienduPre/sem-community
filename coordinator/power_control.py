@@ -117,35 +117,43 @@ def clamp_to_entity_range(
     at 1560 W, #820). ONE clamp for every power write.
 
     ``round_down_to_step`` is for a ceiling (a charge cap): rounding it up
-    to the next step would let through more than was decided.
+    to the next step would let through more than was decided. The grid
+    starts at zero (#820: min 10, step 100 means 1400, not 1410). A cap
+    below the first grid point lands on the entity's MIN — Home Assistant
+    always accepts the min, and it is the smallest cap the entity has.
     """
     if not isinstance(attrs, Mapping):
         return watts
     lo = attrs.get("min")
     lo_w = (float(lo) * scale
             if isinstance(lo, (int, float)) and math.isfinite(lo) else None)
-    if round_down_to_step:
-        step = attrs.get("step")
-        if (isinstance(step, (int, float)) and math.isfinite(step)
-                and step > 0):
-            step_w = float(step) * scale
-            base = lo_w or 0.0
-            # a hair of tolerance so 2.4 kW / 0.1 kW is 24 steps, not 23
-            watts = base + math.floor((watts - base) / step_w + 1e-9) * step_w
     hi = attrs.get("max")
-    if isinstance(hi, (int, float)) and math.isfinite(hi):
-        hi_w = float(hi) * scale
-        if round_down_to_step and watts > hi_w:
-            # Floor the max onto the step grid too, so a capped ceiling is
-            # still a value the entity's step allows (#820 review).
-            step = attrs.get("step")
-            if (isinstance(step, (int, float)) and math.isfinite(step)
-                    and step > 0):
-                step_w = float(step) * scale
-                base = lo_w or 0.0
-                hi_w = base + math.floor((hi_w - base) / step_w + 1e-9) * step_w
+    hi_w = (float(hi) * scale
+            if isinstance(hi, (int, float)) and math.isfinite(hi) else None)
+    step = attrs.get("step")
+    step_w = (float(step) * scale
+              if round_down_to_step and isinstance(step, (int, float))
+              and math.isfinite(step) and step > 0 else None)
+
+    def _floor(value: float) -> float:
+        # (#820, 02.10) The grid starts at ZERO. Arne's Sungrow template
+        # number has min 10 and step 100; a grid anchored at the min gave
+        # 1410 W and, with step 10, 1151 W — values off the step the user
+        # sees. A min that sits on its own step's grid is the same grid.
+        # The tiny tolerance keeps 2.4 kW / 0.1 kW at 24 steps, not 23.
+        return math.floor(value / step_w + 1e-9) * step_w
+
+    if step_w is not None:
+        watts = _floor(watts)
+    if hi_w is not None:
+        if step_w is not None and watts > hi_w:
+            # a capped ceiling is still a value on the step (#820 review)
+            hi_w = _floor(hi_w)
         watts = min(hi_w, watts)
     if lo_w is not None:
+        # The entity's own floor wins over the grid: Home Assistant
+        # accepts its min, and nothing lower — a cap below the first
+        # grid point lands here.
         watts = max(lo_w, watts)
     return watts
 

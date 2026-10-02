@@ -225,7 +225,9 @@ class ChargerAdapter(ABC):
     async def ensure_enabled(self) -> None:
         """Idempotently assert the start/stop surface ON.
 
-        ``switch.``/``input_boolean.`` → ``turn_on`` (idempotent by nature).
+        ``switch.``/``input_boolean.`` → ``turn_on``. Not idempotent everywhere
+        (#976: on OCPP it asks for a new transaction), which is why the
+        reconciler only emits ENABLE while the switch reads ``off``.
         ``button.`` → ``press`` — (#804 B4a) a button start entity used to be
         INVISIBLE here (early return), while the only presser in the tree
         string-mangled the entity id and was unreachable after a latching

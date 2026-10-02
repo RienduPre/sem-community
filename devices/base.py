@@ -2408,6 +2408,31 @@ class CurrentControlDevice(ControllableDevice):
         return (self.session_start_mechanism()
                 == SESSION_START_STOP_ENTITY)
 
+    def _start_switch_reads_on(self) -> bool:
+        """(#976) The start/stop switch already shows a running session.
+
+        A start then has nothing left to do, and it is not always harmless
+        to send: a charge-control switch can be on exactly while the box's
+        transaction runs, with a turn_on that asks for a NEW transaction —
+        which the box refuses ("Rejected"), and its integration reports each
+        refusal as a notification. The reconciler's #536 ENABLE fires only on
+        ``off``; this is the other half of that rule.
+
+        Only a definite ``on`` from a switch that reports its device counts.
+        Anything unreadable still sends, as before, and so does a switch with
+        ``assumed_state`` (an optimistic template / REST / command-line
+        switch): its ``on`` may only echo SEM's last command."""
+        ent = str(self.start_stop_entity or "")
+        if not ent.startswith(("switch.", "input_boolean.")) or self.hass is None:
+            return False
+        try:
+            st = self.hass.states.get(ent)
+            if st is None or st.state != "on":
+                return False
+            return not (getattr(st, "attributes", None) or {}).get("assumed_state")
+        except Exception:  # noqa: BLE001 — a read never costs a start
+            return False
+
     @property
     def contactor_surface(self) -> bool:
         """(#940) True when SEM's own start or stop flips a relay.
@@ -3375,7 +3400,11 @@ class CurrentControlDevice(ControllableDevice):
                 await self.send("select", "select_option", {"entity_id": self.charge_mode_entity, "option": self.charge_mode_start})
             elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
-                if domain in ("switch", "input_boolean"):
+                if self._start_switch_reads_on():
+                    _LOGGER.debug(
+                        "%s: %s is already on — the session is running, no "
+                        "start sent (#976)", self.name, self.start_stop_entity)
+                elif domain in ("switch", "input_boolean"):
                     await self.send(domain, "turn_on", {"entity_id": self.start_stop_entity})
                 elif domain == "button":
                     await self.send("button", "press", {"entity_id": self.start_stop_entity})
@@ -3632,7 +3661,9 @@ class CurrentControlDevice(ControllableDevice):
                 did.append(f"{self.charge_mode_entity}={self.charge_mode_start}")
             elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
-                if domain in ("switch", "input_boolean"):
+                if self._start_switch_reads_on():
+                    pass    # (#976) already on: nothing to hand back
+                elif domain in ("switch", "input_boolean"):
                     await _bounded(self.send(
                         domain, "turn_on",
                         {"entity_id": self.start_stop_entity}))

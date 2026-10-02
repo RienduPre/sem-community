@@ -996,7 +996,11 @@ either side. A silent default is the same bug with the guess baked into the sour
 **Live catches:** **#684** and **#627** (`ev_start_stop_entity` — read off per-charger config since
 v1.0, auto-filled for some brands, never writable, and beta.25's new repair pointed straight at
 it); **#688 part 1** (`min_off_time_sec` defaulted to a twitchy 1 min with no surface, so a pool
-pump short-cycled and the user could neither see the window nor lengthen it).
+pump short-cycled and the user could neither see the window nor lengthen it); **#1040** (Calendar
+tariff mode sat in the Tariff menu since #120, and the setup guide promised a calendar field, but
+nothing ever wrote the schedule the provider reads — the mode ran at the off-peak price all day.
+Closed by `tariff_schedule_entity`, a Schedule-helper field the page refuses Calendar without, on
+the options page and the config card; guard `tests/test_1040_calendar_schedule_field.py`).
 **Second half (16.08.2026):** a field you can type into is not yet a surface you can *correct* —
 the class also lives in what a form does with the value you did **not** type. HA drops a cleared
 optional field out of `user_input` entirely, so `update(user_input)` cannot tell "left alone" from
@@ -2052,6 +2056,38 @@ sites*. Note also that delegation is not free — `_NOT_CHARGING` deliberately h
 cable-present idle states and cable-ABSENT ones, so cable presence had to become its own
 enumerated axis (`_CABLE_ABSENT` + `is_cable_present`) rather than be inferred as
 "anything not disconnected", which would have read an empty bay as occupied on OCPP, go-e and Ohme.
+**Live catch (#1038), shape (c) again — the copy #833 did not look for:** the setup wizard's check
+(`EVChargerDetector._validate_entity`) kept a third copy of the status words, and
+`validate_ev_configuration` is a hard gate on the setup and reconfigure forms. On Home Assistant's
+own Ohme test data (HA 2026.8.2) the status sensor stores `plugged_in`, `finished`,
+`pending_approval`; the reader knew all three, the wizard's copy had `"plugged in"` — the label HA
+shows, not the state it stores (class 116, read side) — so the form refused the sensor while the
+car sat plugged in. The same copy spelled Peblar `"no ev connected"`; core stores
+`no_ev_connected`, and `suspended` for a car plugged in and paused, which no list knew, so the
+reader also read that car as gone. **Closure:** the copy is deleted; the wizard asks
+`status_enum.knows_status` — the words the reader maps, plus a `_FAULT` set (`error`, `faulted`,
+`fault`) that the reader still reads as unknown, so a plain OCPP or Wallbox sensor caught in a
+fault still saves. Numbers stay `0`/`1` only: the reader reads any number > 0 as on, so a voltage
+picked by mistake would show a car plugged in all the time. An ENUM sensor in any other state
+passes when its `options` let the reader answer yes AND no for the role; one known word is not
+enough. Peblar's two words and Tesla Wall Connector's `not_connected` joined the shared list. The
+bare IEC pilot codes (`a`, `b1` … `f`) stay accepted in an `_IEC_PILOT` set, still unknown to the
+reader: ABL eMH1 (#808) may store them. Dropped with the copy, because no integration is known to
+store them and the reader never mapped them (each reads as "no"): `true`/`false`, `idle`,
+`no ev connected` on a plain sensor. A fourth copy, in the coordinator's per-charger loop (`== "on"`, so Ohme
+`charging` read as not charging; nothing read the result), now takes the reader's per-charger
+answer. **Guard:** `tests/test_1038_wizard_reads_the_shared_words.py` — core's option lists for
+Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the wizard's check (Ohme and
+Peblar through the whole form); every word the reader knows passes it; an AST lint over the
+package for any tuple, list, set or dict keys with two or more status words outside
+`status_enum.py`, unless they are only on/off. **Left for Guido:** the shared list still lacks words
+core really stores — Blue Current `vehicle_detected`/`standby`, NRGkick `standby`, Tesla Wall
+Connector `waiting_car`, the ABL pilot codes — so a Blue Current `vehicle_status` is still refused
+except at `ready` (one that saved at `ready` is refused on a later reconfigure), and the reader
+reads a car at `vehicle_detected` as gone. Each needs its meaning checked at the source before it
+is mapped. Older and separate: `_discover_peblar` and
+`_discover_easee` take a status sensor only with no device class, but core's Peblar `cp_state` is
+`enum`, so registry discovery never binds it (the glob prefill does, on an English install).
 **Closure:** import the owner and delete the literal, at **every** site in one pass — and where a
 literal is not a default at all, say so in the code rather than in a comment: `charge_stability`'s
 `or 0` was a sentinel meaning "config is silent, ask the adapter", and became a conditional so the
@@ -2069,7 +2105,7 @@ argument form and would have passed while three of the five 16s were still in th
 **Sweep question:** for a config key, grep the *readers* and compare their defaults before reading
 any logic — if they disagree, that is the bug, whatever the issue says it is about. And when a key
 has no write path, its default is not a fallback, it is the value.
-Refs #789 #788 #716 #746 #685 #678 #833.
+Refs #789 #788 #716 #746 #685 #678 #833 #1038.
 
 ### 47. One word names two axes, so every reader picks the axis it expected — GUARDED
 **Symptom:** a flag reads as an answer to a question it does not answer. Nothing misbehaves; the
@@ -4607,7 +4643,13 @@ WHEN, and did anyone pass in the moment?*
 **Guard:** `tests/test_994_a_level_needs_a_reference.py::TestTheCalendarKnowsWhatDayItIs` — every
 shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
 NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
-Refs #994 #638.
+**Second instance (#1040):** the Schedule-helper branch dropped the moment too. `_get_tariff_at(when)`
+answered every hour with the helper's state NOW, and `_ht_can_occur` took the helper's existence as
+a peak hour on every day. Harmless while no field could set a helper; once #1040 added one, the day
+strip, the next change and the battery break-even at 02:00/14:00 would all have read the current
+tariff. Cure: read the helper's week (`schedule.get_schedule`) and ask it about the hour given.
+Guard: `tests/test_1040_calendar_schedule_field.py::TestTheHelpersWeekAnswersEveryHour`.
+Refs #994 #638 #1040.
 
 ### 105. A sentinel given a name — every "is it missing?" test silently flips — GUARDED
 **Symptom:** a fix that makes absence legible breaks the code that was already handling absence
@@ -5307,6 +5349,7 @@ keys (`…_charge`, `…_power_total`) would fix both — brand code, so not her
 entity names, older than this class: Wallbox binds `…_maximum_icp_current`, the site's grid limit,
 as its current control; V2C was #1034 (classes 56 and 89, closed). Class 114's residual (2) loses its `carport` case:
 go-e MQTT's `car` now reads the own name.
+**Second instance — the runtime, not the setup (#976, 02.10):** `charger_adapters/wallbox.py::_looks_like_wallbox` chose the ADAPTER by `"wallbox" in entity_id`. "Wallbox" is what German owners call any wall charger; @bgthb's Huawei on OCPP is a charge point named "wallbox", so its `switch.wallbox_charge_control` made it a Wallbox. That adapter turns its pause switch on before every current write; on OCPP that turn_on is a RemoteStartTransaction, so every write sent a start the charging box refused ("Rejected", one notification each). Alfen (`alfen_wallbox`) and GARO (`garo_wallbox`) carry the word too. Closure: the adapter asks the registry PLATFORM (or the service domain), never the id. Guard: `tests/test_976_named_wallbox.py` — the reporter's charger through the reconciler, every other charger platform under a device named "wallbox", a Wallbox renamed "Garage", and an AST check that no module in `charger_adapters/` tests a brand word with `in` (a literal word only; `any(…)`, `.find()` or a regex would pass it). Left for Guido: `_looks_like_wallbox` and `_discover_pause_switch` read `charger_current_entity`, a name the real device does not have (it is `current_entity_id`), so a Wallbox configured with its current number alone still gets the generic adapter — unchanged here on purpose, since the Wallbox adapter then turns the pause switch on (a cloud call) before every write. Outside the charger path: `features/load_device_discovery.py` (keba / go-e / easee in ids), `utils/helpers.py` ("keba" picks kW), `coordinator/repair_issues.py` ("keba" + "failsafe"). Decided here: Wallbox hardware behind another integration (the MQTT bridge of #984/#985, Modbus) now runs the generic adapter. With its start/stop switch configured, `stop_session` turns it off on every stop and ENABLE turns it on when off; the Wallbox adapter only added a turn_on before every write.
 Refs #1035 #962 #976 #804 #1036.
 
 ### 116. A select written with the label a person sees, not the option it lists — PARTIAL
@@ -5343,6 +5386,8 @@ translations in German and English; signs and symbols that must not match; an AS
 every `select_option` in the package is in a function that calls `listed_option`, goes through the
 charger seam, or is on a short list with its reason, and a second one for every function that
 writes through the `CONTACT_VALUE_SERVICES` table.
+The read side is the same shape: an ENUM sensor's state is the option key too, so a word list
+typed from the UI never matches it (#1038: Ohme `plugged_in`, Peblar `no_ev_connected`).
 **Sweep question:** where SEM writes or compares a string against an entity with a fixed list —
 did the string come from that list, or from what a person saw? And before mapping one: what
 happens on the hardware once a write that was always refused starts to LAND?
@@ -5368,4 +5413,13 @@ only on an Ohme the user gave a current entity or service. Supporting a start/st
 a feature. (7) Once it is built: the hand-back (`release_to_user`) writes the START mode, which for
 Ohme is `max_charge` — a full-power charge over the user's `smart_charge` — and with no current
 entity an IDLE decision after a restart cannot stop a box left in `max_charge`.
-Refs #1039 #1032 #955.
+Refs #1039 #1032 #955 #1038.
+
+### 117. A start sent to a session the box already runs — PARTIAL
+**Symptom:** when SEM started a session the charger had already started itself (or from its app), the OCPP integration posted "Start transaction failed with response Rejected" (#976, 02.10) — one per session start. Charging went on. (The flood in the same report, one per current write, was class 115.)
+**Root shape:** `start_session` turned the start/stop switch on without reading it, on the belief that a switch's turn_on is idempotent. On OCPP it is not: `charge_control` is on while a transaction runs, and its turn_on is a NEW RemoteStartTransaction, which the box refuses. The reconciler's #536 ENABLE already read the switch first; the session start did not.
+**Where it lives:** `CurrentControlDevice.start_session` (the start/stop-entity branch) and `release_to_user` (same branch, on removal). `ensure_enabled` is only reached when the switch reads off. A `button.` start cannot be read and is unchanged (#804).
+**Closure:** `_start_switch_reads_on()` — a definite `on` from a switch without `assumed_state` means the session runs: no turn_on, the session is claimed. Unreadable or optimistic still sends.
+**Guard:** `tests/test_976_named_wallbox.py::TestNoStartIntoARunningSession` plus the end-to-end run through the reconciler. **Sweep question:** before SEM repeats a command it calls safe to repeat — what does the device do when it gets it twice?
+**Left for Guido:** (1) the #536 ENABLE fires on `off`, which on OCPP is also a box that REFUSES a start (Finishing after SEM's own RemoteStop, Preparing while it waits for authorisation): 5 refused starts, then one per 300 s — about 12 notices an hour while SEM wants to charge. Tied to the open question whether a RemoteStop is the right OCPP pause. (2) `WallboxAdapter.command_current` / `command_max` still turn the pause switch on before every write (a cloud resume call per write on a real Wallbox), and `command_idle` / `command_disable` turn it off a second time after `stop_session` did (the #894 shape). (3) `_discover_v2c` adopts V2C's `paused` switch as start/stop, where on means paused — older, and inverted for this rule as for every other.
+Refs #976 #536 #804.

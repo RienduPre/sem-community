@@ -146,6 +146,53 @@ class TestForeignWarningsReachTheBuffer:
         finally:
             root.removeHandler(tap)
 
+    def test_a_script_warning_carrying_the_entity_in_its_logger_name_is_kept(self):
+        """(02.10, mkaiser #654) A template number's set_value is a script
+        in mode single; Home Assistant DROPS a second call while one runs and
+        logs "Already running" under a logger NAMED after the entity — the
+        message never carries the entity id. Arne's foreign log was empty
+        while his writes were being dropped."""
+        buffer, root, tap = self._setup({"number.battery_max_charge_power_inv_1"})
+        try:
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script."
+                "battery_max_charge_power_inv_1_set_value").warning(
+                "Battery max charge power set_value: Already running")
+            lines = buffer.get_foreign_lines()
+            assert len(lines) == 1
+            assert "FOREIGN" in lines[0] and "Already running" in lines[0]
+        finally:
+            root.removeHandler(tap)
+
+    def test_another_scripts_already_running_is_not_kept(self):
+        buffer, root, tap = self._setup({"number.battery_max_charge_power_inv_1"})
+        try:
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.other_set_value"
+            ).warning("Other set_value: Already running")
+            assert buffer.get_foreign_lines() == []
+        finally:
+            root.removeHandler(tap)
+
+    def test_the_logger_match_is_anchored_on_a_segment(self):
+        """A watched ``number.inv_1`` must not keep ``other_inv_10_set_value``;
+        a segment that IS the object id, or starts with it and ``_``, does."""
+        buffer, root, tap = self._setup({"number.inv_1"})
+        try:
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.other_inv_10_set_value"
+            ).warning("Other set_value: Already running")
+            assert buffer.get_foreign_lines() == []
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.inv_1_set_value"
+            ).warning("Inv 1 set_value: Already running")
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.inv_1"
+            ).warning("Inv 1: Already running")
+            assert len(buffer.get_foreign_lines()) == 2
+        finally:
+            root.removeHandler(tap)
+
     def test_an_unrelated_warning_is_not_kept(self):
         buffer, root, tap = self._setup({ENTITY})
         try:

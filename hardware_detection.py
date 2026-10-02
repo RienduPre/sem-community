@@ -68,26 +68,20 @@ class EVChargerDetector:
                 return -20000 <= value <= 20000
 
             elif sensor_type in ["ev_connected", "ev_charging"]:
-                # Accept binary_sensor values AND regular sensor status values
-                # used by Easee, Wallbox, GoodWe, OCPP, Ohme, Alfen, etc. (#68, #105)
-                return state.state.lower() in (
-                    "on", "off", "true", "false", "0", "1",
-                    "connected", "disconnected", "ready_to_charge",
-                    "awaiting_start", "awaiting_authorization",
-                    "charging", "completed", "ready", "idle",
-                    "not_connected", "paused", "error",
-                    # OCPP status values
-                    "available", "preparing", "suspended_ev",
-                    "suspended_evse", "finishing", "faulted",
-                    # Ohme status values
-                    "plugged in", "unplugged",
-                    # Alfen status values
-                    "ev connected", "charging power on",
-                    # Peblar status values
-                    "no ev connected",
-                    # Blue Current status values
-                    "a", "b1", "b2", "c1", "c2", "d1", "d2", "e", "f",
+                # (#1038) Ask the word list the reader uses (status_enum.py).
+                # This check kept its own copy, which drifted: it had Ohme's
+                # label "plugged in", never the state ``plugged_in`` HA
+                # stores, and refused the sensor. "0"/"1" are a binary status
+                # sent as a number; any other number (a voltage, a counter)
+                # is not taken for a plug.
+                from .coordinator.charger_adapters.status_enum import (
+                    knows_status,
                 )
+                if knows_status(state.state) or state.state in ("0", "1"):
+                    return True
+                options = (getattr(state, "attributes", None) or {}).get(
+                    "options")
+                return _options_answer_both_ways(options, sensor_type)
 
             else:
                 return True
@@ -123,6 +117,24 @@ class EVChargerDetector:
 
 # Backward compatibility alias
 HardwareDetector = EVChargerDetector
+
+
+def _options_answer_both_ways(options, sensor_type: str) -> bool:
+    """(#1038) An ENUM sensor whose listed options let the reader answer yes
+    AND no for this role is one SEM can read, whatever state it is in at
+    setup (booting, a fault). One known word is not enough: Blue Current's
+    ``vehicle_status`` lists ``ready``, but SEM cannot read its other states
+    as plugged or not."""
+    from .coordinator.charger_adapters.status_enum import (
+        classify_charger_status,
+        is_cable_present,
+    )
+    if not isinstance(options, (list, tuple)):
+        return False
+    if sensor_type == "ev_connected":
+        return {True, False} <= {is_cable_present(o) for o in options}
+    classes = {classify_charger_status(o) for o in options}
+    return "charging" in classes and bool(classes & {"not_charging", "locked"})
 
 
 # ============================================================
@@ -3849,7 +3861,8 @@ def _discover_ocpp(entities) -> Dict[str, str]:
 def _discover_ohme(entities) -> Dict[str, str]:
     """Discover EV charger config from Ohme integration.
 
-    Ohme uses sensor for status (Plugged in, Charging, Unplugged).
+    Ohme uses sensor for status (``plugged_in``, ``charging``, ``unplugged``
+    — #1038: the states HA stores, not the labels it shows).
     Charge mode via select entity. (#1039) Its options are ``max_charge``,
     ``paused`` and ``smart_charge``; "Max charge" and "Paused" are only the
     labels HA shows, and the select refuses a label.
@@ -3879,7 +3892,8 @@ def _discover_ohme(entities) -> Dict[str, str]:
 def _discover_peblar(entities) -> Dict[str, str]:
     """Discover EV charger config from Peblar integration.
 
-    Peblar uses sensor for state (connected, charging, no EV connected).
+    Peblar uses sensor for state (``suspended``, ``charging``,
+    ``no_ev_connected`` — #1038: the states HA stores, not the labels).
     Current control via number entity (charge_limit).
     """
     result: Dict[str, str] = {}

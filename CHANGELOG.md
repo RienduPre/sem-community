@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
 - **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
+- 🐛 **An OCPP charger named "wallbox" no longer gets a refused start with every current change** (#976). SEM took it for a Wallbox-brand charger.
+
+# [2.2.0-beta.8] — 02.10.2026
+
+- 🐛 **Setup accepts the Ohme status sensor when the car is plugged in** (#1038). A paused Peblar car no longer reads as unplugged.
+- 🐛 **Calendar tariff mode has a field for its times** (#1040). Pick a Schedule helper; its blocks are the peak hours.
+- 🐛 **Charge pacing is calm** (#820). It writes on the register's step, accepts the inverter's own value, and rewrites at most every 5 minutes.
 
 # [2.2.0-beta.7] — 02.10.2026
 

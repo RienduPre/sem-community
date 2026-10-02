@@ -18,12 +18,21 @@ meanings a user must be able to tell apart on the card.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..utils.log_gate import log_on_change
 
 _LOGGER = logging.getLogger(__name__)
+
+#: (#820, 02.10) At most one cap write per this many seconds. The release to
+#: full power below the buffer is exempt: it goes at once.
+PACING_MIN_WRITE_INTERVAL_S = 300.0
+#: (#820) A write is judged refused only when the register has not moved
+#: for this long AND for this many cycles — a Modbus read-back is a scan late.
+PACING_REFUSE_AFTER_S = 90.0
+PACING_REFUSE_AFTER_CYCLES = 3
 
 #: (#820) The margin the solved pace is opened by, in percent. The solver
 #: finds the SMALLEST constant cap that lands the pack full in the last
@@ -272,6 +281,25 @@ class ChargePacingWriter:
         #: (#820) the last cap SEM put on the register, kept across a
         #: release — a register still holding it is SEM's, not the user's
         self._own_cap_w: float | None = None
+        #: (#820, 02.10) the register just before the last write, when it
+        #: was sent, and what it read once it took the write
+        self._pre_write_w: float | None = None
+        self._write_at: float | None = None
+        self._accepted_w: float | None = None
+        #: None = pending, True = taken, False = refused
+        self._taken: bool | None = None
+        #: (#820, 02.10) ``(register_w, written_w)`` when the register took
+        #: the write but settled on another value (a unit scale in the
+        #: integration, or the inverter's own limit); None otherwise
+        self.applied_differs: tuple[float, float] | None = None
+        #: (#820) the previous in-band read, for the settle check
+        self._last_in_band_w: float | None = None
+        #: (#820, review 3) the record must be re-saved: a verdict changed
+        self._record_dirty: bool = False
+        #: (#820, review 3) the first reading after adoption still has to
+        #: prove the register — a cap from disk is not a cap on the wire
+        self._adopt_check: bool = False
+        self._clock = time.monotonic
         self._store = store
         #: nothing to adopt when nothing was persisted
         self._adopted: bool = store is None
@@ -284,6 +312,13 @@ class ChargePacingWriter:
         self.last_written_w = None
         self._confirmed = False
         self._unconfirmed_cycles = 0
+        self._pre_write_w = None
+        self._write_at = None
+        self._accepted_w = None
+        self._taken = None
+        self.applied_differs = None
+        self._last_in_band_w = None
+        self._adopt_check = False
 
     async def apply(self, hass, entity_id: str, cap_w, *,
                     observer: bool, hw_max_w: float | None = None) -> str:
@@ -373,33 +408,145 @@ class ChargePacingWriter:
                 else register_w)
             self.engaged_entity = str(entity_id)
             self.engaged = True
-        tol = max(100.0, _step_w(hass, entity_id))
-        if abs(register_w - target_w) < tol:
-            # The register holds the cap (or close enough) — whatever SEM
-            # remembers sending.
-            if (self.last_written_w is not None
-                    and abs(register_w - self.last_written_w) < tol):
-                self._confirm(entity_id)
-            return "held"
-        if (self.last_written_w is not None
-                and abs(target_w - self.last_written_w) < tol
-                and not self._confirmed):
-            # SEM sent this cap and the register has not shown it. One
-            # cycle is a slow bus; two is a register that refused it.
-            self._unconfirmed_cycles += 1
-            if self._unconfirmed_cycles < 2:
+        step_w = _step_w(hass, entity_id)
+        # (#820, 02.10) The deadband: a cap is rewritten only for a real
+        # difference — more than one step, 100 W or 5 % of the cap. Arne's
+        # cap jittered 1150↔1158 and SEM rewrote the register every few
+        # seconds.
+        deadband = max(step_w, 100.0, 0.05 * target_w)
+        now = self._clock()
+        if self.last_written_w is None:
+            if abs(register_w - target_w) <= deadband:
                 return "held"
+            return await self._write(hass, entity_id, native, target_w,
+                                     register_w, now)
+        verdict = self._judge(entity_id, register_w, step_w, deadband, now)
+        if self._record_dirty:
+            # the accepted value and the settled difference ride the record,
+            # so the next lifetime adopts a PROVEN register (review 3)
+            self._record_dirty = False
+            await self._remember(entity_id)
+        first_after_adoption = self._adopt_check
+        self._adopt_check = False
+        if verdict == "pending":
+            if first_after_adoption:
+                # (review 3) The first reading after adoption is out of the
+                # band. If it also left the value the register had settled
+                # at, someone moved it while SEM was away (down, or
+                # observing): one rewrite, and the interval does not apply.
+                acc = self._accepted_w
+                if acc is None or abs(register_w - acc) > deadband:
+                    return await self._write(hass, entity_id, native,
+                                             target_w, register_w, now)
+            return "held"
+        # (#820, 02.10, decision) SEM rewrites when (a) the NEW cap differs
+        # from the last SENT cap by more than the deadband — a refused cap
+        # included — or (b) the register has moved away from the value it
+        # settled at (Arne's 1449) by more than the deadband: someone else
+        # changed it. It does NOT rewrite merely because the register sits
+        # at its accepted value and that is not the cap — the inverter
+        # applied its own number, and that is not a refusal.
+        wish_changed = abs(target_w - self.last_written_w) > deadband
+        moved_by_someone = (
+            self._taken is True and self._accepted_w is not None
+            and abs(register_w - self._accepted_w) > deadband)
+        settled = "held" if self._taken else "write_refused"
+        if not (wish_changed or moved_by_someone):
+            return settled
+        if abs(register_w - target_w) <= deadband:
+            return settled
+        if (self._write_at is not None
+                and now - self._write_at < PACING_MIN_WRITE_INTERVAL_S):
+            return settled
+        return await self._write(hass, entity_id, native, target_w,
+                                 register_w, now)
+
+    def _judge(self, entity_id: str, register_w: float, step_w: float,
+               deadband: float, now: float) -> str:
+        """(#820, 02.10) Did the register take the last write?
+
+        TAKEN only when the register is IN THE BAND — within one step, 10 %
+        of what SEM sent or 100 W, whichever is widest (Arne: wrote 1550 W,
+        reads 1449 W; the inverter applied its own number, and that is not
+        a refusal) — AND has CHANGED since the write. The rewrite rule in
+        ``apply`` keeps a taken-but-different value from being rewritten
+        every interval. A reading equal to the pre-write value is "no
+        change yet": a Modbus register that has not been scanned since the
+        write (review pass 2: 4600 read back twice after a 5000 write was
+        judged taken, then "took the write as 4600 W" — before the hardware
+        did anything). It only ages the pending window. A register that
+        moved but is not in the band is PENDING too (a drift of the
+        device's own has no link to SEM's write). REFUSED when the window
+        (3 cycles and 90 s) ends and it never entered the band. A late
+        entry into the band is taken from then on."""
+        sent = self.last_written_w
+        pre = self._pre_write_w
+        changed = pre is None or abs(register_w - pre) >= 1.0
+        band = max(step_w, 0.10 * sent, 100.0)
+        in_band = abs(register_w - sent) <= band
+        if in_band and changed:
+            if self._taken is not True:
+                self._taken = True
+                self._accepted_w = register_w
+                self._record_dirty = True
+                self._confirm(entity_id)
+            self._settle(entity_id, register_w, sent, step_w)
+            return "taken"
+        self._last_in_band_w = None
+        if self._taken is True:
+            return "taken"
+        if self._taken is False:
+            return "refused"
+        self._unconfirmed_cycles += 1
+        waited = (self._write_at is None
+                  or now - self._write_at >= PACING_REFUSE_AFTER_S)
+        if self._unconfirmed_cycles < PACING_REFUSE_AFTER_CYCLES or not waited:
+            return "pending"
+        self._taken = False
+        log_on_change(
+            _LOGGER, f"charge_pacing:refused:{entity_id}", logging.WARNING,
+            "charge pacing: %s refused the cap — SEM wrote %.0f W, the "
+            "register still reads %.0f W. Check the entity's range and "
+            "that the inverter accepts writes.",
+            entity_id, sent, register_w)
+        return "refused"
+
+    def _settle(self, entity_id: str, register_w: float, sent: float,
+                step_w: float) -> None:
+        """``applied_differs`` only when the register SETTLED inside the
+        band — the same value on two consecutive reads, both different from
+        the pre-write value (the caller guarantees that) — more than a step
+        from what was sent (Arne: wrote 1550 W, reads 1449 W). Said once;
+        visible in Diagnose."""
+        if self.applied_differs is not None:
+            return
+        prev = self._last_in_band_w
+        self._last_in_band_w = register_w
+        if prev is None or abs(prev - register_w) >= 1.0:
+            return
+        if abs(register_w - sent) > max(step_w, 1.0):
+            self.applied_differs = (register_w, sent)
+            self._record_dirty = True
             log_on_change(
-                _LOGGER, f"charge_pacing:refused:{entity_id}", logging.WARNING,
-                "charge pacing: %s refused the cap — SEM wrote %.0f W, the "
-                "register still reads %.0f W. Check the entity's range and "
-                "that the inverter accepts writes.",
-                entity_id, self.last_written_w, register_w)
-            return "write_refused"
+                _LOGGER, f"charge_pacing:applied:{entity_id}",
+                logging.WARNING,
+                "charge pacing: %s took the write as %.0f W, not %.0f W "
+                "— check the integration's unit and the inverter's own "
+                "limit", entity_id, register_w, sent)
+
+    async def _write(self, hass, entity_id: str, native: float,
+                     target_w: float, register_w: float, now: float) -> str:
         self.last_written_w = target_w
         self._own_cap_w = target_w
         self._confirmed = False
         self._unconfirmed_cycles = 0
+        self._pre_write_w = register_w
+        self._write_at = now
+        self._accepted_w = None
+        self._taken = None
+        self.applied_differs = None
+        self._last_in_band_w = None
+        self._adopt_check = False
         # Persisted BEFORE the write, and on every write: the record has to
         # describe a register that may already carry the cap, never one that
         # might not. The cap rides along so the next lifetime knows which
@@ -459,11 +606,33 @@ class ChargePacingWriter:
         self.restore_value = restore
         self.last_written_w = _as_float(record.get("cap_w"))
         self._own_cap_w = self.last_written_w
+        # (#820, review 3) A cap from disk is not a cap on the wire: the
+        # register may have been moved while SEM was down or observing.
+        # Taken is UNKNOWN until the first reading proves in-band against
+        # the persisted cap (no pre-write value, so in-band is the whole
+        # proof); the value the register had settled at, and the settled
+        # difference, come back from the record so the first reading can
+        # also be judged "moved by someone".
+        self._taken = None
+        self._accepted_w = _as_float(record.get("accepted_w"))
+        _ad = record.get("applied_differs")
+        self.applied_differs = (
+            (float(_ad[0]), float(_ad[1]))
+            if isinstance(_ad, (list, tuple)) and len(_ad) == 2
+            and _as_float(_ad[0]) is not None and _as_float(_ad[1]) is not None
+            else None)
+        self._pre_write_w = None
+        self._write_at = None
+        self._unconfirmed_cycles = 0
+        self._adopt_check = self.last_written_w is not None
         # (#820) a record whose "value to restore" is SEM's own cap (a
         # capture from before #949) is no value to restore at all
         if (restore is not None and self.last_written_w is not None
                 and abs(restore - self.last_written_w) < 1.0):
             self.restore_value = None
+            # (#820 review 5) the correction must reach the disk, or an
+            # unload that reads the record hands SEM's own cap back
+            await self._remember(stored)
         _LOGGER.info(
             "charge pacing: adopted the cap this install was left with — "
             "%s at %s W, restores to %s W",
@@ -487,6 +656,11 @@ class ChargePacingWriter:
                 "entity_id": str(entity_id),
                 "restore_value": self.restore_value,
                 "cap_w": self.last_written_w,
+                # (#820, review 3) what the register settled at, and the
+                # settled difference — so adoption trusts a proven value
+                "accepted_w": self._accepted_w,
+                "applied_differs": (list(self.applied_differs)
+                                    if self.applied_differs else None),
             })
         except Exception:  # noqa: BLE001 — persistence never costs a cycle
             _LOGGER.debug("charge pacing: could not persist the engagement",
@@ -574,10 +748,72 @@ def pending_pacing_release(coordinator) -> tuple | None:
     if writer is None or not getattr(writer, "engaged", False):
         return None
     entity = str(getattr(writer, "engaged_entity", "") or "")
+    if not entity:
+        return None
+    # (#820 review 5) "engaged, nothing to restore" is its own answer —
+    # ``(entity, None, store)`` — so the disk is read only when the writer
+    # is genuinely not engaged, never to override a corrected memory.
     value = _as_float(getattr(writer, "restore_value", None))
+    return (entity, value, getattr(writer, "_store", None))
+
+
+async def async_pending_pacing_release(coordinator) -> tuple | None:
+    """(#820, review 4) What the pacer holds down, read from the RECORD when
+    the writer's memory has nothing.
+
+    A writer that saw only observer cycles in its lifetime (HA came up with
+    observer on; "flip observer, then uninstall") never adopts the record,
+    so ``pending_pacing_release`` finds no engagement and the unload hands
+    nothing back — a real prior cap stays on the register forever, the
+    #949 failure class reopened. The record on disk is the truth; this
+    reads it. Observer cycles themselves stay fully read-only.
+
+    The value put back is the release rule's: the larger of the captured
+    value and the battery's full charge power. Never raises.
+    """
+    config = getattr(coordinator, "config", None) or {}
+    try:
+        hw_max = _as_float(config.get("battery_max_charge_power_w"))
+    except Exception:  # noqa: BLE001
+        hw_max = None
+
+    def _value(restore):
+        candidates = [v for v in (restore, hw_max) if v is not None and v > 0]
+        return max(candidates) if candidates else None
+
+    held = pending_pacing_release(coordinator)
+    if held:
+        entity, value, store = held
+        value = _value(value)
+        return (entity, value, store) if value is not None else None
+    writer = getattr(coordinator, "_charge_pacing_writer", None)
+    store = getattr(writer, "_store", None) if writer is not None else None
+    if store is None:
+        factory = getattr(coordinator, "_charge_pacing_store", None)
+        try:
+            store = factory() if callable(factory) else None
+        except Exception:  # noqa: BLE001
+            store = None
+    if store is None:
+        return None
+    try:
+        record = await store.async_load()
+    except Exception:  # noqa: BLE001 — a lost record is not a lost unload
+        return None
+    if not isinstance(record, dict):
+        return None
+    entity = str(record.get("entity_id") or "")
+    restore = _as_float(record.get("restore_value"))
+    cap = _as_float(record.get("cap_w"))
+    if restore is not None and cap is not None and abs(restore - cap) < 1.0:
+        # the #949 own-cap rule, on the disk copy too: a record whose
+        # value to restore is SEM's own cap restores nothing but the
+        # hardware maximum
+        restore = None
+    value = _value(restore)
     if not entity or value is None:
         return None
-    return (entity, value, getattr(writer, "_store", None))
+    return (entity, value, store)
 
 
 async def async_release_pacing(hass, held: tuple | None, reason: str) -> str | None:
@@ -585,6 +821,8 @@ async def async_release_pacing(hass, held: tuple | None, reason: str) -> str | N
     if not held:
         return None
     entity, value, store = held
+    if value is None:
+        return None  # engaged, nothing to put back: keep the record
     try:
         # (#820) the captured value is in watts; the register takes its own
         # unit and range

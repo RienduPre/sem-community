@@ -642,6 +642,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # install that chose this mode. The provider now refuses to
             # classify without a reachable HT rule; a YAML/storage-set
             # schedule is honoured instead of discarded.
+            #
+            # (#1040) The Tariff page now has the field this mode lacked:
+            # `tariff_schedule_entity`, a HA Schedule helper whose blocks
+            # are the peak hours. It wins over the hand-written nested key.
             schedule = config.get("tariff_schedule", {}) or {}
             self._tariff_provider = CalendarTariffProvider(
                 hass,
@@ -654,7 +658,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 rules=schedule.get("rules", []),
                 default_tariff=schedule.get("default_tariff", "off_peak"),
                 holiday_entity=schedule.get("holiday_entity"),
-                schedule_entity=schedule.get("schedule_entity"),
+                schedule_entity=(config.get("tariff_schedule_entity")
+                                 or schedule.get("schedule_entity")),
                 currency=currency,
             )
         else:
@@ -3172,8 +3177,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # Official Nord Pool core integration exposes its day-ahead
             # curve only via the get_prices_for_date action (no attribute
             # arrays, core#132856) — fetch it on the event loop before the
-            # sync attribute-parsing below. Self-throttled inside the
-            # provider; no-op for every other provider.
+            # sync attribute-parsing below. (#1040) The calendar provider
+            # reads its Schedule helper's week through the same hook.
+            # Self-throttled inside the provider; no-op for every other
+            # provider.
             _svc_refresh = getattr(
                 self._tariff_provider, "async_refresh_service_prices", None,
             )
@@ -3333,7 +3340,6 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     # the OR of all chargers' plug sensors, so without this override
                     # every charger would report connected as soon as ANY car plugs in.
                     saved_ev_connected, saved_ev_charging = power.ev_connected, power.ev_charging
-                    pc_chrg_sensor = charger_cfg.get("ev_charging_sensor")
                     # #351 M7 — without this override the session-end check
                     # (which reads ``power.ev_connected``) would see the
                     # fleet-OR and never fire on THIS charger's unplug while
@@ -3345,15 +3351,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     pc_conn_map = getattr(power, "ev_connected_per_charger", None) or {}
                     if cid in pc_conn_map:
                         power.ev_connected = bool(pc_conn_map[cid])
-                    if pc_chrg_sensor:
-                        pc_state = self.hass.states.get(pc_chrg_sensor)
-                        if pc_state and pc_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                            power.ev_charging = pc_state.state == "on"
-                    else:
-                        # Symmetric fallback for ev_charging (#351 M7).
-                        pc_chg_map = getattr(power, "ev_charging_per_charger", None) or {}
-                        if cid in pc_chg_map:
-                            power.ev_charging = bool(pc_chg_map[cid])
+                    # ev_charging for this charger: the reader's per-charger
+                    # answer, from the shared status words. (#1038) This used
+                    # to re-read the sensor as ``== "on"``, so an Ohme at
+                    # ``charging`` read as not charging. Nothing in session
+                    # tracking reads it today; it is set so a future reader
+                    # gets this charger's answer, not the fleet's.
+                    pc_chg_map = getattr(power, "ev_charging_per_charger", None) or {}
+                    if cid in pc_chg_map:
+                        power.ev_charging = bool(pc_chg_map[cid])
                     was_connected_this_cid = self._last_ev_connected
                     self._update_session_tracking(power, charger_flows)
                     self._reset_per_charger_estimate_state(cid, was_connected_this_cid)

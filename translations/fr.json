@@ -242,6 +242,7 @@
           "demand_charge_rate": "Tarif de puissance souscrite",
           "update_interval": "Intervalle de mise à jour (s)",
           "tariff_mode": "Mode tarifaire",
+          "tariff_schedule_entity": "Horaire des heures pleines (mode Calendrier)",
           "dynamic_tariff_entity": "Entité de prix dynamique (détectée automatiquement si vide)",
           "dynamic_forecast_entity": "Entité de prévision des prix (facultatif, détectée automatiquement si vide)",
           "dynamic_feedin_entity": "Entité de prix de rachat (optionnel, pour un tarif d'export dynamique)",
@@ -258,6 +259,7 @@
           "demand_charge_rate": "Tarif mensuel de puissance souscrite (devise/kW/mois). Réglez sur 0 si votre contrat n'en comporte pas.",
           "update_interval": "Fréquence à laquelle SEM lit les capteurs et ajuste le matériel (secondes). Plage 10–60 s.",
           "tariff_mode": "Choisissez « Static » pour des tarifs fixes, « Dynamic » pour une tarification en temps réel, ou « Calendar » pour des plages horaires.",
+          "tariff_schedule_entity": "Un assistant Planification (schedule) de Home Assistant. Ses plages sont les heures pleines (HT) ; toutes les autres heures utilisent le tarif de nuit.",
           "dynamic_tariff_entity": "Capteur fournissant le prix d'import actuel de l'électricité. Détecté automatiquement depuis Tibber, Nordpool, etc.",
           "dynamic_forecast_entity": "Capteur optionnel contenant les prévisions de prix horaires utilisées pour la planification intelligente.",
           "dynamic_feedin_entity": "Capteur optionnel fournissant le prix de rachat / d'export actuel pour un tarif d'export dynamique.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "Le mode Calendrier a besoin d'un horaire des heures pleines. Choisissez un assistant Planification ou un autre mode tarifaire."
     }
   },
   "entity": {

@@ -438,7 +438,8 @@ Night charging and smart night charging are **not settings here** — since v1.6
 
 | Setting | Default | What it does and when to change it |
 |---------|---------|-------------------------------------|
-| Tariff mode | Static | How SEM gets electricity prices. Static uses fixed import/export rates you enter. Dynamic reads prices from a HA sensor (e.g. Tibber, Octopus, Amber). Calendar uses HA's calendar to define cheap periods. |
+| Tariff mode | Static | How SEM gets electricity prices. Static uses fixed import/export rates you enter. Dynamic reads prices from a HA sensor (e.g. Tibber, Octopus, Amber). Calendar reads your peak hours from a HA Schedule helper. |
+| Peak-time schedule | None | Calendar mode only, and required there. A HA Schedule helper: its time blocks are the peak (HT) hours at the import rate; all other hours use the night rate. |
 | Import rate | 0.30 per kWh | What you pay to import from the grid (minimum: 0.00). Used for cost calculations and the break-even check in the battery charge scheduler. Set it to your actual electricity rate. Set to 0 if you have free electricity or net metering. |
 | Export rate | 0.08 per kWh | What you receive for feeding into the grid (minimum: 0.00). Used in savings calculations. Set it to your actual feed-in tariff. Set to 0 if you have no feed-in compensation. |
 | Dynamic price sensor | None | When tariff mode is Dynamic, point this at a sensor that reports the current price per kWh. SEM uses it to find the cheapest hours for overnight charging. |
@@ -453,8 +454,12 @@ Night charging and smart night charging are **not settings here** — since v1.6
   change hourly. The [joint energy planner](ENERGY_PLANNER.md) uses the
   price curve to place every scheduled demand — EV, battery and deferrable
   loads — in the cheapest hours automatically.
-- **Calendar**: You define cheap/expensive periods via a HA calendar entity.
-  Useful for fixed time-of-use tariffs without a dynamic price API.
+- **Calendar**: You pick a HA Schedule helper in **Peak-time schedule**
+  (create one under Settings → Devices & services → Helpers → Schedule).
+  Its time blocks are the peak (HT) hours and cost the import rate; all
+  other hours cost the night rate. Example: one block 05:00–24:00 on every
+  day makes 00:00–05:00 the cheap hours. To change the times, edit the
+  helper. Useful for fixed time-of-use tariffs without a dynamic price API.
 
 #### Price classification — how the dynamic-tariff "cheap" / "expensive" labels are computed
 

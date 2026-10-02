@@ -71,6 +71,23 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+class _Clock:
+    """(#820, 02.10) The writer's clock: a refusal now needs time as well
+    as cycles, and a rewrite waits out the minimum interval."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def _clocked():
+    w = ChargePacingWriter()
+    w._clock = clock = _Clock()
+    return w, clock
+
+
 @pytest.fixture(autouse=True)
 def _fresh_log_gate():
     reset_log_gate()
@@ -106,10 +123,12 @@ class TestTheCapFitsTheRegister:
 class TestTheRegisterIsTheTruth:
     def test_a_write_the_register_never_takes_is_reported(self):
         reg = Register(1560, refuse_all=True)
-        w = ChargePacingWriter()
+        w, clock = _clocked()
         h = reg.hass()
-        actions = [_run(w.apply(h, ENTITY, 2443.0, observer=False))
-                   for _ in range(4)]
+        actions = []
+        for _ in range(12):
+            actions.append(_run(w.apply(h, ENTITY, 2443.0, observer=False)))
+            clock.t += 10
         assert actions[0] == "wrote"
         assert actions[-1] == "write_refused", (
             f"{actions}: the register stayed at 1560 W and SEM said 'held' — "
@@ -145,21 +164,25 @@ class TestTheRegisterIsTheTruth:
         """The cap landed; later the inverter put its own value back. The
         old dedupe compared with SEM's memory and never noticed."""
         reg = Register(5000)
-        w = ChargePacingWriter()
+        w, clock = _clocked()
         h = reg.hass()
         assert _run(w.apply(h, ENTITY, 2000.0, observer=False)) == "wrote"
         assert _run(w.apply(h, ENTITY, 2000.0, observer=False)) == "held"
         reg.state.state = "1560"
+        # (#820, 02.10) not at once: at most one write per five minutes
+        assert _run(w.apply(h, ENTITY, 2000.0, observer=False)) == "held"
+        clock.t += 300
         assert _run(w.apply(h, ENTITY, 2000.0, observer=False)) == "wrote"
         assert reg.writes == [2000.0, 2000.0]
 
     def test_a_refusal_is_logged_once(self, caplog):
         reg = Register(1560, refuse_all=True)
-        w = ChargePacingWriter()
+        w, clock = _clocked()
         h = reg.hass()
         with caplog.at_level(logging.WARNING):
-            for _ in range(8):
+            for _ in range(30):
                 _run(w.apply(h, ENTITY, 2443.0, observer=False))
+                clock.t += 10
         lines = [r for r in caplog.records
                  if "refused" in r.getMessage() and ENTITY in r.getMessage()]
         assert len(lines) == 1, [r.getMessage() for r in lines]
@@ -304,7 +327,13 @@ async def test_a_refused_cap_is_on_the_surface():
     )
     reg = Register(1560, refuse_all=True)
     fake = _coordinator(reg)
-    for _ in range(3):
+    await SEMCoordinator._run_charge_pacing(fake, _soc(70.0))
+    import time
+    clock = _Clock()
+    clock.t = time.monotonic()
+    fake._charge_pacing_writer._clock = clock
+    for _ in range(12):
+        clock.t += 10
         await SEMCoordinator._run_charge_pacing(fake, _soc(70.0))
     assert fake._charge_pacing_state["action"] == "write_refused"
 

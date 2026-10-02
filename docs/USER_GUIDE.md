@@ -1616,11 +1616,7 @@ Any HA integration that exposes a price sensor works with SEM. If the sensor has
 
 ### Calendar tariffs (time-based HT/NT schedule)
 
-Set tariff mode to "Calendar" for custom time-of-use schedules. Define rules like "HT weekdays 07:00-20:00, NT otherwise". Features:
-- Swiss utility presets built in: EKZ, BKW, CKW, ewz
-- Custom weekly schedule via configurable rules
-- HA Schedule helper entity support
-- Holiday entity override (binary_sensor)
+Set tariff mode to "Calendar" for a fixed time-of-use tariff, then pick a HA Schedule helper in **Peak-time schedule** (Settings → Configure → Tariff). The helper's time blocks are the peak (HT) hours at the import rate; all other hours use the night rate. For "HT weekdays 07:00–20:00, NT otherwise", add a 07:00–20:00 block on Monday to Friday. Edit the helper to change the times. A holiday follows the schedule like any other day.
 
 ---
 

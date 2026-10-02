@@ -242,6 +242,7 @@
           "demand_charge_rate": "Effektavgift",
           "update_interval": "Uppdateringsintervall (s)",
           "tariff_mode": "Tariffläge",
+          "tariff_schedule_entity": "Schema för högtid (Kalenderläge)",
           "dynamic_tariff_entity": "Entitet för dynamiskt pris (detekteras automatiskt om tom)",
           "dynamic_forecast_entity": "Entitet för prisprognos (valfritt, identifieras automatiskt om tomt)",
           "dynamic_feedin_entity": "Entitet för överskottsersättning (valfri, för dynamiskt exportpris)",
@@ -258,6 +259,7 @@
           "demand_charge_rate": "Månatlig effektavgift för effekttopp (valuta/kW/månad). Sätt till 0 om ditt avtal inte har någon.",
           "update_interval": "Hur ofta SEM läser sensorer och justerar hårdvaran (sekunder). Intervall 10–60 s.",
           "tariff_mode": "Välj 'Statisk' för fasta priser, 'Dynamisk' för realtidspriser eller 'Kalender' för tidsstyrda scheman.",
+          "tariff_schedule_entity": "En Home Assistant Schema-hjälpare (schedule). Dess tidsblock är högtidstimmarna (HT); alla andra timmar använder nattpriset.",
           "dynamic_tariff_entity": "Sensor som anger det aktuella importpriset på el. Detekteras automatiskt från Tibber, Nordpool m.fl.",
           "dynamic_forecast_entity": "Valfri sensor med timvisa prisprognoser som används för smart schemaläggning.",
           "dynamic_feedin_entity": "Valfri sensor som anger aktuellt pris för överskottsel/export för dynamiskt exportpris.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "Kalenderläget behöver ett schema för högtid. Välj en Schema-hjälpare eller ett annat tariffläge."
     }
   },
   "entity": {
