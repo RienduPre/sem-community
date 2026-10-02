@@ -5,6 +5,7 @@
   {
    "charger_roles": [
     "current_number",
+    "phase_select",
     "power",
     "total_energy"
    ],

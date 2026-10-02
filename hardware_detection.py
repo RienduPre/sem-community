@@ -2183,7 +2183,12 @@ def _select_options(entry, state_of) -> List[str]:
 
 
 def _pick_option(options: List[str], wanted) -> Optional[str]:
-    low = {o.lower(): o for o in options}
+    """The option to WRITE, matched by meaning: ``max_charge`` (Ohme's real
+    option value, shown translated as "Max charge") is ``max charge``."""
+    low: Dict[str, str] = {}
+    for o in options:
+        low.setdefault(o.lower(), o)
+        low.setdefault(o.lower().replace("_", " ").replace("-", " "), o)
     for w in wanted:
         if w in low:
             return low[w]
@@ -2335,6 +2340,20 @@ def read_charger_roles(dev_entities, domain: str, *, services_of=None,
                                         "start": go, "stop": halt}
             elif (all(p in opts for p in lex.SELECT_PHASE_OPTIONS)
                   and "phase_select" not in roles):
+                roles["phase_select"] = {"entity": str(e.entity_id),
+                                         "value_1p": "1", "value_3p": "3"}
+        # a phase COUNT number that takes 1 and 3 is a phase switch
+        for e in sorted(dev_entities, key=lambda x: str(x.entity_id)):
+            if not str(e.entity_id).startswith("number.") or "phase_select" in roles:
+                continue
+            if not any(re.search(r"(?:^|_)phase_count$|(?:^|_)phases$", w.rsplit("-", 1)[-1])
+                       for w in _role_words(e)):
+                continue
+            caps = getattr(e, "capabilities", None)
+            caps = caps if isinstance(caps, dict) else {}
+            lo, hi = caps.get("min"), caps.get("max")
+            if (isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+                    and lo <= 1 and hi >= 3):
                 roles["phase_select"] = {"entity": str(e.entity_id),
                                          "value_1p": "1", "value_3p": "3"}
         live = services_of(domain) if services_of else None
