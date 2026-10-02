@@ -96,6 +96,13 @@ class TestListedOption:
         assert listed_option(hass, "select.x", "Eco Charge") == "eco_charge"
         assert listed_option(hass, "select.x", "General") == "general"
 
+    def test_real_labels_still_match_after_the_sign_rule(self):
+        cases = {"Max - charge": "max_charge", "Eco-Lademodus": "eco_lademodus",
+                 "1-phase": "1_phase"}
+        for wanted, option in cases.items():
+            assert listed_option(self._hass([option, "other"]), "select.x",
+                                 wanted) == option, wanted
+
     def test_a_label_in_the_other_direction_is_found_too(self):
         """A select that lists display strings (OpenWB-style) takes them
         from a lower-case, underscored value."""
@@ -115,6 +122,8 @@ class TestListedOption:
         (" ", ["-", "on"]),
         ("+", ["-", "on"]),
         ("Offset 1", ["Offset -1", "Offset 0", "Offset +1"]),
+        ("Offset - 1", ["Offset 1", "Offset 0"]),
+        ("Offset--1", ["Offset 1", "Offset 0"]),
         ("a_5", ["a_-5", "b"]),
     ])
     def test_a_sign_or_a_symbol_is_meaning_not_noise(self, wanted, options):
@@ -209,6 +218,10 @@ def _ohme(hass, start="Max charge", stop="Paused"):
 
 @pytest.mark.asyncio
 class TestOhmeChangesMode:
+    """The charger's own write path, driven directly. SEM builds a charger
+    only when it has a current control or a charger service, and a stock
+    Ohme has neither — that older gap is class 116's residual, not this."""
+
     async def test_start_writes_max_charge_and_the_charger_takes_it(self):
         hass = _Hass({OHME_SELECT: ("smart_charge", OHME_OPTIONS)})
         await _ohme(hass).start_session()

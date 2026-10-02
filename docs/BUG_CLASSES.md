@@ -5331,7 +5331,7 @@ is kept; otherwise the ONE listed option whose label (HA's translation cache: th
 then English) or whose own spelling is the same words; otherwise the value unchanged, for HA to
 refuse with its own error. "The same words" ignores case and treats a space, `_` or `-` between two
 letters or digits as one separator, nothing else; a `-` before a digit is a sign: `-5` is not `5`,
-`Offset -1` is not `Offset 1`, `Solar+` is not `Solar`. A looser match would turn a refused write
+`Offset -1` and `Offset - 1` are not `Offset 1`, `Solar+` is not `Solar`. A looser match would turn a refused write
 into an accepted one with another meaning. Never a guess between two. The charger seam maps every
 select write, so observer mode records the option it would really send. Ohme detection now saves
 `max_charge`/`paused`; a config saved with the labels is mapped at write time, so it needs no
@@ -5361,7 +5361,11 @@ Export To Load stays there. (3) OpenWB detection saves "Instant Charging"/"Stop"
 not checked against their integrations' options — the mapping covers a label either way. (4) The
 config flow's start/stop fields are free text; a dropdown of the chosen select's options would stop
 a wrong value at entry. (5) Class 97, older: `_direction_ready` never re-sends a write that did not
-fail but did not land. (6) SEM binds no current control for Ohme, so it only starts and stops it —
-at full power once the mode lands; the #940 dwell floor is all that limits cycling on a thin
-surplus.
+fail but did not land. (6) Older and separate: both charger builders (`__init__` setup and
+`_retry_ev_device_setup`) skip a charger with no current control and no charger service, and a
+stock Ohme has only the mode select — so SEM builds no device for it and #1039's write is reached
+only on an Ohme the user gave a current entity or service. Supporting a start/stop-only charger is
+a feature. (7) Once it is built: the hand-back (`release_to_user`) writes the START mode, which for
+Ohme is `max_charge` — a full-power charge over the user's `smart_charge` — and with no current
+entity an IDLE decision after a restart cannot stop a box left in `max_charge`.
 Refs #1039 #1032 #955.

@@ -35,7 +35,7 @@ from .log_gate import log_on_change
 _LOGGER = logging.getLogger(__name__)
 
 # A ``-`` right before a digit is a sign or a range, never a separator.
-_SEPARATOR = re.compile(r"(?<=[^\W_])(?![\s_]*-\d)[\s_-]+(?=[^\W_])")
+_SEPARATOR = re.compile(r"(?<=[^\W_])(?![\s_-]*-[\s_]*\d)[\s_-]+(?=[^\W_])")
 
 
 def _words(text: Any) -> str:

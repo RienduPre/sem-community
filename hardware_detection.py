@@ -2428,8 +2428,9 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
         values = dict(_lex.STRATEGY_VALUE_KEYS)
         for key, default in _lex.STRATEGY_VALUE_KEYS:
             values[key] = str((strategy_values or {}).get(key) or default)
-        # (#1039) judged as the runtime writes it: a value names an option
-        # when the select would take what SEM maps it to
+        # (#1039) the runtime's matcher, without HA's labels: a value names
+        # an option when it maps to one. Stricter than the runtime, never
+        # looser — a translated label still reads as unmapped here.
         missing = sorted({v for v in values.values()
                           if pick_listed(options, v) not in options})
         if missing:
