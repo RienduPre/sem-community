@@ -1631,6 +1631,17 @@ Install [Solcast PV Solar](https://github.com/BJReplay/ha-solcast-solar), [Forec
 - Forecast-based night target reduction
 - Smart battery redirect decisions in the flow calculator
 
+### Charge pacing on a real inverter (2.2, #820)
+
+Pacing writes the battery charge-power limit you named. Since 2.2 it writes
+on that entity's step (1400 W, not 1410 W), at most once every five minutes,
+and only for a real change. If your inverter applies its own number instead
+(you asked for 1550 W, it holds 1449 W), SEM accepts that and leaves it alone.
+If the register does not move at all for 90 seconds, SEM says so: the battery
+Diagnose button shows what the register holds and accepts, what SEM sent, and
+any line another integration logged about that entity, such as a template
+number that dropped the write ("set_value: Already running").
+
 ### PV health
 
 `sensor.sem_pv_health` says whether the plant does what the forecast said.

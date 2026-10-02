@@ -103,6 +103,7 @@ Deep dive into energy production, consumption, and environmental impact.
 | **Self-Consumption Trend** | 30-day line chart of self-consumption and autarky rates |
 | **Solar Forecast** | Today + tomorrow forecast with percentage comparison |
 | **30-Day Energy** | Monthly bar chart of daily solar and consumption |
+| **PV health** (2.2) | One tile, green to red: a week of yield against forecast. Tap it for the numbers: ratio, downtime minutes, days since the last full day, snow |
 
 ### Battery
 
@@ -132,6 +133,7 @@ EV charging session tracking and statistics.
 | **Charging Settings** | Charge target range (Min ↔ Max), [Charge mode selector](#charging-mode-selector-v163), Charge by deadline picker, Set as default |
 | **EV Intelligence** | Taper trend visualization, virtual SOC estimate, charge skip status & reasoning, battery health indicator |
 | **Lifetime Statistics** | Total energy, cost, sessions, solar share over all time |
+| **Sessions** (2.2) | Per charger: this month's count and kWh in the header, the month's list with totals, a CSV button. The energy is the charger's own meter |
 
 #### Charging mode selector (v1.6.3)
 
@@ -190,7 +192,7 @@ Entity types use a searchable entity picker filtered to the right domain. **Rese
 The single home for **every changeable setting** (`sem-config-card`),
 organized in collapsible sections: Setup overview, Sensor sources (power-source overrides for grid / solar / battery, #628), EV chargers, Battery zones, Tariff & pricing, Heat pump, Hot water, Battery scheduler, Load management, Solar forecast, PV strings (when 2+ strings are detected), Notifications, and Advanced
 zones, Tariff & pricing, Heat pump, Hot water, Battery scheduler, Load
-management, Solar forecast, Notifications, and Advanced (update
+management, Solar forecast, Notifications (with the **Hints** setting, 2.2), and Advanced (update
 interval, deltas, min solar power, regulation offset, Observer Mode,
 SEM status history).
 
@@ -198,6 +200,9 @@ SEM status history).
 
 What SEM found, with the evidence: every charger and its roles, the entities
 it left unmapped, and **near misses** — hardware it saw but could not place.
+Since 2.2 the same section carries **offers** read from what an integration
+provides — start/stop buttons, a charge-mode select, a car's own charging
+amps — which the add-charger step pre-fills. An offer is never saved by itself.
 Since 2.1 a near miss carries **proposals** read from the integration's own
 words (entities *and* services), and an *add this charger* button when SEM
 can drive it as-is. When it cannot, the row says why ("wire by hand: fields
@@ -400,6 +405,12 @@ often), and **Override external scheduling** (let it act while a Huawei
 reports an operator's `DI Active Scheduling`). All off / at defaults until
 you turn them on.
 
+The *Notifications* group holds **Hints** (2.2): Off, Weekly note or All
+hints. And since 2.2 the card shows only controls your house can use: on a
+flat tariff the price thresholds are not there, without an export-limit
+entity no export guard, without a forecast no forecast spending. Wire the
+entity and the rows appear.
+
 #### sem-control-card
 
 **SEM Control** · *Control tab*
@@ -476,6 +487,12 @@ whichever is longer, up to 24 hours. Read in the morning, a fixed 12 hours
 stopped before the night it was describing: a charge booked for 00:00 against
 a 06:00 deadline sat past the right edge and only the wait band showed. Its
 title says how far it is looking.
+
+**Sessions (2.2).** Under each charger, a block headed *Sessions* shows this
+month's count and kWh while collapsed. Open it for the month's list — start,
+kWh, solar share, cost, minutes — with month totals and ‹ › to step back, and
+a **CSV** button that saves every stored session of that charger. The energy
+is the charger's own meter. Sessions saved before 2.2 have no cost stored.
 
 #### sem-flow-card
 

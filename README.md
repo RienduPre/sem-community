@@ -65,6 +65,11 @@ SEM monitors your solar production, battery, grid, EV charger, and household dev
 - **Two more setpoint models (2.1, #809/#869)** — a battery whose setpoint counts the other way (Victron ESS), or takes a direction select plus watts (Anker Solix).
 - **Modules (2.1, #923)** — SEM shows what your install has. A solar-only house gets no battery entities.
 - **Removal hands the house back (2.1, #935)** — a load SEM switched on is switched off, a parked wallbox is released, and nothing else is touched.
+- **Controls only where they can act (2.2, #996)** — a flat tariff gets no price knobs, a house without an export limit no export guard. Wire the thing and the control appears.
+- **Charging sessions, kept (2.2, #1024)** — the last 400 sessions per charger on the EV tab, with month totals and a CSV button. The energy is the charger's own meter.
+- **PV health (2.2, #1022)** — one sensor, green to red, from a week of yield against forecast. With downtime minutes and a snow flag.
+- **Hints (2.2, #1019)** — one setting, off by default: a sentence when an input goes silent, a load runs all night, grid use rises, or power is cheap while the car waits. And a weekly note.
+- **Chargers found by what they offer (2.2, #1032)** — start/stop buttons, a charge-mode select, a car's own charging amps. SEM reads any integration's controls and offers the charger in setup.
 
 ---
 
@@ -472,6 +477,16 @@ All SEM entities are removed automatically. Your Energy Dashboard and hardware s
 ---
 
 ## Recent Improvements
+
+### 2.2 betas — what SEM shows you
+2.2 turns numbers SEM already had into things you can see. Everything is off or read-only until you use it.
+
+- **Controls only where they can act** (#996). A flat tariff gets no price knobs. Wire the entity and the control appears.
+- **Charging sessions are kept** (#1024): the last 400 per charger on the EV tab, with a CSV button. The energy is the charger's own meter.
+- **PV health** (#1022): one sensor says green, yellow, orange or red from a week of yield against forecast.
+- **Hints** (#1019): a sentence when something is off, and a weekly note. One setting: off, weekly or all.
+- **Chargers found by what they offer** (#1032): buttons, a charge-mode select, a car's own amps. No brand list needed.
+- **Charge pacing is calm** (#820): on the register's step, at most one write every five minutes, and the inverter's own value is accepted.
 
 ### v2.1.0 — Forecast-led planning and spending
 2.1 looks ahead. SEM forms an honest expectation of the energy that is coming and plans how to spend it. It also learns hardware it had never met. Everything new that acts is off by default, with two exceptions: the peak slot guard (which also keeps the battery covering the house while a peak is near), and modules — SEM removes the entities of hardware your house does not have.
