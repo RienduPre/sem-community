@@ -248,6 +248,9 @@ const SG_READY_CONTACT_DOMAINS = ['switch', 'input_boolean', ...CONTACT_VALUE_DO
 
 const STRUCTURAL_KEYS = new Set([
     'battery_soc_sensor',
+    // (#1040) the Schedule helper of Calendar mode — read when the tariff
+    // provider is built, so the backend reloads on it.
+    'tariff_schedule_entity',
     // #628/#696 — the three power-SOURCE overrides (Sensor sources section).
     // Read at SensorReader construction (#592/#597) → backend reloads on
     // set_option; staging batches the three into one Apply/reload.
@@ -755,8 +758,11 @@ class SEMConfigCard extends SEMLitBase {
               // tariff_entity), so it never ticked on any install. What
               // makes a tariff configured depends on the MODE: dynamic
               // needs the price entity, static needs the rate.
+              // (#1040) Calendar needs the schedule that holds its times.
               done: (opts.tariff_mode === 'dynamic'
                        ? !!opts.dynamic_tariff_entity
+                       : opts.tariff_mode === 'calendar'
+                       ? !!opts.tariff_schedule_entity
                        : !!opts.electricity_import_rate) },
             { key: 'battery', labelKey: 'config_section_battery_zones', icon: 'mdi:battery-charging',
               color: '#4db6ac', sectionId: 'battery_zones',
@@ -1423,6 +1429,10 @@ class SEMConfigCard extends SEMLitBase {
                 ${this._renderOptionSelect('tariff_classification_mode', 'config_tariff_class_mode',
                     classModeOptions, opts, 'config_help_tariff_class_mode', 'percentile')}
             ` : nothing}
+            ${/* (#1040) the times Calendar mode runs on — it had no field. */ ''}
+            ${mode === 'calendar' ? this._renderPicker('tariff_schedule_entity',
+                'config_tariff_schedule_entity', 'schedule', null, opts,
+                'config_help_tariff_schedule_entity') : nothing}
             <div class="stepper-pair">
                 ${this._renderStepper('number.sem_cheap_price_threshold', 'cheap_threshold', T, 'setting_help_cheap_threshold')}
                 ${this._renderStepper('number.sem_expensive_price_threshold', 'expensive_threshold', T, 'setting_help_expensive_threshold')}

@@ -316,6 +316,9 @@ class TestStructuralKeysVisibility:
             "ev_energy_sensor", "ev_phase_switch_entity", "ev_plug_sensor",
             "ev_session_energy_sensor", "ev_start_stop_entity",
             "ev_total_energy_sensor",
+            # (#1040) the Schedule helper Calendar mode reads its times
+            # from — read when the tariff provider is built
+            "tariff_schedule_entity",
         }
         assert _SET_OPTION_STRUCTURAL_KEYS == expected
 

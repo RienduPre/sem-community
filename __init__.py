@@ -261,6 +261,9 @@ PLATFORMS: list[Platform] = [
 _SKIP_RELOAD_SNAPSHOT_TTL_S = 60.0
 
 _SET_OPTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
+    # (#1040) Calendar mode's Schedule helper — read when the tariff
+    # provider is built, so a change must reload.
+    "tariff_schedule_entity",
     # #529: manual override for the battery SOC sensor when autodetect can't
     # reach it (SOC on a different device than the power sensor, or a generic
     # template helper). Read at SensorReader construction → must reload.
@@ -6087,7 +6090,7 @@ async def _async_register_phase_services(
     _DIAGNOSE_EV_STATE_PREFIXES = ("ev_", "charger_", "daily_ev", "session_")
     # Tariff — pricing config + classifier diagnostics
     _DIAGNOSE_TARIFF_OPTION = {
-        "tariff_mode", "tariff_classification_mode",
+        "tariff_mode", "tariff_classification_mode", "tariff_schedule_entity",
         "dynamic_tariff_entity", "dynamic_forecast_entity", "dynamic_feedin_entity",
         "electricity_import_rate", "electricity_off_peak_rate",
         "electricity_export_rate", "demand_charge_rate",
