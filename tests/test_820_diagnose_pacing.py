@@ -174,6 +174,25 @@ class TestForeignWarningsReachTheBuffer:
         finally:
             root.removeHandler(tap)
 
+    def test_the_logger_match_is_anchored_on_a_segment(self):
+        """A watched ``number.inv_1`` must not keep ``other_inv_10_set_value``;
+        a segment that IS the object id, or starts with it and ``_``, does."""
+        buffer, root, tap = self._setup({"number.inv_1"})
+        try:
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.other_inv_10_set_value"
+            ).warning("Other set_value: Already running")
+            assert buffer.get_foreign_lines() == []
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.inv_1_set_value"
+            ).warning("Inv 1 set_value: Already running")
+            logging.getLogger(
+                "test_820_root.homeassistant.helpers.script.inv_1"
+            ).warning("Inv 1: Already running")
+            assert len(buffer.get_foreign_lines()) == 2
+        finally:
+            root.removeHandler(tap)
+
     def test_an_unrelated_warning_is_not_kept(self):
         buffer, root, tap = self._setup({ENTITY})
         try:

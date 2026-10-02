@@ -292,6 +292,8 @@ class ChargePacingWriter:
         #: the write but settled on another value (a unit scale in the
         #: integration, or the inverter's own limit); None otherwise
         self.applied_differs: tuple[float, float] | None = None
+        #: (#820) the previous in-band read, for the settle check
+        self._last_in_band_w: float | None = None
         self._clock = time.monotonic
         self._store = store
         #: nothing to adopt when nothing was persisted
@@ -310,6 +312,7 @@ class ChargePacingWriter:
         self._accepted_w = None
         self._taken = None
         self.applied_differs = None
+        self._last_in_band_w = None
 
     async def apply(self, hass, entity_id: str, cap_w, *,
                     observer: bool, hw_max_w: float | None = None) -> str:
@@ -435,36 +438,28 @@ class ChargePacingWriter:
                now: float) -> str:
         """(#820, 02.10) Did the register take the last write?
 
-        TAKEN when it sits within one step or 10 % of what SEM sent, or has
-        moved toward it since before the write — an inverter may apply its
-        own value (Arne: sent 1500, reads 1449). REFUSED only when it has not
-        moved at all for a while. Judged once per write."""
+        TAKEN only when the register is IN THE BAND: within one step or
+        10 % of what SEM sent — an inverter may apply its own value (Arne:
+        sent 1550, reads 1449). A register that moved but is not in the band
+        is PENDING (review: a drift of the device's own has no link to SEM's
+        write, and calling it taken fabricated a diagnosis for a dropped
+        write). REFUSED when the window (3 cycles and 90 s) ends and it
+        never entered the band. A late entry into the band is taken from
+        then on."""
         sent = self.last_written_w
-        pre = self._pre_write_w
-        near = abs(register_w - sent) <= max(step_w, 0.10 * sent, 1.0)
-        moved_toward = (pre is not None
-                        and abs(register_w - sent) < abs(pre - sent) - 1.0)
+        in_band = abs(register_w - sent) <= max(step_w, 0.10 * sent, 1.0)
+        if in_band:
+            if self._taken is not True:
+                self._taken = True
+                self._accepted_w = register_w
+                self._confirm(entity_id)
+            self._settle(entity_id, register_w, sent, step_w)
+            return "taken"
+        self._last_in_band_w = None
         if self._taken is True:
             return "taken"
-        if self._taken is False and not (near or moved_toward):
+        if self._taken is False:
             return "refused"
-        if near or moved_toward:
-            # (a register that refused and then took it — a late scan —
-            # is taken from here on)
-            self._taken = True
-            self._accepted_w = register_w
-            self._confirm(entity_id)
-            if abs(register_w - sent) > max(step_w, 1.0):
-                # (02.10, Arne: wrote 1550 W, reads 1449 W) Taken, but as
-                # another number. Said once; visible in Diagnose.
-                self.applied_differs = (register_w, sent)
-                log_on_change(
-                    _LOGGER, f"charge_pacing:applied:{entity_id}",
-                    logging.WARNING,
-                    "charge pacing: %s took the write as %.0f W, not %.0f W "
-                    "— check the integration's unit and the inverter's own "
-                    "limit", entity_id, register_w, sent)
-            return "taken"
         self._unconfirmed_cycles += 1
         waited = (self._write_at is None
                   or now - self._write_at >= PACING_REFUSE_AFTER_S)
@@ -479,6 +474,27 @@ class ChargePacingWriter:
             entity_id, sent, register_w)
         return "refused"
 
+    def _settle(self, entity_id: str, register_w: float, sent: float,
+                step_w: float) -> None:
+        """``applied_differs`` only when the register SETTLED inside the
+        band — the same value on two consecutive reads — more than a step
+        from what was sent (Arne: wrote 1550 W, reads 1449 W). Said once;
+        visible in Diagnose."""
+        if self.applied_differs is not None:
+            return
+        prev = self._last_in_band_w
+        self._last_in_band_w = register_w
+        if prev is None or abs(prev - register_w) >= 1.0:
+            return
+        if abs(register_w - sent) > max(step_w, 1.0):
+            self.applied_differs = (register_w, sent)
+            log_on_change(
+                _LOGGER, f"charge_pacing:applied:{entity_id}",
+                logging.WARNING,
+                "charge pacing: %s took the write as %.0f W, not %.0f W "
+                "— check the integration's unit and the inverter's own "
+                "limit", entity_id, register_w, sent)
+
     async def _write(self, hass, entity_id: str, native: float,
                      target_w: float, register_w: float, now: float) -> str:
         self.last_written_w = target_w
@@ -490,6 +506,7 @@ class ChargePacingWriter:
         self._accepted_w = None
         self._taken = None
         self.applied_differs = None
+        self._last_in_band_w = None
         # Persisted BEFORE the write, and on every write: the record has to
         # describe a register that may already carry the cap, never one that
         # might not. The cap rides along so the next lifetime knows which

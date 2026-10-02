@@ -131,6 +131,13 @@ class TestTheStepGridStartsAtZero:
         assert clamp_to_entity_range(attrs, 1458.0, 1.0,
                                      round_down_to_step=True) == 1400.0
 
+    def test_a_cap_below_the_first_step_writes_the_entitys_minimum(self):
+        """min 10, step 100: nothing on the grid is below 100 but the entity
+        takes its min, so a 60 W cap becomes 10 W — the smallest cap it has."""
+        attrs = {"min": 10, "max": 5000, "step": 100}
+        assert clamp_to_entity_range(attrs, 60.0, 1.0,
+                                     round_down_to_step=True) == 10.0
+
     def test_the_max_is_floored_on_the_zero_grid(self):
         attrs = {"min": 10, "max": 4555, "step": 100}
         assert clamp_to_entity_range(attrs, 9000.0, 1.0,
@@ -160,17 +167,38 @@ class TestATakenWriteIsNotARefusal:
         assert "write_refused" not in actions, actions
         assert len(reg.writes) == 1
 
-    def test_a_register_that_moved_toward_the_cap_took_it(self):
-        """5000 → 2100 for a 1500 cap: not there, but it moved."""
+    def test_a_drift_of_the_devices_own_is_not_a_taken_write(self):
+        """Review: SEM writes 1500, the device drops it, the register drifts
+        2000 → 1800 for its own reasons. Moved toward, never in the band:
+        pending through the window, then refused — and no fabricated "took
+        the write as 1800 W"."""
         clock = Clock()
-        reg = TemplateNumber(5000.0, applies=lambda v: 2100.0)
+        reg = TemplateNumber(2000.0, refuse_all=True)
+        w = _writer(clock)
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1500.0, observer=False)) == "wrote"
+        reg.state.state = "1800.0"
+        actions = []
+        for _ in range(12):
+            clock.advance(10)
+            actions.append(_run(w.apply(h, ENTITY, 1500.0, observer=False)))
+        assert actions[0] == "held" and actions[-1] == "write_refused", actions
+        assert w.applied_differs is None
+        assert len(reg.writes) == 1
+
+    def test_a_late_entry_into_the_band_is_taken(self):
+        clock = Clock()
+        reg = TemplateNumber(5000.0, refuse_all=True)
         w = _writer(clock)
         h = reg.hass()
         _run(w.apply(h, ENTITY, 1500.0, observer=False))
-        for _ in range(10):
-            reg.scan()
+        for _ in range(12):
             clock.advance(10)
-            assert _run(w.apply(h, ENTITY, 1500.0, observer=False)) != "write_refused"
+            out = _run(w.apply(h, ENTITY, 1500.0, observer=False))
+        assert out == "write_refused"
+        reg.state.state = "1500.0"
+        clock.advance(10)
+        assert _run(w.apply(h, ENTITY, 1500.0, observer=False)) == "held"
 
     def test_a_read_back_one_scan_late_is_not_a_refusal(self):
         clock = Clock()
@@ -274,13 +302,25 @@ class TestTheRegisterTookADifferentValue:
         h = reg.hass()
         assert _run(w.apply(h, ENTITY, wrote, observer=False)) == "wrote"
         reg.scan()
-        clock.advance(10)
-        assert _run(w.apply(h, ENTITY, wrote, observer=False)) == "held"
+        for _ in range(2):  # settled = the same value on two reads
+            clock.advance(10)
+            assert _run(w.apply(h, ENTITY, wrote, observer=False)) == "held"
         return w, h, reg, clock
 
     def test_the_difference_is_in_the_writer_state(self):
         w, *_ = self._taken_at(1550.0, 1449.0)
         assert w.applied_differs == (1449.0, 1550.0)
+
+    def test_one_in_band_read_is_not_yet_a_settled_difference(self):
+        clock = Clock()
+        reg = TemplateNumber(2500.0, step=10.0, applies=lambda v: 1449.0)
+        w = _writer(clock)
+        h = reg.hass()
+        _run(w.apply(h, ENTITY, 1550.0, observer=False))
+        reg.scan()
+        clock.advance(10)
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert w.applied_differs is None, "one read is not settled"
 
     def test_a_value_within_a_step_is_not_a_difference(self):
         w, *_ = self._taken_at(1550.0, 1545.0)

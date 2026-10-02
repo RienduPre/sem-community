@@ -63,6 +63,19 @@ class SEMLogBuffer(logging.Handler):
         self._watched_ids = frozenset(
             e.split(".", 1)[1].lower() for e in self._watched if "." in e)
 
+    def _logger_names_entity(self, logger_name: str) -> bool:
+        """A dotted segment of the logger name that IS a watched object id,
+        or starts with it and an underscore ("<object_id>_set_value").
+        Anchored: a watched ``inv_1`` must not match ``other_inv_10_set_value``."""
+        ids = self._watched_ids
+        if not ids:
+            return False
+        for seg in logger_name.lower().split("."):
+            for oid in ids:
+                if seg == oid or seg.startswith(oid + "_"):
+                    return True
+        return False
+
     def offer_foreign(self, record: logging.LogRecord) -> None:
         """Keep a WARNING+ record from another logger when it names a
         watched entity. Never raises."""
@@ -74,9 +87,8 @@ class SEMLogBuffer(logging.Handler):
                     "." + SEM_LOGGER_NAME) in record.name:
                 return  # SEM's own line is already in the main buffer
             message = record.getMessage()
-            name = record.name.lower()
             if not (any(e in message for e in watched)
-                    or any(oid in name for oid in self._watched_ids)):
+                    or self._logger_names_entity(record.name)):
                 return
             line = (f"{self.formatter.formatTime(record)} FOREIGN "
                     f"{record.levelname} ({record.name}) {message}")
