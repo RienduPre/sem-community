@@ -671,3 +671,79 @@ class TestTheUnloadReleaseReadsTheRecord:
         held = _run(async_pending_pacing_release(SimpleNamespace(
             _charge_pacing_writer=w, config={"battery_max_charge_power_w": 5000.0})))
         assert held == (ENTITY, 5000.0, store)
+
+
+class TestAReleaseNeverHandsBackSemsOwnCap:
+    """Review 5: a record from before #949 can carry SEM's own cap as the
+    value to restore. Adoption corrects that in memory; the correction must
+    reach the disk, and a release from the disk must apply the same rule."""
+
+    def _own_cap_record(self):
+        return FakeStore({"entity_id": ENTITY, "restore_value": 1550.0,
+                          "cap_w": 1550.0, "accepted_w": 800.0,
+                          "applied_differs": None})
+
+    def test_the_repro_releases_nothing_without_a_hardware_max(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release,
+        )
+        store = self._own_cap_record()
+        reg = TemplateNumber(800.0, step=10.0)
+        w = ChargePacingWriter(store=store)      # observer-only, never adopted
+        _run(w.apply(reg.hass(), ENTITY, 1550.0, observer=True))
+        assert _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w, config={}))) is None
+
+    def test_the_repro_releases_the_hardware_max_when_there_is_one(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release,
+        )
+        store = self._own_cap_record()
+        w = ChargePacingWriter(store=store)
+        assert _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w,
+            config={"battery_max_charge_power_w": 5000.0}))) == (
+            ENTITY, 5000.0, store)
+
+    def test_the_adopt_correction_is_on_disk_after_the_first_held_cycle(self):
+        store = self._own_cap_record()
+        reg = TemplateNumber(1550.0, step=10.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = Clock()
+        assert _run(w.apply(reg.hass(), ENTITY, 1550.0, observer=False)) == "held"
+        assert w.restore_value is None
+        assert store.data["restore_value"] is None
+        assert store.data["cap_w"] == 1550.0
+
+    def test_engaged_with_nothing_to_restore_does_not_read_the_disk(self):
+        """The sentinel path: memory says "engaged, nothing to restore"; a
+        stale disk copy must not be consulted instead."""
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_pending_pacing_release, pending_pacing_release,
+        )
+        store = self._own_cap_record()
+        reg = TemplateNumber(1550.0, step=10.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = Clock()
+        _run(w.apply(reg.hass(), ENTITY, 1550.0, observer=False))
+        assert w.engaged and w.restore_value is None
+        store.data = {"entity_id": ENTITY, "restore_value": 1550.0,
+                      "cap_w": 1550.0}             # a stale disk copy
+        assert pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w)) == (ENTITY, None, store)
+        assert _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w, config={}))) is None
+        assert _run(async_pending_pacing_release(SimpleNamespace(
+            _charge_pacing_writer=w,
+            config={"battery_max_charge_power_w": 5000.0}))) == (
+            ENTITY, 5000.0, store)
+
+    def test_a_sentinel_handed_to_the_release_puts_nothing_back(self):
+        from custom_components.solar_energy_management.coordinator.charge_pacing import (
+            async_release_pacing,
+        )
+        store = self._own_cap_record()
+        reg = TemplateNumber(1550.0, step=10.0)
+        assert _run(async_release_pacing(reg.hass(), (ENTITY, None, store),
+                                         "disabled")) is None
+        assert reg.writes == [] and store.data is not None

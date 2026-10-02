@@ -630,6 +630,9 @@ class ChargePacingWriter:
         if (restore is not None and self.last_written_w is not None
                 and abs(restore - self.last_written_w) < 1.0):
             self.restore_value = None
+            # (#820 review 5) the correction must reach the disk, or an
+            # unload that reads the record hands SEM's own cap back
+            await self._remember(stored)
         _LOGGER.info(
             "charge pacing: adopted the cap this install was left with — "
             "%s at %s W, restores to %s W",
@@ -745,9 +748,12 @@ def pending_pacing_release(coordinator) -> tuple | None:
     if writer is None or not getattr(writer, "engaged", False):
         return None
     entity = str(getattr(writer, "engaged_entity", "") or "")
-    value = _as_float(getattr(writer, "restore_value", None))
-    if not entity or value is None:
+    if not entity:
         return None
+    # (#820 review 5) "engaged, nothing to restore" is its own answer —
+    # ``(entity, None, store)`` — so the disk is read only when the writer
+    # is genuinely not engaged, never to override a corrected memory.
+    value = _as_float(getattr(writer, "restore_value", None))
     return (entity, value, getattr(writer, "_store", None))
 
 
@@ -778,7 +784,8 @@ async def async_pending_pacing_release(coordinator) -> tuple | None:
     held = pending_pacing_release(coordinator)
     if held:
         entity, value, store = held
-        return (entity, _value(value) or value, store)
+        value = _value(value)
+        return (entity, value, store) if value is not None else None
     writer = getattr(coordinator, "_charge_pacing_writer", None)
     store = getattr(writer, "_store", None) if writer is not None else None
     if store is None:
@@ -796,7 +803,14 @@ async def async_pending_pacing_release(coordinator) -> tuple | None:
     if not isinstance(record, dict):
         return None
     entity = str(record.get("entity_id") or "")
-    value = _value(_as_float(record.get("restore_value")))
+    restore = _as_float(record.get("restore_value"))
+    cap = _as_float(record.get("cap_w"))
+    if restore is not None and cap is not None and abs(restore - cap) < 1.0:
+        # the #949 own-cap rule, on the disk copy too: a record whose
+        # value to restore is SEM's own cap restores nothing but the
+        # hardware maximum
+        restore = None
+    value = _value(restore)
     if not entity or value is None:
         return None
     return (entity, value, store)
@@ -807,6 +821,8 @@ async def async_release_pacing(hass, held: tuple | None, reason: str) -> str | N
     if not held:
         return None
     entity, value, store = held
+    if value is None:
+        return None  # engaged, nothing to put back: keep the record
     try:
         # (#820) the captured value is in watts; the register takes its own
         # unit and range
