@@ -34,8 +34,9 @@ BRAND_PATHS_TODAY = frozenset({
     "_discover_wallbox_mqtt", "_discover_wattpilot", "_discover_zaptec",
     "_wire_wattpilot",
 })
-#: generic, not a brand: the shared hint walker every brand row feeds
-GENERIC = frozenset({"_discover_from_hints"})
+#: generic, not a brand: the shared hint walker every brand row feeds, and
+#: #1035's wrapper that runs every brand function on one unit
+GENERIC = frozenset({"_discover_from_hints", "_discover_unit"})
 
 
 def _functions(path: Path) -> set:
@@ -50,8 +51,8 @@ def test_no_new_brand_path_in_hardware_detection():
     new = sorted(names - BRAND_PATHS_TODAY)
     assert not new, (
         f"new brand path(s) {new}: teach the crawler the ROLE instead "
-        "(consts/role_lexicon.py + charger_roles.py) and prove it on the "
-        "real integration in tests/integrations_rig")
+        "(consts/role_lexicon.py + read_charger_roles in hardware_detection.py) "
+        "and prove it on the real integration in tests/integrations_rig")
 
 
 def test_the_cleanup_list_only_shrinks():
