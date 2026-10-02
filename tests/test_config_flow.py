@@ -10,6 +10,9 @@ load_management) live on the OptionsFlowHandler now and have their own
 coverage further down this file.
 """
 import pytest
+from custom_components.solar_energy_management.hardware_detection import (  # noqa: E402
+    EVChargerDetector,
+)
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.data_entry_flow import FlowResultType
@@ -175,8 +178,7 @@ class TestSolarEnergyManagementConfigFlow:
         energy_config = _make_energy_dashboard_config()
         flow = _create_flow(mock_hass)
 
-        mock_detector = MagicMock()
-        mock_detector.get_suggested_ev_defaults.return_value = {}
+        mock_detector = MagicMock(spec=EVChargerDetector)
         mock_detector.validate_ev_configuration.return_value = {}
 
         with patch(
@@ -207,8 +209,7 @@ class TestSolarEnergyManagementConfigFlow:
         energy_config = _make_energy_dashboard_config()
         flow = _create_flow(mock_hass)
 
-        mock_detector = MagicMock()
-        mock_detector.get_suggested_ev_defaults.return_value = {}
+        mock_detector = MagicMock(spec=EVChargerDetector)
         mock_detector.validate_ev_configuration.return_value = {}
 
         with patch(
@@ -236,8 +237,7 @@ class TestSolarEnergyManagementConfigFlow:
         flow = _create_flow(mock_hass)
         flow._energy_dashboard_config = energy_config
 
-        mock_detector = MagicMock()
-        mock_detector.get_suggested_ev_defaults.return_value = {}
+        mock_detector = MagicMock(spec=EVChargerDetector)
         mock_detector.validate_ev_configuration.return_value = {
             "ev_connected_sensor": "Required sensor not configured",
             "ev_charging_sensor": "Entity not found or invalid",
@@ -271,9 +271,8 @@ class TestSolarEnergyManagementConfigFlow:
         flow._energy_dashboard_config = energy_config
         flow._data = energy_config.to_dict()
 
-        mock_detector = MagicMock()
+        mock_detector = MagicMock(spec=EVChargerDetector)
         mock_detector.validate_ev_configuration.return_value = {}
-        mock_detector.get_suggested_ev_defaults.return_value = {}
 
         with patch(
             "custom_components.solar_energy_management.config_flow.HardwareDetector",
@@ -346,8 +345,7 @@ class TestSolarEnergyManagementConfigFlow:
         flow = _create_flow(mock_hass)
         flow._energy_dashboard_config = energy_config
 
-        mock_detector = MagicMock()
-        mock_detector.get_suggested_ev_defaults.return_value = {}
+        mock_detector = MagicMock(spec=EVChargerDetector)
 
         with patch(
             "custom_components.solar_energy_management.config_flow.HardwareDetector",
@@ -445,8 +443,7 @@ class TestSolarEnergyManagementConfigFlow:
         energy_config = _make_energy_dashboard_config()
         flow = _create_flow(mock_hass)
 
-        mock_detector = MagicMock()
-        mock_detector.get_suggested_ev_defaults.return_value = {}
+        mock_detector = MagicMock(spec=EVChargerDetector)
         mock_detector.validate_ev_configuration.return_value = {}
 
         flow.async_set_unique_id = AsyncMock()

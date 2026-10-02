@@ -36,36 +36,6 @@ _LOGGER = logging.getLogger(__name__)
 # wizard's second prefill — is retired: the wizard reads ONE crawler (the
 # roster and its roles). A field the roles cannot fill is left for the user.
 
-# Generic EV charger patterns (fallback)
-GENERIC_EV_PATTERNS = {
-    "ev_connected": [
-        ("binary_sensor.*charger*connected*", "Generic Charger - Connected", 3),
-        ("binary_sensor.*ev*connected*", "Generic EV - Connected", 2),
-        # NOTE: removed "binary_sensor.*plug*" — too greedy, matched generic smart plugs.
-        # Use registry-based discovery for accurate plug detection.
-    ],
-    "ev_charging": [
-        ("binary_sensor.*charger*charging*", "Generic Charger - Charging", 3),
-        ("binary_sensor.*ev*charging*", "Generic EV - Charging", 2),
-    ],
-    "ev_charging_power": [
-        ("sensor.*charger*power*", "Generic Charger - Power", 3),
-        ("sensor.*ev*power*", "Generic EV - Power", 2),
-        ("sensor.*wallbox*", "Generic Wallbox", 1),
-    ],
-    "ev_current": [
-        ("sensor.*charger*current*", "Generic Charger - Current", 3),
-        ("sensor.*ev*current*", "Generic EV - Current", 2),
-    ],
-    "ev_session_energy": [
-        ("sensor.*charger*session*", "Generic Charger - Session", 3),
-        ("sensor.*ev*session*", "Generic EV - Session", 2),
-    ],
-    "ev_total_energy": [
-        ("sensor.*charger*total*energy*", "Generic Charger - Total Energy", 3),
-        ("sensor.*ev*total*energy*", "Generic EV - Total Energy", 2),
-    ],
-}
 
 
 class EVChargerDetector:
