@@ -32,463 +32,16 @@ from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
 _LOGGER = logging.getLogger(__name__)
 
 # EV charger integration-specific patterns
-EV_INTEGRATION_PATTERNS = {
-    "keba": {
-        "integration_name": "KEBA KeContact",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.keba_*_plug_connected", "KEBA - Plug Connected", 10),
-                ("binary_sensor.*_keba_*_plug*", "KEBA - Plug Status", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.keba_*_charging", "KEBA - Charging Status", 10),
-                ("sensor.keba_*_state", "KEBA - Charger State", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.keba_*_charging_power", "KEBA - Charging Power", 10),
-                ("sensor.keba_*_power", "KEBA - Power", 9),
-            ],
-            "ev_current": [
-                ("sensor.keba_*_charging_current", "KEBA - Charging Current", 10),
-                ("sensor.keba_*_current", "KEBA - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.keba_*_session_energy", "KEBA - Session Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.keba_*_total_energy", "KEBA - Total Energy", 10),
-            ],
-        }
-    },
-    "easee": {
-        "integration_name": "Easee",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.easee_status", "Easee - Status", 10),
-                ("sensor.*_easee_status", "Easee - Multi Status", 9),
-            ],
-            "ev_charging": [
-                ("sensor.easee_status", "Easee - Charging Status", 10),
-                ("binary_sensor.easee_*_charging", "Easee - Charging Binary", 9),
-                ("sensor.*_easee_status", "Easee - Multi Charging Status", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.easee_power", "Easee - Power", 10),
-                ("sensor.*_easee_power", "Easee - Multi Power", 9),
-                ("sensor.easee_*_power", "Easee - Power Variant", 8),
-            ],
-            "ev_current": [
-                ("sensor.easee_current", "Easee - Current", 10),
-                ("sensor.*_easee_current", "Easee - Multi Current", 9),
-                ("sensor.easee_*_current", "Easee - Current Variant", 8),
-            ],
-            "ev_session_energy": [
-                ("sensor.easee_session_energy", "Easee - Session Energy", 10),
-                ("sensor.*_easee_session*", "Easee - Multi Session", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.easee_total_energy", "Easee - Total Energy", 10),
-                ("sensor.*_easee_total*", "Easee - Multi Total", 9),
-            ],
-        }
-    },
-    "wallbox": {
-        "integration_name": "Wallbox",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.wallbox*connected*", "Wallbox - Connected", 8),
-                ("binary_sensor.wallbox*plug*", "Wallbox - Plug Status", 7),
-            ],
-            "ev_charging": [
-                ("binary_sensor.wallbox*charging*", "Wallbox - Charging", 8),
-                ("sensor.wallbox*state*", "Wallbox - State", 7),
-            ],
-            "ev_charging_power": [
-                ("sensor.wallbox*charging_power*", "Wallbox - Charging Power", 9),
-                ("sensor.wallbox*power*", "Wallbox - Power", 8),
-            ],
-            "ev_current": [
-                ("sensor.wallbox*charging_current*", "Wallbox - Charging Current", 9),
-                ("sensor.wallbox*current*", "Wallbox - Current", 8),
-            ],
-            "ev_session_energy": [
-                ("sensor.wallbox*session*energy*", "Wallbox - Session Energy", 9),
-                ("sensor.wallbox*session*", "Wallbox - Session", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.wallbox*total*energy*", "Wallbox - Total Energy", 8),
-                ("sensor.wallbox*total*", "Wallbox - Total", 7),
-            ],
-        }
-    },
-    "goecharger": {
-        "integration_name": "go-eCharger",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.goe*connected*", "go-eCharger - Connected", 8),
-                ("binary_sensor.go_e*plug*", "go-eCharger - Plug", 7),
-            ],
-            "ev_charging": [
-                ("binary_sensor.goe*charging*", "go-eCharger - Charging", 8),
-                ("sensor.go_e*status*", "go-eCharger - Status", 7),
-            ],
-            "ev_charging_power": [
-                ("sensor.goe*power*", "go-eCharger - Power", 8),
-                ("sensor.go_e*power*", "go-eCharger - Power", 8),
-            ],
-            "ev_current": [
-                ("sensor.goe*current*", "go-eCharger - Current", 8),
-                ("sensor.go_e*amp*", "go-eCharger - Amperage", 7),
-            ],
-            "ev_session_energy": [
-                ("sensor.goe*session*", "go-eCharger - Session", 8),
-                ("sensor.go_e*session*", "go-eCharger - Session", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.goe*total*energy*", "go-eCharger - Total Energy", 8),
-                ("sensor.go_e*total*", "go-eCharger - Total", 7),
-            ],
-        }
-    },
-    "openwb": {
-        "integration_name": "OpenWB",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.openwb*connected*", "OpenWB - Connected", 8),
-                ("binary_sensor.openwb*plug*", "OpenWB - Plug", 7),
-            ],
-            "ev_charging": [
-                ("binary_sensor.openwb*charging*", "OpenWB - Charging", 8),
-                ("sensor.openwb*status*", "OpenWB - Status", 7),
-            ],
-            "ev_charging_power": [
-                ("sensor.openwb*charging*power*", "OpenWB - Charging Power", 9),
-                ("sensor.openwb*power*", "OpenWB - Power", 8),
-            ],
-            "ev_current": [
-                ("sensor.openwb*current*", "OpenWB - Current", 8),
-                ("sensor.openwb*amp*", "OpenWB - Amperage", 7),
-            ],
-            "ev_session_energy": [
-                ("sensor.openwb*session*", "OpenWB - Session", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.openwb*total*energy*", "OpenWB - Total Energy", 8),
-            ],
-        }
-    },
-    "zaptec": {
-        "integration_name": "Zaptec",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.zaptec_*_cable_connected", "Zaptec - Cable Connected", 10),
-                ("binary_sensor.zaptec_*_connected", "Zaptec - Connected", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.zaptec_*_charging", "Zaptec - Charging", 10),
-                ("sensor.zaptec_*_charger_operation_mode", "Zaptec - Operation Mode", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.zaptec_*_charge_power", "Zaptec - Charge Power", 10),
-                ("sensor.zaptec_*_power", "Zaptec - Power", 9),
-            ],
-            "ev_current": [
-                ("number.zaptec_*_available_current", "Zaptec - Available Current", 10),
-                ("sensor.zaptec_*_current", "Zaptec - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.zaptec_*_session_energy", "Zaptec - Session Energy", 10),
-                ("sensor.zaptec_*_total_charge_power_session", "Zaptec - Session Charge", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.zaptec_*_total_charge_power", "Zaptec - Total Energy", 10),
-            ],
-        }
-    },
-    "chargepoint": {
-        "integration_name": "ChargePoint",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.chargepoint_*_connected", "ChargePoint - Connected", 10),
-                ("binary_sensor.chargepoint_*_plugged*", "ChargePoint - Plugged", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.chargepoint_*_charging", "ChargePoint - Charging", 10),
-                ("sensor.chargepoint_*_status", "ChargePoint - Status", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.chargepoint_*_power_output", "ChargePoint - Power Output", 10),
-                ("sensor.chargepoint_*_power", "ChargePoint - Power", 9),
-            ],
-            "ev_current": [
-                ("number.chargepoint_*_charging_amperage_limit", "ChargePoint - Amperage Limit", 10),
-                ("sensor.chargepoint_*_current", "ChargePoint - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.chargepoint_*_session_energy", "ChargePoint - Session Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.chargepoint_*_energy_output", "ChargePoint - Energy Output", 10),
-                ("sensor.chargepoint_*_total_energy", "ChargePoint - Total Energy", 9),
-            ],
-        }
-    },
-    "heidelberg": {
-        "integration_name": "Heidelberg Energy Control",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.heidelberg_*_connected", "Heidelberg - Connected", 10),
-                ("binary_sensor.heidelberg_*_plug*", "Heidelberg - Plug", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.heidelberg_*_charging", "Heidelberg - Charging", 10),
-                ("binary_sensor.heidelberg_*_active", "Heidelberg - Active", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.heidelberg_*_charging_power", "Heidelberg - Charging Power", 10),
-                ("sensor.heidelberg_*_power", "Heidelberg - Power", 9),
-            ],
-            "ev_current": [
-                ("number.heidelberg_*_charging_current_limit", "Heidelberg - Current Limit", 10),
-                ("sensor.heidelberg_*_current", "Heidelberg - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.heidelberg_*_session_energy", "Heidelberg - Session Energy", 10),
-                ("sensor.heidelberg_*_energy_session", "Heidelberg - Energy Session", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.heidelberg_*_total_energy", "Heidelberg - Total Energy", 10),
-                ("sensor.heidelberg_*_energy_total", "Heidelberg - Energy Total", 9),
-            ],
-        }
-    },
-    "ocpp": {
-        "integration_name": "OCPP",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.ocpp_*_status*connector*", "OCPP - Connector Status", 10),
-                ("sensor.ocpp_*_status", "OCPP - Status", 9),
-            ],
-            "ev_charging": [
-                ("sensor.ocpp_*_status*connector*", "OCPP - Connector Status", 10),
-                ("sensor.ocpp_*_status", "OCPP - Status", 9),
-            ],
-            "ev_charging_power": [
-                ("sensor.ocpp_*_power_active_import", "OCPP - Active Import Power", 10),
-                ("sensor.ocpp_*_power*", "OCPP - Power", 8),
-            ],
-            "ev_current": [
-                ("number.ocpp_*_maximum_current", "OCPP - Maximum Current", 10),
-                # (#962) Current.Import is what flows; Current.Offered is
-                # what the charge point advertises it COULD give.
-                ("sensor.ocpp_*_current_import", "OCPP - Current Import", 9),
-                ("sensor.ocpp_*_current_offered", "OCPP - Current Offered", 8),
-            ],
-            "ev_session_energy": [
-                # (#962) the session slot wants a per-session counter, not
-                # the cumulative register that never resets.
-                ("sensor.ocpp_*_session_energy", "OCPP - Session Energy", 10),
-                ("sensor.ocpp_*_energy_active_import_interval",
-                 "OCPP - Import Interval", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.ocpp_*_energy_active_import_register", "OCPP - Energy Register", 10),
-            ],
-        }
-    },
-    "alfen": {
-        "integration_name": "Alfen Eve",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.*alfen*main_state*socket*", "Alfen - Main State", 10),
-                ("sensor.*alfen*status*socket*", "Alfen - Status", 9),
-            ],
-            "ev_charging": [
-                ("sensor.*alfen*main_state*socket*", "Alfen - Main State", 10),
-                ("sensor.*alfen*status*socket*", "Alfen - Status", 9),
-            ],
-            "ev_charging_power": [
-                ("sensor.*alfen*active_power_total*socket*", "Alfen - Active Power", 10),
-                ("sensor.*alfen*active_power*", "Alfen - Active Power Alt", 8),
-            ],
-            "ev_current": [
-                ("number.*alfen*max_current*socket*", "Alfen - Max Current", 10),
-                ("number.*alfen*current_limit*", "Alfen - Current Limit", 9),
-                ("sensor.*alfen*current*socket*", "Alfen - Current", 7),
-            ],
-            "ev_session_energy": [
-                ("sensor.*alfen*transaction*charging*", "Alfen - Session Energy", 10),
-                ("sensor.*alfen*meter_reading*", "Alfen - Meter Reading", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.*alfen*meter_reading*socket*", "Alfen - Total Energy", 10),
-            ],
-        }
-    },
-    "ohme": {
-        "integration_name": "Ohme",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.ohme_*_status", "Ohme - Status", 10),
-            ],
-            "ev_charging": [
-                ("sensor.ohme_*_status", "Ohme - Status", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.ohme_*_power", "Ohme - Power", 10),
-            ],
-            "ev_current": [
-                ("sensor.ohme_*_current", "Ohme - Current", 10),
-            ],
-            "ev_session_energy": [
-                ("sensor.ohme_*_energy", "Ohme - Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.ohme_*_energy", "Ohme - Total Energy", 9),
-            ],
-        }
-    },
-    "peblar": {
-        "integration_name": "Peblar",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.peblar_*_state", "Peblar - State", 10),
-            ],
-            "ev_charging": [
-                ("sensor.peblar_*_state", "Peblar - State", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.peblar_*_power", "Peblar - Power", 10),
-            ],
-            "ev_current": [
-                ("number.peblar_*_charge_limit", "Peblar - Charge Limit", 10),
-                ("sensor.peblar_*_current", "Peblar - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.peblar_*_session_energy", "Peblar - Session Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.peblar_*_lifetime_energy", "Peblar - Lifetime Energy", 10),
-            ],
-        }
-    },
-    "v2c": {
-        "integration_name": "V2C Trydan",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.v2c_*_connected", "V2C - Connected", 10),
-            ],
-            "ev_charging": [
-                ("binary_sensor.v2c_*_charging", "V2C - Charging", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.v2c_*_charge_power", "V2C - Charge Power", 10),
-            ],
-            "ev_current": [
-                ("number.v2c_*_intensity", "V2C - Intensity", 10),
-            ],
-            "ev_session_energy": [
-                ("sensor.v2c_*_charge_energy", "V2C - Charge Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.v2c_*_charge_energy", "V2C - Total Energy", 9),
-            ],
-        }
-    },
-    "blue_current": {
-        "integration_name": "Blue Current",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.*blue_current*vehicle_status*", "Blue Current - Vehicle Status", 10),
-                ("sensor.*blue_current*activity*", "Blue Current - Activity", 9),
-            ],
-            "ev_charging": [
-                ("sensor.*blue_current*activity*", "Blue Current - Activity", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.*blue_current*total_kw*", "Blue Current - Total kW", 10),
-                ("sensor.*blue_current*total_power*", "Blue Current - Total Power", 9),
-            ],
-            "ev_current": [
-                ("sensor.*blue_current*avg_current*", "Blue Current - Avg Current", 10),
-                ("sensor.*blue_current*max_usage*", "Blue Current - Max Usage", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.*blue_current*actual_kwh*", "Blue Current - Energy kWh", 10),
-                ("sensor.*blue_current*energy_usage*", "Blue Current - Energy Usage", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.*blue_current*actual_kwh*", "Blue Current - Total kWh", 10),
-            ],
-        }
-    },
-    "openevse": {
-        "integration_name": "OpenEVSE",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.openevse_*_vehicle", "OpenEVSE - Vehicle Plug", 10),
-                ("sensor.openevse_*_status", "OpenEVSE - Status", 9),
-                ("sensor.openevse_*_state", "OpenEVSE - State", 8),
-            ],
-            "ev_charging": [
-                ("sensor.openevse_*_status", "OpenEVSE - Status", 10),
-                ("sensor.openevse_*_state", "OpenEVSE - State", 9),
-            ],
-            "ev_charging_power": [
-                ("sensor.openevse_*_current_power", "OpenEVSE - Current Power", 10),
-                ("sensor.openevse_*_charging_power", "OpenEVSE - Charging Power", 9),
-            ],
-            "ev_current": [
-                ("number.openevse_*_max_current*", "OpenEVSE - Max Current", 10),
-                ("sensor.openevse_*_charging_current", "OpenEVSE - Charging Current", 9),
-                ("sensor.openevse_*_current_capacity", "OpenEVSE - Current Capacity", 8),
-            ],
-            "ev_session_energy": [
-                ("sensor.openevse_*_usage_session", "OpenEVSE - Session Usage", 10),
-                ("sensor.openevse_*_usage_this_session", "OpenEVSE - Session Usage Alt", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.openevse_*_usage_total", "OpenEVSE - Total Usage", 10),
-                ("sensor.openevse_*_total_energy*", "OpenEVSE - Total Energy", 9),
-            ],
-        }
-    },
-}
+# (#1032) EV_INTEGRATION_PATTERNS — the glob matrix behind the config
+# wizard's second prefill — is retired: the wizard reads ONE crawler (the
+# roster and its roles). A field the roles cannot fill is left for the user.
 
-# Generic EV charger patterns (fallback)
-GENERIC_EV_PATTERNS = {
-    "ev_connected": [
-        ("binary_sensor.*charger*connected*", "Generic Charger - Connected", 3),
-        ("binary_sensor.*ev*connected*", "Generic EV - Connected", 2),
-        # NOTE: removed "binary_sensor.*plug*" — too greedy, matched generic smart plugs.
-        # Use registry-based discovery for accurate plug detection.
-    ],
-    "ev_charging": [
-        ("binary_sensor.*charger*charging*", "Generic Charger - Charging", 3),
-        ("binary_sensor.*ev*charging*", "Generic EV - Charging", 2),
-    ],
-    "ev_charging_power": [
-        ("sensor.*charger*power*", "Generic Charger - Power", 3),
-        ("sensor.*ev*power*", "Generic EV - Power", 2),
-        ("sensor.*wallbox*", "Generic Wallbox", 1),
-    ],
-    "ev_current": [
-        ("sensor.*charger*current*", "Generic Charger - Current", 3),
-        ("sensor.*ev*current*", "Generic EV - Current", 2),
-    ],
-    "ev_session_energy": [
-        ("sensor.*charger*session*", "Generic Charger - Session", 3),
-        ("sensor.*ev*session*", "Generic EV - Session", 2),
-    ],
-    "ev_total_energy": [
-        ("sensor.*charger*total*energy*", "Generic Charger - Total Energy", 3),
-        ("sensor.*ev*total*energy*", "Generic EV - Total Energy", 2),
-    ],
-}
 
 
 class EVChargerDetector:
-    """Auto-detect EV charger entities with integration awareness."""
+    """(#1032) The config wizard's VALIDATOR for EV charger entities. Its
+    glob-pattern detection is retired: suggestions come from one crawler
+    (``discover_ev_charger_from_registry``), never from a second reader."""
 
     def __init__(self, hass: HomeAssistant):
         """Initialize EV charger detector."""
@@ -498,75 +51,6 @@ class EVChargerDetector:
     def get_all_entities(self) -> List[str]:
         """Get all available entity IDs."""
         return list(self.hass.states.async_entity_ids())
-
-    def _get_merged_patterns(self) -> Dict[str, List[Tuple[str, str, int]]]:
-        """Merge integration-specific patterns with generic patterns.
-
-        Returns:
-            Dict with sensor type as key, list of (pattern, description, priority) tuples
-        """
-        merged = {}
-
-        # Add integration-specific patterns first (highest priority)
-        for _integration_name, integration_data in EV_INTEGRATION_PATTERNS.items():
-            for sensor_type, patterns in integration_data["patterns"].items():
-                if sensor_type not in merged:
-                    merged[sensor_type] = []
-                merged[sensor_type].extend(patterns)
-
-        # Add generic patterns
-        for sensor_type, patterns in GENERIC_EV_PATTERNS.items():
-            if sensor_type not in merged:
-                merged[sensor_type] = []
-            merged[sensor_type].extend(patterns)
-
-        # Sort by priority (highest first)
-        for sensor_type in merged:
-            merged[sensor_type] = sorted(
-                merged[sensor_type],
-                key=lambda x: x[2],
-                reverse=True
-            )
-
-        return merged
-
-    def detect_ev_entities(self) -> Dict[str, List[Tuple[str, str, bool, int]]]:
-        """Auto-detect EV charger entities with validation and priority scoring.
-
-        Returns:
-            Dict with sensor type as key, list of (entity_id, description, exists, priority) tuples
-        """
-        detected = {}
-        all_entities = self.get_all_entities()
-        merged_patterns = self._get_merged_patterns()
-
-        for sensor_type, patterns in merged_patterns.items():
-            detected[sensor_type] = []
-
-            for pattern, description, priority in patterns:
-                matches = self._find_pattern_matches(pattern, all_entities)
-                for entity_id in matches:
-                    exists = self._validate_entity(entity_id, sensor_type)
-                    detected[sensor_type].append((entity_id, description, exists, priority))
-
-        # Sort by priority and validation status
-        for sensor_type in detected:
-            detected[sensor_type] = sorted(
-                detected[sensor_type],
-                key=lambda x: (x[2], x[3]),  # Sort by exists (True first), then priority
-                reverse=True
-            )
-
-        return detected
-
-    def _find_pattern_matches(self, pattern: str, entities: List[str]) -> List[str]:
-        """Find entities matching a pattern."""
-        import fnmatch
-
-        if "*" in pattern:
-            return fnmatch.filter(entities, pattern)
-        else:
-            return [pattern] if pattern in entities else []
 
     def _validate_entity(self, entity_id: str, sensor_type: str) -> bool:
         """Validate entity exists and has reasonable values."""
@@ -610,64 +94,6 @@ class EVChargerDetector:
         except (ValueError, TypeError):
             return False
 
-    def get_best_match(self, sensor_type: str) -> Optional[str]:
-        """Get the best matching entity for a sensor type.
-
-        Returns the highest priority valid entity.
-        """
-        detected = self.detect_ev_entities()
-        candidates = detected.get(sensor_type) or []
-        # (#962, bug class 89) A glob cannot tell ``Power.Offered`` from
-        # ``Power.Active.Import`` — both are "a power sensor whose name
-        # matches". For the roles that must carry a MEASUREMENT, try the
-        # candidates that claim to measure first, and fall back to a
-        # capability-named match only when the install offers nothing else.
-        if sensor_type in ("ev_charging_power", "ev_session_energy",
-                           "ev_total_energy"):
-            candidates = (
-                [c for c in candidates if _measures_the_quantity(c[0])]
-                + [c for c in candidates if not _measures_the_quantity(c[0])]
-            )
-        for entity_id, description, exists, priority in candidates:
-            if exists:
-                _LOGGER.info(
-                    f"Auto-detected {sensor_type}: {entity_id} ({description}) "
-                    f"[Priority: {priority}]"
-                )
-                return entity_id
-        return None
-
-    def get_detected_ev_integrations(self) -> Dict[str, bool]:
-        """Detect which EV charger integrations are installed.
-
-        Returns:
-            Dict with integration name as key and detection status as value
-        """
-        detected_integrations = {}
-        all_entities = self.get_all_entities()
-
-        for integration_name, integration_data in EV_INTEGRATION_PATTERNS.items():
-            detected_integrations[integration_name] = False
-
-            for sensor_type, patterns in integration_data["patterns"].items():
-                for pattern, _description, _priority in patterns:
-                    matches = self._find_pattern_matches(pattern, all_entities)
-                    if matches:
-                        for entity_id in matches:
-                            if self._validate_entity(entity_id, sensor_type):
-                                detected_integrations[integration_name] = True
-                                _LOGGER.info(
-                                    f"Detected EV integration: {integration_data['integration_name']} "
-                                    f"(found valid entity: {entity_id})"
-                                )
-                                break
-                    if detected_integrations[integration_name]:
-                        break
-                if detected_integrations[integration_name]:
-                    break
-
-        return detected_integrations
-
     def validate_ev_configuration(self, config: Dict[str, str]) -> Dict[str, str]:
         """Validate EV charger configuration.
 
@@ -693,29 +119,6 @@ class EVChargerDetector:
                 errors[sensor_key] = f"Entity {entity_id} not found or invalid"
 
         return errors
-
-    def get_suggested_ev_defaults(self) -> Dict[str, str]:
-        """Get suggested EV charger default values based on auto-detection."""
-        suggestions = {}
-
-        sensor_mappings = {
-            "ev_connected_sensor": "ev_connected",
-            "ev_charging_sensor": "ev_charging",
-            "ev_charging_power_sensor": "ev_charging_power",
-            "ev_current_sensor": "ev_current",
-            "ev_session_energy_sensor": "ev_session_energy",
-            "ev_total_energy_sensor": "ev_total_energy",
-        }
-
-        for config_key, detect_key in sensor_mappings.items():
-            suggested = self.get_best_match(detect_key)
-            if suggested:
-                suggestions[config_key] = suggested
-            else:
-                suggestions[config_key] = ""
-
-        return suggestions
-
 
 # Backward compatibility alias
 HardwareDetector = EVChargerDetector
@@ -1019,14 +422,102 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     near-miss offer. A guard added here closes its class for every brand,
     hinted or hand-written, and for the next one nobody has written yet.
 
-    The glob matrix (``EVChargerDetector.get_best_match``) is a fifth path
-    and deliberately does NOT funnel through here: it produces a config-flow
-    PREFILL the user confirms, not a binding SEM acts on, so it applies the
-    same ``_measures_the_quantity`` predicate as a demotion rather than a
-    correction."""
+    (#1032) The glob matrix that was a fifth path is retired; the wizard's
+    prefill comes from these paths only."""
     _reject_offline_current_control(result, entities)
     _reject_capability_sensor(result, entities)
     _reject_reboot_control(result, entities)
+
+
+#: (#1036) The roles only a charger fills: a car that is there, a charge
+#: that runs, a session, or a way to steer the box. A meter fills none of
+#: them — it measures power and energy, nothing else.
+_CHARGER_ONLY_ROLES = (
+    "ev_connected_sensor", "ev_charging_sensor", "ev_session_energy_sensor",
+    "ev_current_control_entity", "ev_start_stop_entity",
+    "ev_charge_mode_entity",
+)
+
+
+def meters_beside_chargers(platform: str, units, disabled=()) -> set:
+    """(#1036) The units of ONE integration that are meters next to its
+    charger — never chargers themselves.
+
+    A brand function admits a unit on a power reading alone, so a meter the
+    integration ships beside its charger became a second charger. Easee's
+    Equalizer measures the house's grid import: SEM offered it as a charger
+    with that import as its charging power — and, because its entities came
+    first, as the PRIMARY charger that setup saves and drives.
+
+    A unit is a meter here when its guarded mapping binds no role in
+    ``_CHARGER_ONLY_ROLES``, AND a sibling unit of the same integration does
+    bind one. The sibling is the evidence: the integration publishes those
+    roles for its chargers, and this unit has none of them. Without that
+    sibling nothing is dropped — a box whose status sensor the user disabled
+    must not lose its only charger to a guess. Only a bound role makes a
+    unit the evidence.
+
+    Two things keep a unit that the roles alone would call a meter, each
+    looked for on the WHOLE device — its live entities and its disabled ones
+    (``disabled``: the platform's disabled registry entries):
+
+    * a charger mark (a plug binary or a current control, #814);
+    * an entity with the same translation key as one the evidence bound to
+      a charger role. The key is the integration's own name for the entity
+      and survives the user renaming its id, which the brand functions read.
+      A second Easee with its status disabled, or renamed to
+      ``sensor.carport_toestand``, is still a charger.
+
+    That second check needs the keys. Where the evidence's charger roles
+    carry none, nothing is dropped: SEM cannot tell a meter from a second
+    box whose roles are switched off, and the heal at setup acts on this
+    answer.
+
+    ``mqtt`` and the other transports are not integrations: the devices on
+    them are not neighbours.
+
+    ``units`` is ``{unit_key: (mapping, entities)}`` with each mapping
+    already through ``apply_charger_discovery_guards``. Returns the keys of
+    the units that are meters.
+    """
+    if platform in _TRANSPORT_PLATFORMS:
+        return set()
+
+    def _binds_charger_role(mapping) -> bool:
+        return any(mapping.get(role) for role in _CHARGER_ONLY_ROLES)
+
+    evidence = [(mapping, ents) for mapping, ents in units.values()
+                if mapping and _binds_charger_role(mapping)]
+    if not evidence:
+        return set()
+    charger_keys = set()
+    for mapping, ents in evidence:
+        by_id = {str(e.entity_id): e for e in ents}
+        for role in _CHARGER_ONLY_ROLES:
+            bound = by_id.get(str(mapping.get(role) or ""))
+            key = getattr(bound, "translation_key", None)
+            if isinstance(key, str) and key:
+                charger_keys.add(key)
+    if not charger_keys:
+        return set()
+
+    def _whole_device(ents) -> list:
+        devices = {e.device_id for e in ents if getattr(e, "device_id", None)}
+        return list(ents) + [d for d in disabled
+                             if getattr(d, "device_id", None) in devices]
+
+    meters = set()
+    for key, (mapping, ents) in units.items():
+        if not mapping or _binds_charger_role(mapping):
+            continue
+        whole = _whole_device(ents)
+        if any(_charger_mark(e) for e in whole):
+            continue
+        if any(getattr(e, "translation_key", None) in charger_keys
+               for e in whole):
+            continue
+        meters.add(key)
+    return meters
 
 
 # ============================================================
@@ -1391,7 +882,7 @@ def unit_device_id(unit_key) -> Optional[str]:
 
 
 def discover_all_ev_chargers_from_registry(
-    hass: HomeAssistant,
+    hass: HomeAssistant, *, meters_out: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, str]]:
     """Auto-discover ALL EV chargers from known integrations via entity registry.
 
@@ -1401,6 +892,10 @@ def discover_all_ev_chargers_from_registry(
 
     For charger integrations that expose multiple devices (e.g., 2 Wallbox
     Pulsars), each device produces a separate entry grouped by device_id.
+
+    (#1036) A meter beside a charger is not returned. ``meters_out``, when
+    given, receives each such meter in the shape it was returned in before
+    — so setup can find a meter it saved as the charger back then.
     """
     entity_reg = entity_registry.async_get(hass)
     chargers: List[Dict[str, str]] = []
@@ -1425,6 +920,10 @@ def discover_all_ev_chargers_from_registry(
         ]
         if not entities:
             continue
+        disabled = [
+            e for e in entity_reg.entities.values()
+            if _matches_platform(str(e.platform or "")) and e.disabled_by
+        ]
 
         # Group entities by the physical unit they belong to: device_id
         # where the registry has one (e.g., 2 Wallbox Pulsars), and the
@@ -1432,14 +931,33 @@ def discover_all_ev_chargers_from_registry(
         # device, and one bucket for "no device" mixes two boxes).
         devices = group_entities_by_unit(entities)
 
+        found = {}
         for unit_key, device_entities in devices.items():
-            device_id = unit_device_id(unit_key)
             result = discover_fn(device_entities)
             if result:
                 # (#886) never drive a charger through its offline fallback
                 # register; (#962) never read its advertised capability as a
                 # measurement.
                 apply_charger_discovery_guards(result, device_entities)
+            found[unit_key] = (result, device_entities)
+        # (#1036) a meter the integration ships beside its charger is not a
+        # second charger — and must never be the first one.
+        meters = meters_beside_chargers(platform, found, disabled)
+
+        for unit_key, (result, device_entities) in found.items():
+            device_id = unit_device_id(unit_key)
+            if unit_key in meters:
+                _LOGGER.info(
+                    "Not a charger: %s device %s is a meter beside a charger "
+                    "(#1036)", platform, device_id or unit_label(unit_key))
+                if meters_out is not None:
+                    was = dict(result)
+                    was["_platform"] = str(device_entities[0].platform or platform)
+                    if device_id:
+                        was["_device_id"] = device_id
+                    meters_out.append(was)
+                continue
+            if result:
                 # Preserve the registry's real domain for diagnostics/stable
                 # migration metadata (e.g. zaptec_custom), not just the
                 # canonical matcher name.
@@ -1472,7 +990,47 @@ def discover_all_ev_chargers_from_registry(
                 )
                 chargers.append(result)
 
+    # (#1032) the roster's roles find a charger on any integration the brand
+    # list does not name — the same offer the detection report shows as a
+    # near miss. Only for discovery: a charger already saved keeps its
+    # mapping (nothing here rewrites saved config; setup and the add-charger
+    # step offer it, and the user confirms).
+    try:
+        chargers.extend(_role_discovered_chargers(hass, entity_reg, chargers))
+    except Exception:  # noqa: BLE001 — a new reader never costs discovery
+        _LOGGER.debug("role discovery failed", exc_info=True)
     return chargers
+
+
+def _role_discovered_chargers(hass, registry, found) -> List[Dict[str, Any]]:
+    """(#1032) Complete role offers for units no brand path claimed, in the
+    shape discovery returns (``_platform`` / ``_device_id`` instead of the
+    near miss's ``id`` / ``name``)."""
+    running = bool(getattr(hass, "is_running", True)) if hass is not None else False
+    state_of = ((lambda eid: hass.states.get(eid))
+                if (hass is not None and running and hasattr(hass, "states"))
+                else None)
+    taken = {str(v) for c in found for k, v in c.items()
+             if not k.startswith("_") and isinstance(v, str) and "." in v}
+    report: Dict[str, Any] = {"chargers": [], "near_misses": [], "vehicles": []}
+    _roles_pass(report, registry, [], taken, _services_of(hass), state_of,
+                include_brand_platforms=True)
+    out: List[Dict[str, Any]] = []
+    for n in report["near_misses"]:
+        offer = dict(n.get("suggested_charger") or {})
+        if not offer:
+            continue
+        offer.pop("id", None)
+        offer.pop("name", None)
+        offer["_platform"] = n["platform"]
+        if n.get("device_id"):
+            offer["_device_id"] = n["device_id"]
+        offer["_found_by"] = "roles"
+        _LOGGER.info("Role-discovered EV charger on %s (device %s): %s",
+                     n["platform"], n.get("device_id") or "default",
+                     {k: v for k, v in offer.items() if not k.startswith("_")})
+        out.append(offer)
+    return out
 
 
 def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
@@ -1754,12 +1312,34 @@ def _services_of(hass):
     if services is None or not hasattr(services, "async_services"):
         return None
 
-    def _of(domain: str) -> set:
+    def _of(domain: str) -> "_ServiceNames":
+        """The domain's service names (a set, as before); (#1032) each
+        name's fields ride along in ``.fields``, read from the service's own
+        schema, so a role can be read from what a service TAKES."""
+        out: Dict[str, list] = {}
         try:
-            return set((services.async_services() or {}).get(str(domain), {}) or ())
+            for name, svc in ((services.async_services() or {})
+                              .get(str(domain), {}) or {}).items():
+                fields: list = []
+                inner = getattr(getattr(svc, "schema", None), "schema", None)
+                if isinstance(inner, dict):
+                    fields = sorted(str(getattr(k, "schema", k)) for k in inner)
+                out[str(name)] = fields
         except Exception:  # noqa: BLE001
-            return set()
+            return _ServiceNames()
+        return _ServiceNames(out)
     return _of
+
+
+class _ServiceNames(set):
+    """A set of service names that also knows each one's fields."""
+
+    def __init__(self, fields: Optional[Dict[str, list]] = None) -> None:
+        super().__init__(fields or ())
+        self.fields: Dict[str, list] = dict(fields or {})
+
+    def get(self, name, default=None):
+        return self.fields.get(name, default)
 
 
 def propose_roles_from_roster(dev_entities, domain: str, *,
@@ -1949,8 +1529,367 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
             return
 
 
+# ============================================================
+# (#1032) Charger roles read from ANY integration's own words — the roster
+# learning what a charger, or a car that charges, offers beside a current
+# number. SEM connects to integrations; it does not cover hardware (Guido,
+# 01.10.2026). The rule tables live in consts/role_lexicon.py; nothing below
+# names an integration. Report data only, never a binding.
+# ============================================================
+
+def _role_words(entry) -> List[str]:
+    """An entity's own words: its translation key and its unique id."""
+    return [w for w in (getattr(entry, "translation_key", None),
+                        getattr(entry, "unique_id", None))
+            if isinstance(w, str) and w]
+
+
+def _rule_hits(entry, rule) -> bool:
+    if not str(getattr(entry, "entity_id", "")).startswith(f"{rule['platform']}."):
+        return False
+    words = _role_words(entry)
+    if any(re.search(p, w, re.I) for p in rule.get("not", ()) for w in words):
+        return False
+    return any(re.search(p, w, re.I) for p in rule["any"] for w in words)
+
+
+def _first_hit(entries, rule) -> Optional[str]:
+    hits = sorted(str(e.entity_id) for e in entries if _rule_hits(e, rule))
+    return hits[0] if hits else None
+
+
+def _roles_dc(entry) -> str:
+    dc = getattr(entry, "original_device_class", None)
+    dc = getattr(dc, "value", dc)
+    return dc if isinstance(dc, str) else ""
+
+
+def _speaks_vehicle(entries) -> bool:
+    """A CAR's vocabulary: a vehicle marker, and none of a building's."""
+    from .consts import role_lexicon as lex
+    words = " ".join(w.lower() for e in entries for w in _role_words(e))
+    return (any(m in words for m in lex.VEHICLE_MARKERS)
+            and not any(m in words for m in lex.HOUSE_MARKERS))
+
+
+def _select_options(entry, state_of) -> List[str]:
+    opts = None
+    if state_of is not None:
+        st = state_of(str(entry.entity_id))
+        if st is not None:
+            opts = (getattr(st, "attributes", None) or {}).get("options")
+    if not opts:
+        caps = getattr(entry, "capabilities", None)
+        opts = caps.get("options") if isinstance(caps, dict) else None
+    return [str(o) for o in opts] if isinstance(opts, (list, tuple)) else []
+
+
+def _pick_option(options: List[str], wanted) -> Optional[str]:
+    """The option to WRITE, matched by meaning: ``max_charge`` (Ohme's real
+    option value, shown translated as "Max charge") is ``max charge``."""
+    low: Dict[str, str] = {}
+    for o in options:
+        low.setdefault(o.lower(), o)
+        low.setdefault(o.lower().replace("_", " ").replace("-", " "), o)
+    for w in wanted:
+        if w in low:
+            return low[w]
+    return None
+
+
+def _charging_power(entries, *, vehicle: bool) -> Optional[str]:
+    """The charging power reading: a power sensor that is not one phase leg
+    or a clamp on something else; on a car it must say it is the charger's."""
+    cands = []
+    for e in entries:
+        eid = str(e.entity_id)
+        if not eid.startswith("sensor.") or _roles_dc(e) != "power":
+            continue
+        words = " ".join(_role_words(e)).lower() + " " + eid.lower()
+        if vehicle and "charg" not in words:
+            continue
+        if re.search(r"(reactive|export|import|generation|generator|grid|"
+                     r"battery|photovolt|solar|_pv_|\bpv\b|monitor)", words):
+            continue
+        leg = (bool(re.search(r"(?:_|-)(l[123]|phase_?[123]|ct[1-9]|[123])$", eid))
+               or bool(re.search(r"phase_[123]", eid)))
+        named = bool(re.search(r"charg|total|session", words))
+        # a reading that says "power" over one that only shares the class
+        # (NRGkick's ``charging_rate`` carries the power class)
+        says_power = "power" in " ".join(_role_words(e)).lower() + eid.lower()
+        cands.append((leg, not says_power, not named, eid))
+    cands.sort()
+    return cands[0][-1] if cands else None
+
+
+def _plugged(entries) -> Optional[str]:
+    plugs = sorted(str(e.entity_id) for e in entries
+                   if str(e.entity_id).startswith("binary_sensor.")
+                   and _roles_dc(e) == "plug")
+    if plugs:
+        return plugs[0]
+    cables = sorted(str(e.entity_id) for e in entries
+                    if str(e.entity_id).startswith("binary_sensor.")
+                    and _roles_dc(e) == "connectivity"
+                    and re.search(r"cable|plug", " ".join(_role_words(e)), re.I))
+    return cables[0] if cables else None
+
+
+def _charging_now(entries) -> Optional[str]:
+    hits = sorted(
+        str(e.entity_id) for e in entries
+        if str(e.entity_id).startswith("binary_sensor.")
+        and (_roles_dc(e) == "battery_charging"
+             or (_roles_dc(e) == "running"
+                 and re.search(r"charg|contactor", " ".join(_role_words(e)), re.I))))
+    return hits[0] if hits else None
+
+
+def _current_number_role(entries) -> Optional[str]:
+    from .consts import role_lexicon as lex
+    rule = lex.ROLE_RULES["ev_current_control"]
+    hits = []
+    for e in entries:
+        eid = str(e.entity_id)
+        if not eid.startswith("number."):
+            continue
+        for w in _role_words(e):
+            key = w.rsplit("-", 1)[-1]
+            if "ev_current_control" in (lex.role_for("number", key),
+                                        lex.role_for("number", w)):
+                hits.append(eid)
+                break
+            # ``amp``, ``charge_rate`` — a current only on a charger
+            if (any(re.search(p, key, re.I) for p in rule.get("charger_only_any", ()))
+                    and not any(re.search(p, key, re.I) for p in rule.get("not", ()))):
+                hits.append(eid)
+                break
+    return sorted(hits)[0] if hits else None
+
+
+def _is_stored_setting(entries, eid: Optional[str]) -> bool:
+    """A number filed under the CONFIG category is a stored setting (a box's
+    own maximum), not a live control: rewriting it every cycle wears the
+    box's memory and changes what the owner set."""
+    for e in entries:
+        if str(e.entity_id) == eid:
+            cat = getattr(e, "entity_category", None)
+            return str(getattr(cat, "value", cat) or "") == "config"
+    return False
+
+
+def _service_current_role(domain: str, services: Dict[str, list]) -> Optional[Dict[str, Any]]:
+    """(#956 rule, read live) a current-setting service with a current field
+    is a CONTROL — a service-driven charger is never read-only."""
+    from .consts import role_lexicon as lex
+    rule = lex.SERVICE_ROLE_RULES.get("ev_current_control") or {}
+    for name in sorted(services or {}):
+        fields = list((services or {}).get(name) or [])
+        full = f"{domain}.{name}"
+        param = _current_field(fields)
+        if (rule and param
+                and any(re.search(p, full, re.I) for p in rule.get("any", ()))
+                and not any(re.search(p, full, re.I) for p in rule.get("not", ()))):
+            return {"service": full, "param": param, "fields": fields}
+    return None
+
+
+def _service_field_roles(domain: str, services: Dict[str, list]) -> Dict[str, Any]:
+    """R6 — services read by their FIELDS (report data)."""
+    from .consts import role_lexicon as lex
+    out: Dict[str, Any] = {}
+    for name in sorted(services or {}):
+        fields = list((services or {}).get(name) or [])
+        if all(f in fields for f in lex.SERVICE_PHASE_FIELDS):
+            out.setdefault("phase_service", {"service": f"{domain}.{name}",
+                                             "fields": fields})
+        cur = [f for f in fields if f in lex.SERVICE_SITE_CURRENT_FIELDS]
+        if cur:
+            out.setdefault("site_service", {"service": f"{domain}.{name}",
+                                            "param": cur[0], "fields": fields})
+    return out
+
+
+def read_charger_roles(dev_entities, domain: str, *, services_of=None,
+                       state_of=None) -> Dict[str, Any]:
+    """(#1032) Every charger role ONE device carries, by its own words:
+    R2 start/stop buttons, R3 a car's charge control, R5 a select read by its
+    options, R6 services by their fields (plus the #956 current service)."""
+    from .consts import role_lexicon as lex
+    roles: Dict[str, Any] = {}
+    vehicle = _speaks_vehicle(dev_entities)
+    if vehicle:
+        roles["vehicle"] = True
+        for role, rule in lex.VEHICLE_CONTROL_RULES.items():
+            hit = _first_hit(dev_entities, rule)
+            if hit:
+                roles[role] = hit
+    else:
+        cur = _current_number_role(dev_entities)
+        if cur:
+            roles["current_number"] = cur
+            if _is_stored_setting(dev_entities, cur):
+                roles["current_is_setting"] = True
+        sw = _first_hit(dev_entities, lex.CHARGER_SWITCH_RULES["ev_charge_switch"])
+        if sw:
+            roles["charge_switch"] = sw
+        start = _first_hit(dev_entities, lex.CHARGER_BUTTON_RULES["ev_start_button"])
+        stop = _first_hit(dev_entities, lex.CHARGER_BUTTON_RULES["ev_stop_button"])
+        if start and stop:
+            roles["start_stop_buttons"] = [start, stop]
+        for e in sorted(dev_entities, key=lambda x: str(x.entity_id)):
+            if not str(e.entity_id).startswith("select."):
+                continue
+            opts = _select_options(e, state_of)
+            go = _pick_option(opts, lex.SELECT_CHARGE_OPTIONS)
+            halt = _pick_option(opts, lex.SELECT_STOP_OPTIONS)
+            if go and halt and "charge_mode" not in roles:
+                roles["charge_mode"] = {"entity": str(e.entity_id),
+                                        "start": go, "stop": halt}
+            elif (all(p in opts for p in lex.SELECT_PHASE_OPTIONS)
+                  and "phase_select" not in roles):
+                roles["phase_select"] = {"entity": str(e.entity_id),
+                                         "value_1p": "1", "value_3p": "3"}
+        # a phase COUNT number that takes 1 and 3 is a phase switch
+        for e in sorted(dev_entities, key=lambda x: str(x.entity_id)):
+            if not str(e.entity_id).startswith("number.") or "phase_select" in roles:
+                continue
+            if not any(re.search(r"(?:^|_)phase_count$|(?:^|_)phases$", w.rsplit("-", 1)[-1])
+                       for w in _role_words(e)):
+                continue
+            caps = getattr(e, "capabilities", None)
+            caps = caps if isinstance(caps, dict) else {}
+            lo, hi = caps.get("min"), caps.get("max")
+            # a range that excludes 1 or 3 is not a phase switch; no range
+            # published is taken at the key's word (the values are offered,
+            # never written without the user)
+            if lo is None or hi is None or (
+                    isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+                    and lo <= 1 and hi >= 3):
+                roles["phase_select"] = {"entity": str(e.entity_id),
+                                         "value_1p": "1", "value_3p": "3"}
+        live = services_of(domain) if services_of else None
+        if live:
+            svc = _service_current_role(domain, live)
+            if svc:
+                roles["current_service"] = svc
+            roles.update(_service_field_roles(domain, live))
+    power = _charging_power(dev_entities, vehicle=vehicle)
+    if power:
+        roles["power"] = power
+    plug = _plugged(dev_entities)
+    if plug:
+        roles["plug"] = plug
+    charging = _charging_now(dev_entities)
+    if charging:
+        roles["charging"] = charging
+    # a status SENSOR read by its options with the charger-status vocabulary
+    # SEM's reader already uses (status_enum): options that say "cable in"
+    # and "cable out" make it the plug; one that says "charging", the
+    # charging state (Ohme's unplugged / plugged_in / charging)
+    if not vehicle and ("plug" not in roles or "charging" not in roles):
+        from .coordinator.charger_adapters.status_enum import (
+            classify_charger_status, is_cable_present,
+        )
+        for e in sorted(dev_entities, key=lambda x: str(x.entity_id)):
+            if not str(e.entity_id).startswith("sensor."):
+                continue
+            opts = [o.lower() for o in _select_options(e, state_of)]
+            if len(opts) < 2:
+                continue
+            cable = {is_cable_present(o) for o in opts}
+            if "plug" not in roles and True in cable and False in cable:
+                roles["plug"] = str(e.entity_id)
+            if ("charging" not in roles
+                    and any(classify_charger_status(o) == "charging" for o in opts)):
+                roles["charging"] = str(e.entity_id)
+    # the session and lifetime meters, by their own words (a car's lifetime
+    # energy is what it DROVE, not what a charger delivered)
+    for e in ([] if vehicle else sorted(dev_entities, key=lambda x: str(x.entity_id))):
+        eid = str(e.entity_id)
+        if not eid.startswith("sensor.") or _roles_dc(e) != "energy":
+            continue
+        words = " ".join(_role_words(e)).lower() + " " + eid.lower()
+        if re.search(r"day|week|month|year|hour|today|target|added", words):
+            continue
+        # "session" wins: Zaptec's ``total_charge_power_session`` is a
+        # session meter; NRGkick's ``charged_energy`` is this session's and
+        # its ``total_charged_energy`` the lifetime one
+        if "session" in words:
+            roles.setdefault("session_energy", eid)
+        elif re.search(r"total|lifetime", words):
+            roles.setdefault("total_energy", eid)
+        elif re.search(r"(?:^|_)charged_energy\b", words):
+            roles.setdefault("session_energy", eid)
+    return roles
+
+
+#: (#1032) the roles that can DRIVE a charger (not the #804 config keys)
+_CHARGER_DRIVE_ROLES = ("current_number", "start_stop_buttons", "charge_mode",
+                        "charge_switch",
+                        "vehicle_charge_current", "vehicle_charge_switch",
+                        "current_service")
+
+
+def _roles_offer(roles: Dict[str, Any]) -> Dict[str, Any]:
+    """The charger config these roles fill — the keys the charger pickers
+    and the coordinator already use."""
+    o: Dict[str, Any] = {}
+    if roles.get("power"):
+        o["ev_charging_power_sensor"] = roles["power"]
+    if roles.get("plug"):
+        o["ev_connected_sensor"] = roles["plug"]
+    if roles.get("charging"):
+        o["ev_charging_sensor"] = roles["charging"]
+    if roles.get("session_energy"):
+        o["ev_session_energy_sensor"] = roles["session_energy"]
+    if roles.get("total_energy"):
+        o["ev_total_energy_sensor"] = roles["total_energy"]
+    if roles.get("current_number") and not (
+            roles.get("current_is_setting")
+            and (roles.get("start_stop_buttons") or roles.get("charge_mode"))):
+        o["ev_current_control_entity"] = roles["current_number"]
+    if roles.get("vehicle_charge_current"):
+        o["ev_current_control_entity"] = roles["vehicle_charge_current"]
+    if roles.get("vehicle_charge_switch"):
+        o["ev_start_stop_entity"] = roles["vehicle_charge_switch"]
+    if roles.get("charge_switch"):
+        o["ev_start_stop_entity"] = roles["charge_switch"]
+    if roles.get("charge_mode"):
+        cm = roles["charge_mode"]
+        o["ev_charge_mode_entity"] = cm["entity"]
+        o["ev_charge_mode_start"] = cm["start"]
+        o["ev_charge_mode_stop"] = cm["stop"]
+    if roles.get("start_stop_buttons"):
+        start, stop = roles["start_stop_buttons"]
+        o["ev_start_service"] = "button.press"
+        o["ev_start_service_data"] = json.dumps({"entity_id": start})
+        o["ev_stop_service"] = "button.press"
+        o["ev_stop_service_data"] = json.dumps({"entity_id": stop})
+    if roles.get("current_service") and "ev_current_control_entity" not in o:
+        o["ev_charger_service"] = roles["current_service"]["service"]
+        o["ev_service_param_name"] = roles["current_service"]["param"]
+    if roles.get("phase_select"):
+        o["_suggested_phase_switch"] = dict(roles["phase_select"])
+    return o
+
+
+def _offer_missing(offer: Dict[str, Any]) -> List[str]:
+    missing = []
+    if "ev_charging_power_sensor" not in offer:
+        missing.append("power reading")
+    if not any(k in offer for k in ("ev_current_control_entity",
+                                     "ev_start_stop_entity",
+                                     "ev_charge_mode_entity",
+                                     "ev_start_service",
+                                     "ev_charger_service")):
+        missing.append("control")
+    return missing
+
+
 def charger_from_near_miss(dev_entities, platform: str,
-                          proposed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          proposed: Optional[Dict[str, Any]] = None, *,
+                          roles: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """(#915) The charger config a near miss is one click away from.
 
     "Entities present, no role matched — please report" is the right thing to
@@ -1969,8 +1908,24 @@ def charger_from_near_miss(dev_entities, platform: str,
     control = proposed.get("ev_current_control") or {}
     current = control.get("entity")
     service = control.get("service")
+    # (#1032) a current number that is the box's stored SETTING is not the
+    # control when the box offers a live one (start/stop, a charge mode)
+    if current and roles and roles.get("current_is_setting") and \
+            current == roles.get("current_number") and \
+            (roles.get("start_stop_buttons") or roles.get("charge_mode")):
+        current = None
     if not current and not service:
-        return {}
+        # (#1032) no declared current key: the roles the device's own words
+        # carry (start/stop buttons, a charge-mode select, a current service)
+        if not roles:
+            return {}
+        out = _roles_offer(roles)
+        apply_charger_discovery_guards(out, dev_entities)
+        if _offer_missing(out):
+            return {}
+        out["id"] = f"{platform}_{str(getattr(dev_entities[0], 'device_id', '') or 'device')}"[:48]
+        out["name"] = (describe_domain(platform) or {}).get("name") or platform
+        return out
     if current:
         out: Dict[str, Any] = {"ev_current_control_entity": current}
     else:
@@ -1983,6 +1938,12 @@ def charger_from_near_miss(dev_entities, platform: str,
             return {}
         out = {"ev_charger_service": service,
                "ev_service_param_name": control["param"]}
+    # (#1032) the charging power is the whole box's reading, not one phase
+    # leg or a clamp on something else (the rig: NRGkick's first power
+    # sensor is L1)
+    best_power = _charging_power(dev_entities, vehicle=False)
+    if best_power:
+        out["ev_charging_power_sensor"] = best_power
     for e in dev_entities:
         eid = str(e.entity_id)
         dc = str(getattr(e, "original_device_class", "") or "")
@@ -2332,6 +2293,152 @@ def vehicle_from_device(dev_entities) -> Dict[str, Any]:
     return out
 
 
+def _roles_pass(report, registry, brand_units, configured_entities,
+                services_of, state_of, *, include_brand_platforms=False) -> None:
+    """(#1032) The near-miss walk for the integrations ``_EV_CHARGER_PLATFORMS``
+    does not list, then R1 (companion devices) and R4 (a read-only charger
+    driven through the one car) across ALL near misses. Mutates ``report``."""
+    from .consts import role_lexicon as lex
+    brand_platforms = {p for p, _ in _EV_CHARGER_PLATFORMS}
+    skip = set(lex.OPAQUE_PLATFORMS) | set(_TRANSPORT_PLATFORMS) | {
+        "solar_energy_management"}
+    taken = {str(e) for e in (configured_entities or ()) if e}
+    for u in brand_units:
+        taken |= set(u["entities"])
+    entries = [e for e in registry.entities.values() if not e.disabled_by]
+    def _brand_or_fork(p: str) -> bool:
+        # a fork of a brand integration (``<brand>_custom``) is that brand
+        return p in brand_platforms or any(p.startswith(f"{b}_")
+                                           for b in brand_platforms)
+    # The detection report's own brand walk reports a brand device it could
+    # not map as a near miss; discovery has no such walk, so it reads those
+    # devices here (a unit a brand path DID map is in ``taken``).
+    units = group_entities_by_unit(
+        [e for e in entries
+         if str(e.platform or "") not in skip
+         and (include_brand_platforms
+              or not _brand_or_fork(str(e.platform or "")))])
+    entry_of: Dict[Any, Optional[str]] = {}
+    roles_of: Dict[Any, Dict[str, Any]] = {}
+    for key, ents in units.items():
+        entry_of[key] = next((e.config_entry_id for e in ents
+                              if isinstance(getattr(e, "config_entry_id", None), str)), None)
+        if taken & {str(e.entity_id) for e in ents}:
+            continue
+        platform = str(ents[0].platform or "")
+        roles = read_charger_roles(ents, platform, services_of=services_of,
+                                   state_of=state_of)
+        roles_of[key] = roles
+        offer = _roles_offer(roles)
+        if roles.get("vehicle"):
+            if roles.get("vehicle_charge_current"):
+                report["vehicles"].append({
+                    "platform": platform, "device_id": unit_device_id(key),
+                    "note": "vehicle", "charge_control": offer,
+                })
+            continue
+        has_control = any(k in roles for k in _CHARGER_DRIVE_ROLES)
+        if not (roles.get("power") and (roles.get("plug") or has_control)):
+            continue
+        # a device that also speaks for a GENERATOR (PV, an inverter) is
+        # energy hardware with a charger's word in it — Tesla's energy site
+        # reports its wall connector's state — not a charger itself
+        words = " ".join(w.lower() for e in ents for w in _role_words(e))
+        if any(m in words for m in lex.GENERATOR_MARKERS):
+            continue
+        apply_charger_discovery_guards(offer, ents)
+        missing = _offer_missing(offer)
+        nm = {
+            "platform": platform, "device_id": unit_device_id(key),
+            "entities": [{"entity": str(e.entity_id),
+                          "domain": str(e.entity_id).split(".", 1)[0],
+                          "device_class": getattr(e, "original_device_class", None)}
+                         for e in ents],
+            "note": "a charger SEM has no row for",
+            "roster": describe_domain(platform),
+            "proposed_roles": propose_roles_from_roster(
+                ents, platform, services_of=services_of),
+            "suggested_charger": {},
+            "charger_roles": sorted(k for k in roles
+                                    if k not in ("vehicle", "current_is_setting")),
+            "missing": missing,
+        }
+        if not missing:
+            offer["id"] = f"{platform}_{unit_device_id(key) or 'device'}"[:48]
+            offer["name"] = (describe_domain(platform) or {}).get("name") or platform
+            nm["suggested_charger"] = offer
+        report["near_misses"].append(nm)
+
+    # R1 — a device with no power reading of its own, on the same config
+    # entry as a charger near miss, is that charger's companion; its live
+    # current number replaces a charger's stored setting.
+    dev_entry: Dict[Optional[str], Optional[str]] = {}
+    dev_entities: Dict[Optional[str], list] = {}
+    for ukey, uents in group_entities_by_unit(entries).items():
+        did = unit_device_id(ukey)
+        if did:
+            dev_entities[did] = uents
+            dev_entry[did] = next(
+                (e.config_entry_id for e in uents
+                 if isinstance(getattr(e, "config_entry_id", None), str)), None)
+    chargerish = [n for n in report["near_misses"]
+                  if n.get("suggested_charger") or n.get("charger_roles")]
+    companions = set()
+    for n in chargerish:
+        my_entry = dev_entry.get(n.get("device_id"))
+        if not my_entry:
+            continue
+        offered = {o.get("device_id") for o in report["near_misses"]
+                   if o.get("suggested_charger")}
+        for did, ents in sorted(dev_entities.items()):
+            # every device of the same config entry, not only those already
+            # reported: discovery's own pass sees the installation too
+            if (did == n.get("device_id") or dev_entry.get(did) != my_entry
+                    or did in offered):
+                continue
+            # a companion measures no power at all: a device with power
+            # sensors is a meter or another machine (a Harvi, an Eddi)
+            if any(str(e.entity_id).startswith("sensor.")
+                   and _roles_dc(e) == "power" for e in ents):
+                continue
+            n.setdefault("companions", []).append(
+                {"device_id": did, "entities": len(ents)})
+            companions.add(did)
+            live = _current_number_role(ents)
+            sc = n.get("suggested_charger") or {}
+            if (live and not _is_stored_setting(ents, live) and sc
+                    and "ev_current_control_entity" not in sc):
+                sc["ev_current_control_entity"] = live
+    report["near_misses"] = [n for n in report["near_misses"]
+                             if n.get("device_id") not in companions]
+
+    # R4 — a charger that only reports, driven through the one car that has
+    # its own charge control; two cars are a question, not a guess
+    cars = [v for v in report["vehicles"] if v.get("charge_control")]
+    for n in report["near_misses"]:
+        if n.get("suggested_charger") or n.get("missing") != ["control"]:
+            continue
+        if len(cars) == 1:
+            ents = [e for e in entries if str(e.entity_id) in
+                    {x["entity"] for x in n.get("entities", ())}]
+            roles = read_charger_roles(ents, n["platform"], services_of=None,
+                                       state_of=state_of)
+            offer = _roles_offer(roles)
+            cc = cars[0]["charge_control"]
+            for k in ("ev_current_control_entity", "ev_start_stop_entity"):
+                if cc.get(k):
+                    offer[k] = cc[k]
+            if not _offer_missing(offer):
+                offer["id"] = f"{n['platform']}_{n.get('device_id') or 'device'}"[:48]
+                offer["name"] = (describe_domain(n["platform"]) or {}).get("name") \
+                    or n["platform"]
+                n["suggested_charger"] = offer
+                n["paired_vehicle"] = cars[0].get("device_id")
+                n["missing"] = []
+        elif len(cars) > 1:
+            n["choose_vehicle"] = sorted(str(c.get("device_id")) for c in cars)
+
+
 def build_detection_report(hass: Optional[HomeAssistant] = None,
                            registry=None, configured_entities=None,
                            strategy_values=None) -> Dict[str, Any]:
@@ -2373,11 +2480,29 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         # (#964) entities of a device-less platform that no unit could claim
         # — dropped from the role walk on purpose, never silently.
         "unattributed": [],
+        # (#1036) devices an integration ships beside its charger that only
+        # measure — Easee's Equalizer — named here instead of offered as a
+        # second charger.
+        "meters": [],
     }
 
     # (#964) the entities behind each charger row — the pairing key the
     # prober comparison uses, never written into the report itself.
     brand_units: List[Dict[str, Any]] = []
+    # (#1032) what the role reader needs: live select options once HA runs,
+    # and each service's fields
+    _hass_running = (bool(getattr(hass, "is_running", True))
+                     if hass is not None else False)
+    _roles_state_of = ((lambda eid: hass.states.get(eid))
+                       if (hass is not None and _hass_running
+                           and hasattr(hass, "states")) else None)
+    _roles_services = _services_of(hass)
+
+    def _same_brand(a: str, b: str) -> bool:
+        """(#915) ``zaptec_sim`` and ``zaptec_custom`` are the brand
+        ``zaptec`` — the tolerance the discovery walk and the census apply."""
+        a, b = str(a or ""), str(b or "")
+        return a == b or a.startswith(f"{b}_") or b.startswith(f"{a}_")
 
     for platform, discover_fn in _EV_CHARGER_PLATFORMS:
         def _matches(ep: str, _this=platform) -> bool:
@@ -2399,12 +2524,31 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
         for e in live:
             if str(e.entity_id) not in attributed:
                 report["unattributed"].append(_describe(e))
+        found = {}
         for unit_key, dev_entities in devices.items():
-            device_id = unit_device_id(unit_key)
             mapping = discover_fn(dev_entities) or {}
             # (#886/#962) mirror the config path's guards so the
             # diagnostics report shows the entities SEM will actually use.
             apply_charger_discovery_guards(mapping, dev_entities)
+            found[unit_key] = (mapping, dev_entities)
+        # (#1036) the config path's rule, so the report shows what the flow
+        # will offer: a meter beside a charger is listed as a meter.
+        meters = meters_beside_chargers(
+            platform, found, [e for e in plat_entities if e.disabled_by])
+        # (#1036) near misses wait for the whole platform: whether this brand
+        # has a charger is known only once every unit has been mapped.
+        pending_near: List[Dict[str, Any]] = []
+        for unit_key, (mapping, dev_entities) in found.items():
+            device_id = unit_device_id(unit_key)
+            if unit_key in meters:
+                report["meters"].append({
+                    "platform": str(dev_entities[0].platform or platform),
+                    "device_id": device_id,
+                    "unit": unit_label(unit_key),
+                    "entities": [_describe(e) for e in dev_entities],
+                    "note": "a meter beside a charger, not a charger",
+                })
+                continue
             # (ruflo, 24.09 / #956) a hand-written brand function that finds
             # sensors but NO control claimed the device and the roster never
             # got to speak — go-eCharger's box has no current number, only a
@@ -2462,6 +2606,9 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                     continue
                 _proposed = propose_roles_from_roster(
                     dev_entities, platform, services_of=_services_of(hass))
+                _roles = read_charger_roles(
+                    dev_entities, platform, services_of=_roles_services,
+                    state_of=_roles_state_of)
                 if (platform in _TRANSPORT_PLATFORMS and not _proposed
                         and not _census_energy_shaped(dev_entities)):
                     continue
@@ -2475,14 +2622,12 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 # ``zaptec`` — the tolerance the discovery walk and the census
                 # already apply, applied here too. Comparing the raw platform
                 # left the fork's installation device on the card as the last
-                # near miss (.46).
-                def _same_brand(a: str, b: str) -> bool:
-                    a, b = str(a or ""), str(b or "")
-                    return a == b or a.startswith(f"{b}_") or b.startswith(f"{a}_")
-                if any(_same_brand(c.get("platform"), platform)
-                       for c in report["chargers"]):
-                    continue
-                report["near_misses"].append({
+                # near miss (.46). (#1036) Asked once the platform is done,
+                # below: asked here, it only saw the chargers mapped BEFORE
+                # this device, so a site device listed first still read as
+                # "almost supported". A transport is not a brand: there the
+                # per-device answer stays as it was.
+                near = {
                     "platform": platform,
                     "device_id": device_id,
                     "entities": [_describe(e) for e in dev_entities],
@@ -2499,8 +2644,17 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                     # A charger SEM can describe well enough to drive is an
                     # offer, not a bug report.
                     "suggested_charger": charger_from_near_miss(
-                        dev_entities, platform, _proposed),
-                })
+                        dev_entities, platform, _proposed, roles=_roles),
+                    "charger_roles": sorted(k for k in _roles
+                                            if k not in ("vehicle",
+                                                         "current_is_setting")),
+                    "missing": _offer_missing(_roles_offer(_roles)),
+                }
+                if platform not in _TRANSPORT_PLATFORMS:
+                    pending_near.append(near)
+                elif not any(_same_brand(c.get("platform"), platform)
+                             for c in report["chargers"]):
+                    report["near_misses"].append(near)
                 continue
             mapped: Dict[str, Any] = {}
             used = set()
@@ -2539,6 +2693,21 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
                 "device_id": device_id,
                 "entities": {str(e.entity_id) for e in dev_entities},
             })
+        if not any(_same_brand(c.get("platform"), platform)
+                   for c in report["chargers"]):
+            report["near_misses"].extend(pending_near)
+
+    # (#1032) the same near-miss question asked of every integration the
+    # brand walk does not cover — by the roles its own words carry. A charger
+    # SEM has no row for lands in ``near_misses`` with its offer; a car that
+    # charges lands in ``vehicles`` with its charge control. Units holding an
+    # entity SEM already binds or the user configured are not news (the KEBA
+    # lesson, .175 02.10: a device-less box has no device id to match on).
+    try:
+        _roles_pass(report, registry, brand_units, configured_entities,
+                    _roles_services, _roles_state_of)
+    except Exception:  # noqa: BLE001 — a new reader never costs the report
+        _LOGGER.debug("charger role pass failed", exc_info=True)
 
     # (#814 Pillar A) the prober runs beside the brand walk. A candidate on
     # a device no brand function claimed = "prober_only" (a shape we could
@@ -2621,16 +2790,24 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     return report
 
 
-def discover_ev_charger_from_registry(hass: HomeAssistant) -> Dict[str, str]:
+def discover_ev_charger_from_registry(hass: HomeAssistant, *,
+                                      include_roles: bool = False) -> Dict[str, str]:
     """Auto-discover EV charger config from known integrations via entity registry.
 
     Backward-compatible wrapper: returns the first detected charger.
+
+    (#1032) A charger found only by the roster's roles is returned only when
+    ``include_roles`` — a form the user confirms. Setup's silent reseed and
+    the coordinator's late retry keep to the brand paths: a role-found
+    charger is never saved or driven without the user accepting it.
 
     Returns:
         Dict with config keys (ev_connected_sensor, ev_charging_sensor, etc.)
         Only includes keys where entities were found.
     """
     all_chargers = discover_all_ev_chargers_from_registry(hass)
+    if not include_roles:
+        all_chargers = [c for c in all_chargers if c.get("_found_by") != "roles"]
     return all_chargers[0] if all_chargers else {}
 
 
@@ -2916,20 +3093,6 @@ _BRAND_HINTS: Dict[str, List[_ROLE]] = {
     # (strings.json), so the row survives any rename of the device. The box
     # publishes a dozen power-class sensors (per phase, apparent, peak) and
     # two numbers: every rule NAMES the key it wants.
-    "nrgkick": [
-        {"role": "ev_current_control_entity", "domain": "number",
-         "names": ("current_set",)},
-        {"role": "ev_start_stop_entity", "domain": "switch",
-         "names": ("charging_enabled",)},
-        {"role": "ev_charging_power_sensor", "domain": "sensor",
-         "device_class": "power", "names": ("total_active_power",)},
-        {"role": "ev_session_energy_sensor", "domain": "sensor",
-         "device_class": "energy", "names": ("charged_energy",), "not": ("total",)},
-        {"role": "ev_total_energy_sensor", "domain": "sensor",
-         "device_class": "energy", "names": ("total_charged_energy",)},
-        {"role": "ev_charging_sensor", "domain": "sensor",
-         "names": ("status",)},
-    ],
     # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus. The integration
     # names entities in plain English with the user's device name in front,
     # so the rules match the tail the source writes, never the head.
@@ -3167,24 +3330,6 @@ def _discover_from_hints(entities, hints: List[_ROLE]) -> Dict[str, str]:
     return result
 
 
-def _discover_nrgkick(entities) -> Dict[str, str]:
-    """(#917) NRGkick — a data row, plus the phase-count number offered as
-    the #804 phase switch: it takes 1 or 3, so the values are the counts."""
-    result = _discover_from_hints(entities, _BRAND_HINTS["nrgkick"])
-    # Identity: the current control. A device on the brand's own platform
-    # that only reports is not a charger SEM can drive.
-    if "ev_current_control_entity" not in result:
-        return {}
-    for entry in entities:
-        eid = str(entry.entity_id)
-        if eid.startswith("number.") and eid.endswith("phase_count"):
-            result["_suggested_phase_switch"] = {
-                "entity": eid, "value_1p": "1", "value_3p": "3",
-            }
-            break
-    return result
-
-
 def _discover_chargepoint(entities) -> Dict[str, str]:
     """ChargePoint — a data row (#814); see _BRAND_HINTS."""
     return _discover_from_hints(entities, _BRAND_HINTS["chargepoint"])
@@ -3403,31 +3548,6 @@ def _discover_alfen(entities) -> Dict[str, str]:
     return result
 
 
-def _discover_openevse(entities) -> Dict[str, str]:
-    """Discover EV charger config from OpenEVSE integration.
-
-    OpenEVSE uses binary_sensor for vehicle detection, sensor for status.
-    Current control via number entity (max_current).
-    """
-    result: Dict[str, str] = {}
-    for entry in entities:
-        eid = entry.entity_id
-        dc = entry.original_device_class
-        if eid.startswith("binary_sensor.") and "vehicle" in eid:
-            result["ev_connected_sensor"] = eid
-        if eid.startswith("sensor.") and "status" in eid:
-            result.setdefault("ev_charging_sensor", eid)
-        if eid.startswith("sensor.") and dc == "power":
-            result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "session" in eid:
-            result.setdefault("ev_session_energy_sensor", eid)
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
-            result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("number.") and "current" in eid:
-            result["ev_current_control_entity"] = eid
-    return result
-
-
 def _discover_blue_current(entities) -> Dict[str, str]:
     """Discover EV charger config from Blue Current integration.
 
@@ -3452,6 +3572,15 @@ def _discover_blue_current(entities) -> Dict[str, str]:
 
 
 # Platform → discovery function mapping (must be after all _discover_* functions)
+#: (#1032) Charger integrations whose brand path folded into the roster's
+#: roles — each proven by the crawler rig on the integration's real output
+#: (tests/integrations_rig, tests/test_rig_correct_picks.py). Data only: the
+#: role reader never reads this list; the coverage tests do.
+ROLE_PROVEN_PLATFORMS = (
+    "openevse",
+    "nrgkick",
+)
+
 _EV_CHARGER_PLATFORMS = [
     ("keba", _discover_keba),
     ("easee", _discover_easee),
@@ -3469,13 +3598,12 @@ _EV_CHARGER_PLATFORMS = [
     ("peblar", _discover_peblar),
     ("v2c", _discover_v2c),
     ("alfen_wallbox", _discover_alfen),
-    ("openevse", _discover_openevse),
+    # (#1032) openevse: found by the roster's roles (rig: core 2026.8.2)
     ("blue_current", _discover_blue_current),
     # (#802/#814) data-row brands need no function — the generic matcher
     # applies their _BRAND_HINTS rows.
     ("wattpilot", lambda ents: _discover_wattpilot(ents)),
-    # (#917) NRGkick — a data row plus the phase-count offer.
-    ("nrgkick", _discover_nrgkick),
+    # (#917/#1032) nrgkick: found by the roster's roles
     # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus.
     ("ev_charger_modbus", _discover_abl_emh1),
     # (#816) GARO's custom integration domain.

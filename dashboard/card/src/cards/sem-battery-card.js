@@ -160,8 +160,10 @@ class SEMBatteryCard extends SEMLitBase {
         // (#949) A cap SEM cannot write is not a cap. Before this the line
         // read "pace · 0.4 kW · full by 19:00" on an install that had never
         // been given a charge-limit entity, while the battery took 3 kW.
+        // (#820) A cap the inverter never took is not a cap either.
         const blocked = {no_limit_entity: 'pacing_no_limit',
-                         limit_unreadable: 'pacing_limit_unreadable'}[a.action];
+                         limit_unreadable: 'pacing_limit_unreadable',
+                         write_refused: 'pacing_write_refused'}[a.action];
         if (blocked) {
             return html`
                 <div class="tonight-row" style="opacity:.85" title="${a.reason || ''}">

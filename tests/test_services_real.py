@@ -489,3 +489,42 @@ async def test_set_option_for_a_knob_this_house_lacks_is_stored_without_reload(
     assert sem_config_entry.runtime_data is before
     assert sem_config_entry.options["cheap_price_threshold"] == 0.11
     assert before.config["cheap_price_threshold"] == 0.11
+
+
+@pytest.mark.asyncio
+async def test_diagnose_battery_carries_the_pacing_register(
+    sem_real_hass, sem_config_entry,
+) -> None:
+    """(#820) The battery Diagnose button carries the charge-limit register
+    and another integration's refusal that names it — the user never has to
+    find Home Assistant's own log."""
+    import logging as _logging
+
+    limit = "number.test_battery_max_charge_power"
+    sem_real_hass.states.async_set(
+        limit, "1560", {"min": 10, "max": 9720, "step": 100,
+                        "unit_of_measurement": "W"})
+    _seed_sem_input_sensors(sem_real_hass)
+    sem_config_entry.add_to_hass(sem_real_hass)
+    sem_real_hass.config_entries.async_update_entry(
+        sem_config_entry, options={**sem_config_entry.options,
+                                   "battery_charge_power_limit_entity": limit})
+    assert await sem_real_hass.config_entries.async_setup(
+        sem_config_entry.entry_id)
+    await sem_real_hass.async_block_till_done()
+
+    _logging.getLogger("homeassistant.components.other").error(
+        "Value 2443 refused for %s", limit)
+
+    response = await sem_real_hass.services.async_call(
+        "solar_energy_management", "diagnose",
+        {"section": "battery_zones"},
+        blocking=True,
+        return_response=True,
+    )
+    pacing = response["payload"]["pacing_actuation"]
+    assert pacing["register"]["entity"] == limit
+    assert pacing["register"]["state"] == "1560"
+    assert pacing["register"]["step"] == 100
+    assert any(limit in line and "FOREIGN" in line
+               for line in pacing["foreign_log"])

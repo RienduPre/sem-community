@@ -541,6 +541,93 @@ OPAQUE_PLATFORMS: Final[frozenset] = frozenset({
 })
 
 
+#: (#1032, hardware wave) What a CHARGER exposes beside a current number —
+#: the roles the crawler reads from any integration, never a brand. Matched
+#: like ``ROLE_RULES`` (``re.search``, case-insensitive) against the entity's
+#: ``translation_key`` AND the key part of its ``unique_id``: a translation
+#: key is not always the integration's whole word (Tesla's charge switch
+#: carries ``charge_state_charging_state`` as its translation key and
+#: ``…-charge_state_user_charge_enable_request`` as its unique id).
+#:
+#: R2 — a start and a stop BUTTON together are a charger's start/stop
+#: control (Zaptec ``resume_charging`` / ``stop_charging``, Blue Current
+#: ``stop_charge_session``). Both are needed: a stop alone can stop a car
+#: SEM could never start again. ``deauthorize`` is not a stop — it ends the
+#: user's RFID session, which SEM must never touch (the #848 boundary).
+CHARGER_BUTTON_RULES: Final[Dict[str, Dict[str, Any]]] = {
+    "ev_start_button": {
+        "platform": "button",
+        "any": (r"(?:^|_)(resume|start)_charg", r"^charge_start$",
+                r"start_charge_session$"),
+        "not": (r"schedul", r"boost", r"timer", r"authori", r"firmware"),
+    },
+    "ev_stop_button": {
+        "platform": "button",
+        "any": (r"(?:^|_)(stop|pause)_charg", r"stop_charge_session$",
+                r"^charge_stop$"),
+        "not": (r"schedul", r"boost", r"timer", r"authori", r"firmware"),
+    },
+}
+
+#: A charger's own on/off for charging: a switch that says it enables
+#: charging (NRGkick ``charging_enabled``, Peblar ``charge``). Not a lock,
+#: a schedule, a boost or a phase mode.
+CHARGER_SWITCH_RULES: Final[Dict[str, Dict[str, Any]]] = {
+    "ev_charge_switch": {
+        "platform": "switch",
+        "any": (r"(?:^|_)charg(e|ing)_enabled?$", r"(?:^|_)charge_enable$",
+                r"(?:^|_)charg(e|ing)$"),
+        "not": (r"phase", r"lock", r"schedul", r"boost", r"solar", r"price",
+                r"precondition", r"from_grid", r"smart", r"approv"),
+    },
+}
+
+#: R3 — the charge control a CAR integration exposes: its charging-amps
+#: number and its charge switch. Read only on a device the vocabulary says is
+#: a vehicle (``VEHICLE_MARKERS``) — the same words on a house battery are a
+#: different machine. A car's charge limit in percent is NOT a current
+#: (``charge_limit_soc``), and neither is its maximum (``…_request_max``).
+VEHICLE_CONTROL_RULES: Final[Dict[str, Dict[str, Any]]] = {
+    "vehicle_charge_current": {
+        "platform": "number",
+        "any": (r"charge_current_request$", r"(?:^|_)charging_amps$",
+                r"(?:^|_)charge_amps$", r"(?:^|_)charging_current(_limit)?$",
+                r"(?:^|_)charge_current(_limit)?$"),
+        "not": (r"max$", r"_max_", r"soc", r"percent", r"limit_soc"),
+    },
+    "vehicle_charge_switch": {
+        "platform": "switch",
+        "any": (r"charge_enable_request$", r"(?:^|_)charging$",
+                r"(?:^|_)charge$", r"charge_switch$", r"(?:^|_)charging_enabled$"),
+        "not": (r"port", r"door", r"flap", r"schedul", r"precondition",
+                r"from_grid", r"climate", r"heater"),
+    },
+}
+
+#: R5 — a SELECT read by what it OFFERS, not by its key. myenergi gives both
+#: of a Zappi's selects the translation key ``phase_setting``; the options
+#: are what tell the charge mode (``Fast``/``Eco``/``Eco+``/``Stopped``) from
+#: the phase setting (``1``/``3``/``auto``). A charge-mode select must offer a
+#: way to stop AND a way to charge; a phase select must offer 1 and 3.
+SELECT_STOP_OPTIONS: Final[tuple] = ("stopped", "stop", "paused", "pause",
+                                     "off", "disabled")
+SELECT_CHARGE_OPTIONS: Final[tuple] = ("fast", "eco", "eco+", "pv", "solar",
+                                       "now", "boost", "max charge",
+                                       "minpv", "smart charge")
+# NOT "normal": a myenergi Eddi (a water-heater diverter) offers
+# Stopped / Normal, and read as a charge mode it became a car charger.
+SELECT_PHASE_OPTIONS: Final[tuple] = ("1", "3")
+
+#: R6 — a SERVICE read by its FIELDS. A service taking ``current_p1`` /
+#: ``current_p2`` / ``current_p3`` limits each phase on its own and can run
+#: a charger on one phase (``p1`` only) or three (Easee's
+#: ``set_circuit_dynamic_limit``). A service whose only current field is
+#: ``available_current`` sets the current an installation may use (Zaptec's
+#: ``limit_current``). The rule set never names a service.
+SERVICE_PHASE_FIELDS: Final[tuple] = ("current_p1", "current_p2", "current_p3")
+SERVICE_SITE_CURRENT_FIELDS: Final[tuple] = ("available_current",)
+
+
 #: Every rule set the crawler may apply, by kind.
 ALL_RULE_SETS: Final[tuple] = ("ROLE_RULES", "READ_ROLE_RULES",
                                "VEHICLE_ROLE_RULES")

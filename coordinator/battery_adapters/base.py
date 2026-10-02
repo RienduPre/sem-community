@@ -719,13 +719,10 @@ class BatteryControlAdapter(ABC):
         if isinstance(attrs, dict):
             # (#749) the entity's min/max are NATIVE units — scale them to
             # watts so the clamp, the de-dup and every log stay in W; only
-            # the service-call value converts back at the boundary.
-            lo = attrs.get("min")
-            if isinstance(lo, (int, float)):
-                wire = max(float(lo) * scale, wire)
-            hi = attrs.get("max")
-            if isinstance(hi, (int, float)):
-                wire = min(float(hi) * scale, wire)
+            # the service-call value converts back at the boundary. (#820)
+            # The clamp itself is shared with the charge pacer.
+            from ..power_control import clamp_to_entity_range
+            wire = clamp_to_entity_range(attrs, wire, scale)
         watts = self._setpoint_from_wire(wire, sign)
         # #531: a silent clamp hides a real mismatch (fleet power > a single
         # unit's setpoint range). Surface it once per clamped write so the

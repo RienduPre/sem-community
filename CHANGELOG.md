@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Charging sessions are kept** — the last 400, per charger, with a CSV export service. (#1024)
 - **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
 - **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
+- **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
+
+# [2.2.0-beta.4] — 02.10.2026
+
+- 🐛 **An Easee Equalizer is not a charger** (#1036). It measures the grid. Setup now finds the real charger, also where it had saved the Equalizer.
+
+# [2.2.0-beta.3] — 01.10.2026
+
+- 🐛 **Charge pacing checks the inverter took the limit** (#820). Below the buffer the battery gets full power again.
+- 🐛 **The battery Diagnose button shows the charge limit** (#820): what the register holds and accepts, and the inverter's own refusals.
 
 # [2.2.0-beta.2] — 30.09.2026
 
