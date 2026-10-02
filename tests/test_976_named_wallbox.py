@@ -239,6 +239,15 @@ class TestNoStartIntoARunningSession:
         await dev.start_session()
         assert len(_starts(hass)) == 1
 
+    async def test_an_optimistic_switch_still_gets_its_start(self):
+        """A switch with ``assumed_state`` (template, REST) may read on only
+        because SEM said so last; its on is no proof the box runs."""
+        hass = _hass()
+        hass.states.set(SW, "on", assumed_state=True)
+        dev = _reporters_charger(hass)
+        await dev.start_session()
+        assert len(_starts(hass)) == 1
+
     async def test_a_button_is_still_pressed(self):
         """A button has no state to read; its press stays as it was."""
         hass = _hass()

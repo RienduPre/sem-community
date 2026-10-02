@@ -2415,17 +2415,23 @@ class CurrentControlDevice(ControllableDevice):
         to send: a charge-control switch can be on exactly while the box's
         transaction runs, with a turn_on that asks for a NEW transaction —
         which the box refuses ("Rejected"), and its integration reports each
-        refusal as a notification. Same reading the reconciler's #536 ENABLE
-        keys on, so the two agree on when a start is due. Only a definite
-        ``on`` counts; anything unreadable still sends, as before."""
+        refusal as a notification. The reconciler's #536 ENABLE fires only on
+        ``off``; this is the other half of that rule.
+
+        Only a definite ``on`` from a switch that reports its device counts.
+        Anything unreadable still sends, as before, and so does a switch with
+        ``assumed_state`` (an optimistic template / REST / command-line
+        switch): its ``on`` may only echo SEM's last command."""
         ent = str(self.start_stop_entity or "")
         if not ent.startswith(("switch.", "input_boolean.")) or self.hass is None:
             return False
         try:
             st = self.hass.states.get(ent)
+            if st is None or st.state != "on":
+                return False
+            return not (getattr(st, "attributes", None) or {}).get("assumed_state")
         except Exception:  # noqa: BLE001 — a read never costs a start
             return False
-        return st is not None and st.state == "on"
 
     @property
     def contactor_surface(self) -> bool:

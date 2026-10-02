@@ -46,19 +46,6 @@ _LOGGER = logging.getLogger(__name__)
 # one place now so every brand benefits.
 
 
-def _platform_of(hass, entity_id) -> Optional[str]:
-    """The integration that owns ``entity_id``, as the entity registry says,
-    or None when the registry has no entry for it (or no registry at all)."""
-    if not entity_id or hass is None:
-        return None
-    try:
-        entry = er.async_get(hass).async_get(str(entity_id))
-    except Exception:  # noqa: BLE001 — no registry (early setup, a stub) is "unknown"
-        return None
-    platform = getattr(entry, "platform", None) if entry is not None else None
-    return platform if isinstance(platform, str) else None
-
-
 def _looks_like_wallbox(device: "CurrentControlDevice") -> bool:
     """Is this charger driven by the Wallbox integration?
 
@@ -77,13 +64,18 @@ def _looks_like_wallbox(device: "CurrentControlDevice") -> bool:
     service = (getattr(device, "charger_service", "") or "").lower()
     if service.startswith("wallbox.") or service.startswith("wallbox_"):
         return True
+    # The one registry lookup the builder's #976 wiring uses too (lazy:
+    # hardware_detection reaches back into this package).
+    from ...hardware_detection import entity_platform
     hass = getattr(device, "hass", None)
     for attr in (
         "charger_service_entity_id",
         "charger_current_entity",
         "start_stop_entity",
     ):
-        if _platform_of(hass, getattr(device, attr, None)) == "wallbox":
+        eid = getattr(device, attr, None)
+        if eid and hass is not None \
+                and entity_platform(hass, str(eid)) == "wallbox":
             return True
     return False
 
