@@ -46,24 +46,44 @@ _LOGGER = logging.getLogger(__name__)
 # one place now so every brand benefits.
 
 
-def _looks_like_wallbox(device: "CurrentControlDevice") -> bool:
-    """Heuristic: does this device look like a Wallbox charger?
+def _platform_of(hass, entity_id) -> Optional[str]:
+    """The integration that owns ``entity_id``, as the entity registry says,
+    or None when the registry has no entry for it (or no registry at all)."""
+    if not entity_id or hass is None:
+        return None
+    try:
+        entry = er.async_get(hass).async_get(str(entity_id))
+    except Exception:  # noqa: BLE001 — no registry (early setup, a stub) is "unknown"
+        return None
+    platform = getattr(entry, "platform", None) if entry is not None else None
+    return platform if isinstance(platform, str) else None
 
-    Matches on either the integration domain (``charger_service``
-    starts with ``wallbox.``) or the configured entity id containing
-    ``wallbox`` somewhere — Wallbox HA integration entities are
-    consistently namespaced ``*_wallbox_*``.
+
+def _looks_like_wallbox(device: "CurrentControlDevice") -> bool:
+    """Is this charger driven by the Wallbox integration?
+
+    Asked of the integration — the service domain, or the registry platform
+    of a configured entity — never of the words in an entity id.
+
+    (#976, class 115) The id test was ``"wallbox" in entity_id``. Home
+    Assistant builds an id from the DEVICE name, and "Wallbox" is what owners
+    call any wall charger. @bgthb's Huawei on the OCPP integration is a
+    charge point named "wallbox": its ``switch.wallbox_charge_control`` made
+    it a Wallbox, the adapter took that switch as the pause/resume switch and
+    turned it on before every current write. On OCPP that turn_on is a
+    RemoteStartTransaction, so every write sent a start the charger refused
+    ("Rejected") while it was already charging.
     """
     service = (getattr(device, "charger_service", "") or "").lower()
     if service.startswith("wallbox.") or service.startswith("wallbox_"):
         return True
+    hass = getattr(device, "hass", None)
     for attr in (
         "charger_service_entity_id",
         "charger_current_entity",
         "start_stop_entity",
     ):
-        value = (getattr(device, attr, "") or "").lower()
-        if "wallbox" in value:
+        if _platform_of(hass, getattr(device, attr, None)) == "wallbox":
             return True
     return False
 
