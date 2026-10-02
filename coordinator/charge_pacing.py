@@ -414,7 +414,7 @@ class ChargePacingWriter:
                 return "held"
             return await self._write(hass, entity_id, native, target_w,
                                      register_w, now)
-        verdict = self._judge(entity_id, register_w, step_w, now)
+        verdict = self._judge(entity_id, register_w, step_w, deadband, now)
         if verdict == "pending":
             return "held"
         if self._taken and self._accepted_w is None:
@@ -435,20 +435,27 @@ class ChargePacingWriter:
                                  register_w, now)
 
     def _judge(self, entity_id: str, register_w: float, step_w: float,
-               now: float) -> str:
+               deadband: float, now: float) -> str:
         """(#820, 02.10) Did the register take the last write?
 
-        TAKEN only when the register is IN THE BAND: within one step or
-        10 % of what SEM sent — an inverter may apply its own value (Arne:
-        sent 1550, reads 1449). A register that moved but is not in the band
-        is PENDING (review: a drift of the device's own has no link to SEM's
-        write, and calling it taken fabricated a diagnosis for a dropped
-        write). REFUSED when the window (3 cycles and 90 s) ends and it
-        never entered the band. A late entry into the band is taken from
-        then on."""
+        TAKEN only when the register is IN THE BAND — within one step or
+        10 % of what SEM sent, and never wider than the rewrite deadband, so
+        a value SEM would rewrite can never count as taken — AND has CHANGED
+        since the write. A reading equal to the pre-write value is "no
+        change yet": a Modbus register that has not been scanned since the
+        write (review pass 2: 4600 read back twice after a 5000 write was
+        judged taken, then "took the write as 4600 W" — before the hardware
+        did anything). It only ages the pending window. A register that
+        moved but is not in the band is PENDING too (a drift of the
+        device's own has no link to SEM's write). REFUSED when the window
+        (3 cycles and 90 s) ends and it never entered the band. A late
+        entry into the band is taken from then on."""
         sent = self.last_written_w
-        in_band = abs(register_w - sent) <= max(step_w, 0.10 * sent, 1.0)
-        if in_band:
+        pre = self._pre_write_w
+        changed = pre is None or abs(register_w - pre) >= 1.0
+        band = min(max(step_w, 0.10 * sent, 1.0), deadband)
+        in_band = abs(register_w - sent) <= band
+        if in_band and changed:
             if self._taken is not True:
                 self._taken = True
                 self._accepted_w = register_w
@@ -477,7 +484,8 @@ class ChargePacingWriter:
     def _settle(self, entity_id: str, register_w: float, sent: float,
                 step_w: float) -> None:
         """``applied_differs`` only when the register SETTLED inside the
-        band — the same value on two consecutive reads — more than a step
+        band — the same value on two consecutive reads, both different from
+        the pre-write value (the caller guarantees that) — more than a step
         from what was sent (Arne: wrote 1550 W, reads 1449 W). Said once;
         visible in Diagnose."""
         if self.applied_differs is not None:
