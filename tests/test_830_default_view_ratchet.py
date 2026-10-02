@@ -40,7 +40,11 @@ MAX_SECTIONS = 4
 #: switches off house circuits, and hiding its on/off behind Advanced is how
 #: a first install shed a Span panel circuit by circuit (forum #30). A
 #: control that can turn the lights off is not one to bury.
-MAX_CONTROLS = 7
+#: 7 → 8 (#1040): Calendar mode's schedule helper. It is the one entity of
+#: that mode, as dynamic_tariff_entity is of Dynamic, and the card shows only
+#: one of the two at a time — so what a user sees does not grow. Without it
+#: the default view offered Calendar and no way to set its times.
+MAX_CONTROLS = 8
 
 
 def test_the_default_view_shows_at_most_four_sections():

@@ -1462,6 +1462,8 @@ OPTIONS_FLOW_OWNED_KEYS = frozenset({
     "target_peak_limit",
     "tariff_classification_mode",
     "tariff_mode",
+    # (#1040) the Schedule helper Calendar mode reads its times from
+    "tariff_schedule_entity",
     "update_interval",
     "vehicle_min_current",
     "vehicle_range_entity",
@@ -2712,6 +2714,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Tariff & Advanced settings."""
+        errors: dict[str, str] = {}
         if user_input is not None:
             # The surcharge field is hidden outside dynamic mode, but it is
             # still an options-flow-owned key. Preserve an existing value
@@ -2721,6 +2724,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 **self.config_entry.data,
                 **self.config_entry.options,
             }
+            # (#1040) Calendar mode had no field for its times, so it ran
+            # at the off-peak price all day and found no cheap hours. The
+            # times now come from a Schedule helper; refuse the mode
+            # without one, unless a hand-written schedule already exists.
+            if (
+                user_input.get("tariff_mode") == "calendar"
+                and not user_input.get("tariff_schedule_entity")
+            ):
+                legacy = current_config.get("tariff_schedule") or {}
+                if not (isinstance(legacy, dict) and (
+                        legacy.get("rules") or legacy.get("schedule_entity"))):
+                    errors["tariff_schedule_entity"] = "calendar_needs_schedule"
             if (
                 user_input.get("tariff_mode") != "dynamic"
                 and "grid_import_surcharge" not in user_input
@@ -2742,10 +2757,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         user_input["dynamic_tariff_entity"] = eid
                         _LOGGER.info("Auto-detected dynamic tariff entity: %s", eid)
                         break
-            _merge_form_input(self, self._data, user_input)
-            return await self.async_step_load_management()
+            if not errors:
+                _merge_form_input(self, self._data, user_input)
+                return await self.async_step_load_management()
 
-        current_config = {**self.config_entry.data, **self.config_entry.options}
+        # On a refused save, show the page as the user left it — a field
+        # they emptied stays empty instead of refilling from storage.
+        left = dict(user_input or {})
+        if user_input is not None:
+            shown = (getattr(self, "cur_step", None) or {}).get("data_schema")
+            for key in _clearable_keys(shown):
+                left.setdefault(key, None)
+        current_config = {**self.config_entry.data, **self.config_entry.options,
+                          **left}
         _c = lambda key, fb: self._cfg(current_config, key, fb)
         currency = self.hass.config.currency or "EUR"
 
@@ -2764,6 +2788,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         ],
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
+                ),
+                # (#1040) The times Calendar mode runs on. The provider
+                # has read a Schedule helper since #25, but no field ever
+                # wrote it, so the mode could not be set up at all.
+                vol.Optional(
+                    "tariff_schedule_entity",
+                    description={"suggested_value": current_config.get("tariff_schedule_entity")},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="schedule")
                 ),
                 vol.Optional(
                     "dynamic_tariff_entity",
@@ -2880,6 +2913,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
             }),
+            errors=errors,
         )
 
     async def async_step_load_management(

@@ -635,6 +635,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # install that chose this mode. The provider now refuses to
             # classify without a reachable HT rule; a YAML/storage-set
             # schedule is honoured instead of discarded.
+            #
+            # (#1040) The Tariff page now has the field this mode lacked:
+            # `tariff_schedule_entity`, a HA Schedule helper whose blocks
+            # are the peak hours. It wins over the hand-written nested key.
             schedule = config.get("tariff_schedule", {}) or {}
             self._tariff_provider = CalendarTariffProvider(
                 hass,
@@ -647,7 +651,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 rules=schedule.get("rules", []),
                 default_tariff=schedule.get("default_tariff", "off_peak"),
                 holiday_entity=schedule.get("holiday_entity"),
-                schedule_entity=schedule.get("schedule_entity"),
+                schedule_entity=(config.get("tariff_schedule_entity")
+                                 or schedule.get("schedule_entity")),
                 currency=currency,
             )
         else:
@@ -3069,8 +3074,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # Official Nord Pool core integration exposes its day-ahead
             # curve only via the get_prices_for_date action (no attribute
             # arrays, core#132856) — fetch it on the event loop before the
-            # sync attribute-parsing below. Self-throttled inside the
-            # provider; no-op for every other provider.
+            # sync attribute-parsing below. (#1040) The calendar provider
+            # reads its Schedule helper's week through the same hook.
+            # Self-throttled inside the provider; no-op for every other
+            # provider.
             _svc_refresh = getattr(
                 self._tariff_provider, "async_refresh_service_prices", None,
             )

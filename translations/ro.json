@@ -242,6 +242,7 @@
           "demand_charge_rate": "Tarif pentru putere contractată",
           "update_interval": "Interval de actualizare (s)",
           "tariff_mode": "Mod tarifar",
+          "tariff_schedule_entity": "Program ore de vârf (mod Calendar)",
           "dynamic_tariff_entity": "Entitate preț dinamic (detectată automat dacă e goală)",
           "dynamic_forecast_entity": "Entitatea de prognoză a prețurilor (opțional, detectată automat dacă e goală)",
           "dynamic_feedin_entity": "Entitate preț de injecție (opțional, pentru tarif de export dinamic)",
@@ -258,6 +259,7 @@
           "demand_charge_rate": "Taxa lunară pentru puterea de vârf (monedă/kW/lună). Setați 0 dacă în contractul dumneavoastră nu există.",
           "update_interval": "Cât de des citește SEM senzorii și reglează hardware-ul (secunde). Interval 10–60 s.",
           "tariff_mode": "Alegeți „Static” pentru tarife fixe, „Dinamic” pentru prețuri în timp real sau „Calendar” pentru programe orare.",
+          "tariff_schedule_entity": "Un ajutor Program (schedule) din Home Assistant. Blocurile sale sunt orele de vârf (HT); toate celelalte ore folosesc tariful de noapte.",
           "dynamic_tariff_entity": "Senzor care furnizează prețul curent de import al energiei electrice. Detectat automat de la Tibber, Nordpool etc.",
           "dynamic_forecast_entity": "Senzor opțional cu prognoze orare de preț, folosite pentru planificarea inteligentă.",
           "dynamic_feedin_entity": "Senzor opțional care furnizează prețul curent de injecție / export pentru tariful de export dinamic.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "Modul Calendar are nevoie de un program pentru orele de vârf. Alegeți un ajutor Program sau alt mod de tarif."
     }
   },
   "entity": {

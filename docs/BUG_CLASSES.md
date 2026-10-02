@@ -996,7 +996,11 @@ either side. A silent default is the same bug with the guess baked into the sour
 **Live catches:** **#684** and **#627** (`ev_start_stop_entity` — read off per-charger config since
 v1.0, auto-filled for some brands, never writable, and beta.25's new repair pointed straight at
 it); **#688 part 1** (`min_off_time_sec` defaulted to a twitchy 1 min with no surface, so a pool
-pump short-cycled and the user could neither see the window nor lengthen it).
+pump short-cycled and the user could neither see the window nor lengthen it); **#1040** (Calendar
+tariff mode sat in the Tariff menu since #120, and the setup guide promised a calendar field, but
+nothing ever wrote the schedule the provider reads — the mode ran at the off-peak price all day.
+Closed by `tariff_schedule_entity`, a Schedule-helper field the page refuses Calendar without, on
+the options page and the config card; guard `tests/test_1040_calendar_schedule_field.py`).
 **Second half (16.08.2026):** a field you can type into is not yet a surface you can *correct* —
 the class also lives in what a form does with the value you did **not** type. HA drops a cleared
 optional field out of `user_input` entirely, so `update(user_input)` cannot tell "left alone" from
@@ -4639,7 +4643,13 @@ WHEN, and did anyone pass in the moment?*
 **Guard:** `tests/test_994_a_level_needs_a_reference.py::TestTheCalendarKnowsWhatDayItIs` — every
 shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
 NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
-Refs #994 #638.
+**Second instance (#1040):** the Schedule-helper branch dropped the moment too. `_get_tariff_at(when)`
+answered every hour with the helper's state NOW, and `_ht_can_occur` took the helper's existence as
+a peak hour on every day. Harmless while no field could set a helper; once #1040 added one, the day
+strip, the next change and the battery break-even at 02:00/14:00 would all have read the current
+tariff. Cure: read the helper's week (`schedule.get_schedule`) and ask it about the hour given.
+Guard: `tests/test_1040_calendar_schedule_field.py::TestTheHelpersWeekAnswersEveryHour`.
+Refs #994 #638 #1040.
 
 ### 105. A sentinel given a name — every "is it missing?" test silently flips — GUARDED
 **Symptom:** a fix that makes absence legible breaks the code that was already handling absence
