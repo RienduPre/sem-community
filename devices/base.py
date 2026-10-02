@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from ..consts.devices import names_a_reboot
 from ..utils.log_gate import log_on_change
+from ..utils.select_option import listed_option
 
 # #392: KEBA's failsafe watchdog (and similar device-side timers on other
 # chargers) requires periodic *writes* to refresh — reads alone don't
@@ -928,6 +929,14 @@ class ControllableDevice(ABC):
         withheld. Returns True when the command actually went to hardware.
         """
         payload = dict(data or {})
+        # (#1039) A select takes the option it LISTS, never the label HA
+        # shows for it (``max_charge``, not "Max charge"). Mapped here, before
+        # the observer record, so what SEM WOULD send is what it would send.
+        if (service == "select_option" and domain in ("select", "input_select")
+                and "option" in payload):
+            payload["option"] = listed_option(
+                getattr(self, "hass", None), payload.get("entity_id"),
+                payload["option"])
         # getattr, not attribute access: devices built without __init__
         # (test fixtures, legacy construction paths) must still SEND. The
         # documented default is False — "a device nobody told is a device

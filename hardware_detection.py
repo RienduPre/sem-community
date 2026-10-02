@@ -28,6 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 
 from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
+from .utils.select_option import pick_listed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -2427,7 +2428,11 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
         values = dict(_lex.STRATEGY_VALUE_KEYS)
         for key, default in _lex.STRATEGY_VALUE_KEYS:
             values[key] = str((strategy_values or {}).get(key) or default)
-        missing = sorted({v for v in values.values() if v not in options})
+        # (#1039) the runtime's matcher, without HA's labels: a value names
+        # an option when it maps to one. Stricter than the runtime, never
+        # looser — a translated label still reads as unmapped here.
+        missing = sorted({v for v in values.values()
+                          if pick_listed(options, v) not in options})
         if missing:
             prop["action"] = "options_unmapped"
             prop["options"] = options[:12]
@@ -3853,7 +3858,9 @@ def _discover_ohme(entities) -> Dict[str, str]:
     """Discover EV charger config from Ohme integration.
 
     Ohme uses sensor for status (Plugged in, Charging, Unplugged).
-    Charge mode via select entity (Max charge, Paused, etc.).
+    Charge mode via select entity. (#1039) Its options are ``max_charge``,
+    ``paused`` and ``smart_charge``; "Max charge" and "Paused" are only the
+    labels HA shows, and the select refuses a label.
     """
     result: Dict[str, str] = {}
     own = _own_names(entities)
@@ -3872,8 +3879,8 @@ def _discover_ohme(entities) -> Dict[str, str]:
             result.setdefault("ev_current_sensor", eid)
         if eid.startswith("select.") and "charge_mode" in name:
             result["ev_charge_mode_entity"] = eid
-            result["ev_charge_mode_start"] = "Max charge"
-            result["ev_charge_mode_stop"] = "Paused"
+            result["ev_charge_mode_start"] = "max_charge"
+            result["ev_charge_mode_stop"] = "paused"
     return result
 
 
