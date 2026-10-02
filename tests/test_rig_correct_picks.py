@@ -105,3 +105,16 @@ async def test_no_charger_offered(hass, name):
     assert not [c for c in rep["chargers"] if c["platform"] == domain]
     assert not [n for n in rep["near_misses"]
                 if n["platform"] == domain and n["suggested_charger"]]
+
+
+def test_every_role_proven_platform_has_a_rig_capture_and_a_pick_test():
+    from pathlib import Path
+
+    from custom_components.solar_energy_management.hardware_detection import (
+        ROLE_PROVEN_PLATFORMS,
+    )
+    from .integrations_rig.rig import capture_names
+    src = Path(__file__).read_text()
+    for p in ROLE_PROVEN_PLATFORMS:
+        assert p in capture_names(), f"{p}: no rig capture"
+        assert f"async def test_{p}(" in src, f"{p}: no correct-pick test"

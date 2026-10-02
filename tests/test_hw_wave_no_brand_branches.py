@@ -29,7 +29,7 @@ BRAND_PATHS_TODAY = frozenset({
     "_discover_goecharger", "_discover_goecharger_mqtt",
     "_discover_heidelberg", "_discover_juicebox", "_discover_keba",
     "_discover_mqtt_brands", "_discover_nrgkick", "_discover_ocpp",
-    "_discover_ohme", "_discover_openevse", "_discover_openwb",
+    "_discover_ohme", "_discover_openwb",
     "_discover_peblar", "_discover_v2c", "_discover_wallbox",
     "_discover_wallbox_mqtt", "_discover_wattpilot", "_discover_zaptec",
     "_wire_wattpilot",

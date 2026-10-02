@@ -4120,31 +4120,6 @@ def _discover_alfen(entities) -> Dict[str, str]:
     return result
 
 
-def _discover_openevse(entities) -> Dict[str, str]:
-    """Discover EV charger config from OpenEVSE integration.
-
-    OpenEVSE uses binary_sensor for vehicle detection, sensor for status.
-    Current control via number entity (max_current).
-    """
-    result: Dict[str, str] = {}
-    for entry in entities:
-        eid = entry.entity_id
-        dc = entry.original_device_class
-        if eid.startswith("binary_sensor.") and "vehicle" in eid:
-            result["ev_connected_sensor"] = eid
-        if eid.startswith("sensor.") and "status" in eid:
-            result.setdefault("ev_charging_sensor", eid)
-        if eid.startswith("sensor.") and dc == "power":
-            result["ev_charging_power_sensor"] = eid
-        if eid.startswith("sensor.") and dc == "energy" and "session" in eid:
-            result.setdefault("ev_session_energy_sensor", eid)
-        if eid.startswith("sensor.") and dc == "energy" and "total" in eid:
-            result.setdefault("ev_total_energy_sensor", eid)
-        if eid.startswith("number.") and "current" in eid:
-            result["ev_current_control_entity"] = eid
-    return result
-
-
 def _discover_blue_current(entities) -> Dict[str, str]:
     """Discover EV charger config from Blue Current integration.
 
@@ -4169,6 +4144,14 @@ def _discover_blue_current(entities) -> Dict[str, str]:
 
 
 # Platform → discovery function mapping (must be after all _discover_* functions)
+#: (#1032) Charger integrations whose brand path folded into the roster's
+#: roles — each proven by the crawler rig on the integration's real output
+#: (tests/integrations_rig, tests/test_rig_correct_picks.py). Data only: the
+#: role reader never reads this list; the coverage tests do.
+ROLE_PROVEN_PLATFORMS = (
+    "openevse",
+)
+
 _EV_CHARGER_PLATFORMS = [
     ("keba", _discover_keba),
     ("easee", _discover_easee),
@@ -4186,7 +4169,7 @@ _EV_CHARGER_PLATFORMS = [
     ("peblar", _discover_peblar),
     ("v2c", _discover_v2c),
     ("alfen_wallbox", _discover_alfen),
-    ("openevse", _discover_openevse),
+    # (#1032) openevse: found by the roster's roles (rig: core 2026.8.2)
     ("blue_current", _discover_blue_current),
     # (#802/#814) data-row brands need no function — the generic matcher
     # applies their _BRAND_HINTS rows.

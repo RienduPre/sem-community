@@ -363,7 +363,12 @@ class TestTheMatrixAndTheRosterAgree:
         src = (ROOT / "hardware_detection.py").read_text()
         body = re.search(r"_EV_CHARGER_PLATFORMS\s*=\s*\[(.*?)\n\]",
                          src, re.S).group(1)
-        return set(re.findall(r'\(\s*"([a-z0-9_]+)"', body))
+        found = set(re.findall(r'\(\s*"([a-z0-9_]+)"', body))
+        # (#1032) brands the roster's roles find, proven on the rig
+        roles = re.search(r"ROLE_PROVEN_PLATFORMS\s*=\s*\((.*?)\)", src, re.S)
+        if roles:
+            found |= set(re.findall(r'"([a-z0-9_]+)"', roles.group(1)))
+        return found
 
     def _documented_domains(self) -> set:
         out = set()

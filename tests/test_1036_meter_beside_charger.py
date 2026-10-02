@@ -373,8 +373,11 @@ def _box_for(platform):
 _ADMITTED_AND_EXERCISED = (
     "keba", "easee", "goecharger", "goecharger_mqtt", "goecharger_api2",
     "wallbox", "chargepoint", "heidelberg_energy_control", "openwb2mqtt",
-    "openwbmqtt", "ocpp", "ohme", "peblar", "v2c", "openevse", "wattpilot",
+    "openwbmqtt", "ocpp", "ohme", "peblar", "v2c", "wattpilot",
 )
+# (#1032) openevse left the brand list: the roster's roles find it, and a
+# meter alone is no role charger (power without a plug or a control) —
+# pinned in tests/test_hw_wave_roles.py.
 
 
 class TestEveryBrandSharesTheRule:

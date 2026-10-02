@@ -198,3 +198,26 @@ async def test_no_role_finds_a_charger_on_a_heat_pump(hass):
     rep = await _report(hass, "vicare")
     assert _near(rep, "vicare") == []
     assert _cars(rep, "vicare") == []
+
+
+# ── a meter alone is no role charger (#1036's rule on the role path) ─────
+
+async def test_a_bare_meter_is_no_role_charger(hass):
+    cap = {"domain": "rig_meter", "source": {"kind": "declared", "repo": "x",
+                                             "commit": "x"},
+           "devices": {"rig_meter:m": {"name": "meter", "model": None,
+                                       "manufacturer": None}},
+           "entities": [
+               {"entity_id": f"sensor.meter_{k}", "unique_id": f"m_{k}",
+                "translation_key": k, "original_device_class": dc,
+                "unit_of_measurement": u, "capabilities": {},
+                "entity_category": None, "disabled_by": None,
+                "device": "rig_meter:m", "state": "1", "attributes": {}}
+               for k, dc, u in (("power", "power", "W"),
+                                ("total_energy", "energy", "kWh"),
+                                ("current", "current", "A"))],
+           "services": {}}
+    await replay(hass, cap)
+    rep = crawl(hass)
+    assert not [n for n in rep["near_misses"]
+                if n["platform"] == "rig_meter" and n["suggested_charger"]]
