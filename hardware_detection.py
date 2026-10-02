@@ -834,6 +834,53 @@ def _is_phase_leg(entity_id: str) -> bool:
                for word, nxt in zip(tokens, tokens[1:], strict=False))
 
 
+def _without_phase(entity_id: str) -> tuple:
+    """(#1035) An id with its phase taken out, and any "total" or "sum": the
+    name the sum of the legs goes by. ``sensor.box_power_phase_3`` and
+    ``sensor.box_power`` give the same answer; ``sensor.box_grid_power``
+    does not."""
+    tokens = [t for t in _name_tokens(entity_id) if t]
+    out: List[str] = []
+    skip = False
+    for word, nxt in zip(tokens, tokens[1:] + [""], strict=True):
+        if skip:
+            skip = False
+            continue
+        if word == "phase" and nxt in ("1", "2", "3"):
+            skip = True
+            continue
+        if word in _PHASE_SEGMENTS or word in ("total", "sum"):
+            continue
+        out.append(word)
+    return (entity_id.split(".", 1)[0], *out)
+
+
+def _device_words(rows: List[List[str]]) -> List[str]:
+    """(#1035) The leading words of a unit's ids that name its DEVICE.
+
+    A word joins when every id of the unit carries it at that place — or,
+    on a unit of eight or more ids, all but a quarter of them, so one id
+    its owner renamed (``sensor.ev_power``) does not stop the device's name
+    being seen on the rest. A real charger publishes 15 to 40 entities; a
+    small unit must agree in full, because there a word several entities
+    start with (``charging_power``, ``charging_current``) is more likely
+    their own than the device's."""
+    words: List[str] = []
+    while True:
+        at = len(words)
+        counts: Dict[str, int] = {}
+        for t in rows:
+            if len(t) > at and t[:at] == words:
+                counts[t[at]] = counts.get(t[at], 0) + 1
+        if not counts:
+            return words
+        word, carried = max(counts.items(), key=lambda kv: kv[1])
+        if carried < len(rows) and (len(rows) < 8
+                                    or carried * 4 < len(rows) * 3):
+            return words
+        words.append(word)
+
+
 def _own_names(entities) -> Dict[str, str]:
     """(#1035) Each entity's OWN name: its object id without the device name
     in front of it.
@@ -846,13 +893,14 @@ def _own_names(entities) -> Dict[str, str]:
     ``switch.peblar_ev_charger_force_single_phase``, and SEM bound that
     switch to start and stop the charge.
 
-    The device part is the leading words that EVERY entity of the unit
-    shares, and never a whole id: each keeps at least its last word, so a
-    device's main entity (named by the device alone, GARO's
-    ``switch.garo_laddbox``) keeps the word that names it. Nothing is
-    removed for one entity alone, which shares with nobody, nor on a
-    transport (mqtt, modbus, …), where the device name is the only mark of
-    the brand, nor for a ``_WholeIds`` unit.
+    The device name is ``_device_words``. An id that does not carry it (its
+    owner renamed it) keeps its whole name. An id that is the device name
+    alone, or that plus Home Assistant's ``_2`` for a second box of the
+    same name, is the device's main entity: its own name IS the device
+    name, so it keeps it — GARO's start/stop is ``switch.garo_laddbox``.
+    Nothing is removed for one entity alone, which shares with nobody, nor
+    on a transport (mqtt, modbus, …), where the device name is the only
+    mark of the brand, nor for a ``_WholeIds`` unit.
 
     Each value starts with ``_``, so a hint that carries its own boundary
     (``"_state"``) still matches the first word of the entity's own name.
@@ -864,14 +912,17 @@ def _own_names(entities) -> Dict[str, str]:
         if eid:
             tokens[eid] = _name_tokens(eid)
             platforms.add(str(getattr(e, "platform", "") or ""))
-    shared = 0
+    device: List[str] = []
     if (len(tokens) > 1 and not platforms & _TRANSPORT_PLATFORMS
             and not isinstance(entities, _WholeIds)):
-        rows = list(tokens.values())
-        shared = min(len(t) for t in rows) - 1
-        for other in rows[1:]:
-            shared = min(shared, _shared_leading_tokens(rows[0], other))
-    return {eid: "_" + "_".join(t[shared:]) for eid, t in tokens.items()}
+        device = _device_words(list(tokens.values()))
+    out: Dict[str, str] = {}
+    for eid, t in tokens.items():
+        rest = t[len(device):] if device and t[:len(device)] == device else t
+        if not rest or (len(rest) == 1 and rest[0].isdigit()):
+            rest = t
+        out[eid] = "_" + "_".join(rest)
+    return out
 
 
 class _WholeIds(list):
@@ -893,7 +944,9 @@ def _discover_unit(discover_fn, entities) -> Dict[str, str]:
     picked, and the guards that run next still swap a capability or a
     single phase for the measurement. So such a role, left empty by the own
     names, keeps the answer the whole id gives — unless that entity already
-    holds another role.
+    holds another role. It only fills a charger the own names found: a unit
+    that only the device name made a charger (a Zaptec installation its
+    owner called "Carport Charger") stays out.
     """
     result = discover_fn(entities)
     if not result:
@@ -947,7 +1000,7 @@ def _rank_measurand(entity_id: str, role: str) -> tuple:
 
 
 def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
-                   taken=()) -> Optional[str]:
+                   taken=(), sum_of: Optional[str] = None) -> Optional[str]:
     """The sibling of ``bound_eid`` that measures what ``role`` asks about.
 
     Same device, same domain, same ``device_class`` AND the same unit
@@ -956,6 +1009,11 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
     legs and entities already holding another role are excluded outright,
     and the winner is chosen by ``_rank_measurand`` rather than by whoever
     the loop happened to see last.
+
+    ``sum_of`` (#1035) narrows the search to the sum of that phase leg —
+    the sibling named like it without the phase. A device can publish its
+    grid, solar or battery power beside the charger's; one phase of the
+    charge is closer to the truth than any of those.
     """
     want_dc = getattr(bound_entry, "original_device_class", None)
     want_unit = _unit_family(bound_entry)
@@ -974,6 +1032,8 @@ def _measured_twin(bound_eid: str, entities, role: str, bound_entry,
         if _unit_family(e) != want_unit:
             continue
         if not _measures_the_quantity(eid) or _is_phase_leg(own.get(eid, eid)):
+            continue
+        if sum_of is not None and _without_phase(eid) != _without_phase(sum_of):
             continue
         candidates.append(eid)
     if not candidates:
@@ -1007,9 +1067,9 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
     pre-#962 binding stands, and a name SEM merely finds suspicious can
     never cost a user their charger.
 
-    (#1035) ONE PHASE of the reading is swapped the same way. A matcher
-    that keeps the last power sensor it sees took Peblar's
-    ``…_power_phase_3`` over ``…_power``, so SEM saw a third of a
+    (#1035) ONE PHASE of the reading is swapped too, but only for the sum
+    of the legs. A matcher that keeps the last power sensor it sees took
+    Peblar's ``…_power_phase_3`` over ``…_power``, so SEM saw a third of a
     three-phase charge. Whether a sensor is one phase is read from its own
     name, never from the device name in front of it.
 
@@ -1024,7 +1084,8 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
         if not eid:
             continue
         eid = str(eid)
-        if _measures_the_quantity(eid) and not _is_phase_leg(own.get(eid, eid)):
+        one_phase = _measures_the_quantity(eid)
+        if one_phase and not _is_phase_leg(own.get(eid, eid)):
             continue
         entry = by_id.get(eid)
         if entry is None:
@@ -1033,7 +1094,8 @@ def _reject_capability_sensor(result: Dict[str, str], entities) -> None:
             continue
         taken = {str(v) for k, v in result.items()
                  if k in _MEASURAND_ROLES and k != role}
-        twin = _measured_twin(eid, entities, role, entry, taken=taken)
+        twin = _measured_twin(eid, entities, role, entry, taken=taken,
+                              sum_of=eid if one_phase else None)
         if twin:
             result[role] = twin
 
@@ -3552,7 +3614,10 @@ def _discover_ocpp(entities) -> Dict[str, str]:
                 energies.append(eid)
         if eid.startswith("number.") and ("current" in name or "limit" in name):
             result["ev_current_control_entity"] = eid
-        if eid.startswith("switch.") and "charge" in name:
+        # (#1035) never the availability switch — the rule the manual path
+        # (``ocpp_charge_control_switch``) already applies
+        if (eid.startswith("switch.") and "charge" in name
+                and "availab" not in name):
             result["ev_start_stop_entity"] = eid
     # Swap-only, like the choke-point guard: a charge point that publishes
     # nothing but capabilities keeps the pre-#962 answer rather than losing

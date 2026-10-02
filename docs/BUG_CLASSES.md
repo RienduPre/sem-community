@@ -3893,8 +3893,10 @@ downstream*, because "drop it" is only safe where absence is handled.
 **Second instance — #1035, one phase:** Peblar's brand rule kept the LAST power sensor, and the
 three per-phase sensors come after the total, so SEM read `…_power_phase_3` — a third of a
 three-phase charge. The guard swapped a capability but let a phase leg stand. `_reject_capability_sensor`
-now swaps a bound phase leg the same way (swap only), and `_is_phase_leg` reads the entity's own name
-(class 115) and wants the number AFTER the word: `phase_3` is a leg, `3_phase_power` is the sum.
+now swaps a bound phase leg too, swap only and ONLY for the sum of the legs — the sibling named like
+it without the phase (`_without_phase`), so a device's grid, solar or battery power is never taken
+for it. `_is_phase_leg` reads the entity's own name (class 115) and wants the number AFTER the word:
+`phase_3` is a leg, `3_phase_power` is the sum.
 Guard: `tests/test_1035_own_name.py::TestOnePhaseIsSwappedForTheTotal`.
 **Residual, CLOSED in #964 (class 90):** the sibling search this class installs is only as
 honest as the bucket it searches — and two of the three discovery sites grouped device-less
@@ -5227,26 +5229,40 @@ manual path `ocpp_charge_control_switch`. On a device named "EV Charger" or "Car
 pre-fix rules bound a role-free entity (a child lock, an LED number, an "online" binary) on 11
 platforms: Peblar, OCPP, ChargePoint, go-e (HTTP and both MQTT domains), Heidelberg, openWB (both
 domains), V2C, Wallbox, Zaptec.
-**Closure:** `_own_names` — each id without the leading words EVERY entity of the unit shares. Each
-id keeps at least its last word, so a main entity named by the device alone (GARO's
-`switch.garo_laddbox`) keeps the word that names it. One entity alone and the transports (`mqtt`,
-where the device name is the only mark of the brand) are left whole. Every brand name test reads
-it. A control or a status that only the device name matched is no longer bound; a measurand READ
-role is the exception (`_discover_unit`): left empty by the own names, it keeps the whole-id answer
-unless another role holds that entity — class 89's swap-only rule, because a charger with no power
-reading is worse than a guessed one, and the guards that run next still correct a capability or a
-phase. **Guard:** `tests/test_1035_own_name.py` — HA's own Peblar entities in both orders, config
-path and report, with the old rule spelled out; an oracle that gives every platform in
-`_EV_CHARGER_PLATFORMS` a device named "EV Charger" and "Carport Charger" with role-free entities
-first and last; an AST check that no brand function tests a string against `eid`/`eid_lower`/
-`entity_id` or calls `_name_hit(eid, …)`, and that it catches the old rule; the read-role fallback
-and its limits. **Sweep question:** for every word test over an entity id — does it read the part
-the integration wrote for that entity, or the part the owner wrote for the device?
+**Closure:** `_own_names` — each id without the device's words (`_device_words`): the leading
+words every id of the unit carries, or, on a unit of eight or more ids, all but a quarter, so one
+id its owner renamed does not switch the rule off for the device (the review of this fix found
+that one rename brought #1035 back). A renamed id keeps its whole name. An id that is the device
+name alone, or that plus HA's `_2`, is the device's MAIN entity and keeps the device name as its
+own (GARO's start/stop is `switch.garo_laddbox`; a second box is `switch.garo_laddbox_2`). One
+entity alone and the transports (`mqtt`, where the device name is the only mark of the brand) are
+left whole. Every brand name test reads it. A control or a status that only the device name
+matched is no longer bound; a measurand READ role is the exception (`_discover_unit`): left empty
+by the own names, it keeps the whole-id answer unless another role holds that entity — class 89's
+swap-only rule. The fallback only fills a charger the own names found: a unit that only its
+device name made a charger (a Zaptec installation called "Carport Charger") stays out.
+`_discover_ocpp` also skips the availability switch, as the #976 manual path already did, for the
+installs where no device name can be seen. **Guard:** `tests/test_1035_own_name.py` — HA's own
+Peblar entities in both orders, config path and report, with the old rule spelled out and with one
+id renamed; GARO's main entity, its second box and a box named "Laddbox Garage"; an oracle that
+gives every platform in `_EV_CHARGER_PLATFORMS` a device named "EV Charger" and "Carport Charger"
+with role-free entities first and last; an AST check that no brand function tests anything
+against `eid`/`eid_lower`/`entity_id` (plain, `str()`, `.lower()`), runs a regex over it or calls
+`_name_hit(eid, …)`, and that it catches each of those shapes; the read-role fallback and its
+limits. Thirteen mutants of the fix are killed. **Sweep question:** for every word test over an
+entity id — does it read the part the integration wrote for that entity, or the part the owner
+wrote for the device?
 **Left for Guido:** (1) a charger SAVED before this fix keeps its binding — detection re-runs only
-while no charger is configured, so a Peblar set up on an earlier version keeps the single-phase
-switch until the owner picks again; (2) Peblar's state sensor is `device_class: enum` and
-`_discover_peblar` asks for none, so no connected/charging sensor is bound (a different shape);
-(3) the inverter-side `_DISCHARGE_CONTROL_PATTERNS` regexes read whole ids too, some by brand name on
-purpose; (4) the glob matrix (`EV_INTEGRATION_PATTERNS`) is a config-flow prefill and was not
-changed. Class 114's residual (2) loses its `carport` case: go-e MQTT's `car` now reads the own name.
+while no charger is configured. A Peblar set up earlier keeps the single-phase switch; an OCPP
+charge point left at the default name "charger" may hold `switch.charger_availability` as its
+start/stop, which stops a charge by taking the connector out of service. (2) A unit whose own
+names match no rule at all is no longer a charger: if openWB's loadpoint publishes German entity
+names under an English "Chargepoint" device name, it matched only through "charg" before (with a
+guessed status sensor) and is now left to the prober and the near-miss offer. (3) Peblar's state
+sensor is `device_class: enum` and `_discover_peblar` asks for none, so no connected/charging
+sensor is bound (a different shape). (4) The inverter-side `_DISCHARGE_CONTROL_PATTERNS` read whole
+ids too, some by brand name on purpose. (5) The glob matrix (`EV_INTEGRATION_PATTERNS`) is a
+config-flow prefill and was not changed. (6) An owner who renamed the TOTAL power sensor leaves
+the phase leg bound: the sum is found by name. Class 114's residual (2) loses its `carport` case:
+go-e MQTT's `car` now reads the own name.
 Refs #1035 #962 #976 #804 #1036.

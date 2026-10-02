@@ -148,6 +148,19 @@ class TestThePeblarFromHomeAssistantsOwnTestData:
         assert mapped["ev_charging_power_sensor"]["entity"] == \
             "sensor.peblar_ev_charger_power"
 
+    def test_one_renamed_entity_does_not_bring_the_bug_back(self):
+        """Owners rename entity ids. One renamed id must not switch the own
+        names off for the whole device (the review of this fix)."""
+        for renamed in ("sensor.wallbox_uptime", "sensor.ev_power"):
+            at = {"sensor.wallbox_uptime": 18, "sensor.ev_power": 12}[renamed]
+            rows = list(_PEBLAR)
+            rows[at] = (renamed,) + rows[at][1:]
+            entities = [_entry(e, "peblar", "peblar-1", dc, u, k)
+                        for e, dc, u, k in rows]
+            charger = _discover(entities)[0]
+            assert charger["ev_start_stop_entity"] == \
+                "switch.peblar_ev_charger_charge", renamed
+
     def test_the_data_really_holds_the_trap(self):
         """No vacuous pass: the rule that was there, spelled out — a word
         tested against the whole id, the last match kept — hands back
@@ -161,6 +174,32 @@ class TestThePeblarFromHomeAssistantsOwnTestData:
 
 
 # ── The entity's own name ────────────────────────────────────────────
+def _garo(device, suffix=""):
+    return [
+        _entry(f"switch.{device}{suffix}", "garo_wallbox", "garo-1"),
+        _entry(f"sensor.{device}_power{suffix}", "garo_wallbox", "garo-1", "power", "W"),
+        _entry(f"number.{device}_current_limit{suffix}", "garo_wallbox", "garo-1",
+               "current", "A"),
+    ]
+
+
+class TestGaroKeepsItsStartStop:
+    """The row's "laddbox" hint finds GARO's switch, which is the device
+    itself — also for a second box and for a box its owner named."""
+
+    def test_the_reporters_box(self):
+        charger = _discover(_garo("garo_laddbox"))[0]
+        assert charger["ev_start_stop_entity"] == "switch.garo_laddbox"
+
+    def test_a_second_box_of_the_same_name(self):
+        charger = _discover(_garo("garo_laddbox", "_2"))[0]
+        assert charger["ev_start_stop_entity"] == "switch.garo_laddbox_2"
+
+    def test_a_box_named_laddbox_garage(self):
+        charger = _discover(_garo("laddbox_garage"))[0]
+        assert charger["ev_start_stop_entity"] == "switch.laddbox_garage"
+
+
 class TestOwnNames:
     def test_the_device_name_is_taken_off(self):
         own = _own_names(_peblar())
@@ -168,17 +207,56 @@ class TestOwnNames:
             "_force_single_phase"
         assert own["switch.peblar_ev_charger_charge"] == "_charge"
 
-    def test_a_main_entity_keeps_the_word_that_names_it(self):
+    def test_a_main_entity_keeps_the_device_name(self):
         """GARO's start/stop switch IS the device: its id is the device name
-        alone. Every id keeps at least its last word, so the row's
-        "laddbox" hint still finds it."""
+        alone, so the device name is its own name."""
+        own = _own_names(_garo("garo_laddbox"))
+        assert own["switch.garo_laddbox"] == "_garo_laddbox"
+        assert own["sensor.garo_laddbox_power"] == "_power"
+
+    def test_a_second_box_of_the_same_name_too(self):
+        """Home Assistant numbers a second box ``_2``: the main entity is
+        still the device name, not the number."""
+        own = _own_names(_garo("garo_laddbox", "_2"))
+        assert own["switch.garo_laddbox_2"] == "_garo_laddbox_2"
+        assert own["sensor.garo_laddbox_power_2"] == "_power_2"
+
+    def test_a_word_only_some_ids_start_with_is_their_own(self):
+        """A small unit must agree in full: "charge" starts two of three
+        ids here, and is theirs."""
         own = _own_names([
-            _entry("switch.garo_laddbox", "garo_wallbox"),
-            _entry("sensor.garo_laddbox_power", "garo_wallbox"),
-            _entry("number.garo_laddbox_current_limit", "garo_wallbox"),
+            _entry("switch.box_charge_a", "x"),
+            _entry("switch.box_charge_b", "x"),
+            _entry("sensor.box_power", "x"),
         ])
-        assert own["switch.garo_laddbox"] == "_laddbox"
-        assert own["sensor.garo_laddbox_power"] == "_laddbox_power"
+        assert own["switch.box_charge_a"] == "_charge_a"
+        # three of four is not "all" on a unit this small
+        own = _own_names([
+            _entry("sensor.wb_charging_power", "x"),
+            _entry("number.wb_charging_current", "x"),
+            _entry("switch.wb_charging_enable", "x"),
+            _entry("binary_sensor.wb_plug", "x"),
+        ])
+        assert own["number.wb_charging_current"] == "_charging_current"
+
+    def test_one_renamed_id_does_not_hide_the_device_name(self):
+        """A real charger publishes many entities. One its owner renamed
+        keeps its whole name; the rest still lose the device name."""
+        rows = [(e, dc, u, k) for e, dc, u, k in _PEBLAR]
+        rows[18] = ("sensor.wallbox_uptime",) + rows[18][1:]
+        entities = [_entry(e, "peblar", "peblar-1", dc, u, k) for e, dc, u, k in rows]
+        own = _own_names(entities)
+        assert own["switch.peblar_ev_charger_force_single_phase"] == \
+            "_force_single_phase"
+        assert own["sensor.wallbox_uptime"] == "_wallbox_uptime"
+
+    def test_a_small_unit_with_a_renamed_id_keeps_whole_names(self):
+        own = _own_names([
+            _entry("switch.ev_charger_charge", "peblar"),
+            _entry("switch.ev_charger_child_lock", "peblar"),
+            _entry("sensor.my_power", "peblar"),
+        ])
+        assert own["switch.ev_charger_child_lock"] == "_ev_charger_child_lock"
 
     def test_one_entity_alone_keeps_its_whole_name(self):
         own = _own_names([_entry("switch.ev_charger_charge", "peblar")])
@@ -236,15 +314,52 @@ class TestOnePhaseIsSwappedForTheTotal:
         assert not _is_phase_leg("sensor.box_3_phase_power")
         assert not _is_phase_leg("sensor.box_power")
 
-    def test_a_device_named_phase_1_is_not_one_phase(self):
-        """Whether a sensor is one phase is read from its own name."""
-        entities = [
+    def _phase_1_box(self):
+        return [
             _entry("sensor.phase_1_box_power", "wallbox", device_class="power", unit="W"),
+            _entry("sensor.phase_1_box_import_power", "wallbox", device_class="power",
+                   unit="W"),
             _entry("sensor.phase_1_box_power_l2", "wallbox", device_class="power", unit="W"),
+            _entry("sensor.phase_1_box_total_power", "wallbox", device_class="power",
+                   unit="W"),
         ]
+
+    def test_a_device_named_phase_1_is_not_one_phase(self):
+        """Whether a sensor is one phase is read from its own name: the
+        total stays, though the whole id says "phase_1"."""
         result = {"ev_charging_power_sensor": "sensor.phase_1_box_power"}
-        _reject_capability_sensor(result, entities)
+        _reject_capability_sensor(result, self._phase_1_box())
         assert result["ev_charging_power_sensor"] == "sensor.phase_1_box_power"
+
+    def test_on_a_device_named_phase_1_a_real_leg_finds_its_sum(self):
+        """…and the twin search reads the own name too, or it would throw
+        the total away as "one phase"."""
+        result = {"ev_charging_power_sensor": "sensor.phase_1_box_power_l2"}
+        _reject_capability_sensor(result, self._phase_1_box())
+        assert result["ev_charging_power_sensor"] == "sensor.phase_1_box_power"
+
+    def test_a_phase_is_never_swapped_for_another_quantity(self):
+        """A device can publish its grid, solar or battery power beside the
+        charger's. One phase of the charge is closer than any of those."""
+        entities = [
+            _entry("sensor.box_power_l1", "x", device_class="power", unit="W"),
+            _entry("sensor.box_power_l3", "x", device_class="power", unit="W"),
+            _entry("sensor.box_grid_power", "x", device_class="power", unit="W"),
+            _entry("sensor.box_battery_power", "x", device_class="power", unit="W"),
+        ]
+        result = {"ev_charging_power_sensor": "sensor.box_power_l3"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_charging_power_sensor"] == "sensor.box_power_l3"
+
+    def test_a_total_named_total_is_the_sum(self):
+        entities = [
+            _entry("sensor.box_power_l3", "x", device_class="power", unit="W"),
+            _entry("sensor.box_grid_power", "x", device_class="power", unit="W"),
+            _entry("sensor.box_total_power", "x", device_class="power", unit="W"),
+        ]
+        result = {"ev_charging_power_sensor": "sensor.box_power_l3"}
+        _reject_capability_sensor(result, entities)
+        assert result["ev_charging_power_sensor"] == "sensor.box_total_power"
 
 
 # ── A read role is never lost to the own names (class 89) ─────────────
@@ -281,6 +396,23 @@ class TestAReadRoleKeepsTheWholeIdAnswer:
             _entry("switch.charger_child_lock", "ocpp", "cp"),
         ]
         assert "ev_start_stop_entity" not in _discover_unit(_discover_ocpp, entities)
+
+    def test_the_device_name_alone_never_makes_a_charger(self):
+        """The fallback fills a charger the own names found; it never makes
+        one. A Zaptec installation its owner called "Carport Charger" has
+        only "charg" in its device name to look like a charger."""
+        entities = [
+            _entry("sensor.carport_charger_total_power", "zaptec", "inst",
+                   "power", "W"),
+            _entry("binary_sensor.carport_charger_online", "zaptec", "inst",
+                   "connectivity"),
+            _entry("number.carport_charger_available_current", "zaptec", "inst",
+                   "current", "A",
+                   unique_id="inst_available_current"),
+        ]
+        # non-vacuous: the whole ids alone would admit it
+        assert hd._discover_zaptec(hd._WholeIds(entities))
+        assert _discover(entities) == []
 
     def test_the_fallback_never_takes_an_entity_another_role_holds(self):
         def _fn(entities):
@@ -381,6 +513,23 @@ def _patched_registry(entries):
                  return_value=_Reg())
 
 
+class TestOcppNeverStopsWithAvailability:
+    def test_auto_detection_skips_the_availability_switch(self):
+        """Where the own names cannot help (no device name shared), the
+        auto-detection still never takes the availability switch — the rule
+        the manual path already had."""
+        entities = [
+            _entry("sensor.cp_power_active_import", "ocpp", "cp", "power", "W"),
+            _entry("sensor.cp_status_connector", "ocpp", "cp"),
+            _entry("switch.charger_charge_control", "ocpp", "cp"),
+            _entry("switch.charger_availability", "ocpp", "cp"),
+        ]
+        assert _own_names(entities)["switch.charger_availability"] == \
+            "_charger_availability"
+        charger = _discover(entities)[0]
+        assert charger["ev_start_stop_entity"] == "switch.charger_charge_control"
+
+
 class TestTheOcppManualPath:
     def test_a_charge_point_named_charger_finds_its_charge_control(self):
         """OCPP names a charge point "charger" unless told otherwise, so
@@ -409,24 +558,42 @@ def _brand_functions():
     return sorted(n for n in names if callable(getattr(hd, n, None)))
 
 
+def _is_whole_id(node) -> bool:
+    """``eid``, ``eid_lower``, ``entity_id``, ``x.entity_id`` — and any of
+    them through ``str()``, ``.lower()`` or ``.casefold()``."""
+    if isinstance(node, ast.Name):
+        return node.id in _WHOLE_ID_NAMES
+    if isinstance(node, ast.Attribute):
+        return node.attr == "entity_id"
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in ("lower", "casefold"):
+            return _is_whole_id(func.value)
+        if isinstance(func, ast.Name) and func.id == "str" and node.args:
+            return _is_whole_id(node.args[0])
+    return False
+
+
 def _whole_id_word_tests(fn) -> list:
+    """Every word test on a whole id: ``<x> in eid`` (any ``x``), a regex
+    over it, or ``_name_hit(eid, …)``. Suffix tests (``endswith``) are fine:
+    the device name is in front."""
     tree = ast.parse(inspect.getsource(fn).lstrip())
     hits = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Compare):
-            left = node.left
             for op, right in zip(node.ops, node.comparators, strict=True):
-                if (isinstance(op, (ast.In, ast.NotIn))
-                        and isinstance(left, ast.Constant)
-                        and isinstance(left.value, str)
-                        and isinstance(right, ast.Name)
-                        and right.id in _WHOLE_ID_NAMES):
-                    hits.append(f"{left.value!r} in {right.id}")
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == "_name_hit" and node.args
-                and isinstance(node.args[0], ast.Name)
-                and node.args[0].id in _WHOLE_ID_NAMES):
-            hits.append(f"_name_hit({node.args[0].id}, …)")
+                if isinstance(op, (ast.In, ast.NotIn)) and _is_whole_id(right):
+                    hits.append(f"{ast.unparse(node.left)} in {ast.unparse(right)}")
+        if isinstance(node, ast.Call) and node.args:
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else "")
+            if name == "_name_hit" and _is_whole_id(node.args[0]):
+                hits.append(f"_name_hit({ast.unparse(node.args[0])}, …)")
+            if name in ("search", "match", "fullmatch", "findall") and any(
+                    _is_whole_id(a) for a in node.args):
+                hits.append(f"{name}(…, {ast.unparse(node.args[-1])})")
     return hits
 
 
@@ -446,6 +613,22 @@ class TestNoBrandRuleTestsAWordAgainstTheWholeId:
                 if eid.startswith("switch.") and "charge" in eid:
                     return eid
         assert _whole_id_word_tests(_old) == ["'charge' in eid"]
+
+    def test_the_check_catches_the_other_shapes(self):
+        import re
+
+        def _old(entities, words):
+            for entry in entities:
+                eid = str(entry.entity_id)
+                if any(w in eid for w in words):
+                    return eid
+                if "x" in eid.lower() or "y" in entry.entity_id:
+                    return eid
+                if re.search("z", eid) or _name_hit(eid, "w"):  # noqa: F821
+                    return eid
+                if eid.endswith("_amp"):          # a suffix: fine
+                    return eid
+        assert len(_whole_id_word_tests(_old)) == 5
 
     def test_no_brand_function_does(self):
         offenders = {n: _whole_id_word_tests(getattr(hd, n))
