@@ -32,428 +32,9 @@ from .consts.devices import REBOOT_DEVICE_CLASS, names_a_reboot
 _LOGGER = logging.getLogger(__name__)
 
 # EV charger integration-specific patterns
-EV_INTEGRATION_PATTERNS = {
-    "keba": {
-        "integration_name": "KEBA KeContact",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.keba_*_plug_connected", "KEBA - Plug Connected", 10),
-                ("binary_sensor.*_keba_*_plug*", "KEBA - Plug Status", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.keba_*_charging", "KEBA - Charging Status", 10),
-                ("sensor.keba_*_state", "KEBA - Charger State", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.keba_*_charging_power", "KEBA - Charging Power", 10),
-                ("sensor.keba_*_power", "KEBA - Power", 9),
-            ],
-            "ev_current": [
-                ("sensor.keba_*_charging_current", "KEBA - Charging Current", 10),
-                ("sensor.keba_*_current", "KEBA - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.keba_*_session_energy", "KEBA - Session Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.keba_*_total_energy", "KEBA - Total Energy", 10),
-            ],
-        }
-    },
-    "easee": {
-        "integration_name": "Easee",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.easee_status", "Easee - Status", 10),
-                ("sensor.*_easee_status", "Easee - Multi Status", 9),
-            ],
-            "ev_charging": [
-                ("sensor.easee_status", "Easee - Charging Status", 10),
-                ("binary_sensor.easee_*_charging", "Easee - Charging Binary", 9),
-                ("sensor.*_easee_status", "Easee - Multi Charging Status", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.easee_power", "Easee - Power", 10),
-                ("sensor.*_easee_power", "Easee - Multi Power", 9),
-                ("sensor.easee_*_power", "Easee - Power Variant", 8),
-            ],
-            "ev_current": [
-                ("sensor.easee_current", "Easee - Current", 10),
-                ("sensor.*_easee_current", "Easee - Multi Current", 9),
-                ("sensor.easee_*_current", "Easee - Current Variant", 8),
-            ],
-            "ev_session_energy": [
-                ("sensor.easee_session_energy", "Easee - Session Energy", 10),
-                ("sensor.*_easee_session*", "Easee - Multi Session", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.easee_total_energy", "Easee - Total Energy", 10),
-                ("sensor.*_easee_total*", "Easee - Multi Total", 9),
-            ],
-        }
-    },
-    "wallbox": {
-        "integration_name": "Wallbox",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.wallbox*connected*", "Wallbox - Connected", 8),
-                ("binary_sensor.wallbox*plug*", "Wallbox - Plug Status", 7),
-            ],
-            "ev_charging": [
-                ("binary_sensor.wallbox*charging*", "Wallbox - Charging", 8),
-                ("sensor.wallbox*state*", "Wallbox - State", 7),
-            ],
-            "ev_charging_power": [
-                ("sensor.wallbox*charging_power*", "Wallbox - Charging Power", 9),
-                ("sensor.wallbox*power*", "Wallbox - Power", 8),
-            ],
-            "ev_current": [
-                ("sensor.wallbox*charging_current*", "Wallbox - Charging Current", 9),
-                ("sensor.wallbox*current*", "Wallbox - Current", 8),
-            ],
-            "ev_session_energy": [
-                ("sensor.wallbox*session*energy*", "Wallbox - Session Energy", 9),
-                ("sensor.wallbox*session*", "Wallbox - Session", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.wallbox*total*energy*", "Wallbox - Total Energy", 8),
-                ("sensor.wallbox*total*", "Wallbox - Total", 7),
-            ],
-        }
-    },
-    "goecharger": {
-        "integration_name": "go-eCharger",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.goe*connected*", "go-eCharger - Connected", 8),
-                ("binary_sensor.go_e*plug*", "go-eCharger - Plug", 7),
-            ],
-            "ev_charging": [
-                ("binary_sensor.goe*charging*", "go-eCharger - Charging", 8),
-                ("sensor.go_e*status*", "go-eCharger - Status", 7),
-            ],
-            "ev_charging_power": [
-                ("sensor.goe*power*", "go-eCharger - Power", 8),
-                ("sensor.go_e*power*", "go-eCharger - Power", 8),
-            ],
-            "ev_current": [
-                ("sensor.goe*current*", "go-eCharger - Current", 8),
-                ("sensor.go_e*amp*", "go-eCharger - Amperage", 7),
-            ],
-            "ev_session_energy": [
-                ("sensor.goe*session*", "go-eCharger - Session", 8),
-                ("sensor.go_e*session*", "go-eCharger - Session", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.goe*total*energy*", "go-eCharger - Total Energy", 8),
-                ("sensor.go_e*total*", "go-eCharger - Total", 7),
-            ],
-        }
-    },
-    "openwb": {
-        "integration_name": "OpenWB",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.openwb*connected*", "OpenWB - Connected", 8),
-                ("binary_sensor.openwb*plug*", "OpenWB - Plug", 7),
-            ],
-            "ev_charging": [
-                ("binary_sensor.openwb*charging*", "OpenWB - Charging", 8),
-                ("sensor.openwb*status*", "OpenWB - Status", 7),
-            ],
-            "ev_charging_power": [
-                ("sensor.openwb*charging*power*", "OpenWB - Charging Power", 9),
-                ("sensor.openwb*power*", "OpenWB - Power", 8),
-            ],
-            "ev_current": [
-                ("sensor.openwb*current*", "OpenWB - Current", 8),
-                ("sensor.openwb*amp*", "OpenWB - Amperage", 7),
-            ],
-            "ev_session_energy": [
-                ("sensor.openwb*session*", "OpenWB - Session", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.openwb*total*energy*", "OpenWB - Total Energy", 8),
-            ],
-        }
-    },
-    "zaptec": {
-        "integration_name": "Zaptec",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.zaptec_*_cable_connected", "Zaptec - Cable Connected", 10),
-                ("binary_sensor.zaptec_*_connected", "Zaptec - Connected", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.zaptec_*_charging", "Zaptec - Charging", 10),
-                ("sensor.zaptec_*_charger_operation_mode", "Zaptec - Operation Mode", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.zaptec_*_charge_power", "Zaptec - Charge Power", 10),
-                ("sensor.zaptec_*_power", "Zaptec - Power", 9),
-            ],
-            "ev_current": [
-                ("number.zaptec_*_available_current", "Zaptec - Available Current", 10),
-                ("sensor.zaptec_*_current", "Zaptec - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.zaptec_*_session_energy", "Zaptec - Session Energy", 10),
-                ("sensor.zaptec_*_total_charge_power_session", "Zaptec - Session Charge", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.zaptec_*_total_charge_power", "Zaptec - Total Energy", 10),
-            ],
-        }
-    },
-    "chargepoint": {
-        "integration_name": "ChargePoint",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.chargepoint_*_connected", "ChargePoint - Connected", 10),
-                ("binary_sensor.chargepoint_*_plugged*", "ChargePoint - Plugged", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.chargepoint_*_charging", "ChargePoint - Charging", 10),
-                ("sensor.chargepoint_*_status", "ChargePoint - Status", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.chargepoint_*_power_output", "ChargePoint - Power Output", 10),
-                ("sensor.chargepoint_*_power", "ChargePoint - Power", 9),
-            ],
-            "ev_current": [
-                ("number.chargepoint_*_charging_amperage_limit", "ChargePoint - Amperage Limit", 10),
-                ("sensor.chargepoint_*_current", "ChargePoint - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.chargepoint_*_session_energy", "ChargePoint - Session Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.chargepoint_*_energy_output", "ChargePoint - Energy Output", 10),
-                ("sensor.chargepoint_*_total_energy", "ChargePoint - Total Energy", 9),
-            ],
-        }
-    },
-    "heidelberg": {
-        "integration_name": "Heidelberg Energy Control",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.heidelberg_*_connected", "Heidelberg - Connected", 10),
-                ("binary_sensor.heidelberg_*_plug*", "Heidelberg - Plug", 9),
-            ],
-            "ev_charging": [
-                ("binary_sensor.heidelberg_*_charging", "Heidelberg - Charging", 10),
-                ("binary_sensor.heidelberg_*_active", "Heidelberg - Active", 8),
-            ],
-            "ev_charging_power": [
-                ("sensor.heidelberg_*_charging_power", "Heidelberg - Charging Power", 10),
-                ("sensor.heidelberg_*_power", "Heidelberg - Power", 9),
-            ],
-            "ev_current": [
-                ("number.heidelberg_*_charging_current_limit", "Heidelberg - Current Limit", 10),
-                ("sensor.heidelberg_*_current", "Heidelberg - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.heidelberg_*_session_energy", "Heidelberg - Session Energy", 10),
-                ("sensor.heidelberg_*_energy_session", "Heidelberg - Energy Session", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.heidelberg_*_total_energy", "Heidelberg - Total Energy", 10),
-                ("sensor.heidelberg_*_energy_total", "Heidelberg - Energy Total", 9),
-            ],
-        }
-    },
-    "ocpp": {
-        "integration_name": "OCPP",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.ocpp_*_status*connector*", "OCPP - Connector Status", 10),
-                ("sensor.ocpp_*_status", "OCPP - Status", 9),
-            ],
-            "ev_charging": [
-                ("sensor.ocpp_*_status*connector*", "OCPP - Connector Status", 10),
-                ("sensor.ocpp_*_status", "OCPP - Status", 9),
-            ],
-            "ev_charging_power": [
-                ("sensor.ocpp_*_power_active_import", "OCPP - Active Import Power", 10),
-                ("sensor.ocpp_*_power*", "OCPP - Power", 8),
-            ],
-            "ev_current": [
-                ("number.ocpp_*_maximum_current", "OCPP - Maximum Current", 10),
-                # (#962) Current.Import is what flows; Current.Offered is
-                # what the charge point advertises it COULD give.
-                ("sensor.ocpp_*_current_import", "OCPP - Current Import", 9),
-                ("sensor.ocpp_*_current_offered", "OCPP - Current Offered", 8),
-            ],
-            "ev_session_energy": [
-                # (#962) the session slot wants a per-session counter, not
-                # the cumulative register that never resets.
-                ("sensor.ocpp_*_session_energy", "OCPP - Session Energy", 10),
-                ("sensor.ocpp_*_energy_active_import_interval",
-                 "OCPP - Import Interval", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.ocpp_*_energy_active_import_register", "OCPP - Energy Register", 10),
-            ],
-        }
-    },
-    "alfen": {
-        "integration_name": "Alfen Eve",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.*alfen*main_state*socket*", "Alfen - Main State", 10),
-                ("sensor.*alfen*status*socket*", "Alfen - Status", 9),
-            ],
-            "ev_charging": [
-                ("sensor.*alfen*main_state*socket*", "Alfen - Main State", 10),
-                ("sensor.*alfen*status*socket*", "Alfen - Status", 9),
-            ],
-            "ev_charging_power": [
-                ("sensor.*alfen*active_power_total*socket*", "Alfen - Active Power", 10),
-                ("sensor.*alfen*active_power*", "Alfen - Active Power Alt", 8),
-            ],
-            "ev_current": [
-                ("number.*alfen*max_current*socket*", "Alfen - Max Current", 10),
-                ("number.*alfen*current_limit*", "Alfen - Current Limit", 9),
-                ("sensor.*alfen*current*socket*", "Alfen - Current", 7),
-            ],
-            "ev_session_energy": [
-                ("sensor.*alfen*transaction*charging*", "Alfen - Session Energy", 10),
-                ("sensor.*alfen*meter_reading*", "Alfen - Meter Reading", 8),
-            ],
-            "ev_total_energy": [
-                ("sensor.*alfen*meter_reading*socket*", "Alfen - Total Energy", 10),
-            ],
-        }
-    },
-    "ohme": {
-        "integration_name": "Ohme",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.ohme_*_status", "Ohme - Status", 10),
-            ],
-            "ev_charging": [
-                ("sensor.ohme_*_status", "Ohme - Status", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.ohme_*_power", "Ohme - Power", 10),
-            ],
-            "ev_current": [
-                ("sensor.ohme_*_current", "Ohme - Current", 10),
-            ],
-            "ev_session_energy": [
-                ("sensor.ohme_*_energy", "Ohme - Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.ohme_*_energy", "Ohme - Total Energy", 9),
-            ],
-        }
-    },
-    "peblar": {
-        "integration_name": "Peblar",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.peblar_*_state", "Peblar - State", 10),
-            ],
-            "ev_charging": [
-                ("sensor.peblar_*_state", "Peblar - State", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.peblar_*_power", "Peblar - Power", 10),
-            ],
-            "ev_current": [
-                ("number.peblar_*_charge_limit", "Peblar - Charge Limit", 10),
-                ("sensor.peblar_*_current", "Peblar - Current", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.peblar_*_session_energy", "Peblar - Session Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.peblar_*_lifetime_energy", "Peblar - Lifetime Energy", 10),
-            ],
-        }
-    },
-    "v2c": {
-        "integration_name": "V2C Trydan",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.v2c_*_connected", "V2C - Connected", 10),
-            ],
-            "ev_charging": [
-                ("binary_sensor.v2c_*_charging", "V2C - Charging", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.v2c_*_charge_power", "V2C - Charge Power", 10),
-            ],
-            "ev_current": [
-                ("number.v2c_*_intensity", "V2C - Intensity", 10),
-            ],
-            "ev_session_energy": [
-                ("sensor.v2c_*_charge_energy", "V2C - Charge Energy", 10),
-            ],
-            "ev_total_energy": [
-                ("sensor.v2c_*_charge_energy", "V2C - Total Energy", 9),
-            ],
-        }
-    },
-    "blue_current": {
-        "integration_name": "Blue Current",
-        "patterns": {
-            "ev_connected": [
-                ("sensor.*blue_current*vehicle_status*", "Blue Current - Vehicle Status", 10),
-                ("sensor.*blue_current*activity*", "Blue Current - Activity", 9),
-            ],
-            "ev_charging": [
-                ("sensor.*blue_current*activity*", "Blue Current - Activity", 10),
-            ],
-            "ev_charging_power": [
-                ("sensor.*blue_current*total_kw*", "Blue Current - Total kW", 10),
-                ("sensor.*blue_current*total_power*", "Blue Current - Total Power", 9),
-            ],
-            "ev_current": [
-                ("sensor.*blue_current*avg_current*", "Blue Current - Avg Current", 10),
-                ("sensor.*blue_current*max_usage*", "Blue Current - Max Usage", 9),
-            ],
-            "ev_session_energy": [
-                ("sensor.*blue_current*actual_kwh*", "Blue Current - Energy kWh", 10),
-                ("sensor.*blue_current*energy_usage*", "Blue Current - Energy Usage", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.*blue_current*actual_kwh*", "Blue Current - Total kWh", 10),
-            ],
-        }
-    },
-    "openevse": {
-        "integration_name": "OpenEVSE",
-        "patterns": {
-            "ev_connected": [
-                ("binary_sensor.openevse_*_vehicle", "OpenEVSE - Vehicle Plug", 10),
-                ("sensor.openevse_*_status", "OpenEVSE - Status", 9),
-                ("sensor.openevse_*_state", "OpenEVSE - State", 8),
-            ],
-            "ev_charging": [
-                ("sensor.openevse_*_status", "OpenEVSE - Status", 10),
-                ("sensor.openevse_*_state", "OpenEVSE - State", 9),
-            ],
-            "ev_charging_power": [
-                ("sensor.openevse_*_current_power", "OpenEVSE - Current Power", 10),
-                ("sensor.openevse_*_charging_power", "OpenEVSE - Charging Power", 9),
-            ],
-            "ev_current": [
-                ("number.openevse_*_max_current*", "OpenEVSE - Max Current", 10),
-                ("sensor.openevse_*_charging_current", "OpenEVSE - Charging Current", 9),
-                ("sensor.openevse_*_current_capacity", "OpenEVSE - Current Capacity", 8),
-            ],
-            "ev_session_energy": [
-                ("sensor.openevse_*_usage_session", "OpenEVSE - Session Usage", 10),
-                ("sensor.openevse_*_usage_this_session", "OpenEVSE - Session Usage Alt", 9),
-            ],
-            "ev_total_energy": [
-                ("sensor.openevse_*_usage_total", "OpenEVSE - Total Usage", 10),
-                ("sensor.openevse_*_total_energy*", "OpenEVSE - Total Energy", 9),
-            ],
-        }
-    },
-}
+# (#1032) EV_INTEGRATION_PATTERNS — the glob matrix behind the config
+# wizard's second prefill — is retired: the wizard reads ONE crawler (the
+# roster and its roles). A field the roles cannot fill is left for the user.
 
 # Generic EV charger patterns (fallback)
 GENERIC_EV_PATTERNS = {
@@ -488,7 +69,9 @@ GENERIC_EV_PATTERNS = {
 
 
 class EVChargerDetector:
-    """Auto-detect EV charger entities with integration awareness."""
+    """(#1032) The config wizard's VALIDATOR for EV charger entities. Its
+    glob-pattern detection is retired: suggestions come from one crawler
+    (``discover_ev_charger_from_registry``), never from a second reader."""
 
     def __init__(self, hass: HomeAssistant):
         """Initialize EV charger detector."""
@@ -498,75 +81,6 @@ class EVChargerDetector:
     def get_all_entities(self) -> List[str]:
         """Get all available entity IDs."""
         return list(self.hass.states.async_entity_ids())
-
-    def _get_merged_patterns(self) -> Dict[str, List[Tuple[str, str, int]]]:
-        """Merge integration-specific patterns with generic patterns.
-
-        Returns:
-            Dict with sensor type as key, list of (pattern, description, priority) tuples
-        """
-        merged = {}
-
-        # Add integration-specific patterns first (highest priority)
-        for _integration_name, integration_data in EV_INTEGRATION_PATTERNS.items():
-            for sensor_type, patterns in integration_data["patterns"].items():
-                if sensor_type not in merged:
-                    merged[sensor_type] = []
-                merged[sensor_type].extend(patterns)
-
-        # Add generic patterns
-        for sensor_type, patterns in GENERIC_EV_PATTERNS.items():
-            if sensor_type not in merged:
-                merged[sensor_type] = []
-            merged[sensor_type].extend(patterns)
-
-        # Sort by priority (highest first)
-        for sensor_type in merged:
-            merged[sensor_type] = sorted(
-                merged[sensor_type],
-                key=lambda x: x[2],
-                reverse=True
-            )
-
-        return merged
-
-    def detect_ev_entities(self) -> Dict[str, List[Tuple[str, str, bool, int]]]:
-        """Auto-detect EV charger entities with validation and priority scoring.
-
-        Returns:
-            Dict with sensor type as key, list of (entity_id, description, exists, priority) tuples
-        """
-        detected = {}
-        all_entities = self.get_all_entities()
-        merged_patterns = self._get_merged_patterns()
-
-        for sensor_type, patterns in merged_patterns.items():
-            detected[sensor_type] = []
-
-            for pattern, description, priority in patterns:
-                matches = self._find_pattern_matches(pattern, all_entities)
-                for entity_id in matches:
-                    exists = self._validate_entity(entity_id, sensor_type)
-                    detected[sensor_type].append((entity_id, description, exists, priority))
-
-        # Sort by priority and validation status
-        for sensor_type in detected:
-            detected[sensor_type] = sorted(
-                detected[sensor_type],
-                key=lambda x: (x[2], x[3]),  # Sort by exists (True first), then priority
-                reverse=True
-            )
-
-        return detected
-
-    def _find_pattern_matches(self, pattern: str, entities: List[str]) -> List[str]:
-        """Find entities matching a pattern."""
-        import fnmatch
-
-        if "*" in pattern:
-            return fnmatch.filter(entities, pattern)
-        else:
-            return [pattern] if pattern in entities else []
 
     def _validate_entity(self, entity_id: str, sensor_type: str) -> bool:
         """Validate entity exists and has reasonable values."""
@@ -610,64 +124,6 @@ class EVChargerDetector:
         except (ValueError, TypeError):
             return False
 
-    def get_best_match(self, sensor_type: str) -> Optional[str]:
-        """Get the best matching entity for a sensor type.
-
-        Returns the highest priority valid entity.
-        """
-        detected = self.detect_ev_entities()
-        candidates = detected.get(sensor_type) or []
-        # (#962, bug class 89) A glob cannot tell ``Power.Offered`` from
-        # ``Power.Active.Import`` — both are "a power sensor whose name
-        # matches". For the roles that must carry a MEASUREMENT, try the
-        # candidates that claim to measure first, and fall back to a
-        # capability-named match only when the install offers nothing else.
-        if sensor_type in ("ev_charging_power", "ev_session_energy",
-                           "ev_total_energy"):
-            candidates = (
-                [c for c in candidates if _measures_the_quantity(c[0])]
-                + [c for c in candidates if not _measures_the_quantity(c[0])]
-            )
-        for entity_id, description, exists, priority in candidates:
-            if exists:
-                _LOGGER.info(
-                    f"Auto-detected {sensor_type}: {entity_id} ({description}) "
-                    f"[Priority: {priority}]"
-                )
-                return entity_id
-        return None
-
-    def get_detected_ev_integrations(self) -> Dict[str, bool]:
-        """Detect which EV charger integrations are installed.
-
-        Returns:
-            Dict with integration name as key and detection status as value
-        """
-        detected_integrations = {}
-        all_entities = self.get_all_entities()
-
-        for integration_name, integration_data in EV_INTEGRATION_PATTERNS.items():
-            detected_integrations[integration_name] = False
-
-            for sensor_type, patterns in integration_data["patterns"].items():
-                for pattern, _description, _priority in patterns:
-                    matches = self._find_pattern_matches(pattern, all_entities)
-                    if matches:
-                        for entity_id in matches:
-                            if self._validate_entity(entity_id, sensor_type):
-                                detected_integrations[integration_name] = True
-                                _LOGGER.info(
-                                    f"Detected EV integration: {integration_data['integration_name']} "
-                                    f"(found valid entity: {entity_id})"
-                                )
-                                break
-                    if detected_integrations[integration_name]:
-                        break
-                if detected_integrations[integration_name]:
-                    break
-
-        return detected_integrations
-
     def validate_ev_configuration(self, config: Dict[str, str]) -> Dict[str, str]:
         """Validate EV charger configuration.
 
@@ -693,29 +149,6 @@ class EVChargerDetector:
                 errors[sensor_key] = f"Entity {entity_id} not found or invalid"
 
         return errors
-
-    def get_suggested_ev_defaults(self) -> Dict[str, str]:
-        """Get suggested EV charger default values based on auto-detection."""
-        suggestions = {}
-
-        sensor_mappings = {
-            "ev_connected_sensor": "ev_connected",
-            "ev_charging_sensor": "ev_charging",
-            "ev_charging_power_sensor": "ev_charging_power",
-            "ev_current_sensor": "ev_current",
-            "ev_session_energy_sensor": "ev_session_energy",
-            "ev_total_energy_sensor": "ev_total_energy",
-        }
-
-        for config_key, detect_key in sensor_mappings.items():
-            suggested = self.get_best_match(detect_key)
-            if suggested:
-                suggestions[config_key] = suggested
-            else:
-                suggestions[config_key] = ""
-
-        return suggestions
-
 
 # Backward compatibility alias
 HardwareDetector = EVChargerDetector
@@ -1019,11 +452,8 @@ def apply_charger_discovery_guards(result: Dict[str, str], entities) -> None:
     near-miss offer. A guard added here closes its class for every brand,
     hinted or hand-written, and for the next one nobody has written yet.
 
-    The glob matrix (``EVChargerDetector.get_best_match``) is a fifth path
-    and deliberately does NOT funnel through here: it produces a config-flow
-    PREFILL the user confirms, not a binding SEM acts on, so it applies the
-    same ``_measures_the_quantity`` predicate as a demotion rather than a
-    correction."""
+    (#1032) The glob matrix that was a fifth path is retired; the wizard's
+    prefill comes from these paths only."""
     _reject_offline_current_control(result, entities)
     _reject_capability_sensor(result, entities)
     _reject_reboot_control(result, entities)
@@ -1608,11 +1038,13 @@ def _role_discovered_chargers(hass, registry, found) -> List[Dict[str, Any]]:
     near miss's ``id`` / ``name``)."""
     running = bool(getattr(hass, "is_running", True)) if hass is not None else False
     state_of = ((lambda eid: hass.states.get(eid))
-                if (hass is not None and running) else None)
+                if (hass is not None and running and hasattr(hass, "states"))
+                else None)
     taken = {str(v) for c in found for k, v in c.items()
              if not k.startswith("_") and isinstance(v, str) and "." in v}
     report: Dict[str, Any] = {"chargers": [], "near_misses": [], "vehicles": []}
-    _roles_pass(report, registry, [], taken, _services_of(hass), state_of)
+    _roles_pass(report, registry, [], taken, _services_of(hass), state_of,
+                include_brand_platforms=True)
     out: List[Dict[str, Any]] = []
     for n in report["near_misses"]:
         offer = dict(n.get("suggested_charger") or {})
@@ -2892,7 +2324,7 @@ def vehicle_from_device(dev_entities) -> Dict[str, Any]:
 
 
 def _roles_pass(report, registry, brand_units, configured_entities,
-                services_of, state_of) -> None:
+                services_of, state_of, *, include_brand_platforms=False) -> None:
     """(#1032) The near-miss walk for the integrations ``_EV_CHARGER_PLATFORMS``
     does not list, then R1 (companion devices) and R4 (a read-only charger
     driven through the one car) across ALL near misses. Mutates ``report``."""
@@ -2908,10 +2340,14 @@ def _roles_pass(report, registry, brand_units, configured_entities,
         # a fork of a brand integration (``<brand>_custom``) is that brand
         return p in brand_platforms or any(p.startswith(f"{b}_")
                                            for b in brand_platforms)
+    # The detection report's own brand walk reports a brand device it could
+    # not map as a near miss; discovery has no such walk, so it reads those
+    # devices here (a unit a brand path DID map is in ``taken``).
     units = group_entities_by_unit(
         [e for e in entries
          if str(e.platform or "") not in skip
-         and not _brand_or_fork(str(e.platform or ""))])
+         and (include_brand_platforms
+              or not _brand_or_fork(str(e.platform or "")))])
     entry_of: Dict[Any, Optional[str]] = {}
     roles_of: Dict[Any, Dict[str, Any]] = {}
     for key, ents in units.items():
@@ -2982,13 +2418,18 @@ def _roles_pass(report, registry, brand_units, configured_entities,
         my_entry = dev_entry.get(n.get("device_id"))
         if not my_entry:
             continue
-        for other in report["near_misses"]:
-            did = other.get("device_id")
-            if (other is n or not did or dev_entry.get(did) != my_entry
-                    or other.get("suggested_charger")):
+        offered = {o.get("device_id") for o in report["near_misses"]
+                   if o.get("suggested_charger")}
+        for did, ents in sorted(dev_entities.items()):
+            # every device of the same config entry, not only those already
+            # reported: discovery's own pass sees the installation too
+            if (did == n.get("device_id") or dev_entry.get(did) != my_entry
+                    or did in offered):
                 continue
-            ents = dev_entities.get(did, [])
-            if _charging_power(ents, vehicle=False):
+            # a companion measures no power at all: a device with power
+            # sensors is a meter or another machine (a Harvi, an Eddi)
+            if any(str(e.entity_id).startswith("sensor.")
+                   and _roles_dc(e) == "power" for e in ents):
                 continue
             n.setdefault("companions", []).append(
                 {"device_id": did, "entities": len(ents)})
@@ -3083,7 +2524,8 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     _hass_running = (bool(getattr(hass, "is_running", True))
                      if hass is not None else False)
     _roles_state_of = ((lambda eid: hass.states.get(eid))
-                       if (hass is not None and _hass_running) else None)
+                       if (hass is not None and _hass_running
+                           and hasattr(hass, "states")) else None)
     _roles_services = _services_of(hass)
 
     def _same_brand(a: str, b: str) -> bool:
@@ -3681,20 +3123,6 @@ _BRAND_HINTS: Dict[str, List[_ROLE]] = {
     # (strings.json), so the row survives any rename of the device. The box
     # publishes a dozen power-class sensors (per phase, apparent, peak) and
     # two numbers: every rule NAMES the key it wants.
-    "nrgkick": [
-        {"role": "ev_current_control_entity", "domain": "number",
-         "names": ("current_set",)},
-        {"role": "ev_start_stop_entity", "domain": "switch",
-         "names": ("charging_enabled",)},
-        {"role": "ev_charging_power_sensor", "domain": "sensor",
-         "device_class": "power", "names": ("total_active_power",)},
-        {"role": "ev_session_energy_sensor", "domain": "sensor",
-         "device_class": "energy", "names": ("charged_energy",), "not": ("total",)},
-        {"role": "ev_total_energy_sensor", "domain": "sensor",
-         "device_class": "energy", "names": ("total_charged_energy",)},
-        {"role": "ev_charging_sensor", "domain": "sensor",
-         "names": ("status",)},
-    ],
     # (#808) ABL eMH1 through matfroh/ABL_emh1_modbus. The integration
     # names entities in plain English with the user's device name in front,
     # so the rules match the tail the source writes, never the head.

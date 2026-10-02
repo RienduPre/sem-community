@@ -161,3 +161,37 @@ def test_no_new_platform_name_compare():
 def test_the_platform_compare_list_only_shrinks():
     gone = sorted(PLATFORM_NAME_COMPARES_TODAY - _platform_name_compares())
     assert not gone, f"{gone} are gone — remove them from the list"
+
+
+#: (#1032 review) Named constants that hold integration names. The role
+#: reader may read the brand list only to step AROUND brands (the role pass
+#: leaves a device a brand path owns to that path) — never to treat a
+#: brand differently.
+BRAND_CONSTANTS = re.compile(r"BRAND|PROVEN|_EV_CHARGER_PLATFORMS|ROSTER$|"
+                             r"_PATTERNS$")
+ROLE_READER_MAY_STEP_AROUND = {("_roles_pass", "_EV_CHARGER_PLATFORMS")}
+
+
+def test_the_role_reader_reads_no_brand_constant():
+    tree = ast.parse((ROOT / "hardware_detection.py").read_text())
+    fns = {n.name: n for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    bad = []
+    for f in ROLE_READER:
+        for n in ast.walk(fns[f]):
+            name = (n.id if isinstance(n, ast.Name)
+                    else n.attr if isinstance(n, ast.Attribute) else None)
+            if name and BRAND_CONSTANTS.search(name) and \
+                    (f, name) not in ROLE_READER_MAY_STEP_AROUND:
+                bad.append((f, name))
+            # a platform compared with something BUILT (f-string, +, getattr)
+            if isinstance(n, ast.Compare):
+                parts = [n.left, *n.comparators]
+                if any("platform" in ast.unparse(p) for p in parts) and any(
+                        isinstance(p, (ast.JoinedStr, ast.BinOp))
+                        or (isinstance(p, ast.Call)
+                            and getattr(p.func, "id", "") == "getattr"
+                            and "platform" not in ast.unparse(p))
+                        for p in parts):
+                    bad.append((f, ast.unparse(n)))
+    assert not bad, f"the role reader treats brands by name: {bad}"
