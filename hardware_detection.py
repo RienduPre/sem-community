@@ -831,7 +831,7 @@ def _is_phase_leg(entity_id: str) -> bool:
         return True
     tokens = _name_tokens(entity_id)
     return any(word == "phase" and nxt in ("1", "2", "3")
-               for word, nxt in zip(tokens, tokens[1:]))
+               for word, nxt in zip(tokens, tokens[1:], strict=False))
 
 
 def _own_names(entities) -> Dict[str, str]:

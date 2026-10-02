@@ -415,7 +415,7 @@ def _whole_id_word_tests(fn) -> list:
     for node in ast.walk(tree):
         if isinstance(node, ast.Compare):
             left = node.left
-            for op, right in zip(node.ops, node.comparators):
+            for op, right in zip(node.ops, node.comparators, strict=True):
                 if (isinstance(op, (ast.In, ast.NotIn))
                         and isinstance(left, ast.Constant)
                         and isinstance(left.value, str)
