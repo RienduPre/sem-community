@@ -3241,10 +3241,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     pc_conn_map = getattr(power, "ev_connected_per_charger", None) or {}
                     if cid in pc_conn_map:
                         power.ev_connected = bool(pc_conn_map[cid])
-                    # Symmetric for ev_charging (#351 M7): the reader's
-                    # per-charger answer, from the shared status words. (#1038)
-                    # This used to re-read the sensor as ``== "on"``, so an Ohme
-                    # at ``charging`` read as not charging.
+                    # ev_charging for this charger: the reader's per-charger
+                    # answer, from the shared status words. (#1038) This used
+                    # to re-read the sensor as ``== "on"``, so an Ohme at
+                    # ``charging`` read as not charging. Nothing in session
+                    # tracking reads it today; it is set so a future reader
+                    # gets this charger's answer, not the fleet's.
                     pc_chg_map = getattr(power, "ev_charging_per_charger", None) or {}
                     if cid in pc_chg_map:
                         power.ev_charging = bool(pc_chg_map[cid])

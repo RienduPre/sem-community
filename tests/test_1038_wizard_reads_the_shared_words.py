@@ -178,7 +178,8 @@ class TestASensorIsJudgedByTheOptionsItLists:
     fault, a boot) is still the right sensor when its listed options let
     the reader answer yes AND no for the role."""
 
-    @pytest.mark.parametrize("options", [OHME, PEBLAR], ids=["ohme", "peblar"])
+    @pytest.mark.parametrize("options", [OHME, PEBLAR, TESLA_WC],
+                             ids=["ohme", "peblar", "tesla_wall_connector"])
     @pytest.mark.parametrize("role", ["ev_connected", "ev_charging"])
     def test_a_full_vocabulary_passes_in_every_state(self, options, role):
         refused = [s for s in options if not _accepts(s, options, role)]
@@ -206,8 +207,22 @@ class TestASensorIsJudgedByTheOptionsItLists:
         assert _accepts("vehicle_detected", BLUE_CURRENT_VEHICLE,
                         "ev_connected") is False
         assert _accepts("standby", BLUE_CURRENT_VEHICLE, "ev_connected") is False
-        # a plug sensor must be able to say "no car": Tesla WC lists none
-        assert _accepts("booting", TESLA_WC, "ev_connected") is False
+        # nor is it a charging sensor: it lists no charging word
+        assert _accepts("vehicle_detected", BLUE_CURRENT_VEHICLE,
+                        "ev_charging") is False
+
+    def test_a_plug_sensor_must_list_a_car_and_no_car(self):
+        assert _accepts("x", ["unplugged", "x"], "ev_connected") is False
+        assert _accepts("x", ["plugged_in", "x"], "ev_connected") is False
+        assert _accepts("x", ["plugged_in", "unplugged", "x"],
+                        "ev_connected") is True
+
+    def test_a_charging_sensor_must_list_charging_and_not_charging(self):
+        assert _accepts("wakeup", ["charging", "wakeup", "standby"],
+                        "ev_charging") is False
+        assert _accepts("wakeup", ["connected", "wakeup"], "ev_charging") is False
+        assert _accepts("wakeup", ["charging", "connected", "wakeup"],
+                        "ev_charging") is True
 
     @pytest.mark.parametrize("options", [
         # Peblar charge_current_limit_source, NRGkick cellular_mode: ENUM
@@ -259,11 +274,29 @@ class TestTheWizardAndTheReaderAgree:
         assert se.is_cable_present(state) is None
         assert _plugged(state) is False
 
+    @pytest.mark.parametrize("state", ["C2", "b1", "A", "f"])
+    def test_a_bare_pilot_code_still_passes(self, state):
+        # the old list took them; ABL eMH1 (#808) may store them. Never
+        # mapped: the reader falls back, as before
+        assert _wizard_errors(state) == {}
+        assert se.classify_charger_status(state) == "unknown"
+        assert _plugged(state) is False
+
+    def test_tesla_not_connected_is_an_empty_bay(self):
+        assert _wizard_errors("not_connected") == {}
+        assert _plugged("not_connected") is False
+        assert _charging("not_connected") is False
+
     @pytest.mark.parametrize("state", ["maybe", "idle", "true", "nan",
-                                       "a", "b1", "firmware 1.2.3"])
+                                       "no ev connected", "firmware 1.2.3"])
     def test_a_word_the_reader_cannot_read_is_refused(self, state):
         assert se.classify_charger_status(state) == "unknown"
         assert _accepts(state) is False
+
+    def test_the_extra_sets_never_collide_with_a_class(self):
+        classes = se._CHARGING | se._NOT_CHARGING | se._LOCKED
+        assert se._FAULT.isdisjoint(classes)
+        assert se._IEC_PILOT.isdisjoint(classes)
 
     def test_the_power_role_keeps_its_own_check(self):
         det = _detector("plugged_in")
@@ -271,18 +304,30 @@ class TestTheWizardAndTheReaderAgree:
 
 
 def _status_word_lists(tree):
-    """Every tuple/list/set literal holding two or more status words other
-    than a bare on/off pair."""
+    """Every tuple/list/set literal, and every dict's keys, holding two or
+    more status words — unless they are only a bare on/off pair."""
     found = []
     for n in ast.walk(tree):
         if isinstance(n, (ast.Tuple, ast.List, ast.Set)):
-            words = [e.value for e in n.elts
-                     if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                     and se.knows_status(e.value)
-                     and e.value.strip().lower() not in ("on", "off")]
-            if len(words) >= 2:
-                found.append((n.lineno, words))
+            elts = n.elts
+        elif isinstance(n, ast.Dict):
+            elts = [k for k in n.keys if k is not None]
+        else:
+            continue
+        words = [e.value for e in elts
+                 if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                 and se.knows_status(e.value)]
+        if len(words) >= 2 and not all(
+                w.strip().lower() in ("on", "off") for w in words):
+            found.append((n.lineno, words))
     return found
+
+
+# Lists that are not a charger's status words, each with its reason.
+_NOT_A_CHARGER_LIST = {
+    # SEM's own home-battery status labels (battery_status_map)
+    ("sensor.py", frozenset({"charging", "discharging"})),
+}
 
 
 class TestTheCopyIsGone:
@@ -304,14 +349,18 @@ class TestTheCopyIsGone:
 
     def test_no_word_list_anywhere_in_the_package(self):
         root = Path(hd.__file__).parent
-        hits = []
+        hits, walked = [], set()
         for path in sorted(root.rglob("*.py")):
             rel = path.relative_to(root).as_posix()
             if rel.split("/")[0] in ("tests", "tools", "scripts") or \
                     rel == "coordinator/charger_adapters/status_enum.py":
                 continue
+            walked.add(rel)
             for line, words in _status_word_lists(ast.parse(path.read_text())):
-                hits.append(f"{rel}:{line} {words}")
+                if (rel, frozenset(words)) not in _NOT_A_CHARGER_LIST:
+                    hits.append(f"{rel}:{line} {words}")
+        assert {"hardware_detection.py", "coordinator/sensor_reader.py",
+                "coordinator/coordinator.py", "config_flow.py"} <= walked
         assert hits == [], (
             "a private list of charger status words — they belong in "
             "status_enum.py:\n" + "\n".join(hits))
@@ -319,5 +368,11 @@ class TestTheCopyIsGone:
     def test_the_lint_can_fail(self):
         bad = 'def f(s):\n    return s in ("on", "plugged in", "charging")\n'
         assert _status_word_lists(ast.parse(bad)) == [
-            (2, ["plugged in", "charging"])]
+            (2, ["on", "plugged in", "charging"])]
         assert _status_word_lists(ast.parse('x = ("on", "off")\n')) == []
+        # on plus one real word is a copy too
+        assert _status_word_lists(ast.parse('x = ("on", "charging")\n')) == [
+            (1, ["on", "charging"])]
+        assert _status_word_lists(ast.parse(
+            'x = {"charging": True, "paused": False}\n')) == [
+            (1, ["charging", "paused"])]

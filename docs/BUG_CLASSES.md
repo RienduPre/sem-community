@@ -2066,18 +2066,22 @@ reader also read that car as gone. **Closure:** the copy is deleted; the wizard 
 fault still saves. Numbers stay `0`/`1` only: the reader reads any number > 0 as on, so a voltage
 picked by mistake would show a car plugged in all the time. An ENUM sensor in any other state
 passes when its `options` let the reader answer yes AND no for the role; one known word is not
-enough. Peblar's two words joined the shared list. Dropped with the copy, because the reader never
-read them: `true`/`false`, `idle`, `not_connected` and `no ev connected` on a plain sensor, the
-bare IEC codes `a`…`f`. A fourth copy, in the coordinator's per-charger loop (`== "on"`, so Ohme
+enough. Peblar's two words and Tesla Wall Connector's `not_connected` joined the shared list. The
+bare IEC pilot codes (`a`, `b1` … `f`) stay accepted in an `_IEC_PILOT` set, still unknown to the
+reader: ABL eMH1 (#808) may store them. Dropped with the copy, because no integration is known to
+store them and the reader never mapped them (each reads as "no"): `true`/`false`, `idle`,
+`no ev connected` on a plain sensor. A fourth copy, in the coordinator's per-charger loop (`== "on"`, so Ohme
 `charging` read as not charging; nothing read the result), now takes the reader's per-charger
 answer. **Guard:** `tests/test_1038_wizard_reads_the_shared_words.py` — core's option lists for
-Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the real form check; every
-word the reader knows passes it; an AST lint over the package for any tuple, list or set of two or
-more status words outside `status_enum.py`. **Left for Guido:** the shared list still lacks words
+Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the wizard's check (Ohme and
+Peblar through the whole form); every word the reader knows passes it; an AST lint over the
+package for any tuple, list, set or dict keys with two or more status words outside
+`status_enum.py`, unless they are only on/off. **Left for Guido:** the shared list still lacks words
 core really stores — Blue Current `vehicle_detected`/`standby`, NRGkick `standby`, Tesla Wall
-Connector `not_connected`/`waiting_car` — so a Blue Current `vehicle_status` is still refused
-except at `ready`, and the reader reads a car at `vehicle_detected` as gone. Each needs its meaning
-checked at the source before it is mapped. Older and separate: `_discover_peblar` and
+Connector `waiting_car`, the ABL pilot codes — so a Blue Current `vehicle_status` is still refused
+except at `ready` (one that saved at `ready` is refused on a later reconfigure), and the reader
+reads a car at `vehicle_detected` as gone. Each needs its meaning checked at the source before it
+is mapped. Older and separate: `_discover_peblar` and
 `_discover_easee` take a status sensor only with no device class, but core's Peblar `cp_state` is
 `enum`, so registry discovery never binds it (the glob prefill does, on an English install).
 **Closure:** import the owner and delete the literal, at **every** site in one pass — and where a
