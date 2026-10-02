@@ -908,7 +908,9 @@ class SolarEnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Primary: integration-aware registry discovery (KEBA, Easee, go-eCharger, Wallbox).
         # This filters by entity registry platform and device_class, so it never matches
         # unrelated devices like generic smart plugs.
-        suggestions = discover_ev_charger_from_registry(self.hass)
+        # (#1032) the user confirms this form, so a charger the roster's roles
+        # found may be offered here
+        suggestions = discover_ev_charger_from_registry(self.hass, include_roles=True)
 
         # Fallback: pattern-based detection only fills keys the registry didn't already set,
         # so a stray generic match can never override a confident registry match.

@@ -1590,7 +1590,45 @@ def discover_all_ev_chargers_from_registry(
                 )
                 chargers.append(result)
 
+    # (#1032) the roster's roles find a charger on any integration the brand
+    # list does not name — the same offer the detection report shows as a
+    # near miss. Only for discovery: a charger already saved keeps its
+    # mapping (nothing here rewrites saved config; setup and the add-charger
+    # step offer it, and the user confirms).
+    try:
+        chargers.extend(_role_discovered_chargers(hass, entity_reg, chargers))
+    except Exception:  # noqa: BLE001 — a new reader never costs discovery
+        _LOGGER.debug("role discovery failed", exc_info=True)
     return chargers
+
+
+def _role_discovered_chargers(hass, registry, found) -> List[Dict[str, Any]]:
+    """(#1032) Complete role offers for units no brand path claimed, in the
+    shape discovery returns (``_platform`` / ``_device_id`` instead of the
+    near miss's ``id`` / ``name``)."""
+    running = bool(getattr(hass, "is_running", True)) if hass is not None else False
+    state_of = ((lambda eid: hass.states.get(eid))
+                if (hass is not None and running) else None)
+    taken = {str(v) for c in found for k, v in c.items()
+             if not k.startswith("_") and isinstance(v, str) and "." in v}
+    report: Dict[str, Any] = {"chargers": [], "near_misses": [], "vehicles": []}
+    _roles_pass(report, registry, [], taken, _services_of(hass), state_of)
+    out: List[Dict[str, Any]] = []
+    for n in report["near_misses"]:
+        offer = dict(n.get("suggested_charger") or {})
+        if not offer:
+            continue
+        offer.pop("id", None)
+        offer.pop("name", None)
+        offer["_platform"] = n["platform"]
+        if n.get("device_id"):
+            offer["_device_id"] = n["device_id"]
+        offer["_found_by"] = "roles"
+        _LOGGER.info("Role-discovered EV charger on %s (device %s): %s",
+                     n["platform"], n.get("device_id") or "default",
+                     {k: v for k, v in offer.items() if not k.startswith("_")})
+        out.append(offer)
+    return out
 
 
 def probe_charger_candidates(hass: Optional[HomeAssistant] = None,
@@ -2099,8 +2137,9 @@ def _gate_proposal(prop: Dict[str, Any], role: str, state_of,
 
 def _role_words(entry) -> List[str]:
     """An entity's own words: its translation key and its unique id."""
-    return [w for w in (str(getattr(entry, "translation_key", "") or ""),
-                        str(getattr(entry, "unique_id", "") or "")) if w]
+    return [w for w in (getattr(entry, "translation_key", None),
+                        getattr(entry, "unique_id", None))
+            if isinstance(w, str) and w]
 
 
 def _rule_hits(entry, rule) -> bool:
@@ -2118,7 +2157,9 @@ def _first_hit(entries, rule) -> Optional[str]:
 
 
 def _roles_dc(entry) -> str:
-    return str(getattr(entry, "original_device_class", "") or "")
+    dc = getattr(entry, "original_device_class", None)
+    dc = getattr(dc, "value", dc)
+    return dc if isinstance(dc, str) else ""
 
 
 def _speaks_vehicle(entries) -> bool:
@@ -2136,8 +2177,9 @@ def _select_options(entry, state_of) -> List[str]:
         if st is not None:
             opts = (getattr(st, "attributes", None) or {}).get("options")
     if not opts:
-        opts = (getattr(entry, "capabilities", None) or {}).get("options")
-    return [str(o) for o in (opts or [])]
+        caps = getattr(entry, "capabilities", None)
+        opts = caps.get("options") if isinstance(caps, dict) else None
+    return [str(o) for o in opts] if isinstance(opts, (list, tuple)) else []
 
 
 def _pick_option(options: List[str], wanted) -> Optional[str]:
@@ -2221,7 +2263,8 @@ def _is_stored_setting(entries, eid: Optional[str]) -> bool:
     box's memory and changes what the owner set."""
     for e in entries:
         if str(e.entity_id) == eid:
-            return str(getattr(e, "entity_category", "") or "").endswith("config")
+            cat = getattr(e, "entity_category", None)
+            return str(getattr(cat, "value", cat) or "") == "config"
     return False
 
 
@@ -2794,8 +2837,8 @@ def _roles_pass(report, registry, brand_units, configured_entities,
     entry_of: Dict[Any, Optional[str]] = {}
     roles_of: Dict[Any, Dict[str, Any]] = {}
     for key, ents in units.items():
-        entry_of[key] = next((getattr(e, "config_entry_id", None) for e in ents
-                              if getattr(e, "config_entry_id", None)), None)
+        entry_of[key] = next((e.config_entry_id for e in ents
+                              if isinstance(getattr(e, "config_entry_id", None), str)), None)
         if taken & {str(e.entity_id) for e in ents}:
             continue
         platform = str(ents[0].platform or "")
@@ -2846,8 +2889,8 @@ def _roles_pass(report, registry, brand_units, configured_entities,
         if did:
             dev_entities[did] = uents
             dev_entry[did] = next(
-                (getattr(e, "config_entry_id", None) for e in uents
-                 if getattr(e, "config_entry_id", None)), None)
+                (e.config_entry_id for e in uents
+                 if isinstance(getattr(e, "config_entry_id", None), str)), None)
     chargerish = [n for n in report["near_misses"]
                   if n.get("suggested_charger") or n.get("charger_roles")]
     companions = set()
@@ -3251,16 +3294,24 @@ def build_detection_report(hass: Optional[HomeAssistant] = None,
     return report
 
 
-def discover_ev_charger_from_registry(hass: HomeAssistant) -> Dict[str, str]:
+def discover_ev_charger_from_registry(hass: HomeAssistant, *,
+                                      include_roles: bool = False) -> Dict[str, str]:
     """Auto-discover EV charger config from known integrations via entity registry.
 
     Backward-compatible wrapper: returns the first detected charger.
+
+    (#1032) A charger found only by the roster's roles is returned only when
+    ``include_roles`` — a form the user confirms. Setup's silent reseed and
+    the coordinator's late retry keep to the brand paths: a role-found
+    charger is never saved or driven without the user accepting it.
 
     Returns:
         Dict with config keys (ev_connected_sensor, ev_charging_sensor, etc.)
         Only includes keys where entities were found.
     """
     all_chargers = discover_all_ev_chargers_from_registry(hass)
+    if not include_roles:
+        all_chargers = [c for c in all_chargers if c.get("_found_by") != "roles"]
     return all_chargers[0] if all_chargers else {}
 
 
