@@ -476,3 +476,115 @@ class TestArnesSequenceEndToEnd:
             clock.advance(120)
             assert _run(w.apply(h, ENTITY, 1700.0, observer=False)) == "held"
         assert reg.writes == [1550.0, 1700.0, 1700.0]
+
+
+class FakeStore:
+    def __init__(self, data=None):
+        self.data = data
+
+    async def async_load(self):
+        return self.data
+
+    async def async_save(self, data):
+        self.data = dict(data)
+
+    async def async_remove(self):
+        self.data = None
+
+
+class TestAdoptionProvesTheRegister:
+    """Review 3: a cap from disk is not a cap on the wire. The register may
+    have been moved while SEM was down, or while it was observing."""
+
+    def _lifetime_one(self):
+        """Write 1550, the inverter settles at 1449, taken + settled,
+        persisted."""
+        clock = Clock()
+        store = FakeStore()
+        reg = TemplateNumber(1700.0, step=10.0, applies=lambda v: 1449.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
+        reg.scan()
+        for _ in range(2):
+            clock.advance(10)
+            assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert store.data["cap_w"] == 1550.0
+        assert store.data["accepted_w"] == 1449.0
+        assert store.data["applied_differs"] == [1449.0, 1550.0]
+        return store, reg
+
+    def test_the_record_carries_the_accepted_value(self):
+        self._lifetime_one()
+
+    def test_a_register_moved_while_sem_was_down_is_rewritten_at_once(self):
+        store, reg = self._lifetime_one()
+        reg.applies = None
+        reg.state.state = "500.0"           # moved while SEM was down
+        clock = Clock(5000.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
+        assert reg.writes[-1] == 1550.0
+        assert w._taken is None, "a write on the wire is not yet proven"
+        reg.scan()
+        clock.advance(10)
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert w._taken is True
+        assert len(reg.writes) == 2
+
+    def test_a_register_at_the_persisted_accepted_value_is_taken_without_a_write(self):
+        store, reg = self._lifetime_one()
+        n = len(reg.writes)
+        clock = Clock(5000.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        assert w._taken is True
+        assert w.applied_differs == (1449.0, 1550.0)
+        assert len(reg.writes) == n
+
+    def test_a_persisted_difference_is_not_said_again(self, caplog):
+        store, reg = self._lifetime_one()
+        caplog.clear()                       # lifetime one said it once
+        clock = Clock(5000.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        with caplog.at_level(logging.WARNING):
+            for _ in range(3):
+                clock.advance(10)
+                _run(w.apply(h, ENTITY, 1550.0, observer=False))
+        assert not [r for r in caplog.records
+                    if "took the write as" in r.getMessage()]
+
+    def test_observer_on_then_off_with_the_register_moved_meanwhile(self):
+        store, reg = self._lifetime_one()
+        clock = Clock(5000.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "held"
+        n = len(reg.writes)
+        # observer on: SEM stands down without forgetting (#949)
+        assert _run(w.apply(h, ENTITY, None, observer=True)) == "observer"
+        reg.applies = None
+        reg.state.state = "500.0"           # moved while SEM observed
+        clock.advance(60)
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
+        assert len(reg.writes) == n + 1
+
+    def test_an_old_record_without_an_accepted_value_still_proves(self):
+        """A record from before this change: no accepted value. Out of band
+        on the first reading means moved by someone — one write."""
+        store = FakeStore({"entity_id": ENTITY, "restore_value": 5000.0,
+                           "cap_w": 1550.0})
+        reg = TemplateNumber(500.0, step=10.0)
+        w = ChargePacingWriter(store=store)
+        w._clock = Clock()
+        h = reg.hass()
+        assert _run(w.apply(h, ENTITY, 1550.0, observer=False)) == "wrote"
+        assert reg.writes == [1550.0]
