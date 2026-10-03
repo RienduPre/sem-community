@@ -2357,14 +2357,17 @@ Each counter has its own wait, which starts only once HA runs (class 86) and las
 for ever; an external `source:id` statistic is left out at once). A sum with a counter left out is a
 FLOOR: that category is only ever raised, and #551's downward heal does not fire on it. The seed
 records the counters it summed (`lifetime_seed_counters`, persisted); when the set changes — or, with
-no record, when any list is longer than one — each total is RAISED to its counter sum, never lowered
-(review: a swapped inverter or a removed row reads less than the history SEM holds), and
-`lifetime_home` moves by the same amounts. So every install seeded before the fix heals on its next
-restart, not only those below half of the hardware. The battery wait now applies only to a battery
+no record, when any list is longer than one — each total is RAISED to its counter sum, never lowered.
+The same holds for the old below-half and 90 % re-seeds (review, two rounds: a swapped inverter, a
+removed row or a second charger reads less than the history SEM holds, and a full overwrite triggered
+by ANOTHER category lowered it); only #551's unit heal still sets values outright. `lifetime_home`
+moves by the raised amounts. So every install seeded before the fix heals on its next restart, not
+only those below half of the hardware. The battery wait now applies only to a battery
 counter that gave a reading: a battery-less install read 0 + 0 there and never seeded at all.
 **Guard:** `tests/test_1043_lifetime_seed_all_counters.py` — the reporter's numbers, a tariff-1 seed
 above half heals, a re-seed never lowers history (swapped inverter, removed row, gone or dark
-counter), per-counter waits that start when HA runs, battery-less, the record round-trips, yearly
+counter, a below-half category beside a lower counter, a night restart, a floor never starting the
+unit heal), per-counter waits that start when HA runs, battery-less, the record round-trips, yearly
 and monthly sums, and an AST check that `energy_calculator.py` names no scalar `*_energy` field.
 **Named, not swept:** the EV part of both seeds takes the FIRST `device_consumption` entry whose id
 CONTAINS a keyword (`"ev"` — class 67), so a two-charger install seeds one charger, and summing would

@@ -317,6 +317,67 @@ class TestReSeedNeverLowersHistory:
         later.seed_lifetime_from_hardware(_hass(_values()), _ed())
         assert _lifetime(later, "grid_export") == pytest.approx(35_196)
 
+    def test_a_below_half_category_does_not_lower_another(self):
+        """Review round 2: export below half of its new sum calls for a
+        re-seed. That must not set solar — whose new inverter counts from
+        0 — down to the counter, nor the EV total to the first charger."""
+        solar = {"sensor.inv_new": 20_000.0}
+        exp = {"sensor.export_t1": 2_000.0, "sensor.export_t2": 6_000.0}
+        values = {**solar, **IMPORT, **exp, **CHARGE, **DISCHARGE,
+                  "sensor.wallbox_total_energy": 3_000.0}
+        ed = _ed(solar=solar, exp=exp)
+        ed.device_consumption = [{"stat_consumption": "sensor.wallbox_total_energy"}]
+        calc = _calc()
+        calc._lifetime_accumulators.update({
+            "lifetime_solar": 30_000.0, "lifetime_grid_import": 10_000.0,
+            "lifetime_grid_export": 3_000.0, "lifetime_battery_charge": 3_000.0,
+            "lifetime_battery_discharge": 2_700.0, "lifetime_home": 31_000.0,
+            "lifetime_ev": 5_000.0,
+        })
+        calc.seed_lifetime_from_hardware(_hass(values), ed)
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(30_000)
+        assert _lifetime(calc, "grid_export") == pytest.approx(8_000)
+        assert _lifetime(calc, "home") == pytest.approx(31_000 - 5_000)
+        assert _lifetime(calc, "ev") == pytest.approx(5_000)
+
+    def test_a_night_restart_on_the_upgrade_keeps_solar(self, monkeypatch):
+        """Inverters 2 and 3 asleep past the wait, on the upgrade restart of
+        the reporter's tariff-1 export: export is raised, solar — a floor
+        tonight — keeps the 60,000 SEM holds instead of 12,388."""
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = _calc()
+        calc._lifetime_accumulators.update({
+            "lifetime_solar": 60_000.0, "lifetime_grid_import": 10_000.0,
+            "lifetime_grid_export": 10_357.0, "lifetime_battery_charge": 3_000.0,
+            "lifetime_battery_discharge": 2_700.0,
+        })
+        night = _values(**{"sensor.inv2_kwh": "unavailable", "sensor.inv3_kwh": "unavailable"})
+        calc.seed_lifetime_from_hardware(_hass(night), _ed())
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(night), _ed())
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(60_000)
+        assert _lifetime(calc, "grid_export") == pytest.approx(35_196)
+
+    def test_a_floor_never_starts_the_unit_heal(self, monkeypatch):
+        """Solar stored above twice its partial sum is not the #551 ×1000
+        case — so export, a little above its counter, and home stay."""
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = self._good()
+        calc._lifetime_accumulators["lifetime_grid_export"] = 35_300.0
+        calc._lifetime_accumulators["lifetime_home"] = 34_000.0
+        night = _values(**{"sensor.inv2_kwh": "unavailable", "sensor.inv3_kwh": "unavailable"})
+        calc.seed_lifetime_from_hardware(_hass(night), _ed())
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(night), _ed())
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(60_700)
+        assert _lifetime(calc, "grid_export") == pytest.approx(35_300)
+        assert _lifetime(calc, "home") == pytest.approx(34_000)
+
 
 @pytest.mark.unit
 class TestLifetimeSeedWaitsForEveryCounter:
@@ -402,6 +463,24 @@ class TestLifetimeSeedWaitsForEveryCounter:
         calc.seed_lifetime_from_hardware(_hass(late), _ed())
         clock[0] += 1
         calc.seed_lifetime_from_hardware(_hass(late), _ed())
+        assert calc._lifetime_seeded is False
+
+    def test_a_counter_that_reads_again_starts_a_new_wait(self, monkeypatch):
+        """Ready once, dark again: the old wait does not carry over."""
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = _calc()
+        calc.seed_lifetime_from_hardware(
+            _hass(_values(**{"sensor.inv2_kwh": "unavailable"})), _ed())
+        clock[0] += 100
+        calc.seed_lifetime_from_hardware(
+            _hass(_values(**{"sensor.inv3_kwh": "unavailable"})), _ed())
+        clock[0] += 250
+        both = _values(**{"sensor.inv2_kwh": "unavailable", "sensor.inv3_kwh": "unavailable"})
+        calc.seed_lifetime_from_hardware(_hass(both), _ed())
+        clock[0] += 50
+        calc.seed_lifetime_from_hardware(_hass(both), _ed())
+        # inv3 has waited its 300 s; inv2 only 50 s since it went dark again.
         assert calc._lifetime_seeded is False
 
     def test_an_absent_counter_is_left_out_after_the_wait(self, monkeypatch):

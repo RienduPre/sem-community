@@ -1177,7 +1177,7 @@ class EnergyCalculator:
             return
         if left_out:
             log_on_change(
-                _LOGGER, "lifetime_seed_left_out", logging.WARNING,
+                _LOGGER, "lifetime_seed_left_out", logging.INFO,
                 "Lifetime seed: Energy Dashboard counter(s) %s gave no reading "
                 "— left out; those lifetime totals are only raised, never "
                 "lowered", ", ".join(left_out),
@@ -1220,8 +1220,13 @@ class EnergyCalculator:
         # Re-seed any sensor that is <50% of the hardware counter —
         # this fixes the race condition where solar loaded first but
         # grid/battery were unavailable during initial seeding (#110).
+        # (#1043) That re-seed, the 90 % solar check and a changed counter
+        # set only RAISE totals (``_raise_lifetime_to_counters``): a swapped
+        # inverter, a removed row or a second charger reads less than the
+        # history SEM holds. Only the #551 unit heal sets values outright.
         current = self._lifetime_accumulators
-        needs_seed = False
+        raise_needed = False
+        unit_heal = False
         for category in ENERGY_COUNTER_CATEGORIES:
             key = f"lifetime_{category}"
             hw_value = totals[category]
@@ -1231,8 +1236,7 @@ class EnergyCalculator:
                     "Lifetime re-seed needed: %s stored=%.0f hw=%.0f (%.0f%%)",
                     key, stored, hw_value, (stored / hw_value * 100) if hw_value > 0 else 0,
                 )
-                needs_seed = True
-                break
+                raise_needed = True
             # #551 — DOWNWARD self-heal: installs that seeded before the
             # unit-aware read stored Wh values as kWh (×1000). The
             # accumulator can never legitimately dwarf its own hardware
@@ -1244,11 +1248,25 @@ class EnergyCalculator:
                     "Lifetime re-seed (downward, #551 unit fix): %s "
                     "stored=%.0f hw=%.0f", key, stored, hw_value,
                 )
-                needs_seed = True
+                unit_heal = True
                 break
 
-        if not needs_seed and current.get("lifetime_solar", 0) > solar * 0.9:
-            self._raise_lifetime_to_counters(counters, seed_set, totals)
+        if not unit_heal:
+            if self._lifetime_seed_counters is None:
+                # No record: the seed came from before #1043, which read only
+                # the FIRST grid and battery counter — wrong wherever a list
+                # is longer.
+                set_changed = any(len(ids) > 1 for ids in counters.values())
+            else:
+                set_changed = self._lifetime_seed_counters != seed_set
+            if (
+                raise_needed
+                or set_changed
+                or current.get("lifetime_solar", 0) <= solar * 0.9
+            ):
+                self._raise_lifetime_to_counters(
+                    totals, self._read_ev_seed(ed_config, _read), seed_set,
+                )
             self._lifetime_seed_counters = seed_set
             self._lifetime_seeded = True
             return
@@ -1267,13 +1285,7 @@ class EnergyCalculator:
                    - acc["lifetime_battery_charge"])
         self._lifetime_accumulators["lifetime_home"] = home
 
-        # Seed EV from hardware counter (KEBA total energy etc.)
-        ev_total = 0.0
-        for dev in ed_config.device_consumption:
-            energy_sensor = dev.get("stat_consumption", "")
-            if any(p in energy_sensor.lower() for p in ["keba", "ev", "charger", "wallbox", "easee"]):
-                ev_total = _read(energy_sensor)
-                break
+        ev_total = self._read_ev_seed(ed_config, _read)
         if ev_total > 0:
             self._lifetime_accumulators["lifetime_ev"] = ev_total
 
@@ -1287,26 +1299,25 @@ class EnergyCalculator:
             acc["lifetime_battery_discharge"], home, ev_total,
         )
 
-    def _raise_lifetime_to_counters(
-        self,
-        counters: Dict[str, List[str]],
-        seed_set: Dict[str, List[str]],
-        totals: Dict[str, float],
-    ) -> None:
-        """Raise a lifetime total its counters prove too low (#1043).
+    @staticmethod
+    def _read_ev_seed(ed_config, read) -> float:
+        """Seed EV from hardware counter (KEBA total energy etc.)."""
+        for dev in getattr(ed_config, "device_consumption", None) or []:
+            energy_sensor = dev.get("stat_consumption", "")
+            if any(p in energy_sensor.lower() for p in ["keba", "ev", "charger", "wallbox", "easee"]):
+                return read(energy_sensor)
+        return 0.0
 
-        Runs when the seed was taken from another set of counters. With no
-        record, the seed came from before #1043, which read only the FIRST
-        grid and battery counter — wrong wherever a list is longer. Only UP:
-        a counter that was replaced or removed reads less than the history
-        SEM holds, and that history stays. ``lifetime_home`` moves by the
+    def _raise_lifetime_to_counters(
+        self, totals: Dict[str, float], ev_total: float, seed_set: Dict[str, List[str]],
+    ) -> None:
+        """Raise each lifetime total its counters prove too low (#1043).
+
+        Only UP: a counter that was replaced or removed reads less than the
+        history SEM holds, and that history stays. On a fresh install every
+        total is 0, so this is the full seed. ``lifetime_home`` moves by the
         same amounts, with the sign each category has in the energy balance.
         """
-        if self._lifetime_seed_counters is None:
-            if not any(len(ids) > 1 for ids in counters.values()):
-                return
-        elif self._lifetime_seed_counters == seed_set:
-            return
         acc = self._lifetime_accumulators
         home_delta = 0.0
         raised = []
@@ -1318,13 +1329,15 @@ class EnergyCalculator:
             acc[key] = totals[category]
             home_delta += -delta if category in ("grid_export", "battery_charge") else delta
             raised.append(f"{category} +{delta:.0f}")
+        if ev_total > acc.get("lifetime_ev", 0.0):
+            raised.append(f"ev +{ev_total - acc.get('lifetime_ev', 0.0):.0f}")
+            acc["lifetime_ev"] = ev_total
         if not raised:
             return
         acc["lifetime_home"] = max(0.0, acc.get("lifetime_home", 0.0) + home_delta)
         _LOGGER.info(
-            "Lifetime totals raised to the Energy Dashboard counters "
-            "(counter set %s → %s): %s kWh",
-            self._lifetime_seed_counters, seed_set, ", ".join(raised),
+            "Lifetime seeded from hardware — raised to the Energy Dashboard "
+            "counters %s: %s kWh", seed_set, ", ".join(raised),
         )
 
     @property
