@@ -209,7 +209,7 @@ class BatteryNightTracker:
             # pack's SOC kept counting the whole time, so ask the pack what
             # happened rather than writing the interval off. Without this a
             # reboot silently UNDER-states the drain — and users reboot.
-            self._bridge_hole(dt, s)
+            self._bridge_hole(dt, s, in_night)
             self._gap_s += dt
             dt = 0.0                    # never integrate across a hole
             self._last_good = None      # …and never hold across one
@@ -317,7 +317,8 @@ class BatteryNightTracker:
         still refuse a night."""
         return max(0.0, self._night_gap() - self._bridged_s)
 
-    def _bridge_hole(self, dt: float, s: "Sample") -> None:
+    def _bridge_hole(self, dt: float, s: "Sample",
+                     in_night: bool = True) -> None:
         """Recover a sampling hole's energy from the battery's own SOC.
 
         Only ever ADDS: an SOC that rose across the hole means the pack was
@@ -333,6 +334,11 @@ class BatteryNightTracker:
         or an SOC jump too large to be real) leaves the night refused, which is
         the honest outcome: better an unusable night than a confidently wrong
         one.
+
+        (#1045) A hole that ends after dawn hands its energy to the night, so
+        the SOC it ended on is the night's morning value too. Without that the
+        energy covers more time than the SOC span, and the capacity reader
+        reads the pack big.
         """
         if self._phase != "night":
             return
@@ -351,6 +357,8 @@ class BatteryNightTracker:
             # above), and the charge must still be seen: the SOC span is net
             # of it, so a hole that hid a grid charge would read the pack big.
             self._charge_j += cap * -drop_pct / 100.0 * 3.6e6
+            if not in_night:
+                self._soc_morning = float(after)
             return
 
         # A pack cannot lose more than a plausible fraction of itself in the
@@ -363,6 +371,8 @@ class BatteryNightTracker:
 
         self._bridged_j += cap * drop_pct / 100.0 * 3.6e6
         self._bridged_s += dt
+        if not in_night:
+            self._soc_morning = float(after)
 
     @property
     def phase(self) -> str:

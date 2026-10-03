@@ -12,8 +12,9 @@ ledger.
 (#1045) The energy is everything that left the pack — house drain, EV assist
 and export — less what went back in, because that is what the SOC span counts.
 ``drain_kwh`` alone is the house's share: the overnight need's number, not
-this one. The recorder writes ``charge_kwh`` for that; a record without it is
-read as it always was, where that reading is near enough.
+this one. The recorder writes ``charge_kwh`` for that. A record sealed before
+it existed is read as it always was, unless its assist and export show that
+reading is low.
 
 Why it matters more than the forecast ledger: the spendable budget's
 ``usable_capacity_kwh`` is a configured **nameplate**. If a 30 kWh pack really
@@ -141,6 +142,8 @@ def _qualifying_ratios(records: Optional[Iterable[dict]]) -> list:
         # that sizes every budget against a pack that is not there.
         charge = max(0.0, charge)
         if charge > max(MAX_NIGHT_CHARGE_SHARE * out, NIGHT_CHARGE_NOISE_KWH):
+            continue
+        if out - charge <= 0:            # noise larger than a tiny night
             continue
         ratios.append((out - charge) / span)
     return ratios

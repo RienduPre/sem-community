@@ -128,6 +128,13 @@ class TestARecordSealedBeforeTheChargeWasCounted:
         assert measured_capacity(recs).usable_kwh == pytest.approx(
             PACK_KWH, abs=0.01)
 
+    def test_an_old_night_with_much_assist_is_not_used(self):
+        """30 % of what left went to the car: the house share alone is
+        known to be low, so the night is not evidence."""
+        recs = [_old(d, drain=3.5, assist=1.5) for d in _dates(MIN_SAMPLES)]
+        assert 1.5 > MAX_UNCOUNTED_SHARE_OLD_RECORD * 5.0
+        assert measured_capacity(recs) is None
+
     def test_an_old_export_night_that_charged_back_is_not_read_big(self):
         """The reviewer's night: 1 kWh house, 7 kWh sold, 4 kWh charged
         back from the grid, 40 % span. Counting the export without the
@@ -183,6 +190,11 @@ class TestANightThatAlsoCharged:
         m = measured_capacity(recs)
         assert m is not None
         assert m.kwh_per_pct == pytest.approx(1.3 / 15.0, abs=0.0005)
+
+    def test_noise_larger_than_a_tiny_night_is_not_a_negative_size(self):
+        recs = [_rec(d, soc_start=60.0, soc_morning=45.0, drain=0.2,
+                     charge=0.24) for d in _dates(MIN_SAMPLES)]
+        assert measured_capacity(recs) is None
 
     def test_heavy_nights_do_not_move_the_clean_ones(self):
         clean = [_rec(d, drain=5.0) for d in _dates(MIN_SAMPLES)]
@@ -263,6 +275,28 @@ class TestTheRecorderWritesTheCharge:
         assert tr3._record()["charge_kwh"] is None
         tr3.start("2026-09-02", outdoor_temp_c=None)  # the next night counts
         assert tr3._record()["charge_kwh"] == 0.0
+
+    def test_a_hole_that_ends_after_dawn_ends_the_span_with_it(self):
+        """4 kWh measured over 40 points, then a restart across dawn while
+        the pack lost 10 more. The hole's 1 kWh joins the night, so its
+        last SOC must too — else 5 kWh over 40 points says 12.5 kWh."""
+        tr = BatteryNightTracker(reserve_soc=10.0, capacity_kwh=PACK_KWH)
+        tr.start("2026-09-01", outdoor_temp_c=None)
+        t, soc = 0.0, 90.0
+        for k in range(81):                          # 4 kWh at 3 kW
+            if k:
+                t += 60.0
+                soc -= 3000.0 * 60.0 / 3.6e6 / PACK_KWH * 100.0
+            tr.tick(t, True, _s(home=3000.0, soc=soc))
+        assert soc == pytest.approx(50.0)
+        tr.tick(t + 2400.0, False, _s(soc=40.0))     # the restart, after dawn
+        rec = tr._record()
+        assert tr.phase == "day"
+        assert rec["drain_kwh"] == pytest.approx(5.0, abs=0.01)
+        assert rec["soc_morning"] == pytest.approx(40.0)
+        m = measured_capacity([dict(rec, date=d)
+                               for d in _dates(MIN_SAMPLES)])
+        assert m.usable_kwh == pytest.approx(PACK_KWH, abs=0.05)
 
     def test_a_charge_hidden_in_a_restart_hole_is_counted(self):
         """6 kWh out, a 40-minute outage while the grid put 25 points back,
