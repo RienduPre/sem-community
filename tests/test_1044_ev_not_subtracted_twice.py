@@ -269,10 +269,17 @@ EV_W = 7000.0
 HEATER_W = 300.0
 
 
-async def _night_cycle(*, register_charger=True):
-    """A night: no sun, the car charging, the house importing all of it."""
+async def _night_cycle(*, register_charger=True, nested=False):
+    """A night: no sun, the car charging, the house importing all of it.
+
+    ``nested``: the config-flow shape — no top-level EV sensor, the
+    charger's own ``ev_charging_power_sensor`` summed per charger."""
+    config, charger = dict(WIRED), dict(CHARGER)
+    if nested:
+        config.pop("ev_power_sensor")
+        charger["ev_charging_power_sensor"] = charger["ev_power_sensor"]
     rig = CycleRig(
-        config=dict(WIRED), chargers=[CHARGER],
+        config=config, chargers=[charger],
         states={"sensor.solar": 0, "sensor.grid": -8000, "sensor.batt": 0,
                 "sensor.soc": 50, "sensor.ev": EV_W,
                 "sensor.heater_power": HEATER_W},
@@ -305,6 +312,16 @@ class TestTheLivePowerLeavesTheCarOut:
         assert data["true_baseload_power"] == pytest.approx(
             home - HEATER_W, abs=1)
         assert data["true_baseload_power"] > 0
+
+    async def test_the_per_charger_sum_leaves_the_car_out_too(self):
+        """The config-flow shape, end to end: the reader sums the charger's
+        own sensor, and that same entity is the device's power sensor."""
+        rig, data = await _night_cycle(nested=True)
+        assert data["ev_power"] == pytest.approx(EV_W, abs=1)
+        home = data["home_consumption_power"]
+        assert home > HEATER_W
+        assert data["true_baseload_power"] == pytest.approx(
+            home - HEATER_W, abs=1)
 
     async def test_twin_the_charger_is_registered_so_the_old_sum_saw_it(self):
         """Vacuity twin: the charger sits in the surplus controller, so a sum
