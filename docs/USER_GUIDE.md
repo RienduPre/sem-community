@@ -701,6 +701,10 @@ dashboards:
 | `sensor.sem_battery_capacity_drift_pct` | how far that measurement sits from the nameplate |
 | `sensor.sem_forecast_trust_d1` / `_d2` | how accurate tomorrow's and the day after's forecast have proven, 0–100 % |
 
+The measured size counts what your battery power sensor sees. When that sensor
+measures on the AC side, the size can read 5–10 % below the nameplate. That is
+conversion loss, not wear.
+
 **What the budget may be spent on**
 
 Two switches, and they are deliberately separate rather than one setting:
