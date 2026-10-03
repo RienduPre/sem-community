@@ -49,7 +49,9 @@ from ..const import (
     STATE_UNAVAILABLE,
 )
 from ..utils.time_manager import TimeManager
-from ..ha_energy_reader import read_energy_dashboard_config_outcome, EnergyDashboardConfig
+from ..ha_energy_reader import (
+    read_energy_dashboard_config_outcome, EnergyDashboardConfig, energy_counters,
+)
 from .install_modules import Module, Presence, module_reload_due, module_verdict, presence_of
 
 from .types import (
@@ -1976,12 +1978,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
                 # (#556) daily-solar reconciliation against the inverter's
                 # production counters — gated by prefer_hardware_energy.
-                solar_counters = list(dashboard_config.solar_energy_list) or (
-                    [dashboard_config.solar_energy] if dashboard_config.solar_energy else []
-                )
                 self._energy_calculator.configure_solar_counters(
                     self.hass,
-                    solar_counters,
+                    energy_counters(dashboard_config, "solar"),
                     self.config.get("prefer_hardware_energy", True),
                 )
 
@@ -1992,17 +1991,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # Energy Dashboard were pure power integration, and every
                 # dropped or mis-signed sample stayed in them forever.
                 meter_counters: Dict[str, List[str]] = {}
-                for category, single, listed in (
-                    ("grid_import", dashboard_config.grid_import_energy,
-                     dashboard_config.grid_import_energy_list),
-                    ("grid_export", dashboard_config.grid_export_energy,
-                     dashboard_config.grid_export_energy_list),
-                    ("battery_charge", dashboard_config.battery_charge_energy,
-                     dashboard_config.battery_charge_energy_list),
-                    ("battery_discharge", dashboard_config.battery_discharge_energy,
-                     dashboard_config.battery_discharge_energy_list),
-                ):
-                    entities = list(listed) or ([single] if single else [])
+                for category in ("grid_import", "grid_export",
+                                 "battery_charge", "battery_discharge"):
+                    entities = energy_counters(dashboard_config, category)
                     if entities:
                         meter_counters[category] = entities
                 self._energy_calculator.configure_meter_counters(

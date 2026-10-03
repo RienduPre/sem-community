@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import logging
 import re
+import time
 from collections import deque
 from datetime import datetime, date, timedelta
 from typing import Dict, Any, List, Optional, Set
@@ -19,6 +20,8 @@ from .types import (
 )
 from ..utils.time_manager import TimeManager
 from .units import energy_state_to_kwh
+from .repair_issues import UNAVAILABLE_REPAIR_THRESHOLD_S
+from ..ha_energy_reader import ENERGY_COUNTER_CATEGORIES, energy_counters
 from .battery_provenance import (
     BatteryProvenance, allocate_fleet_charge, discharge_savings,
 )
@@ -190,6 +193,24 @@ _HOME_BALANCE_TERMS = (
     ("battery_discharge", 1.0),
     ("battery_charge", -1.0),
 )
+
+
+def _as_seed_counters(value: Any) -> Optional[Dict[str, List[str]]]:
+    """A stored lifetime seed set (#1043), or None when it is not one.
+
+    None means "no record", which makes the seed check the counters again —
+    the safe answer for a damaged entry.
+    """
+    if not isinstance(value, dict):
+        return None
+    out: Dict[str, List[str]] = {}
+    for category, ids in value.items():
+        if not isinstance(category, str) or not isinstance(ids, (list, tuple)):
+            return None
+        if not all(isinstance(e, str) for e in ids):
+            return None
+        out[category] = sorted(ids)
+    return out
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -364,6 +385,13 @@ class EnergyCalculator:
         self._ev_day_offset: Optional[str] = None
         self._ev_day_key: Optional[date] = None
         self._lifetime_seeded: bool = False
+        # (#1043) Which counters, per category, the lifetime seed added up —
+        # persisted, so a seed taken from a different set (the first tariff
+        # only, before #1043) is known and taken again. None = no record.
+        self._lifetime_seed_counters: Optional[Dict[str, List[str]]] = None
+        # (#1043) When a counter with no state at all was first seen while HA
+        # was running. Runtime only: the wait starts again on every start.
+        self._lifetime_seed_absent_since: Optional[float] = None
         self._yearly_seeded: bool = False
         self._yearly_seed_attempts: int = 0
         # Separate flag for the yearly COST backfill so it can correct installs
@@ -1047,6 +1075,48 @@ class EnergyCalculator:
         # the name the rest of the class (and its tests) call.
         return energy_state_to_kwh(state, default=0.0)
 
+    def _read_counter_set(
+        self, hass: HomeAssistant, entity_ids: List[str],
+    ) -> "tuple[Optional[float], List[str], List[str]]":
+        """Add up one category's hardware counters (#1043).
+
+        Returns ``(kwh, summed, absent)``. ``kwh`` is None while a counter that
+        has a state reads unknown, unavailable or no number: a counter still
+        loading would add 0, and that sum looks complete (#1043 seeded 12,396
+        of 60,601 kWh solar that way). ``absent`` are counters with no state
+        at all — the caller decides whether that is still the start-up.
+        """
+        total = 0.0
+        summed: List[str] = []
+        absent: List[str] = []
+        for entity_id in entity_ids:
+            state = hass.states.get(entity_id)
+            if state is None:
+                absent.append(entity_id)
+                continue
+            value = energy_state_to_kwh(state)  # #551 unit-aware; None = no value
+            if value is None:
+                return None, summed, absent
+            total += value
+            summed.append(entity_id)
+        return total, summed, absent
+
+    def _absent_counters_settled(self, hass: HomeAssistant) -> bool:
+        """May a counter with no state be left out of the seed? (#1043)
+
+        Before HA runs, every entity of an integration that is still loading
+        has no state (bug class 86), so the answer is no. Once HA runs, HA
+        gives each registered entity a state, and an entity that still has
+        none after ``UNAVAILABLE_REPAIR_THRESHOLD_S`` is an Energy Dashboard
+        row whose entity is gone — it must not hold the seed for ever.
+        """
+        if not getattr(hass, "is_running", False):
+            return False
+        now = time.monotonic()
+        if self._lifetime_seed_absent_since is None:
+            self._lifetime_seed_absent_since = now
+        return now - self._lifetime_seed_absent_since >= UNAVAILABLE_REPAIR_THRESHOLD_S
+
     def seed_lifetime_from_hardware(self, hass: HomeAssistant, ed_config) -> None:
         """Seed lifetime accumulators from hardware energy counters.
 
@@ -1060,7 +1130,6 @@ class EnergyCalculator:
         if not ed_config:
             return
 
-        # Read hardware total to compare
         def _read(entity_id):
             if not entity_id:
                 return 0.0
@@ -1069,19 +1138,46 @@ class EnergyCalculator:
                 return self._energy_state_kwh(state)  # #551 unit-aware
             return 0.0
 
-        # Read all hardware counters first
-        # (#556) multi-string installs have several solar counters — seed
-        # from their SUM, matching what the daily reconciliation tracks
-        # (single-counter seeding could later SHRINK lifetime on re-seed).
-        solar_list = list(getattr(ed_config, "solar_energy_list", None) or [])
-        if solar_list:
-            solar = sum(_read(e) for e in solar_list)
-        else:
-            solar = _read(ed_config.solar_energy)
-        grid_import = _read(ed_config.grid_import_energy)
-        grid_export = _read(ed_config.grid_export_energy)
-        batt_charge = _read(ed_config.battery_charge_energy)
-        batt_discharge = _read(ed_config.battery_discharge_energy)
+        # (#1043) Every category is the SUM of all its Energy Dashboard
+        # counters, as HA's dashboard shows it — not the first one. Solar was
+        # summed since #556; grid and battery read the first counter only, so
+        # a dual-tariff meter seeded tariff 1 alone. And a sum is taken only
+        # when every counter in it can be read: one still loading adds 0.
+        counters = {
+            category: energy_counters(ed_config, category)
+            for category in ENERGY_COUNTER_CATEGORIES
+        }
+        totals: Dict[str, float] = {}
+        seed_set: Dict[str, List[str]] = {}
+        absent: List[str] = []
+        for category, entity_ids in counters.items():
+            kwh, summed, missing = self._read_counter_set(hass, entity_ids)
+            if kwh is None:
+                _LOGGER.debug(
+                    "Lifetime seed waiting: a %s counter has no value yet (%s)",
+                    category, ", ".join(entity_ids),
+                )
+                return
+            totals[category] = kwh
+            seed_set[category] = sorted(summed)
+            absent.extend(missing)
+        if absent:
+            if not self._absent_counters_settled(hass):
+                _LOGGER.debug(
+                    "Lifetime seed waiting for counters with no state yet: %s",
+                    ", ".join(absent),
+                )
+                return
+            log_on_change(
+                _LOGGER, "lifetime_seed_absent", logging.WARNING,
+                "Lifetime seed: Energy Dashboard counter(s) %s do not exist — "
+                "left out of the lifetime totals", ", ".join(absent),
+            )
+        solar = totals["solar"]
+        grid_import = totals["grid_import"]
+        grid_export = totals["grid_export"]
+        batt_charge = totals["battery_charge"]
+        batt_discharge = totals["battery_discharge"]
 
         _LOGGER.debug(
             "Lifetime seed check: hw solar=%.0f import=%.0f export=%.0f "
@@ -1098,7 +1194,16 @@ class EnergyCalculator:
                 solar, grid_import, grid_export,
             )
             return
-        if (batt_charge < 1 or batt_discharge < 1) and (batt_charge + batt_discharge) < 10:
+        # (#1043) Only a battery the Energy Dashboard lists is waited for: an
+        # install without one read 0 + 0 here and never seeded at all.
+        has_battery_counters = bool(
+            counters["battery_charge"] or counters["battery_discharge"]
+        )
+        if (
+            has_battery_counters
+            and (batt_charge < 1 or batt_discharge < 1)
+            and (batt_charge + batt_discharge) < 10
+        ):
             _LOGGER.debug(
                 "Lifetime seed waiting for battery: charge=%.0f discharge=%.0f",
                 batt_charge, batt_discharge,
@@ -1110,7 +1215,18 @@ class EnergyCalculator:
         # this fixes the race condition where solar loaded first but
         # grid/battery were unavailable during initial seeding (#110).
         current = self._lifetime_accumulators
-        needs_seed = False
+        # (#1043) A seed taken from another set of counters is re-taken. With
+        # no record the seed came from before #1043, which read only the first
+        # grid and battery counter: that is wrong wherever a list is longer.
+        if self._lifetime_seed_counters is None:
+            needs_seed = any(len(ids) > 1 for ids in seed_set.values())
+        else:
+            needs_seed = self._lifetime_seed_counters != seed_set
+        if needs_seed:
+            _LOGGER.info(
+                "Lifetime re-seed needed: counter set changed from %s to %s",
+                self._lifetime_seed_counters, seed_set,
+            )
         checks = [
             ("lifetime_solar", solar),
             ("lifetime_grid_import", grid_import),
@@ -1119,6 +1235,8 @@ class EnergyCalculator:
             ("lifetime_battery_discharge", batt_discharge),
         ]
         for key, hw_value in checks:
+            if needs_seed:
+                break
             stored = current.get(key, 0)
             if hw_value > 100 and stored < hw_value * 0.5:
                 _LOGGER.info(
@@ -1141,6 +1259,7 @@ class EnergyCalculator:
                 break
 
         if not needs_seed and current.get("lifetime_solar", 0) > solar * 0.9:
+            self._lifetime_seed_counters = seed_set
             self._lifetime_seeded = True
             return
 
@@ -1163,6 +1282,7 @@ class EnergyCalculator:
         if ev_total > 0:
             self._lifetime_accumulators["lifetime_ev"] = ev_total
 
+        self._lifetime_seed_counters = seed_set
         self._lifetime_seeded = True
         _LOGGER.info(
             "Lifetime seeded from hardware: solar=%.0f import=%.0f export=%.0f "
@@ -1241,27 +1361,24 @@ class EnergyCalculator:
             _LOGGER.debug("Recorder not available for yearly seeding")
             return
 
-        # Build entity → category mapping from Energy Dashboard config
-        entity_map = {}
-        if ed_config.solar_energy:
-            entity_map[ed_config.solar_energy] = "solar"
-        if ed_config.grid_import_energy:
-            entity_map[ed_config.grid_import_energy] = "grid_import"
-        if ed_config.grid_export_energy:
-            entity_map[ed_config.grid_export_energy] = "grid_export"
-        if ed_config.battery_charge_energy:
-            entity_map[ed_config.battery_charge_energy] = "battery_charge"
-        if ed_config.battery_discharge_energy:
-            entity_map[ed_config.battery_discharge_energy] = "battery_discharge"
+        # Category → every Energy Dashboard counter of it (#1043: all tariffs
+        # and inverters, not the first one).
+        category_counters = {
+            category: ids
+            for category in ENERGY_COUNTER_CATEGORIES
+            if (ids := energy_counters(ed_config, category))
+        }
 
-        if not entity_map:
+        if not category_counters:
             _LOGGER.debug("No energy entities in ED config for yearly seeding")
             return
 
         # Query statistics from Jan 1 of current year
         now = dt_util.now()
         start_time = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        entity_ids = list(entity_map.keys())
+        entity_ids = list(dict.fromkeys(
+            entity_id for ids in category_counters.values() for entity_id in ids
+        ))
 
         try:
             stats = await statistics_during_period(
@@ -1275,18 +1392,23 @@ class EnergyCalculator:
             _LOGGER.debug("No recorder statistics available for yearly seeding")
             return
 
-        # Extract yearly energy: difference between latest and first sum
+        # Extract yearly energy: difference between latest and first sum,
+        # added up over the category's counters (#1043)
         seeded = {}
-        for entity_id, category in entity_map.items():
-            entity_stats = stats.get(entity_id, [])
-            if len(entity_stats) < 2:
-                seeded[category] = 0.0
-                continue
-            first_sum = entity_stats[0].get("sum") if entity_stats[0].get("sum") is not None else 0.0
-            last_sum = entity_stats[-1].get("sum") if entity_stats[-1].get("sum") is not None else 0.0
-            yearly_energy = max(0, last_sum - first_sum)
+        for category, ids in category_counters.items():
+            yearly_energy = 0.0
+            has_stats = False
+            for entity_id in ids:
+                entity_stats = stats.get(entity_id, [])
+                if len(entity_stats) < 2:
+                    continue
+                first_sum = entity_stats[0].get("sum") if entity_stats[0].get("sum") is not None else 0.0
+                last_sum = entity_stats[-1].get("sum") if entity_stats[-1].get("sum") is not None else 0.0
+                yearly_energy += max(0, last_sum - first_sum)
+                has_stats = True
             seeded[category] = yearly_energy
-            self._yearly_accumulators[f"{category}_{year_key}"] = yearly_energy
+            if has_stats:
+                self._yearly_accumulators[f"{category}_{year_key}"] = yearly_energy
 
         # Derive home consumption from energy balance
         solar = seeded.get("solar", 0)
@@ -1635,17 +1757,11 @@ class EnergyCalculator:
         """
         if hass is None or not ed_config:
             return None
+        # (#1043) every counter of a series, each one's month added in
         entity_map: Dict[str, str] = {}
-        for attr, series in (
-            ("solar_energy", "solar"),
-            ("grid_import_energy", "grid_import"),
-            ("grid_export_energy", "grid_export"),
-            ("battery_charge_energy", "battery_charge"),
-            ("battery_discharge_energy", "battery_discharge"),
-        ):
-            entity_id = getattr(ed_config, attr, None)
-            if isinstance(entity_id, str) and entity_id:
-                entity_map[entity_id] = series
+        for series in ENERGY_COUNTER_CATEGORIES:
+            for entity_id in energy_counters(ed_config, series):
+                entity_map.setdefault(entity_id, series)
         if not entity_map:
             return None
         try:
@@ -1674,7 +1790,8 @@ class EnergyCalculator:
                 bucket = _stat_bucket_year_month(row)
                 if bucket is not None and bucket[0] == target_year:
                     baseline = prev_sum if prev_sum is not None else 0.0
-                    result.setdefault(series, {})[bucket[1]] = max(
+                    months = result.setdefault(series, {})
+                    months[bucket[1]] = months.get(bucket[1], 0.0) + max(
                         0.0, cumulative - baseline
                     )
                 prev_sum = cumulative
@@ -3427,6 +3544,12 @@ class EnergyCalculator:
             "yearly_cost_accumulators": self._yearly_cost_accumulators.copy(),
             "last_update": self._last_update.isoformat() if self._last_update else None,
             "yearly_seeded": self._yearly_seeded,
+            # (#1043) the counters the lifetime seed added up. Lost, a seed
+            # from the first tariff only could not be told from a good one.
+            "lifetime_seed_counters": (
+                {cat: list(ids) for cat, ids in self._lifetime_seed_counters.items()}
+                if self._lifetime_seed_counters is not None else None
+            ),
             "yearly_cost_seeded": self._yearly_cost_seeded,
             "rate_history": list(self._rate_history),
             "accumulated_savings": self._accumulated_savings,
@@ -3542,6 +3665,8 @@ class EnergyCalculator:
             self._yearly_cost_accumulators = state.get("yearly_cost_accumulators", {})
             self._yearly_seeded = state.get("yearly_seeded", False)
             self._yearly_cost_seeded = state.get("yearly_cost_seeded", False)
+            self._lifetime_seed_counters = _as_seed_counters(
+                state.get("lifetime_seed_counters"))
             rate_history = state.get("rate_history", [])
             self._rate_history = deque(
                 rate_history if isinstance(rate_history, list) else [], maxlen=30

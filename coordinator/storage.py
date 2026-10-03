@@ -109,6 +109,9 @@ CALCULATOR_STATE_KEYS: tuple[str, ...] = (
     # (#1044) the first day the mirror held home members only. Lost, every
     # restart would look like the upgrade day and seal no day clean.
     "home_members_since",
+    # (#1043) the counters the lifetime seed added up, per category. Lost,
+    # every restart would read as a seed from before #1043 and re-seed.
+    "lifetime_seed_counters",
 )
 
 
