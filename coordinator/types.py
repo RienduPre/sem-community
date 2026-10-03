@@ -132,6 +132,15 @@ class PowerReadings:
     # per-charger flow attribution that closes the #316 family.
     ev_power_per_charger: "Dict[str, float]" = field(default_factory=dict)
 
+    # (#1044) WHAT ``ev_power`` was read from this cycle — the per-charger
+    # sensors summed, or the one fleet sensor read instead (Energy
+    # Dashboard or the top-level sensor). ``home`` takes ``ev_power`` out,
+    # so these say which of SEM's chargers are already out of ``home``
+    # (``health_check.chargers_outside_home``). Both empty: no EV sensor
+    # was read, and every charger's draw is still inside ``home``.
+    ev_power_entities: "frozenset" = frozenset()
+    ev_power_fleet_entity: Optional[str] = None
+
     # Per-charger EV plug / charging state (#584). The boolean mirror of
     # ``ev_power_per_charger`` — populated by ``sensor_reader`` for
     # multi-charger setups from each charger's ``ev_connected_sensor`` /

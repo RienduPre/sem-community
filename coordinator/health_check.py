@@ -50,17 +50,35 @@ def sem_ev_chargers(coordinator) -> list:
     return devs
 
 
+def chargers_outside_home(chargers, power) -> list:
+    """(#1044) The chargers whose draw this cycle's ``ev_power`` holds.
+
+    ``home`` takes ``ev_power`` out, so these are already out of it. A
+    charger is in ``ev_power`` when its own sensor was summed, or when one
+    fleet sensor (Energy Dashboard or the top-level sensor) was read for
+    the whole EV side. A charger the reader never read — a late-found box
+    whose sensor was not handed to the reader, a second box with no sensor
+    of its own — is still inside ``home``, and stays a member.
+    """
+    if getattr(power, "ev_power_fleet_entity", None):
+        return [c for c in (chargers or ()) if c is not None]
+    read = getattr(power, "ev_power_entities", None) or frozenset()
+    return [c for c in (chargers or ())
+            if c is not None and getattr(c, "power_entity_id", None) in read]
+
+
 def home_members(devices, chargers) -> list:
     """(#1044) The devices whose draw is INSIDE the home row.
 
     The one answer for every reader that adds devices up against ``home``:
     the true-baseload mirror and its W twin, and the partition check below.
-    SEM's own EV chargers are not inside it::
+    ``chargers`` are SEM's own EV chargers that ``ev`` holds
+    (``chargers_outside_home``); they are not inside it::
 
         home = max(0, solar + grid_import + batt_discharge
                       - ev - grid_export - batt_charge)
 
-    and ``ev`` is read from those chargers' own power sensors. #872 drew this
+    and ``ev`` is read from those chargers' power sensors. #872 drew this
     line for the partition check alone; the baseload (#773) never drew it, so
     it took the car out of ``home`` a second time — RienduPre (#1044): a
     49 kWh night session, 6.29 kWh of home, a true baseload of −49.69 kWh.

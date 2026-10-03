@@ -17,6 +17,9 @@ the car out a second time. The W twin did the same with the live draw.
 The baseload (#773) never drew it. Now one function (``home_members``)
 answers for every reader, by IDENTITY: a load the user put under current
 control is a ``CurrentControlDevice`` too, and its draw IS inside ``home``.
+And only for the chargers ``ev_power`` actually read
+(``chargers_outside_home``): a charger the reader never read is still
+inside ``home``, and must still be taken away.
 """
 from __future__ import annotations
 
@@ -36,9 +39,13 @@ from custom_components.solar_energy_management.coordinator.energy_calculator imp
 )
 from custom_components.solar_energy_management.coordinator.health_check import (
     HealthCheck,
+    chargers_outside_home,
     home_member_totals,
     home_members,
     sem_ev_chargers,
+)
+from custom_components.solar_energy_management.coordinator.sensor_reader import (
+    SensorReader,
 )
 from custom_components.solar_energy_management.coordinator.types import (
     PowerReadings,
@@ -92,10 +99,18 @@ def _coord(devices, *, ev_devices=None, ev_device=None, calc=None):
     return coord
 
 
-def _file(coord):
+def _read(entities=(), fleet=None):
+    """This cycle's readings, saying what ``ev_power`` was read from."""
+    p = PowerReadings()
+    p.ev_power_entities = frozenset(entities)
+    p.ev_power_fleet_entity = fleet
+    return p
+
+
+def _file(coord, power):
     with patch(_COORD_DT) as dt:
         dt.now.return_value = _NOW
-        SEMCoordinator._file_device_energy(coord, TODAY)
+        SEMCoordinator._file_device_energy(coord, TODAY, power)
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -133,6 +148,17 @@ class TestTheRule:
         assert sem_ev_chargers(coord) == [late]
         assert sem_ev_chargers(SimpleNamespace()) == []
 
+    def test_only_chargers_ev_power_read_are_outside(self):
+        a = _ccd("a", "sensor.a_power")
+        b = _ccd("b", "sensor.global_power")   # no sensor of its own
+        assert chargers_outside_home([a, b], _read({"sensor.a_power"})) == [a]
+        assert chargers_outside_home([a, b], _read()) == []
+
+    def test_one_fleet_sensor_stands_for_every_charger(self):
+        late = _ccd("ev_charger", "sensor.box_power")
+        power = _read(fleet="sensor.ed_ev_power")
+        assert chargers_outside_home([late], power) == [late]
+
     def test_partition_members_use_the_same_rule(self):
         """#872's check, now on the shared rule: the charger is out, the
         current-controlled heater (out under #872's type rule) is in."""
@@ -148,11 +174,12 @@ class TestTheRule:
 
 @pytest.mark.unit
 class TestTheMirrorLeavesTheCarOut:
-    def _his_day(self, *, chargers_known=True, late=False):
+    def _his_day(self, *, chargers_known=True, late=False,
+                 power=None, home=HIS_HOME_KWH):
         wallbox = _booked(_ccd("wallbox", "sensor.wallbox_power"), HIS_EV_KWH)
         heater = _booked(_ccd("heater", "sensor.heater_power"), 1.2)
         calc = EnergyCalculator({}, MagicMock())
-        calc._daily_accumulators[f"home_{TODAY}"] = HIS_HOME_KWH
+        calc._daily_accumulators[f"home_{TODAY}"] = home
         if not chargers_known:
             coord = _coord([wallbox, heater], calc=calc)
         elif late:
@@ -160,7 +187,7 @@ class TestTheMirrorLeavesTheCarOut:
         else:
             coord = _coord([wallbox, heater],
                            ev_devices={"wallbox": wallbox}, calc=calc)
-        _file(coord)
+        _file(coord, power or _read({"sensor.wallbox_power"}))
         return calc
 
     def test_his_day_reads_a_house_not_minus_49(self):
@@ -180,9 +207,18 @@ class TestTheMirrorLeavesTheCarOut:
             pytest.approx(1.2)
 
     def test_a_late_found_charger_is_left_out_too(self):
-        calc = self._his_day(late=True)
+        """The legacy ``_ev_device`` shape, read through a fleet sensor."""
+        calc = self._his_day(late=True, power=_read(fleet="sensor.ed_ev"))
         assert calc.get_true_baseload(TODAY)["controlled_today_kwh"] == \
             pytest.approx(1.2)
+
+    def test_a_charger_ev_power_never_read_is_still_taken_away(self):
+        """Review #1044: with no EV sensor read, ``home`` still holds the car
+        (6.29 + 49). It must be taken away once — not zero times."""
+        b = self._his_day(power=_read(),
+                          home=HIS_HOME_KWH + HIS_EV_KWH).get_true_baseload(TODAY)
+        assert b["controlled_today_kwh"] == pytest.approx(1.2 + HIS_EV_KWH)
+        assert b["today_kwh"] == pytest.approx(HIS_HOME_KWH - 1.2)
 
     def test_twin_without_the_rule_reproduces_his_number(self):
         """Vacuity twin: the same seam, with no charger known, books the car
@@ -198,7 +234,8 @@ class TestTheMirrorLeavesTheCarOut:
         wallbox = _booked(_ccd("wallbox"), 3.0, source="rated")
         calc = EnergyCalculator({}, MagicMock())
         calc._daily_accumulators[f"home_{TODAY}"] = HIS_HOME_KWH
-        _file(_coord([wallbox], ev_devices={"wallbox": wallbox}, calc=calc))
+        _file(_coord([wallbox], ev_devices={"wallbox": wallbox}, calc=calc),
+              _read(fleet="sensor.ev"))
         b = calc.get_true_baseload(TODAY)
         assert b["estimated_today_kwh"] == 0.0
         assert b["measured"] is True
@@ -244,6 +281,7 @@ async def _night_cycle(*, register_charger=True):
     if register_charger:
         # What ``__init__.py`` does: the charger is a surplus device too.
         rig.coord._surplus_controller.register_device(wallbox)
+        wallbox.managed_externally = True
     heater = _ccd("heater", "sensor.heater_power", "number.heater_amps")
     heater.hass = rig.hass
     rig.coord._surplus_controller.register_device(heater)
@@ -256,6 +294,8 @@ async def _night_cycle(*, register_charger=True):
 @pytest.mark.asyncio
 class TestTheLivePowerLeavesTheCarOut:
     async def test_baseload_power_is_home_minus_the_house_loads(self):
+        """The rig reads the car through the top-level fleet sensor — the
+        same entity the charger's own power sensor names."""
         rig, data = await _night_cycle()
         assert rig.coord._ev_devices["wallbox"].observed_power_w() == EV_W
         assert data["ev_power"] == pytest.approx(EV_W, abs=1), \
@@ -431,6 +471,9 @@ class TestEveryHomeReaderAsksTheRule:
                     _calls(fn, "home_member_totals"), (
                     f"{fn.name} adds devices up against home without "
                     "asking home_members — SEM's chargers are not in home")
+                assert _calls(fn, "chargers_outside_home"), (
+                    f"{fn.name} takes chargers out without asking which "
+                    "ones ev_power read")
         names = {fn.name for fn in readers}
         assert "_file_device_energy" in names, "guard reads nothing"
         assert len(readers) >= 2
@@ -445,3 +488,61 @@ class TestEveryHomeReaderAsksTheRule:
         for call in _calls(_coordinator_tree(), "run_all_checks"):
             kwargs |= {k.arg for k in call.keywords}
         assert "charger_ids" in kwargs
+
+
+# ───────────────────────────────────────────────────────────────────────
+# 6. the reader says what ``ev_power`` was read from
+# ───────────────────────────────────────────────────────────────────────
+
+def _mk_reader(states, chargers):
+    r = SensorReader.__new__(SensorReader)
+    r._ev_power_hist, r._ev_power_last, r._ev_power_hold = {}, {}, {}
+    r._raw_config = {"ev_chargers": chargers}
+    r._read_sensor = lambda eid, kind, **kw: states.get(eid, 0.0)
+    return r
+
+
+@pytest.mark.unit
+class TestTheReaderSaysWhatItRead:
+    def test_the_per_charger_sum_names_its_sensors(self):
+        chargers = [{"id": "a", "ev_charging_power_sensor": "sensor.a"},
+                    {"id": "b"}]                       # none of its own
+        r = _mk_reader({"sensor.a": 4000.0}, chargers)
+        readings = PowerReadings()
+        assert r._read_ev_fleet_power(readings, chargers) is True
+        assert readings.ev_power_entities == frozenset({"sensor.a"})
+        assert readings.ev_power_fleet_entity is None
+
+    def test_every_ev_power_write_says_its_source(self):
+        """AST: each statement list in ``sensor_reader`` that sets
+        ``readings.ev_power`` also sets ``ev_power_entities`` or
+        ``ev_power_fleet_entity`` — the ED, legacy and per-charger
+        branches, and any branch added later."""
+        src = pathlib.Path(
+            "custom_components/solar_energy_management/coordinator/"
+            "sensor_reader.py")
+        if not src.exists():
+            src = pathlib.Path(__file__).parent.parent / "coordinator" / \
+                "sensor_reader.py"
+        tree = ast.parse(src.read_text())
+
+        def _sets(stmt, attr):
+            return isinstance(stmt, ast.Assign) and any(
+                isinstance(t, ast.Attribute) and t.attr == attr
+                and isinstance(t.value, ast.Name) and t.value.id == "readings"
+                for t in stmt.targets)
+
+        writes = 0
+        for node in ast.walk(tree):
+            for field in ("body", "orelse"):
+                block = getattr(node, field, None)
+                if not isinstance(block, list):
+                    continue
+                if any(_sets(st, "ev_power") for st in block):
+                    writes += 1
+                    assert any(_sets(st, "ev_power_entities")
+                               or _sets(st, "ev_power_fleet_entity")
+                               for st in block), (
+                        f"line {block[0].lineno}: ev_power set without "
+                        "saying what it was read from")
+        assert writes >= 4, "guard reads nothing"

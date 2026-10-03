@@ -3632,6 +3632,11 @@ class EnergyCalculator:
                     self._home_members_since = date.fromisoformat(
                         str(members_since))
                 except ValueError:
+                    _LOGGER.warning(
+                        "Discarding unparseable home_members_since %r — the "
+                        "true baseload's day history restarts today",
+                        members_since,
+                    )
                     self._home_members_since = None
             last_update = state.get("last_update")
             if last_update:

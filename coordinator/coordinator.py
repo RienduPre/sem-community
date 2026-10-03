@@ -59,8 +59,8 @@ from .types import (
     SessionData, BatterySessionData,
 )
 from .health_check import (
-    home_member_evidence, home_member_totals, home_members, HealthCheck,
-    sem_ev_chargers,
+    chargers_outside_home, home_member_evidence, home_member_totals,
+    home_members, HealthCheck, sem_ev_chargers,
 )
 from .units import energy_state_to_kwh, power_state_to_watts
 from .distance_units import distance_to_km
@@ -4546,7 +4546,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # rule lives beside the check that depends on it.
                 per_device_daily=home_member_totals(
                     self._surplus_controller._devices.values(),
-                    sem_ev_chargers(self)),
+                    chargers_outside_home(sem_ev_chargers(self), power)),
                 # (#979) …and where each member's number came from. A bucket
                 # alone names the symptom; its source sensor and raw reading
                 # name the fault, and the violation is usually gone by the
@@ -4558,7 +4558,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 ) if self._energy_calculator else None,
                 # (#1044) Not terms of the baseload, so never its suspect.
                 charger_ids=[
-                    str(d.device_id) for d in sem_ev_chargers(self)
+                    str(d.device_id) for d in chargers_outside_home(
+                        sem_ev_chargers(self), power)
                     if getattr(d, "device_id", None)
                 ],
             )
@@ -6134,7 +6135,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # (#769) The tick that accrued the energy is the tick that files
             # it. Same meter day, so the device's four horizons all rest on
             # the one day boundary.
-            self._file_device_energy(meter_day)
+            self._file_device_energy(meter_day, power)
             # (#773) The W twin of the daily residual: home minus the live
             # device draws SEM can see. A device with no readable power
             # contributes nothing — its draw simply stays inside the
@@ -6143,11 +6144,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # finding (a double-count or a sign error), and the drift/
             # partition checks depend on seeing it.
             # (#1044) Home members only: ``home`` has already taken out
-            # SEM's own chargers' draw.
+            # the draw of the chargers ``ev_power`` read.
             _controlled_w = 0.0
             for device in home_members(
                     self._surplus_controller._devices.values(),
-                    sem_ev_chargers(self)):
+                    chargers_outside_home(sem_ev_chargers(self), power)):
                 try:
                     _controlled_w += float(device.observed_power_w() or 0.0)
                 except (AttributeError, TypeError, ValueError):
@@ -13973,7 +13974,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             _LOGGER.debug("Failed to restore daily energy for %s: %s",
                           getattr(device, "device_id", "?"), e)
 
-    def _file_device_energy(self, meter_day) -> None:
+    def _file_device_energy(self, meter_day, power) -> None:
         """(#769) File each device's just-booked kWh into the ledger.
 
         The device knows what it consumed (#768) and, where it has modes worth
@@ -13996,7 +13997,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             return
         now = dt_util.now()
         devices = list(self._surplus_controller._devices.values())
-        members = {id(d) for d in home_members(devices, sem_ev_chargers(self))}
+        members = {id(d) for d in home_members(
+            devices, chargers_outside_home(sem_ev_chargers(self), power))}
         for device in devices:
             increment = getattr(device, "last_cycle_energy_kwh", 0.0) or 0.0
             if not increment:
@@ -14012,8 +14014,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # subtraction runs against. ``meter_day`` above is the
             # device's SUNRISE day; the mirror wants the calendar day —
             # the #703/#704 boundary lesson, applied at the seam.
-            # (#1044) Home members only. SEM's own charger keeps its
-            # ledger row above, but ``home`` has already taken its kWh
+            # (#1044) Home members only. A charger ``ev_power`` read keeps
+            # its ledger row above, but ``home`` has already taken its kWh
             # out — booking it here took the car out twice.
             if id(device) not in members:
                 continue
