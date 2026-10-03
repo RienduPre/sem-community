@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
 - 🐛 **An OCPP charger named "wallbox" no longer gets a refused start with every current change** (#976). SEM took it for a Wallbox-brand charger.
 - 🐛 **A V2C now charges when SEM starts it and pauses when SEM stops it** (#1042). SEM turned its "Pause session" switch on to charge.
+- 🐛 **Measured battery size counts what went to the car and the grid** (#1045). It read low on nights the battery charged the car or sold power.
 
 # [2.2.0-beta.8] — 02.10.2026
 
