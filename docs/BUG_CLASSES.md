@@ -69,7 +69,7 @@ charges — Fronius; ``grid_export`` while importing; solar overnight) false-pos
 (#611). **Guard:** `test_589_sensor_freshness.py::test_constant_value_but_still_reporting_not_frozen`
 + the missing-`last_reported` fallback test. **Open siblings:** the frozen value still *feeds* the
 balance (observe-only, not yet held); multi-unit partial-availability sums silently under-report
-(audit W6). Refs #274 #461 #589 #611.
+(audit W6; the lifetime seed's half closed by #1043, see class 52). Refs #274 #461 #589 #611.
 
 ### 6. Multi-unit over-command (N× / partial split) — PARTIAL
 **Symptom:** a fleet-level power target handed to *each* of N units → N× the intended
@@ -2341,6 +2341,31 @@ fails on revert), and a dark FIRST plane does not hide a live sibling. **Sweep q
 quantity SEM reads from an external integration, does the integration model that quantity as ONE
 entity or as N siblings that must be aggregated — and does the resolver (read AND detection) take the
 first, or all of them? Refs #562 #687 #819 #838.
+
+**Round 2 (#1043, 2.1) — SEM's own Energy Dashboard config, not an integration.** The reader keeps
+every source in `<category>_energy_list` and the FIRST one in the scalar `<category>_energy`. The
+lifetime seed read the scalar for grid and battery, so a dual-tariff meter seeded tariff 1 alone
+(RienduPre: lifetime CO2 261 kg against 610 kg for one year); the yearly seed and
+`_query_monthly_energy` read the scalar for all five categories. The read had a warm-up twin (class
+86): a counter still loading read 0, so a three-inverter sum was the first inverter and looked
+complete — and against a good stored value it fired #551's downward heal, shrinking it.
+**Closure:** one resolver, `ha_energy_reader.energy_counters(ed, category)` (the list, else the
+scalar), used by all three seeds and by the coordinator's counter wiring. The lifetime seed sums only
+when every listed counter reads a number; a counter with NO state is left out only once HA runs and
+`UNAVAILABLE_REPAIR_THRESHOLD_S` has passed (a gone ED row must not hold the seed for ever). It
+records the counters it summed (`lifetime_seed_counters`, persisted) and re-seeds when that set
+changes — or, with no record, when any list is longer than one, so every install seeded before the
+fix heals on its next restart, not only those below half of the hardware. The battery wait now
+applies only when the dashboard lists a battery: a battery-less install read 0 + 0 there and never
+seeded at all. **Guard:** `tests/test_1043_lifetime_seed_all_counters.py` — the reporter's numbers,
+a tariff-1 seed above half heals, a partial read cannot shrink, absent vs unavailable, battery-less,
+the record round-trips, yearly and monthly sums, and an AST check that `energy_calculator.py` reads
+no scalar `*_energy` field. **Named, not swept:** the EV part of both seeds takes the FIRST
+`device_consumption` entry whose id CONTAINS a keyword (`"ev"` — class 67), so a two-charger install
+seeds one charger, and summing would sum every false match too. A yearly total seeded from tariff 1
+before this fix stays low until 1 January (the yearly seed runs once per install).
+`sensor_reader._grid_counter_entities` and the sign diagnostics restate the list-else-scalar rule
+(correct today).
 
 
 ### 52. A summary statistic chosen without asking which tail hurts — GUARDED
