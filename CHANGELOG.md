@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+# [2.2.0-beta.9] — 03.10.2026
+
 ### ✨ Improvements
 
 - SEM shows a control only where your house can use it: price knobs need a dynamic tariff, the export guard an export limit. (#996)
