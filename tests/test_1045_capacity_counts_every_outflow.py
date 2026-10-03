@@ -27,6 +27,7 @@ from custom_components.solar_energy_management.coordinator.battery_night import 
 )
 from custom_components.solar_energy_management.coordinator.measured_capacity import (
     MAX_NIGHT_CHARGE_SHARE,
+    MAX_UNCOUNTED_SHARE_OLD_RECORD,
     MIN_NEED_SAMPLES,
     MIN_SAMPLES,
     capacity_progress,
@@ -37,16 +38,18 @@ from custom_components.solar_energy_management.coordinator.measured_capacity imp
 PACK_KWH = 10.0
 
 
-def _rec(date, *, soc_start=90.0, soc_morning=40.0, drain=5.0, assist=None,
-         export=None, charge=None, trainable=True):
-    r = {"date": date, "soc_start": soc_start, "soc_morning": soc_morning,
-         "drain_kwh": drain, "trainable": trainable}
-    if assist is not None:
-        r["assist_kwh"] = assist
-    if export is not None:
-        r["export_kwh"] = export
-    if charge is not None:
-        r["charge_kwh"] = charge
+def _rec(date, *, soc_start=90.0, soc_morning=40.0, drain=5.0, assist=0.0,
+         export=0.0, charge=0.0, trainable=True):
+    """A record as the recorder writes it now."""
+    return {"date": date, "soc_start": soc_start, "soc_morning": soc_morning,
+            "drain_kwh": drain, "assist_kwh": assist, "export_kwh": export,
+            "charge_kwh": charge, "trainable": trainable}
+
+
+def _old(date, **kw):
+    """A record sealed before the recorder counted charge (#800 shape)."""
+    r = _rec(date, **kw)
+    del r["charge_kwh"]
     return r
 
 
@@ -86,33 +89,61 @@ class TestTheSpanAndTheEnergyCountTheSameThing:
         assert m is not None
         assert m.usable_kwh == pytest.approx(PACK_KWH, abs=0.01)
 
-    def test_33_nights_with_some_assist_no_longer_drift(self):
-        """Mixed history, as on the reporter's install: plain nights and
-        assist nights must agree on one pack size."""
+    def test_33_nights_mostly_with_assist_no_longer_drift(self):
+        """Mixed history, as on the reporter's install, with the assist
+        nights in the majority so the median cannot hide them."""
         dates = [f"2026-08-{d:02d}" for d in range(1, 32)] + [
             "2026-09-01", "2026-09-02"]
         recs = []
         for i, d in enumerate(dates):
-            if i % 3 == 0:
+            if i % 3:
                 recs.append(_rec(d, drain=2.5, assist=2.5))
             else:
-                recs.append(_rec(d, drain=5.0, assist=0.0, export=0.0))
+                recs.append(_rec(d, drain=5.0))
         m = measured_capacity(recs)
         assert m.samples == 33
         assert m.drift_vs(PACK_KWH) == pytest.approx(0.0, abs=0.001)
 
-    def test_a_record_written_before_the_fields_reads_as_before(self):
-        """No assist/export/charge keys: the house share is all it has."""
-        recs = [_rec(d, drain=5.0) for d in _dates(MIN_SAMPLES)]
-        assert measured_capacity(recs).usable_kwh == pytest.approx(
-            PACK_KWH, abs=0.01)
-
-    def test_null_fields_read_as_absent(self):
+    def test_null_fields_read_as_an_old_record(self):
         recs = [_rec(d, drain=5.0) for d in _dates(MIN_SAMPLES)]
         for r in recs:
             r.update(assist_kwh=None, export_kwh=None, charge_kwh=None)
         assert measured_capacity(recs).usable_kwh == pytest.approx(
             PACK_KWH, abs=0.01)
+
+
+@pytest.mark.unit
+class TestARecordSealedBeforeTheChargeWasCounted:
+    """Old records carry assist and export but not the charge. Adding the
+    first two to a night that also charged reads HIGH (review, 03.10)."""
+
+    def test_a_plain_old_night_reads_as_before(self):
+        recs = [_old(d, drain=5.0) for d in _dates(MIN_SAMPLES)]
+        assert measured_capacity(recs).usable_kwh == pytest.approx(
+            PACK_KWH, abs=0.01)
+
+    def test_an_old_night_with_little_assist_keeps_the_house_share(self):
+        recs = [_old(d, drain=5.0, assist=0.3) for d in _dates(MIN_SAMPLES)]
+        assert 0.3 <= MAX_UNCOUNTED_SHARE_OLD_RECORD * 5.3
+        assert measured_capacity(recs).usable_kwh == pytest.approx(
+            PACK_KWH, abs=0.01)
+
+    def test_an_old_export_night_that_charged_back_is_not_read_big(self):
+        """The reviewer's night: 1 kWh house, 7 kWh sold, 4 kWh charged
+        back from the grid, 40 % span. Counting the export without the
+        charge says 20 kWh on a 10 kWh pack."""
+        recs = [_old(d, soc_start=90.0, soc_morning=50.0, drain=1.0,
+                     export=7.0) for d in _dates(MIN_SAMPLES + 2)]
+        assert measured_capacity(recs) is None
+        assert capacity_progress(recs) == 0
+
+    def test_old_assist_nights_do_not_outvote_new_ones(self):
+        old = [_old(f"2026-08-{d:02d}", soc_start=90.0, soc_morning=50.0,
+                    drain=1.0, export=7.0) for d in range(1, 10)]
+        new = [_rec(d, drain=2.0, assist=3.0) for d in _dates(MIN_SAMPLES)]
+        m = measured_capacity(old + new)
+        assert m.samples == MIN_SAMPLES
+        assert m.usable_kwh == pytest.approx(PACK_KWH, abs=0.01)
 
 
 @pytest.mark.unit
@@ -142,6 +173,16 @@ class TestANightThatAlsoCharged:
                      assist=5.0, charge=0.5) for d in _dates(MIN_SAMPLES)]
         assert measured_capacity(recs).usable_kwh == pytest.approx(
             PACK_KWH, abs=0.01)
+
+    def test_charge_noise_on_a_short_night_is_subtracted(self):
+        """1.5 kWh out over a 15 % span, 0.2 kWh of meter noise back in:
+        above 10 % of the outflow, under the noise floor — used."""
+        recs = [_rec(d, soc_start=60.0, soc_morning=45.0, drain=1.5,
+                     charge=0.2) for d in _dates(MIN_SAMPLES)]
+        assert 0.2 > MAX_NIGHT_CHARGE_SHARE * 1.5
+        m = measured_capacity(recs)
+        assert m is not None
+        assert m.kwh_per_pct == pytest.approx(1.3 / 15.0, abs=0.0005)
 
     def test_heavy_nights_do_not_move_the_clean_ones(self):
         clean = [_rec(d, drain=5.0) for d in _dates(MIN_SAMPLES)]
@@ -205,14 +246,49 @@ class TestTheRecorderWritesTheCharge:
         tr2.tick(180.0, False, _s())
         assert tr2._record()["charge_kwh"] == pytest.approx(0.12, abs=0.002)
 
-    def test_a_store_written_before_the_field_restores_zero(self):
+    def test_a_night_restored_from_an_old_store_says_unknown(self):
+        """The charge before the restart was never counted: None, not 0."""
         tr = BatteryNightTracker(reserve_soc=10.0)
         tr.start("2026-09-01", outdoor_temp_c=None)
         state = tr.to_dict()
         del state["charge_j"]
+        del state["charge_known"]
         tr2 = BatteryNightTracker(reserve_soc=10.0)
         tr2.from_dict(state)
-        assert tr2._record()["charge_kwh"] == 0.0
+        tr2.tick(0.0, True, _s(charge=3600.0))
+        tr2.tick(60.0, True, _s(charge=3600.0))
+        assert tr2._record()["charge_kwh"] is None
+        tr3 = BatteryNightTracker(reserve_soc=10.0)
+        tr3.from_dict(tr2.to_dict())                 # and stays unknown
+        assert tr3._record()["charge_kwh"] is None
+        tr3.start("2026-09-02", outdoor_temp_c=None)  # the next night counts
+        assert tr3._record()["charge_kwh"] == 0.0
+
+    def test_a_charge_hidden_in_a_restart_hole_is_counted(self):
+        """6 kWh out, a 40-minute outage while the grid put 25 points back,
+        then 0.5 kWh out. The hole's charge must reach the record, or the
+        night reads 16 kWh on a 10 kWh pack (review, 03.10)."""
+        tr = BatteryNightTracker(reserve_soc=10.0, capacity_kwh=PACK_KWH)
+        tr.start("2026-09-01", outdoor_temp_c=None)
+        t, soc = 0.0, 90.0
+        for k in range(121):                         # 2 h at 3 kW
+            if k:
+                t += 60.0
+                soc -= 3000.0 * 60.0 / 3.6e6 / PACK_KWH * 100.0
+            tr.tick(t, True, _s(home=3000.0, soc=soc))
+        t += 2400.0                                  # the outage
+        soc += 25.0
+        tr.tick(t, True, _s(home=0.0, soc=soc))
+        for _ in range(10):                          # 0.5 kWh more
+            t += 60.0
+            soc -= 3000.0 * 60.0 / 3.6e6 / PACK_KWH * 100.0
+            tr.tick(t, True, _s(home=3000.0, soc=soc))
+        tr.tick(t + 60.0, False, _s(soc=soc))
+        rec = tr._record()
+        assert rec["trainable"]
+        assert rec["charge_kwh"] == pytest.approx(2.5, abs=0.01)
+        assert measured_capacity([dict(rec, date=d)
+                                  for d in _dates(MIN_SAMPLES)]) is None
 
 
 @pytest.mark.unit
@@ -303,3 +379,9 @@ class TestCoordinatorHandsTheChargeToTheRecorder:
         tr._last_ts -= 60.0                          # one cycle ago
         asyncio.run(h._record_battery_night(power, flows))
         assert tr._charge_j == pytest.approx(1800.0 * 60.0, rel=0.05)
+
+        before = tr._charge_j                        # now discharging
+        power.battery_power, power.battery_charge_power = -1800.0, 0.0
+        tr._last_ts -= 60.0
+        asyncio.run(h._record_battery_night(power, flows))
+        assert tr._charge_j == before

@@ -145,6 +145,10 @@ class BatteryNightTracker:
         self._assist_j = 0.0
         self._export_j = 0.0
         self._charge_j = 0.0
+        # (#1045) False for a night restored from a store written before the
+        # charge was counted: what went in before the restart is unknown, and
+        # the record says so rather than claiming 0.
+        self._charge_known = True
         self._gap_s = 0.0
         # (#837) The night's OWN gap/hold, frozen at dawn. gap_s and held_s
         # keep accumulating through the day phase — they have to, the day is
@@ -343,6 +347,10 @@ class BatteryNightTracker:
         drop_pct = float(before) - float(after)
         if drop_pct <= 0:
             self._bridged_s += dt      # covered, and nothing left the pack
+            # (#1045) …but something went IN. The drain must not shrink (see
+            # above), and the charge must still be seen: the SOC span is net
+            # of it, so a hole that hid a grid charge would read the pack big.
+            self._charge_j += cap * -drop_pct / 100.0 * 3.6e6
             return
 
         # A pack cannot lose more than a plausible fraction of itself in the
@@ -380,7 +388,8 @@ class BatteryNightTracker:
             "assist_kwh": round(self._assist_j / 3.6e6, 3),
             "export_kwh": round(self._export_j / 3.6e6, 3),
             # (#1045) What went back IN during the night — the SOC span is net.
-            "charge_kwh": round(self._charge_j / 3.6e6, 3),
+            "charge_kwh": (round(self._charge_j / 3.6e6, 3)
+                           if self._charge_known else None),
             "soc_start": self._soc_start,
             "soc_morning": self._soc_morning,
             "reserve_hit": self._reserve_hit,
@@ -434,6 +443,7 @@ class BatteryNightTracker:
             "last_ts": self._last_ts,
             "drain_j": self._drain_j, "assist_j": self._assist_j,
             "export_j": self._export_j, "charge_j": self._charge_j,
+            "charge_known": self._charge_known,
             "gap_s": self._gap_s,
             "reserve_hit": self._reserve_hit,
             "soc_start": self._soc_start,
@@ -484,6 +494,7 @@ class BatteryNightTracker:
         self._assist_j = float(d.get("assist_j", 0.0) or 0.0)
         self._export_j = float(d.get("export_j", 0.0) or 0.0)
         self._charge_j = float(d.get("charge_j", 0.0) or 0.0)
+        self._charge_known = bool(d.get("charge_known", "charge_j" in d))
         self._gap_s = float(d.get("gap_s", 0.0) or 0.0)
         self._reserve_hit = bool(d.get("reserve_hit", False))
         self._soc_start = d.get("soc_start")
