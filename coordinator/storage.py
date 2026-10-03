@@ -106,6 +106,9 @@ CALCULATOR_STATE_KEYS: tuple[str, ...] = (
     # "too little history" silence for two weeks after every reboot — the
     # exact window a post-upgrade sensor fault most needs catching in.
     "baseload_history",
+    # (#1044) the first day the mirror held home members only. Lost, every
+    # restart would look like the upgrade day and seal no day clean.
+    "home_members_since",
 )
 
 

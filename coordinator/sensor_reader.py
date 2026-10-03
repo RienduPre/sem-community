@@ -2607,11 +2607,13 @@ class SensorReader:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
                 self._read_sensor(ed.ev_power, "ev"),
                 charging=self._fleet_charging_status(), readings=readings))
+            readings.ev_power_fleet_entity = ed.ev_power   # (#1044)
         elif self.config.ev_power_sensor:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
                 self._read_sensor(self.config.ev_power_sensor, "ev"),
                 charging=self._fleet_charging_status(), readings=readings,
             ))
+            readings.ev_power_fleet_entity = self.config.ev_power_sensor
 
         # EV connection status — per-charger OR'd for global (#193), plus
         # per-charger maps so ``build_charger_view`` can gate each charger's
@@ -4130,6 +4132,7 @@ class SensorReader:
                 self._read_sensor(self.config.ev_power_sensor, "ev"),
                 charging=self._fleet_charging_status(), readings=readings,
             ))
+            readings.ev_power_fleet_entity = self.config.ev_power_sensor  # (#1044)
 
         # EV connection status — per-charger OR'd for global (#193), plus
         # per-charger maps so build_charger_view gates each charger on its
@@ -4170,10 +4173,12 @@ class SensorReader:
         if not any(c.get("ev_charging_power_sensor") for c in ev_chargers):
             return False
         total_ev = 0.0
+        summed = set()
         for charger_cfg in ev_chargers:
             cid = charger_cfg.get("id")
             cps = charger_cfg.get("ev_charging_power_sensor")
             if cps:
+                summed.add(cps)
                 # Smooth per charger so the per-charger dict stays
                 # consistent with the fleet sum (both blip-filtered).
                 chrg = charger_cfg.get("ev_charging_sensor")
@@ -4191,6 +4196,10 @@ class SensorReader:
                     readings.ev_power_per_charger[cid] = cw
         # total_ev is already the sum of smoothed per-charger values.
         readings.ev_power = FleetEvPower(total_ev)
+        # (#1044) The sensors in that sum — a charger whose own sensor is
+        # not among them (none nested, so it fell back to a global one) is
+        # still inside ``home``.
+        readings.ev_power_entities = frozenset(summed)
         return True
 
     def _fleet_charging_status(self) -> Optional[bool]:
