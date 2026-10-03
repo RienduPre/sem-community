@@ -158,7 +158,8 @@ class TestLifetimeSeedSumsEveryCounter:
     def test_a_first_tariff_seed_above_half_heals_too(self):
         """The half-of-hardware check alone does not catch tariff 1 when it is
         the bigger half — here every stored value is ≥ 55 % of the sum, so the
-        old checks found nothing to fix. No record + a two-counter list does."""
+        old checks found nothing to fix. No record + a two-counter list does,
+        and the home balance moves by the same amounts."""
         imp = {"sensor.import_t1": 6_000.0, "sensor.import_t2": 4_000.0}
         exp = {"sensor.export_t1": 6_000.0, "sensor.export_t2": 5_000.0}
         solar = {"sensor.pv": 20_000.0}
@@ -167,11 +168,15 @@ class TestLifetimeSeedSumsEveryCounter:
         calc._lifetime_accumulators.update({
             "lifetime_solar": 20_100.0, "lifetime_grid_import": 6_000.0,
             "lifetime_grid_export": 6_000.0, "lifetime_battery_charge": 3_000.0,
-            "lifetime_battery_discharge": 2_700.0,
+            "lifetime_battery_discharge": 2_700.0, "lifetime_home": 19_800.0,
+            "lifetime_ev": 1_234.0,
         })
         calc.seed_lifetime_from_hardware(_hass(values), _ed(solar=solar, imp=imp, exp=exp))
         assert _lifetime(calc, "grid_import") == pytest.approx(10_000)
         assert _lifetime(calc, "grid_export") == pytest.approx(11_000)
+        assert _lifetime(calc, "solar") == pytest.approx(20_100)  # not lowered
+        assert _lifetime(calc, "home") == pytest.approx(19_800 + 4_000 - 5_000)
+        assert _lifetime(calc, "ev") == pytest.approx(1_234)
 
     def test_single_counter_install_with_no_record_is_left_alone(self):
         """No list is longer than one, so a seed from before #1043 read the
@@ -182,7 +187,7 @@ class TestLifetimeSeedSumsEveryCounter:
                   **CHARGE, **DISCHARGE}
         calc = _calc()
         stored = {
-            "lifetime_solar": 20_500.0, "lifetime_grid_import": 9_100.0,
+            "lifetime_solar": 20_500.0, "lifetime_grid_import": 8_900.0,
             "lifetime_grid_export": 7_050.0, "lifetime_battery_charge": 3_010.0,
             "lifetime_battery_discharge": 2_705.0, "lifetime_home": 21_000.0,
         }
@@ -199,14 +204,18 @@ class TestLifetimeSeedSumsEveryCounter:
 
         later = _calc()
         later.restore_state(state)
-        # Live accumulation moved the totals on since the seed.
+        # Live accumulation moved the totals on since the seed — one of them
+        # below its counter, which only a CHANGED set may raise.
         later._lifetime_accumulators["lifetime_solar"] += 40.0
+        later._lifetime_accumulators["lifetime_grid_export"] -= 300.0
         before = dict(later._lifetime_accumulators)
         later.seed_lifetime_from_hardware(_hass(_values()), _ed())
         assert later._lifetime_seeded is True
         assert later._lifetime_accumulators == before
 
-    def test_a_new_counter_in_the_dashboard_re_seeds(self):
+    def test_a_new_counter_in_the_dashboard_is_added(self):
+        """A small new inverter: the old checks (half, 90 %) see nothing, the
+        record sees a new set and raises the total by its counter."""
         calc = _calc()
         two = {k: SOLAR[k] for k in ("sensor.inv1_kwh", "sensor.inv2_kwh")}
         calc.seed_lifetime_from_hardware(_hass(_values()), _ed(solar=two))
@@ -214,8 +223,99 @@ class TestLifetimeSeedSumsEveryCounter:
 
         later = _calc()
         later.restore_state(calc.get_state())
+        with_new = {**two, "sensor.inv_new": 500.0}
+        later.seed_lifetime_from_hardware(
+            _hass(_values(**{"sensor.inv_new": 500.0})), _ed(solar=with_new))
+        assert _lifetime(later, "solar") == pytest.approx(12_388 + 27_870 + 500)
+        assert later._lifetime_seed_counters["solar"] == sorted(with_new)
+
+
+@pytest.mark.unit
+class TestReSeedNeverLowersHistory:
+    """Review of #1043: a new or changed counter set must not overwrite the
+    history SEM holds with a smaller hardware sum."""
+
+    def _good(self, record=True):
+        calc = _calc()
+        calc.seed_lifetime_from_hardware(_hass(_values()), _ed())
+        later = _calc()
+        state = calc.get_state()
+        if not record:
+            state["lifetime_seed_counters"] = None
+        later.restore_state(state)
+        later._lifetime_accumulators["lifetime_solar"] = 60_700.0
+        return later
+
+    def test_a_replaced_inverter_on_an_old_seed_keeps_its_history(self):
+        """No record, two inverters, inverter 2 swapped: its counter starts
+        again. The hardware sum is 35,000 against 55,000 SEM holds."""
+        solar = {"sensor.inv1_kwh": 30_000.0, "sensor.inv2_kwh": 5_000.0}
+        calc = _calc()
+        calc._lifetime_accumulators.update({
+            "lifetime_solar": 55_000.0, "lifetime_grid_import": 10_000.0,
+            "lifetime_grid_export": 35_196.0, "lifetime_battery_charge": 3_000.0,
+            "lifetime_battery_discharge": 2_700.0,
+        })
+        values = {**solar, **IMPORT, **EXPORT, **CHARGE, **DISCHARGE}
+        calc.seed_lifetime_from_hardware(_hass(values), _ed(solar=solar))
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(55_000)
+
+    def test_a_removed_dashboard_row_keeps_its_history(self):
+        calc = self._good()
+        two = {k: SOLAR[k] for k in ("sensor.inv1_kwh", "sensor.inv2_kwh")}
+        calc.seed_lifetime_from_hardware(_hass(_values()), _ed(solar=two))
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(60_700)
+
+    def test_a_gone_counter_left_out_keeps_the_history(self, monkeypatch):
+        """Its integration was deleted, its row left in the dashboard. After
+        the wait it is left out — and the sum without it is only a floor."""
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = self._good()
+        values = _values()
+        del values["sensor.inv2_kwh"], values["sensor.inv3_kwh"]
+        calc.seed_lifetime_from_hardware(_hass(values), _ed())
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(values), _ed())
+        assert calc._lifetime_seeded is True
+        # 12,388 alone is under half of 60,700: the #551 downward heal would
+        # have fired on a complete set. On a floor it may not.
+        assert _lifetime(calc, "solar") == pytest.approx(60_700)
+
+    def test_a_dark_counter_left_out_keeps_the_history(self, monkeypatch):
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = self._good(record=False)
+        dark = _values(**{"sensor.inv2_kwh": "unavailable", "sensor.inv3_kwh": "unavailable"})
+        calc.seed_lifetime_from_hardware(_hass(dark), _ed())
+        assert calc._lifetime_seeded is False
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(dark), _ed())
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(60_700)
+        # Next start, the counters are back: the set changed, the total is
+        # raised if the counters prove it too low — never lowered.
+        later = _calc()
+        later.restore_state(calc.get_state())
         later.seed_lifetime_from_hardware(_hass(_values()), _ed())
-        assert _lifetime(later, "solar") == pytest.approx(60_601)
+        assert _lifetime(later, "solar") == pytest.approx(60_700)
+
+    def test_a_fresh_seed_with_a_counter_left_out_is_healed_later(self, monkeypatch):
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = _calc()
+        dark = _values(**{"sensor.export_t2": "unavailable"})
+        calc.seed_lifetime_from_hardware(_hass(dark), _ed())
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(dark), _ed())
+        assert _lifetime(calc, "grid_export") == pytest.approx(10_358)
+
+        later = _calc()
+        later.restore_state(calc.get_state())
+        later.seed_lifetime_from_hardware(_hass(_values()), _ed())
+        assert _lifetime(later, "grid_export") == pytest.approx(35_196)
 
 
 @pytest.mark.unit
@@ -253,21 +353,56 @@ class TestLifetimeSeedWaitsForEveryCounter:
         assert later._lifetime_seeded is False
         assert _lifetime(later, "solar") == pytest.approx(60_700)
 
-    def test_a_counter_with_no_number_holds_the_seed(self):
+    @pytest.mark.parametrize("reading", ["garbage", "nan", "inf", 0, -5])
+    def test_a_counter_with_no_usable_number_holds_the_seed(self, reading):
         calc = _calc()
         calc.seed_lifetime_from_hardware(
-            _hass(_values(**{"sensor.inv3_kwh": "garbage"})), _ed())
+            _hass(_values(**{"sensor.inv3_kwh": reading})), _ed())
         assert calc._lifetime_seeded is False
 
-    def test_an_absent_counter_holds_the_seed_while_ha_starts(self):
+    def test_an_absent_counter_holds_the_seed_while_ha_starts(self, monkeypatch):
         """Before HA runs, an integration still loading has NO state at all
-        (bug class 86) — that is not a counter that is gone."""
+        (bug class 86) — that is not a counter that is gone, however long
+        the start takes."""
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
         values = _values()
         del values["sensor.inv3_kwh"]
         calc = _calc()
         calc.seed_lifetime_from_hardware(_hass(values, running=False), _ed())
+        clock[0] += 10 * UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(values, running=False), _ed())
         assert calc._lifetime_seeded is False
         assert _lifetime(calc, "solar") == 0.0
+
+    def test_the_wait_starts_when_ha_runs(self, monkeypatch):
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        values = _values()
+        del values["sensor.inv3_kwh"]
+        calc = _calc()
+        calc.seed_lifetime_from_hardware(_hass(values, running=False), _ed())
+        clock[0] += 10 * UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(values), _ed())
+        assert calc._lifetime_seeded is False
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(values), _ed())
+        assert calc._lifetime_seeded is True
+
+    def test_each_counter_has_its_own_wait(self, monkeypatch):
+        """A counter that goes dark late does not inherit the wait another
+        counter already served."""
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        calc = _calc()
+        calc.seed_lifetime_from_hardware(
+            _hass(_values(**{"sensor.inv2_kwh": "unavailable"})), _ed())
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S - 1
+        late = _values(**{"sensor.inv3_kwh": "unavailable"})
+        calc.seed_lifetime_from_hardware(_hass(late), _ed())
+        clock[0] += 1
+        calc.seed_lifetime_from_hardware(_hass(late), _ed())
+        assert calc._lifetime_seeded is False
 
     def test_an_absent_counter_is_left_out_after_the_wait(self, monkeypatch):
         """A stale Energy Dashboard row must not hold the seed for ever: once
@@ -290,17 +425,15 @@ class TestLifetimeSeedWaitsForEveryCounter:
         assert _lifetime(calc, "solar") == pytest.approx(12_388 + 27_870)
         assert calc._lifetime_seed_counters["solar"] == ["sensor.inv1_kwh", "sensor.inv2_kwh"]
 
-    def test_an_unavailable_counter_is_never_left_out(self, monkeypatch):
-        """An entity that EXISTS and reads unavailable is a real counter whose
-        value is owed — the wait for a gone row does not apply to it."""
-        clock = [1_000.0]
-        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    def test_an_external_statistic_is_left_out_at_once(self):
+        """``tibber:…`` ids in the dashboard are statistics, not entities:
+        they never have a state, so there is nothing to wait for."""
+        imp = {**IMPORT, "tibber:energy_consumption_home": 0.0}
+        values = _values()
         calc = _calc()
-        dark = _values(**{"sensor.inv3_kwh": "unavailable"})
-        calc.seed_lifetime_from_hardware(_hass(dark), _ed())
-        clock[0] += 10 * UNAVAILABLE_REPAIR_THRESHOLD_S
-        calc.seed_lifetime_from_hardware(_hass(dark), _ed())
-        assert calc._lifetime_seeded is False
+        calc.seed_lifetime_from_hardware(_hass(values), _ed(imp=imp))
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "grid_import") == pytest.approx(10_000)
 
 
 @pytest.mark.unit
@@ -315,11 +448,18 @@ class TestBatteryLessInstall:
         assert _lifetime(calc, "solar") == pytest.approx(60_601)
         assert _lifetime(calc, "battery_charge") == 0.0
 
-    def test_a_listed_battery_reading_zero_still_waits(self):
+    def test_a_listed_battery_reading_zero_waits_then_is_left_out(self, monkeypatch):
+        clock = [1_000.0]
+        monkeypatch.setattr(ec_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
         calc = _calc()
         values = _values(**{"sensor.batt_charge": 0, "sensor.batt_discharge": 0})
         calc.seed_lifetime_from_hardware(_hass(values), _ed())
         assert calc._lifetime_seeded is False
+        clock[0] += UNAVAILABLE_REPAIR_THRESHOLD_S
+        calc.seed_lifetime_from_hardware(_hass(values), _ed())
+        assert calc._lifetime_seeded is True
+        assert _lifetime(calc, "solar") == pytest.approx(60_601)
+        assert _lifetime(calc, "battery_charge") == 0.0
 
 
 @pytest.mark.unit
@@ -441,10 +581,15 @@ _SCALARS = {
 
 
 def _scalar_reads(source: str) -> list:
-    return sorted(
-        (n.lineno, n.attr) for n in ast.walk(ast.parse(source))
-        if isinstance(n, ast.Attribute) and n.attr in _SCALARS
-    )
+    """Attribute reads AND string names — ``getattr(ed, "solar_energy")``
+    was how ``_query_monthly_energy`` read the first counter."""
+    hits = []
+    for n in ast.walk(ast.parse(source)):
+        if isinstance(n, ast.Attribute) and n.attr in _SCALARS:
+            hits.append((n.lineno, n.attr))
+        elif isinstance(n, ast.Constant) and n.value in _SCALARS:
+            hits.append((n.lineno, n.value))
+    return sorted(hits)
 
 
 @pytest.mark.unit
@@ -456,6 +601,8 @@ class TestNoFirstCounterReads:
         source = Path(inspect.getfile(ec_module)).read_text(encoding="utf-8")
         assert _scalar_reads(source) == []
 
-    def test_the_guard_sees_the_shape_it_bans(self):
+    def test_the_guard_sees_the_shapes_it_bans(self):
         bad = "def f(ed_config):\n    return ed_config.grid_import_energy\n"
         assert _scalar_reads(bad) == [(2, "grid_import_energy")]
+        bad = "def f(ed):\n    return getattr(ed, 'solar_energy', None)\n"
+        assert _scalar_reads(bad) == [(2, "solar_energy")]

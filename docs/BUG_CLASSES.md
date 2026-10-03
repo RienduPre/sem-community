@@ -2351,21 +2351,28 @@ lifetime seed read the scalar for grid and battery, so a dual-tariff meter seede
 complete — and against a good stored value it fired #551's downward heal, shrinking it.
 **Closure:** one resolver, `ha_energy_reader.energy_counters(ed, category)` (the list, else the
 scalar), used by all three seeds and by the coordinator's counter wiring. The lifetime seed sums only
-when every listed counter reads a number; a counter with NO state is left out only once HA runs and
-`UNAVAILABLE_REPAIR_THRESHOLD_S` has passed (a gone ED row must not hold the seed for ever). It
-records the counters it summed (`lifetime_seed_counters`, persisted) and re-seeds when that set
-changes — or, with no record, when any list is longer than one, so every install seeded before the
-fix heals on its next restart, not only those below half of the hardware. The battery wait now
-applies only when the dashboard lists a battery: a battery-less install read 0 + 0 there and never
-seeded at all. **Guard:** `tests/test_1043_lifetime_seed_all_counters.py` — the reporter's numbers,
-a tariff-1 seed above half heals, a partial read cannot shrink, absent vs unavailable, battery-less,
-the record round-trips, yearly and monthly sums, and an AST check that `energy_calculator.py` reads
-no scalar `*_energy` field. **Named, not swept:** the EV part of both seeds takes the FIRST
-`device_consumption` entry whose id CONTAINS a keyword (`"ev"` — class 67), so a two-charger install
-seeds one charger, and summing would sum every false match too. A yearly total seeded from tariff 1
-before this fix stays low until 1 January (the yearly seed runs once per install).
-`sensor_reader._grid_counter_entities` and the sign diagnostics restate the list-else-scalar rule
-(correct today).
+when every listed counter gives a reading — no state, unknown/unavailable, NaN and 0 are not one.
+Each counter has its own wait, which starts only once HA runs (class 86) and lasts
+`UNAVAILABLE_REPAIR_THRESHOLD_S`; then the counter is left out (a gone ED row must not hold the seed
+for ever; an external `source:id` statistic is left out at once). A sum with a counter left out is a
+FLOOR: that category is only ever raised, and #551's downward heal does not fire on it. The seed
+records the counters it summed (`lifetime_seed_counters`, persisted); when the set changes — or, with
+no record, when any list is longer than one — each total is RAISED to its counter sum, never lowered
+(review: a swapped inverter or a removed row reads less than the history SEM holds), and
+`lifetime_home` moves by the same amounts. So every install seeded before the fix heals on its next
+restart, not only those below half of the hardware. The battery wait now applies only to a battery
+counter that gave a reading: a battery-less install read 0 + 0 there and never seeded at all.
+**Guard:** `tests/test_1043_lifetime_seed_all_counters.py` — the reporter's numbers, a tariff-1 seed
+above half heals, a re-seed never lowers history (swapped inverter, removed row, gone or dark
+counter), per-counter waits that start when HA runs, battery-less, the record round-trips, yearly
+and monthly sums, and an AST check that `energy_calculator.py` names no scalar `*_energy` field.
+**Named, not swept:** the EV part of both seeds takes the FIRST `device_consumption` entry whose id
+CONTAINS a keyword (`"ev"` — class 67), so a two-charger install seeds one charger, and summing would
+sum every false match too. `coordinator/night_backfill.py` reads the `*_energy_sensor` config keys
+(#876 copied the scalars there), so a night's grid and battery legs are the first tariff and the
+first battery. A yearly total seeded from tariff 1 before this fix stays low until 1 January (the
+yearly seed runs once per install). `sensor_reader.battery_sign_diagnostics` lists the scalar
+first (diagnostics only); `_grid_counter_entities` restates list-else-scalar (correct today).
 
 
 ### 52. A summary statistic chosen without asking which tail hurts — GUARDED
