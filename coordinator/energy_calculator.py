@@ -383,6 +383,10 @@ class EnergyCalculator:
         # One row per finished calendar day WITH a home row — a day without
         # one is a gap and is refused, never recorded as zero. Persisted.
         self._baseload_history: deque = deque(maxlen=_BASELOAD_HISTORY_DAYS)
+        # (#1044) The first calendar day whose mirror held home members only
+        # (SEM's own chargers left out). Persisted, the ``midnight_ev_since``
+        # way: a restart must not look like the upgrade day.
+        self._home_members_since: Optional[date] = None
 
     def _record_clamp(
         self, name: str, raw: float, clamped: float, eps: float,
@@ -772,6 +776,11 @@ class EnergyCalculator:
         # (#773) The audited residual, derived AFTER home because it is one
         # more subtraction from it. The W twin is filled by the coordinator,
         # which owns the live device draws.
+        # (#1044) The first day this code books the mirror. Before it, SEM's
+        # own chargers were booked too; a day that began before it is not
+        # sealed as a home-members-only day (``_seal_baseload_day``).
+        if self._home_members_since is None:
+            self._home_members_since = today
         _baseload = self.get_true_baseload(today)
         energy.true_baseload_today = _baseload["today_kwh"]
         energy.controlled_loads_today = _baseload["controlled_today_kwh"]
@@ -3018,6 +3027,13 @@ class EnergyCalculator:
             # — and most houses').
             "estimated_kwh": round(estimated, 3),
             "devices": devices,
+            # (#1044) True when the whole day was booked with SEM's own
+            # chargers left out of the mirror. The upgrade day is not: its
+            # morning may hold a charger booked under the old rule.
+            "home_members_only": (
+                self._home_members_since is not None
+                and day > self._home_members_since
+            ),
         })
 
     # ── (#770) battery charge, by where the energy came from ───────────
@@ -3463,6 +3479,10 @@ class EnergyCalculator:
             # weeks after every reboot — the exact window a post-upgrade
             # sensor fault most needs catching in.
             "baseload_history": list(self._baseload_history),
+            "home_members_since": (
+                self._home_members_since.isoformat()
+                if self._home_members_since else None
+            ),
         }
 
     @staticmethod
@@ -3604,6 +3624,15 @@ class EnergyCalculator:
                      if isinstance(r, dict) and r.get("date")),
                     maxlen=_BASELOAD_HISTORY_DAYS,
                 )
+            # (#1044) Absent on a store written before the fix: the next
+            # update stamps today, so the upgrade day is not sealed clean.
+            members_since = state.get("home_members_since")
+            if members_since:
+                try:
+                    self._home_members_since = date.fromisoformat(
+                        str(members_since))
+                except ValueError:
+                    self._home_members_since = None
             last_update = state.get("last_update")
             if last_update:
                 self._last_update = datetime.fromisoformat(last_update)
