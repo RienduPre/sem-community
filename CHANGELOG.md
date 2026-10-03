@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🐛 **An OCPP charger named "wallbox" no longer gets a refused start with every current change** (#976). SEM took it for a Wallbox-brand charger.
 - 🐛 **A V2C now charges when SEM starts it and pauses when SEM stops it** (#1042). SEM turned its "Pause session" switch on to charge.
 - 🐛 **Measured battery size counts what went to the car and the grid** (#1045). It read low after the battery charged the car or sold power.
+- 🐛 **True baseload no longer goes negative while a car charges** (#1044). SEM took the car's energy away twice.
 
 # [2.2.0-beta.8] — 02.10.2026
 
