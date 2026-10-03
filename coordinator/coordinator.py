@@ -9106,6 +9106,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     max(0.0, -float(getattr(power, "battery_power", 0.0) or 0.0))
                     if getattr(power, "battery_power", None) is not None
                     else None),
+                # (#1045) What goes back INTO the pack overnight. The SOC span
+                # is net of it, so the capacity reader must be too.
+                battery_charge_w=float(
+                    getattr(power, "battery_charge_power", 0.0) or 0.0),
                 grid_to_home_w=float(
                     getattr(power_flows, "grid_to_home", 0.0) or 0.0),
                 home_w=float(

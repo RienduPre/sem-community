@@ -9,6 +9,11 @@ Not complicated, and it needs **no new recording**. Every sealed night from
 arithmetic over records SEM already writes. This is a READER, not a fourth
 ledger.
 
+(#1045) The energy is everything that left the pack — house drain, EV assist
+and export — less what went back in, because that is what the SOC span counts.
+``drain_kwh`` alone is the house's share: the overnight need's number, not
+this one.
+
 Why it matters more than the forecast ledger: the spendable budget's
 ``usable_capacity_kwh`` is a configured **nameplate**. If a 30 kWh pack really
 delivers 0.24 kWh/% against a nominal 0.30, every spendable number is 20 % too
@@ -40,6 +45,12 @@ MIN_SOC_SPAN_PCT: float = 15.0
 #: seven: capacity is a physical property of the pack, not a property of the
 #: weather, so it does not need a week of conditions to be representative.
 MIN_SAMPLES: int = 5
+
+#: (#1045) How much of what left the pack may have gone back in the same night
+#: and still let the night measure it. Up to this the charge is subtracted —
+#: meter noise around zero, a short top-up. Above it the net is a small
+#: difference of two lossy conversions, and the night is not used.
+MAX_NIGHT_CHARGE_SHARE: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -80,10 +91,10 @@ def _f(value) -> Optional[float]:
 
 def _qualifying_ratios(records: Optional[Iterable[dict]]) -> list:
     """kWh-per-percent of every night that passes the quality gates —
-    trainable, ≥ ``MIN_SOC_SPAN_PCT`` of SOC span, positive drain — one
-    record per date. The verdict and the progress count read the SAME list,
-    so the surface can never say "0 nights" while four already qualify
-    (PROD 26.08, #778)."""
+    trainable, ≥ ``MIN_SOC_SPAN_PCT`` of SOC span, energy out of the pack,
+    little charge back in — one record per date. The verdict and the progress
+    count read the SAME list, so the surface can never say "0 nights" while
+    four already qualify (PROD 26.08, #778)."""
     ratios = []
     for rec in distinct_nights(records or []):
         if not isinstance(rec, dict) or not rec.get("trainable"):
@@ -96,9 +107,22 @@ def _qualifying_ratios(records: Optional[Iterable[dict]]) -> list:
         span = start - morning
         if span < MIN_SOC_SPAN_PCT:      # also rejects a rising SOC (negative)
             continue
-        if drain <= 0:
+        # (#1045) The span counts everything that left the pack, so the energy
+        # must too. ``drain_kwh`` is the house's share only — right for the
+        # overnight need, wrong here: every night with EV assist or battery
+        # export read low (a 10 kWh pack measured 7.9). Records written before
+        # a field existed simply contribute 0, as they always did.
+        out = (drain + (_f(rec.get("assist_kwh")) or 0.0)
+               + (_f(rec.get("export_kwh")) or 0.0))
+        if out <= 0:
             continue
-        ratios.append(drain / span)
+        # …and the span is NET of what went back in the same night, so the
+        # energy must be net too. Gross over net reads HIGH — the direction
+        # that sizes every budget against a pack that is not there.
+        charge = max(0.0, _f(rec.get("charge_kwh")) or 0.0)
+        if charge > MAX_NIGHT_CHARGE_SHARE * out:
+            continue
+        ratios.append((out - charge) / span)
     return ratios
 
 
