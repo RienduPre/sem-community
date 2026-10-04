@@ -241,6 +241,11 @@ class HealthCheck:
         is exhausted the gap is a genuinely stuck sensor and warns.
         """
         violations: list[str] = []
+        # (#1047) Home was built from a dark input's held value this cycle,
+        # while the terms below carry that input's 0 W fallback. The gap is
+        # the dropout itself, already bridged — the same case as the hold.
+        if getattr(power, "balance_held_w", None):
+            home_hold_active = True
 
         supply = power.solar_power + power.grid_import_power + power.battery_discharge_power
         demand = (

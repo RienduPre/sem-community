@@ -236,6 +236,15 @@ class PowerReadings:
     solar_downtime_min_today: float = 0.0
     grid_power_unavailable: bool = False
     battery_power_all_unavailable: bool = False
+    #: (#1047) For each balance input whose EVERY read was dark this cycle
+    #: ("solar" / "grid" / "battery"), the last value SEM published for it,
+    #: while that value is inside the dark-read grace — the number the
+    #: input's own entity keeps showing. Read by ONE thing: the home figure
+    #: in ``calculate_derived``. The input fields above keep the reader's
+    #: 0.0 fallback, because #818's rule (nothing substitutes a steering
+    #: value) still stands; home is not a steering input, it is what SEM
+    #: shows, and it must not show a house made of a dropout.
+    balance_held_w: "Dict[str, float]" = field(default_factory=dict)
     # (#910) True for a cycle in which a charger's power read was a blink
     # held at its last accepted value (status still charging).
     ev_power_held: bool = False
@@ -307,9 +316,19 @@ class PowerReadings:
         self.battery_charge_power = max(0, self.battery_power)
         self.battery_discharge_power = max(0, -self.battery_power)
 
-        # Home consumption from energy balance
-        energy_in = self.solar_power + self.grid_import_power + self.battery_discharge_power
-        energy_out = self.ev_power + self.grid_export_power + self.battery_charge_power
+        # Home consumption from energy balance.
+        # (#1047) A dark input enters as the value its entity still shows
+        # (``balance_held_w``), never as the reader's 0.0 fallback. PROD
+        # 04.10 15:26: the battery read unavailable while charging 3.9 kW,
+        # the 0 W put the whole 4.7 kW of solar on the house — home read
+        # 4,676 W for 20 s instead of ~500 W. The split fields above stay
+        # on the raw reading; only the home figure takes the held value.
+        held = self.balance_held_w or {}
+        solar = held.get("solar", self.solar_power)
+        grid = held.get("grid", self.grid_power)
+        battery = held.get("battery", self.battery_power)
+        energy_in = solar + max(0, -grid) + max(0, -battery)
+        energy_out = self.ev_power + max(0, grid) + max(0, battery)
         residual = energy_in - energy_out
         self.home_consumption_power = max(0, residual)
         # (#660) How much that clamp removed. THIS is the honest signal:
@@ -1178,10 +1197,14 @@ class SEMData:
             "battery_power": None if _batt_dark else _w(self.power.battery_power),
             "ev_power": _w(self.power.ev_power),
             "home_consumption_power": _w(self.power.home_consumption_power),
-            "grid_import_power": _w(self.power.grid_import_power),
-            "grid_export_power": _w(self.power.grid_export_power),
-            "battery_charge_power": _w(self.power.battery_charge_power),
-            "battery_discharge_power": _w(self.power.battery_discharge_power),
+            # (#1047) The split halves are their input, cut in two — they
+            # cannot be more certain than it (the grid_active_power rule).
+            # Published as numbers, they read 0 W beside a battery entity
+            # still holding 3.9 kW.
+            "grid_import_power": None if _grid_dark else _w(self.power.grid_import_power),
+            "grid_export_power": None if _grid_dark else _w(self.power.grid_export_power),
+            "battery_charge_power": None if _batt_dark else _w(self.power.battery_charge_power),
+            "battery_discharge_power": None if _batt_dark else _w(self.power.battery_discharge_power),
             "battery_soc": None if self.power.battery_soc_unavailable else self.power.battery_soc,
             "battery_temperature": self.power.battery_temperature,
             "inverter_temperature": self.power.inverter_temperature,
