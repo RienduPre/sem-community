@@ -98,6 +98,7 @@ from ..analytics.consumption_predictor import ConsumptionPredictor
 from .ev_taper_detector import EVTaperDetector
 from .ev_soc_need import estimate_stop_step, soc_remaining_need
 from ..utils.log_gate import log_on_change
+from ..utils.helpers import solar_share_pct
 from ..analytics.energy_assistant import EnergyAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -6246,6 +6247,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # Energy assistant (Phase 6)
         assistant_data = EnergyAssistantSensorData()
         try:
+            # (#1046) the car's flows on the EV day — the hours "Today" counts.
+            # None on the upgrade day: its rows start at the restart, so the
+            # calendar flows say more.
+            ev_flows = self._energy_calculator.ev_day_flows()
+            if ev_flows is None:
+                ev_flows = (energy_flows.solar_to_ev, energy_flows.grid_to_ev,
+                            energy_flows.battery_to_ev)
+            ev_solar, ev_grid, ev_battery = ev_flows
             assistant = self._energy_assistant.analyze(
                 daily_solar_kwh=energy.daily_solar,
                 daily_home_kwh=energy.daily_home,
@@ -6254,8 +6263,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 daily_grid_export_kwh=energy.daily_grid_export,
                 daily_battery_charge_kwh=energy.daily_battery_charge,
                 daily_battery_discharge_kwh=energy.daily_battery_discharge,
-                solar_to_ev_kwh=energy_flows.solar_to_ev,
-                grid_to_ev_kwh=energy_flows.grid_to_ev,
+                solar_to_ev_kwh=ev_solar,
+                grid_to_ev_kwh=ev_grid,
+                battery_to_ev_kwh=ev_battery,
                 self_consumption_rate=performance.self_consumption_rate,
                 autarky_rate=performance.autarky_rate,
                 current_price_level=tariff_data.tariff_price_level,
@@ -12466,8 +12476,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             session.energy_kwh += total_increment
             session.solar_energy_kwh += solar_increment
             session.grid_energy_kwh += grid_increment
-            if session.energy_kwh > 0:
-                session.solar_share_pct = (session.solar_energy_kwh / session.energy_kwh) * 100
+            # (#1046) the split of the flows, not solar over the measured
+            # charge: a cycle the flows leave unassigned (dark inverter) is
+            # in energy_kwh but in neither flow, and read as "not solar".
+            share = solar_share_pct(session.solar_energy_kwh, session.grid_energy_kwh)
+            if share is not None:
+                session.solar_share_pct = share
             # Use live dynamic tariff rate instead of static config value (#223)
             import_rate = self._energy_calculator._import_rate
             session.cost += grid_increment * import_rate

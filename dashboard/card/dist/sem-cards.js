@@ -1658,7 +1658,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="ev-sub">${e.sub}</div>
                     </div>`)}
             </div>
-        `}render(){if(!this._hass||!this._config)return K;const e=this._theme(),t=2*Math.PI*42,s=t.toFixed(1),i=this._val("battery_soc",null),r=Je(i),a=this._val("battery_power",0),o=this._val("battery_charge_power",0),n=this._val("battery_discharge_power",0),l=(this._valStr("battery_status")||"").toLowerCase(),c=this._val("battery_health_score",0),d=this._val("battery_cycles_estimated",0),p=this._val("daily_battery_charge_energy",0),h=this._val("daily_battery_discharge_energy",0),_=this._val("daily_battery_savings",0),g=this._val("monthly_battery_charge_energy",0),u=this._val("monthly_battery_discharge_energy",0),m=this._val("flow_solar_to_battery_energy",0),f=fe(this._hass),v=this._hass?.states[`${this._prefix}battery_temperature`],y=v&&"unavailable"!==v.state&&"unknown"!==v.state?parseFloat(v.state):null,b=(x=v)&&x.attributes&&x.attributes.unit_of_measurement||"°C";var x;const $="selling"===l,w=!$&&("charging"===l||o>10),k=!$&&("discharging"===l||n>10),S=this._hass?.states["sensor.sem_tariff_current_export_rate"],C=S&&"unavailable"!==S.state&&"unknown"!==S.state?parseFloat(S.state):null,z="#FCD170",M=$?this._t("selling_to_grid"):w?this._t("charging"):k?this._t("discharging"):this._t("idle"),D=$?z:w?"#f06292":"#4db6ac",E=$?z:w?"#f06292":k?"#4db6ac":e.textSec||"#888",F=w||k||$?"0.5":"0.2",I=w||k||$?"socPulse 2s ease-in-out infinite":"none",A=r.fraction,N=(t*(1-A)).toFixed(1),B=p>0?Math.round(m/p*100):0,T=this._valStr("battery_session_type"),R="charge"===T||"discharge"===T,P="charge"===T,L=R?this._val("battery_session_energy",0):0,U=R?this._val("battery_session_duration",0):0,O=R?this._val("battery_session_avg_power",0):0,H=R?this._val("battery_session_solar_share",0):0,j=R?this._val("battery_session_cost",0):0,G=R?this._val("battery_session_savings",0):0,q=P?"#f06292":"#4db6ac";e.dotColor;const V=e.surface||"rgba(255,255,255,0.06)",Y=e.surfaceBorder||"rgba(255,255,255,0.05)",X=e.surfaceHover||"rgba(255,255,255,0.12)",Z=e.textSec||"#999",J=e.textTertiary||"#888";return W`
+        `}render(){if(!this._hass||!this._config)return K;const e=this._theme(),t=2*Math.PI*42,s=t.toFixed(1),i=this._val("battery_soc",null),r=Je(i),a=this._val("battery_power",0),o=this._val("battery_charge_power",0),n=this._val("battery_discharge_power",0),l=(this._valStr("battery_status")||"").toLowerCase(),c=this._val("battery_health_score",0),d=this._val("battery_cycles_estimated",0),p=this._val("daily_battery_charge_energy",0),h=this._val("daily_battery_discharge_energy",0),_=this._val("daily_battery_savings",0),g=this._val("monthly_battery_charge_energy",0),u=this._val("monthly_battery_discharge_energy",0),m=this._val("flow_solar_to_battery_energy",0),f=this._val("flow_grid_to_battery_energy",0),v=fe(this._hass),y=this._hass?.states[`${this._prefix}battery_temperature`],b=y&&"unavailable"!==y.state&&"unknown"!==y.state?parseFloat(y.state):null,x=($=y)&&$.attributes&&$.attributes.unit_of_measurement||"°C";var $;const w="selling"===l,k=!w&&("charging"===l||o>10),S=!w&&("discharging"===l||n>10),C=this._hass?.states["sensor.sem_tariff_current_export_rate"],z=C&&"unavailable"!==C.state&&"unknown"!==C.state?parseFloat(C.state):null,M="#FCD170",D=w?this._t("selling_to_grid"):k?this._t("charging"):S?this._t("discharging"):this._t("idle"),E=w?M:k?"#f06292":"#4db6ac",F=w?M:k?"#f06292":S?"#4db6ac":e.textSec||"#888",I=k||S||w?"0.5":"0.2",A=k||S||w?"socPulse 2s ease-in-out infinite":"none",N=r.fraction,B=(t*(1-N)).toFixed(1),T=p>0?Math.round(function(e,...t){const s=e=>{const t=Number(e);return Number.isFinite(t)&&t>0?t:0},i=s(e),r=t.reduce((e,t)=>e+s(t),i);return r>0?i/r*100:null}(m,f)??0):0,R=this._valStr("battery_session_type"),P="charge"===R||"discharge"===R,L="charge"===R,U=P?this._val("battery_session_energy",0):0,O=P?this._val("battery_session_duration",0):0,H=P?this._val("battery_session_avg_power",0):0,j=P?this._val("battery_session_solar_share",0):0,G=P?this._val("battery_session_cost",0):0,q=P?this._val("battery_session_savings",0):0,V=L?"#f06292":"#4db6ac";e.dotColor;const Y=e.surface||"rgba(255,255,255,0.06)",X=e.surfaceBorder||"rgba(255,255,255,0.05)",Z=e.surfaceHover||"rgba(255,255,255,0.12)",J=e.textSec||"#999",Q=e.textTertiary||"#888";return W`
             <style>
                 :host { display: block; contain: layout style paint; }
                 .wrap {
@@ -1702,30 +1702,30 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .metric-row {
                     display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; gap: 8px;
                 }
-                .metric-label { font-size: 12px; color: var(--secondary-text-color, ${Z}); font-weight: 500; }
+                .metric-label { font-size: 12px; color: var(--secondary-text-color, ${J}); font-weight: 500; }
                 .metric-val { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: #4db6ac; }
                 .chips { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
                 .chip {
                     flex: 1; min-width: 80px;
-                    background: var(--secondary-background-color, ${V});
-                    border: 1px solid var(--divider-color, ${Y});
+                    background: var(--secondary-background-color, ${Y});
+                    border: 1px solid var(--divider-color, ${X});
                     border-radius: 10px; padding: 8px 10px; text-align: center;
                     transition: border-color 0.3s cubic-bezier(0.4,0,0.2,1);
                 }
-                .chip:hover { border-color: var(--divider-color, ${X}); }
+                .chip:hover { border-color: var(--divider-color, ${Z}); }
                 .chip-label {
-                    font-size: 11px; color: var(--secondary-text-color, ${J});
+                    font-size: 11px; color: var(--secondary-text-color, ${Q});
                     font-weight: 500; letter-spacing: 0.3px; margin-bottom: 3px;
                 }
                 .chip-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
                 .c-charge { color: #f06292; }
                 .c-discharge { color: #4db6ac; }
                 .c-savings { color: #8DC892; }
-                .chip-src { font-size: 10px; color: var(--secondary-text-color, ${J}); margin-top: 1px; }
+                .chip-src { font-size: 10px; color: var(--secondary-text-color, ${Q}); margin-top: 1px; }
                 .session-section {
                     margin-top: 14px; padding: 10px 12px;
-                    background: var(--secondary-background-color, ${V});
-                    border: 1px solid var(--divider-color, ${Y});
+                    background: var(--secondary-background-color, ${Y});
+                    border: 1px solid var(--divider-color, ${X});
                     border-radius: 10px;
                 }
                 .sess-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -1734,7 +1734,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     text-transform: uppercase; letter-spacing: 0.5px;
                 }
                 .sess-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
-                .sess-item-label { font-size: 11px; color: var(--secondary-text-color, ${J}); }
+                .sess-item-label { font-size: 11px; color: var(--secondary-text-color, ${Q}); }
                 .sess-item-value {
                     font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
                     color: var(--primary-text-color, ${e.text||"#e0e0e0"});
@@ -1894,8 +1894,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     gap: 12px;
                 }
                 .battery-section {
-                    background: ${V};
-                    border: 1px solid ${Y};
+                    background: ${Y};
+                    border: 1px solid ${X};
                     border-radius: 12px;
                     padding: 12px 14px;
                 }
@@ -1927,7 +1927,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .battery-section-soc-label {
                     display: block;
-                    font-size: 10px; color: ${Z};
+                    font-size: 10px; color: ${J};
                     margin-top: 2px;
                     text-transform: uppercase; letter-spacing: 0.05em;
                 }
@@ -1940,7 +1940,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     padding: 2px 0;
                 }
                 .bs-label {
-                    font-size: 11px; color: ${Z};
+                    font-size: 11px; color: ${J};
                     font-weight: 500;
                 }
                 .bs-val {
@@ -1951,7 +1951,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 /* Per-battery controls (#523) — mode select + reserve stepper */
                 .battery-section-controls {
                     margin-top: 10px; padding-top: 10px;
-                    border-top: 1px solid ${Y};
+                    border-top: 1px solid ${X};
                     display: flex; flex-direction: column; gap: 8px;
                 }
                 .bsc-row {
@@ -1961,7 +1961,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 .bsc-hint {
                     display: flex; align-items: flex-start; gap: 5px;
                     font-size: 11px; line-height: 1.35;
-                    color: ${Z};
+                    color: ${J};
                     margin: -2px 0 1px 0;
                     opacity: 0.92;
                 }
@@ -1970,23 +1970,23 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     flex: 0 0 auto; margin-top: 1px; opacity: 0.8;
                 }
                 .bsc-label {
-                    font-size: 12px; color: ${Z}; font-weight: 500;
+                    font-size: 12px; color: ${J}; font-weight: 500;
                 }
                 .bsc-select {
-                    background: ${V};
+                    background: ${Y};
                     color: var(--primary-text-color, ${e.text||"#e0e0e0"});
-                    border: 1px solid ${Y};
+                    border: 1px solid ${X};
                     border-radius: 8px; padding: 5px 8px; font-size: 12px;
                     font-weight: 600; cursor: pointer; min-width: 150px;
                 }
                 .bsc-stepper { display: flex; align-items: center; gap: 8px; }
                 .bsc-btn {
                     width: 24px; height: 24px; border-radius: 6px;
-                    background: ${V}; border: 1px solid ${Y};
+                    background: ${Y}; border: 1px solid ${X};
                     color: var(--primary-text-color, ${e.text||"#e0e0e0"});
                     font-size: 15px; font-weight: 700; cursor: pointer; line-height: 1;
                 }
-                .bsc-btn:hover { border-color: ${X}; }
+                .bsc-btn:hover { border-color: ${Z}; }
                 .bsc-stepval {
                     min-width: 38px; text-align: center; font-size: 13px;
                     font-weight: 700; font-variant-numeric: tabular-nums;
@@ -2005,8 +2005,8 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 }
                 .month-chip {
                     flex: 1; text-align: center; padding: 6px 8px;
-                    background: var(--secondary-background-color, ${V});
-                    border: 1px solid var(--divider-color, ${Y});
+                    background: var(--secondary-background-color, ${Y});
+                    border: 1px solid var(--divider-color, ${X});
                     border-radius: 8px;
                 }
             </style>
@@ -2015,7 +2015,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                 <defs>
                     <filter id="batt-glow" x="-50%" y="-50%" width="200%" height="200%">
                         <feGaussianBlur stdDeviation="4" result="blur"/>
-                        <feFlood flood-color="${D}" flood-opacity="0.25" result="color"/>
+                        <feFlood flood-color="${E}" flood-opacity="0.25" result="color"/>
                         <feComposite in="color" in2="blur" operator="in" result="glow"/>
                         <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
                     </filter>
@@ -2032,11 +2032,11 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="battery-ring">
                             <svg viewBox="0 0 100 100">
                                 <circle class="glow-ring" cx="50" cy="50" r="42"
-                                    style="stroke:${D};opacity:${F}"/>
+                                    style="stroke:${E};opacity:${I}"/>
                                 <circle class="ring-bg" cx="50" cy="50" r="42"/>
                                 <circle class="soc-arc" cx="50" cy="50" r="42"
                                     stroke-dasharray="${s}"
-                                    style="stroke-dashoffset:${N};stroke:${D};animation:${I}"/>
+                                    style="stroke-dashoffset:${B};stroke:${E};animation:${A}"/>
                             </svg>
                             <div class="ring-center">
                                 <!-- #523/#524 follow-up: filled SOC-level
@@ -2046,17 +2046,17 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                      charging bolt. -->
                                 <svg class="battery-icon" width="18" height="26" viewBox="0 0 20 30">
                                     <rect x="6" y="0" width="8" height="4" rx="1.5"
-                                        fill="${D}" opacity="0.7"/>
+                                        fill="${E}" opacity="0.7"/>
                                     <rect x="2" y="4" width="16" height="26" rx="3"
-                                        fill="rgba(0,0,0,0.30)" stroke="${D}"
+                                        fill="rgba(0,0,0,0.30)" stroke="${E}"
                                         stroke-width="1.6" opacity="0.9"/>
-                                    <rect x="4" y="${(28-22*A).toFixed(1)}" width="12"
-                                        height="${(22*A).toFixed(1)}" rx="1.5"
-                                        fill="${D}" opacity="0.55"/>
+                                    <rect x="4" y="${(28-22*N).toFixed(1)}" width="12"
+                                        height="${(22*N).toFixed(1)}" rx="1.5"
+                                        fill="${E}" opacity="0.55"/>
                                     <path d="M11,9.5 L6.5,18.5 L9.5,18.5 L8.5,24.5 L13.5,15 L10.5,15 Z"
-                                        fill="#FCD170" opacity="${w?.95:0}"/>
+                                        fill="#FCD170" opacity="${k?.95:0}"/>
                                 </svg>
-                                <div class="soc-value" style="color:${D}">
+                                <div class="soc-value" style="color:${E}">
                                     ${r.label}
                                 </div>
                             </div>
@@ -2073,12 +2073,12 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             </div>
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("status")}</span>
-                                <span class="metric-val" style="color:${E}">${M}</span>
+                                <span class="metric-val" style="color:${F}">${D}</span>
                             </div>
-                            ${$&&null!=C?W`
+                            ${w&&null!=z?W`
                             <div class="metric-row">
                                 <span class="metric-label">${this._t("export_rate")}</span>
-                                <span class="metric-val" style="color:${z}">${this._fmt(C,3)} ${f}/kWh</span>
+                                <span class="metric-val" style="color:${M}">${this._fmt(z,3)} ${v}/kWh</span>
                             </div>
                             `:K}
                             <div class="metric-row">
@@ -2093,7 +2093,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                                 <div class="metric-row">
                                     <span class="metric-label">${this._t("temperature")}</span>
                                     <span class="metric-val">
-                                        ${null!=y?`${this._fmt(y,1)} ${b}`:"—"}
+                                        ${null!=b?`${this._fmt(b,1)} ${x}`:"—"}
                                     </span>
                                 </div>
                             `}
@@ -2119,36 +2119,36 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                     <div class="session-section">
                         <div class="sess-header">
                             <ha-icon icon="mdi:battery-sync"
-                                style="--mdc-icon-size:14px;color:${R?q:e.textSec}">
+                                style="--mdc-icon-size:14px;color:${P?V:e.textSec}">
                             </ha-icon>
-                            <span class="sess-title" style="color:${R?q:e.textSec}">
+                            <span class="sess-title" style="color:${P?V:e.textSec}">
                                 ${this._t("current_session")}
                             </span>
                         </div>
-                        ${R?W`
+                        ${P?W`
                         <div class="sess-grid">
                             <div>
                                 <div class="sess-item-label">${this._t("energy")}</div>
-                                <div class="sess-item-value">${this._fmt(L,2)} kWh</div>
+                                <div class="sess-item-value">${this._fmt(U,2)} kWh</div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("duration")}</div>
-                                <div class="sess-item-value">${this._fmtDuration(U)}</div>
+                                <div class="sess-item-value">${this._fmtDuration(O)}</div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("avg_power")}</div>
-                                <div class="sess-item-value">${ge(O)}</div>
+                                <div class="sess-item-value">${ge(H)}</div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("source")}</div>
                                 <div class="sess-item-value">
-                                    ${P?`${this._t("solar")}: ${this._fmt(H,0)}%`:""}
+                                    ${L?`${this._t("solar")}: ${this._fmt(j,0)}%`:""}
                                 </div>
                             </div>
                             <div>
                                 <div class="sess-item-label">${this._t("cost")}</div>
                                 <div class="sess-item-value">
-                                    ${P?`${this._fmt(j,2)} ${f}`:`${this._t("saved")} ${this._fmt(G,2)} ${f}`}
+                                    ${L?`${this._fmt(G,2)} ${v}`:`${this._t("saved")} ${this._fmt(q,2)} ${v}`}
                                 </div>
                             </div>
                         </div>
@@ -2163,7 +2163,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                             <div class="chip-label">${this._t("charge_today")}</div>
                             <div class="chip-value c-charge">${this._fmt(p,2)} kWh</div>
                             <div class="chip-src">
-                                ${B>0?`${B}% ${this._t("solar")}`:""}
+                                ${T>0?`${T}% ${this._t("solar")}`:""}
                             </div>
                         </div>
                         <div class="chip">
@@ -2173,7 +2173,7 @@ const e=globalThis,t=e.ShadowRoot&&(void 0===e.ShadyCSS||e.ShadyCSS.nativeShadow
                         <div class="chip">
                             <div class="chip-label">${this._t("savings_today")}</div>
                             <div class="chip-value c-savings">
-                                ${this._fmt(_,2)} ${f}
+                                ${this._fmt(_,2)} ${v}
                             </div>
                         </div>
                     </div>

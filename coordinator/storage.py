@@ -112,6 +112,9 @@ CALCULATOR_STATE_KEYS: tuple[str, ...] = (
     # (#1043) the counters the lifetime seed added up, per category. Lost,
     # every restart would read as a seed from before #1043 and re-seed.
     "lifetime_seed_counters",
+    # (#1046) the EV day the car's flow rows were first booked on. Lost,
+    # every restart would read as the upgrade day.
+    "ev_flow_since",
 )
 
 
