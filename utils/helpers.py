@@ -4,7 +4,7 @@ This module contains pure utility functions that have no dependencies
 on the coordinator or other components.
 """
 import logging
-from typing import Any
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,3 +102,20 @@ def convert_power_to_watts(value: float, unit: str, sensor_name: str = "") -> fl
                     f"Power sensor {sensor_name} has unknown unit '{unit}', assuming W"
                 )
             return value  # Default to watts for non-EV sensors
+
+
+def solar_share_pct(solar: float, *others: float) -> Optional[float]:
+    """(#1046) Solar's percent of what the flows say came in.
+
+    Top and bottom both come from the flows. A meter total (the charger's
+    kWh, the battery's measured charge) also counts cycles the flows
+    missed — an inverter that reads dark leaves the draw unassigned — so a
+    flow divided by it reads solar low: 49 % on PROD for an 89 % solar day.
+    ``others`` are the non-solar flows into the same thing. None when the
+    flows hold nothing: no split is known.
+    """
+    solar = max(0.0, solar or 0.0)
+    total = solar + sum(max(0.0, x or 0.0) for x in others)
+    if total <= 0:
+        return None
+    return solar / total * 100.0

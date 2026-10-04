@@ -98,6 +98,7 @@ from ..analytics.consumption_predictor import ConsumptionPredictor
 from .ev_taper_detector import EVTaperDetector
 from .ev_soc_need import estimate_stop_step, soc_remaining_need
 from ..utils.log_gate import log_on_change
+from ..utils.helpers import solar_share_pct
 from ..analytics.energy_assistant import EnergyAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -6256,6 +6257,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 daily_battery_discharge_kwh=energy.daily_battery_discharge,
                 solar_to_ev_kwh=energy_flows.solar_to_ev,
                 grid_to_ev_kwh=energy_flows.grid_to_ev,
+                battery_to_ev_kwh=energy_flows.battery_to_ev,
                 self_consumption_rate=performance.self_consumption_rate,
                 autarky_rate=performance.autarky_rate,
                 current_price_level=tariff_data.tariff_price_level,
@@ -12466,8 +12468,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             session.energy_kwh += total_increment
             session.solar_energy_kwh += solar_increment
             session.grid_energy_kwh += grid_increment
-            if session.energy_kwh > 0:
-                session.solar_share_pct = (session.solar_energy_kwh / session.energy_kwh) * 100
+            # (#1046) the split of the flows, not solar over the measured
+            # charge: a cycle the flows leave unassigned (dark inverter) is
+            # in energy_kwh but in neither flow, and read as "not solar".
+            share = solar_share_pct(session.solar_energy_kwh, session.grid_energy_kwh)
+            if share is not None:
+                session.solar_share_pct = share
             # Use live dynamic tariff rate instead of static config value (#223)
             import_rate = self._energy_calculator._import_rate
             session.cost += grid_increment * import_rate
