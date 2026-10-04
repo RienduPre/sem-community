@@ -552,9 +552,6 @@ class SensorReader:
         self._last_cycle_mono: Optional[float] = None
         self._last_solar_dark: bool = False
         self._solar_dark_s_today: float = 0.0
-        # (#1047) name → (last published value W, monotonic time) for each
-        # balance input; see ``_hold_dark_balance_inputs``.
-        self._balance_last_good: dict[str, tuple[float, float]] = {}
         # Per-entity flag — was the Repair already raised this outage?
         # Avoids re-raising every cycle past the threshold.
         self._sensor_repair_raised: set[str] = set()
@@ -1066,12 +1063,6 @@ class SensorReader:
         readings.dark_inputs = tuple(sorted(
             n for n, c in self._input_dark.items() if c))
         readings.solar_power_unavailable = self._all_dark("solar")
-
-        # (#1047) LAST of all: the held values are in SEM's convention, so
-        # they join after every sign correction and after the #988 gate,
-        # which must keep reasoning from this cycle's own reads.
-        self._hold_dark_balance_inputs(readings)
-        readings.calculate_derived()
 
         return readings
 
@@ -2809,47 +2800,6 @@ class SensorReader:
         self._solar_zero_refuted = True
         self._input_dark["solar"] = self._input_dark.get("solar", 0) + 1
         self._input_reads["solar"] = max(0, self._input_reads.get("solar", 0) - 1)
-
-    #: (#1047) The balance inputs SEM publishes as one figure each: name,
-    #: the flag that blanks that figure (``SEMData.to_dict``), its field.
-    #: Every name in ``_DEGRADABLE_POWER_INPUTS`` rolls up into one of these.
-    _BALANCE_HOLD_INPUTS = (
-        ("solar", "solar_power_unavailable", "solar_power"),
-        ("grid", "grid_power_unavailable", "grid_power"),
-        ("battery", "battery_power_all_unavailable", "battery_power"),
-    )
-
-    def _hold_dark_balance_inputs(self, readings: PowerReadings) -> None:
-        """(#1047) Hand the home figure the value each dark input still shows.
-
-        When every read of an input is dark, the reader puts 0.0 in its
-        field and the entity layer keeps showing the last good value for
-        ``SENSOR_DARK_READ_GRACE_S``. The home balance used the 0.0: PROD
-        04.10 15:26, the battery went dark while charging 3.9 kW and home
-        read the whole 4.7 kW of solar for 20 s. Here the same value the
-        entity shows — last published, same grace, same ``<=`` — goes to
-        ``readings.balance_held_w``, which only the home figure reads.
-
-        A figure never published is never held (a restart into a dropout
-        stays 0, #875), and a live 0 W is a reading, not a dropout. The
-        input fields are untouched: #818 still forbids a substituted
-        steering value, and ``inputs_degraded`` still says this cycle
-        cannot see.
-        """
-        now = float(self._now_monotonic())
-        last_good = getattr(self, "_balance_last_good", None)
-        if last_good is None:
-            last_good = self._balance_last_good = {}
-        held: Dict[str, float] = {}
-        for name, dark_flag, value_field in self._BALANCE_HOLD_INPUTS:
-            if not getattr(readings, dark_flag, False):
-                last_good[name] = (
-                    float(getattr(readings, value_field, 0.0) or 0.0), now)
-                continue
-            last = last_good.get(name)
-            if last is not None and now - last[1] <= SENSOR_DARK_READ_GRACE_S:
-                held[name] = last[0]
-        readings.balance_held_w = held
 
     def _hold_battery_soc(self, readings: PowerReadings) -> None:
         """The SOC sensor is dark this cycle: hold the last value read so the

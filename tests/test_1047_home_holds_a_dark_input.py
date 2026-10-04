@@ -1,6 +1,6 @@
 """#1047 — home power jumps when the battery reading drops out.
 
-HA-PROD, 04.10.2026 (Huawei, 2.2 beta), 10 s cycles:
+HA-PROD, 04.10.2026 (Huawei), 10 s cycles:
 
     15:25:24  solar 4596   battery +3916 (charging)   grid +6    home  674
     15:25:49  solar unavailable
@@ -9,20 +9,25 @@ HA-PROD, 04.10.2026 (Huawei, 2.2 beta), 10 s cycles:
     15:26:24  solar 4676   battery dark               grid dark  home 4676  <- 20 s
     15:26:44  solar 4676   battery +4094              grid +38   home  544
 
-``sensor.sem_battery_power`` kept 3916 W through the gap — the entity's
-dark-read grace. The home balance took the reader's 0.0 fallback instead,
-so the whole solar output landed on the house. The 2-cycle spike guard did
-not catch it: the dip hold had already spent its count on the solar-dark
-cycles before.
+``sensor.sem_battery_power`` kept 3916 W through the gap (the entity's
+dark-read grace). Home was shown straight from the reader's 0 W fallback,
+so the whole solar output landed on the house. The #237/#444 hold catches
+a dip only; its 2-cycle spike guard had been spent by the dip hold on the
+solar-dark cycles before.
 
-The rule pinned here: an input whose every read is dark enters the HOME
-figure as the value its entity still shows (last published, same grace),
-never as 0. The input fields keep the 0.0 fallback — #818's "nothing
-substitutes a steering value" still stands — and ``inputs_degraded`` still
-says the cycle cannot see.
+Pinned here: the SHOWN home (entity, ``coordinator.data``, the cards'
+snapshot) keeps its last value while any input of it reads dark, for the
+same grace as the input entities. The STEERING home is untouched: it
+steers beside the raw battery/grid fields, and a held home next to a 0 W
+battery charge is a surplus that is not there (the first cut of this fix
+held the battery inside the sum and the review measured a 3.9 kW phantom
+EV surplus from exactly that).
 """
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -30,11 +35,10 @@ import pytest
 from custom_components.solar_energy_management.consts.core import (
     SENSOR_DARK_READ_GRACE_S,
 )
-from custom_components.solar_energy_management.coordinator.health_check import (
-    HealthCheck,
+from custom_components.solar_energy_management.coordinator.coordinator import (
+    SEMCoordinator,
 )
 from custom_components.solar_energy_management.coordinator.sensor_reader import (
-    _DEGRADABLE_POWER_INPUTS,
     SensorReader,
 )
 from custom_components.solar_energy_management.coordinator.types import (
@@ -55,199 +59,182 @@ def _state(value):
 
 
 class _House:
-    """Legacy-config reader over three power sensors the test can move."""
+    """A real reader over three sensors the test can move, and the
+    coordinator steps that turn its reading into what SEM shows."""
 
-    def __init__(self, extra_config=None):
+    def __init__(self):
         self.values = {"sensor.pv": "0", "sensor.grid": "0", "sensor.bat": "0"}
         self.clock = [1000.0]
         hass = MagicMock()
         hass.states = MagicMock()
         hass.states.get = lambda eid: (
             _state(self.values[eid]) if eid in self.values else None)
-        cfg = {
+        self.reader = SensorReader(hass, {
             "solar_production_sensor": "sensor.pv",
             "grid_power_sensor": "sensor.grid",
             "battery_power_sensor": "sensor.bat",
-        }
-        cfg.update(extra_config or {})
-        self.reader = SensorReader(hass, cfg)
+        })
         self.reader._energy_dashboard_config = None
-        self.reader._now_monotonic = lambda: self.clock[0]
+        self.coord = SEMCoordinator.__new__(SEMCoordinator)
+        self.coord._shown_home_clock = lambda: self.clock[0]
 
-    def read(self, at, *, pv, grid, bat) -> PowerReadings:
+    def cycle(self, at, *, pv, grid, bat):
         self.clock[0] = at
         self.values.update(
             {"sensor.pv": pv, "sensor.grid": grid, "sensor.bat": bat})
-        return self.reader.read_power()
+        p = self.reader.read_power()
+        self.coord._smooth_home_consumption(p)
+        self.coord._hold_shown_home(p)
+        return p, SEMData(power=p).to_dict(), self.coord._build_power_snapshot(p)
+
+
+def _replay():
+    h = _House()
+    out = {}
+    out["15:25:24"] = h.cycle(1000, pv=4596, grid=6, bat=3916)
+    out["15:25:54"] = h.cycle(1030, pv="unavailable", grid=6, bat=3916)
+    out["15:26:04"] = h.cycle(1040, pv="unavailable", grid="unavailable",
+                              bat="unavailable")
+    out["15:26:14"] = h.cycle(1050, pv="unavailable", grid="unavailable",
+                              bat="unavailable")
+    out["15:26:24"] = h.cycle(1060, pv=4676, grid="unavailable",
+                              bat="unavailable")
+    out["15:26:34"] = h.cycle(1070, pv=4676, grid="unavailable",
+                              bat="unavailable")
+    out["15:26:44"] = h.cycle(1080, pv=4676, grid=38, bat=4094)
+    return out
 
 
 @pytest.mark.unit
 class TestTheProdAfternoon:
-    def _replay(self):
-        h = _House()
-        out = {}
-        out["15:25:24"] = h.read(1000, pv=4596, grid=6, bat=3916)
-        out["15:25:54"] = h.read(1030, pv="unavailable", grid=6, bat=3916)
-        out["15:26:04"] = h.read(1040, pv="unavailable", grid="unavailable",
-                                 bat="unavailable")
-        out["15:26:24"] = h.read(1060, pv=4676, grid="unavailable",
-                                 bat="unavailable")
-        out["15:26:44"] = h.read(1080, pv=4676, grid=38, bat=4094)
-        return out
+    def test_the_shown_home_never_jumps_to_the_solar_output(self):
+        out = _replay()
+        for t in ("15:25:54", "15:26:04", "15:26:14", "15:26:24", "15:26:34"):
+            _p, data, _snap = out[t]
+            assert data["home_consumption_power"] == 674, (
+                f"{t}: shown home {data['home_consumption_power']} W — a dark "
+                f"input's 0 W was shown as house load")
+        assert out["15:26:44"][1]["home_consumption_power"] == 544
 
-    def test_home_is_the_house_not_the_solar_output(self):
-        p = self._replay()["15:26:24"]
-        assert p.home_consumption_power == pytest.approx(4676 - 3916 - 6), (
-            f"home {p.home_consumption_power:.0f} W — the dark battery and "
-            f"grid entered the balance as 0 W")
+    def test_the_bug_is_reproduced_without_the_hold(self):
+        """Vacuity: the same replay, shown straight from the steering
+        figure, is the PROD jump."""
+        p, _data, _snap = _replay()["15:26:24"]
+        assert p.home_consumption_power == pytest.approx(4676)
 
-    def test_every_dark_cycle_keeps_the_house(self):
-        """Solar dark, then all three dark: the house never moved, so home
-        does not either — and no clamp fires to need the dip hold."""
-        out = self._replay()
-        for t in ("15:25:24", "15:25:54", "15:26:04"):
-            assert out[t].home_consumption_power == pytest.approx(674), t
-            assert out[t].home_residual_clamped_w == 0.0, t
-        assert out["15:26:44"].home_consumption_power == pytest.approx(544)
+    def test_the_cards_keep_the_last_set_that_added_up(self):
+        out = _replay()
+        _p, _d, snap = out["15:26:24"]
+        assert snap["held"] is True
+        assert snap["home_w"] == pytest.approx(674)
+        assert snap["battery_w"] == pytest.approx(3916), (
+            "the cards showed a 0 W battery beside a 4.7 kW house")
+        assert out["15:26:44"][2]["held"] is False
 
-    def test_the_steering_inputs_still_say_dark(self):
-        """#818: the input fields keep the fallback; the cycle cannot see."""
-        p = self._replay()["15:26:24"]
-        assert p.battery_power == 0.0
-        assert p.grid_power == 0.0
-        assert p.battery_charge_power == 0.0
-        assert p.battery_power_unavailable is True
-        assert p.battery_power_all_unavailable is True
-        assert p.grid_power_unavailable is True
-        assert p.inputs_degraded is True
-        assert set(p.dark_inputs) >= {"battery", "grid"}
-        assert p.balance_held_w == {"battery": 3916.0, "grid": 6.0}
-
-    def test_a_live_cycle_holds_nothing(self):
-        p = self._replay()["15:26:44"]
-        assert p.balance_held_w == {}
+    def test_the_input_entities_and_their_halves_go_quiet(self):
+        _p, data, _snap = _replay()["15:26:24"]
+        for k in ("battery_power", "battery_charge_power",
+                  "battery_discharge_power", "grid_power",
+                  "grid_import_power", "grid_export_power"):
+            assert data[k] is None, k
+        assert data["solar_power"] == 4676
 
 
 @pytest.mark.unit
-class TestEachInputHoldsAlone:
-    """battery: + charge.  grid: + export.  Each one dark on its own."""
+class TestSteeringIsNotTouched:
+    def test_the_hold_never_writes_the_steering_figure(self):
+        c = SEMCoordinator.__new__(SEMCoordinator)
+        c._shown_home_clock = lambda: 1000.0
+        p = PowerReadings()
+        p.home_consumption_power = 674.0
+        c._hold_shown_home(p)
+        p.home_consumption_power = 4676.0
+        p.battery_power_all_unavailable = True
+        c._hold_shown_home(p)
+        assert p.home_shown_w == pytest.approx(674)
+        assert p.home_consumption_power == pytest.approx(4676)
 
-    @pytest.mark.parametrize("dark", ["pv", "grid", "bat"])
-    def test_the_dark_input_enters_at_its_held_value(self, dark):
-        h = _House()
-        before = h.read(1000, pv=3000, grid=500, bat=2000)
-        assert before.home_consumption_power == pytest.approx(500)
-        live = {"pv": 3000, "grid": 500, "bat": 2000}
-        live[dark] = "unavailable"
-        p = h.read(1010, **live)
-        assert p.home_consumption_power == pytest.approx(500), (
-            f"{dark} dark: home {p.home_consumption_power:.0f} W")
-
-    def test_a_discharging_battery_holds_as_a_source(self):
-        """The other sign: a dark discharge must not drop the house."""
-        h = _House()
-        h.read(1000, pv=0, grid=-300, bat=-1500)        # night, import 300
-        p = h.read(1010, pv=0, grid=-300, bat="unavailable")
-        assert p.home_consumption_power == pytest.approx(1800)
+    def test_no_phantom_ev_surplus_from_a_dark_battery(self):
+        """solar − home − battery charge, the EV budget's own sum, on the
+        dark cycle: the raw set says the meter's answer (≈ 0), never the
+        3.9 kW a held home beside a 0 W battery charge would invent."""
+        p, _d, _s = _replay()["15:26:24"]
+        surplus = max(0.0, p.solar_power - p.home_consumption_power
+                      - p.battery_charge_power)
+        assert surplus < 100.0, f"phantom surplus {surplus:.0f} W"
+        assert p.inputs_degraded is True
 
 
 @pytest.mark.unit
 class TestTheHoldEndsWhereTheEntityLetsGo:
+    def _coord(self, clock):
+        c = SEMCoordinator.__new__(SEMCoordinator)
+        c._shown_home_clock = lambda: clock[0]
+        return c
+
+    def _p(self, home, **flags):
+        p = PowerReadings()
+        p.home_consumption_power = float(home)
+        for k, v in flags.items():
+            setattr(p, k, v)
+        return p
+
+    @pytest.mark.parametrize("flag", [
+        "solar_power_unavailable", "grid_power_unavailable",
+        "battery_power_all_unavailable"])
+    def test_each_dark_input_holds_the_shown_home(self, flag):
+        clock = [1000.0]
+        c = self._coord(clock)
+        c._hold_shown_home(self._p(674))
+        clock[0] = 1010.0
+        p = self._p(4676, **{flag: True})
+        c._hold_shown_home(p)
+        assert SEMData(power=p).to_dict()["home_consumption_power"] == 674
+
     def test_the_grace_boundary_is_the_entity_boundary(self):
         """Same ``age <= grace`` as ``SEMSolarSensor``: held at the edge,
-        released one second past it — the entity blanks there too."""
-        h = _House()
-        h.read(1000, pv=4000, grid=0, bat=3000)
-        p = h.read(1000 + GRACE, pv=4000, grid=0, bat="unavailable")
-        assert p.home_consumption_power == pytest.approx(1000)
-        p = h.read(1000 + GRACE + 1, pv=4000, grid=0, bat="unavailable")
-        assert p.balance_held_w == {}
-        assert p.home_consumption_power == pytest.approx(4000)
+        released one second past it — the input entities blank there too,
+        and home shows the computed value again (never unknown)."""
+        clock = [1000.0]
+        c = self._coord(clock)
+        c._hold_shown_home(self._p(674))
+        clock[0] = 1000.0 + GRACE
+        p = self._p(4676, battery_power_all_unavailable=True)
+        c._hold_shown_home(p)
+        assert p.home_shown_w == pytest.approx(674)
+        clock[0] = 1000.0 + GRACE + 1
+        p = self._p(4676, battery_power_all_unavailable=True)
+        c._hold_shown_home(p)
+        assert p.home_shown_w is None
+        assert SEMData(power=p).to_dict()["home_consumption_power"] == 4676
 
-    def test_a_value_never_read_is_never_held(self):
-        """A restart into a dropout: nothing was published, nothing is
-        invented (#875)."""
-        h = _House()
-        p = h.read(1000, pv=4000, grid=0, bat="unavailable")
-        assert p.balance_held_w == {}
-        assert p.home_consumption_power == pytest.approx(4000)
+    def test_nothing_shown_yet_is_never_held(self):
+        """A restart into a dropout: there is no last value to keep."""
+        c = self._coord([1000.0])
+        p = self._p(4676, battery_power_all_unavailable=True)
+        c._hold_shown_home(p)
+        assert p.home_shown_w is None
+        assert SEMData(power=p).to_dict()["home_consumption_power"] == 4676
 
-    def test_a_live_zero_is_a_reading(self):
-        """The battery really stopped: 0 W read live is believed at once."""
-        h = _House()
-        h.read(1000, pv=4000, grid=0, bat=3000)
-        p = h.read(1010, pv=4000, grid=0, bat=0)
-        assert p.balance_held_w == {}
-        assert p.home_consumption_power == pytest.approx(4000)
+    def test_the_held_value_is_the_last_one_shown(self):
+        clock = [1000.0]
+        c = self._coord(clock)
+        c._hold_shown_home(self._p(674))
+        clock[0] = 1010.0
+        c._hold_shown_home(self._p(710))
+        clock[0] = 1020.0
+        p = self._p(4676, grid_power_unavailable=True)
+        c._hold_shown_home(p)
+        assert p.home_shown_w == pytest.approx(710)
 
-    def test_the_held_value_is_the_last_one_published(self):
-        h = _House()
-        h.read(1000, pv=4000, grid=0, bat=3000)
-        h.read(1010, pv=4000, grid=0, bat=2500)
-        p = h.read(1020, pv=4000, grid=0, bat="unavailable")
-        assert p.balance_held_w["battery"] == pytest.approx(2500)
-
-
-@pytest.mark.unit
-class TestTheHeldValueIsInSemConvention:
-    def test_a_user_flipped_battery_holds_the_corrected_sign(self):
-        """The sensor says −3000 and the user's flip makes it +3000 charge.
-        The hold must carry +3000: a held raw value would be re-flipped,
-        and a raw 0 cannot be."""
-        h = _House({"battery_sign_user_flip": True})
-        p = h.read(1000, pv=4000, grid=0, bat=-3000)
-        assert p.battery_power == pytest.approx(3000)
-        assert p.home_consumption_power == pytest.approx(1000)
-        p = h.read(1010, pv=4000, grid=0, bat="unavailable")
-        assert p.balance_held_w["battery"] == pytest.approx(3000)
-        assert p.home_consumption_power == pytest.approx(1000)
-
-    def test_a_manually_inverted_grid_holds_the_corrected_sign(self):
-        h = _House({"grid_sign_invert": True})
-        p = h.read(1000, pv=0, grid=800, bat=0)      # sensor + = import here
-        assert p.grid_power == pytest.approx(-800)
-        assert p.home_consumption_power == pytest.approx(800)
-        p = h.read(1010, pv=0, grid="unavailable", bat=0)
-        assert p.home_consumption_power == pytest.approx(800)
-
-
-@pytest.mark.unit
-class TestTheHomeFormula:
-    def test_held_values_reach_home_and_nothing_else(self):
-        p = PowerReadings()
-        p.solar_power, p.grid_power, p.battery_power = 4676.0, 0.0, 0.0
-        p.balance_held_w = {"battery": 3916.0, "grid": 6.0}
-        p.calculate_derived()
-        assert p.home_consumption_power == pytest.approx(754)
-        assert p.battery_charge_power == 0.0
-        assert p.grid_export_power == 0.0
-
-    def test_no_held_value_is_the_old_formula(self):
-        p = PowerReadings()
-        p.solar_power, p.grid_power, p.battery_power = 4676.0, 0.0, 0.0
-        p.calculate_derived()
-        assert p.home_consumption_power == pytest.approx(4676)
-
-
-@pytest.mark.unit
-class TestTheHealthCheckKnowsTheGap:
-    def _cycle(self, held):
-        p = PowerReadings()
-        p.solar_power, p.grid_power, p.battery_power = 4676.0, 0.0, 0.0
-        p.balance_held_w = held
-        p.calculate_derived()
-        return HealthCheck().check_power_balance(p)
-
-    def test_a_held_input_is_not_a_violation(self):
-        assert self._cycle({"battery": 3916.0, "grid": 6.0}) == []
-
-    def test_the_same_gap_without_a_hold_still_is(self):
-        """Vacuity: the gap itself is visible to the check."""
-        p = PowerReadings()
-        p.solar_power, p.grid_power, p.battery_power = 4676.0, 0.0, 0.0
-        p.calculate_derived()
-        p.home_consumption_power = 754.0          # a substitute nobody declared
-        assert HealthCheck().check_power_balance(p) != []
+    def test_a_live_cycle_shows_its_own_figure(self):
+        clock = [1000.0]
+        c = self._coord(clock)
+        c._hold_shown_home(self._p(674))
+        p = self._p(2500)
+        c._hold_shown_home(p)
+        assert p.home_shown_w is None
+        assert SEMData(power=p).to_dict()["home_consumption_power"] == 2500
 
 
 @pytest.mark.unit
@@ -269,7 +256,6 @@ class TestTheSplitFiguresFollowTheirInput:
 
     def test_a_dark_battery_blanks_its_halves(self):
         d = self._data(battery_power_all_unavailable=True)
-        assert d["battery_power"] is None
         assert d["battery_charge_power"] is None
         assert d["battery_discharge_power"] is None
         assert d["grid_export_power"] == 6, "only the dark input goes quiet"
@@ -281,23 +267,24 @@ class TestTheSplitFiguresFollowTheirInput:
         assert d["battery_charge_power"] == 3916
 
 
-@pytest.mark.unit
-class TestEveryDarkInputIsCovered:
-    def test_every_degradable_input_rolls_up_into_a_held_one(self):
-        """A new steering input added to the dark tally must also get a
-        home hold, or its dropout is this bug again."""
-        held = {name for name, _flag, _field in SensorReader._BALANCE_HOLD_INPUTS}
-        for name in _DEGRADABLE_POWER_INPUTS:
-            assert name.split("_")[0] in held, name
+def _getattr_flags(fn) -> set:
+    """Every ``getattr(<x>, "<name>_unavailable", …)`` in a function's code."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    return {
+        n.args[1].value for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "getattr"
+        and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
+        and isinstance(n.args[1].value, str)
+        and n.args[1].value.endswith("_unavailable")
+    }
 
-    @pytest.mark.parametrize(
-        "name, flag, field", SensorReader._BALANCE_HOLD_INPUTS)
-    def test_the_hold_flag_is_the_flag_that_blanks_the_entity(
-            self, name, flag, field):
-        """Home holds exactly when the input's entity starts holding —
-        the two must answer to one flag."""
-        p = PowerReadings()
-        setattr(p, field, 1234.0)
-        assert SEMData(power=p).to_dict()[field] == 1234
-        setattr(p, flag, True)
-        assert SEMData(power=p).to_dict()[field] is None, name
+
+@pytest.mark.unit
+class TestTheHoldListensToEveryFlagThatBlanksAnInput:
+    def test_every_input_the_entity_blanks_holds_the_shown_home(self):
+        """Home is built from every input ``to_dict`` can blank. A flag
+        added there and not here is this bug again for that input."""
+        blanks = _getattr_flags(SEMData.to_dict)
+        held_on = _getattr_flags(SEMCoordinator._hold_shown_home)
+        assert blanks, "the parse found no blanking flags — the pin is blind"
+        assert blanks <= held_on, sorted(blanks - held_on)

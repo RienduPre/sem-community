@@ -67,24 +67,33 @@ NOT ``last_updated`` (advances only when the *value* changes) — else a fast-po
 legitimately holds a constant value for >10 min (a split discharge sensor at 0 W while the battery
 charges — Fronius; ``grid_export`` while importing; solar overnight) false-positives as frozen
 (#611). **Guard:** `test_589_sensor_freshness.py::test_constant_value_but_still_reporting_not_frozen`
-+ the missing-`last_reported` fallback test. **Home figure (#1047, PROD 04.10 15:26):** an input whose
-EVERY read is dark entered the home balance as the reader's 0.0 while its own entity kept showing the
-last value — a battery charging 3.9 kW went dark and home read the whole 4.7 kW of solar for 20 s.
-**Closure:** `SensorReader._hold_dark_balance_inputs` hands `PowerReadings.balance_held_w` the value
-the entity shows (last published, same `SENSOR_DARK_READ_GRACE_S`, same `<=`, SEM convention — it runs
-after every sign correction and after the #988 gate); only `calculate_derived`'s home reads it. The
-input fields keep the 0.0 (#818: no substituted steering value); the split figures (import/export,
-charge/discharge) blank with their input; the balance check treats a held cycle like the home hold.
-**Guard:** `tests/test_1047_home_holds_a_dark_input.py` — the PROD replay, each input alone, the grace
-edge, never-read, a live zero, both sign overrides, and two structural pins: every
-`_DEGRADABLE_POWER_INPUTS` name rolls up into a held input, and the hold flag is the flag that blanks
-the entity. **Open siblings:** the frozen value still *feeds* the
++ the missing-`last_reported` fallback test. **Home figure (#1047, PROD 04.10 15:26):** home is the
+remainder of the balance, so an input whose EVERY read is dark entered it as the reader's 0.0 while
+the input's own entity kept its last value — a battery charging 3.9 kW went dark and the SHOWN home
+read the whole 4.7 kW of solar for 20 s. The #237/#444 hold catches a dip only; its 2-cycle spike
+guard had been spent by the dip hold first. **Closure:** `SEMCoordinator._hold_shown_home` sets
+`PowerReadings.home_shown_w` — the last home shown on a cycle with no dark input, for the same
+`SENSOR_DARK_READ_GRACE_S` and `<=` as the entity layer — which `to_dict` publishes and the #699
+snapshot treats as incoherent (the cards keep the last set that added up). It holds the HOUSE, not
+the dark input, and `home_consumption_power` is left alone. **Why not hold the input inside the sum
+(challenge record, #1047):** the first cut did, and the review measured it. Home STEERS — the EV budget
+is `solar − home − battery_charge`, and a held home beside the raw 0 W battery charge was a 3.9 kW
+surplus that was not there (a start after the 60 s delay); a held grid beside a live EV ramp loosened
+the #906 blind-meter peak guard by the ramp; a held battery beside falling solar drove home to 0 W. A
+balancing term moves with everything else, the house does not. The import/export and charge/discharge
+halves blank with their input (the `grid_active_power` rule). **Guard:**
+`tests/test_1047_home_holds_a_dark_input.py` — the PROD replay through the real reader, smoothing,
+hold, publish and snapshot; steering untouched (no phantom surplus); the grace edge; never-shown; and
+an AST pin that every `*_unavailable` flag `to_dict` blanks an input on is a flag the hold listens
+to. **Open siblings:** the frozen value still *feeds* the
 balance (observe-only, not yet held); multi-unit partial-availability sums silently under-report
 (audit W6; the lifetime seed's half closed by #1043, see class 52) — one dark unit of N is still 0 W
-in home AND in the published total; the instantaneous flows still read the dark input's 0
-(`solar_to_battery` drops while home holds); an EV power dropout is not in the dark tally at all
-(its own #910 hold + the 2-cycle spike guard, whose count the dip hold can spend first). Refs #274
-#461 #589 #611 #1047.
+in home AND in the published total; the flow figures and the daily home energy still integrate the
+dark cycle's raw home (they share the steering figure; the #771 partition check ties them together);
+the steering home itself still reads a dark battery as idle (safe for the EV budget — the meter
+answers — but the discharge limit home/n is wide for the gap; holding it needs the battery charge
+held beside it); an EV power dropout is not in the dark tally at all (its own #910 hold + the 2-cycle
+spike guard, whose count the dip hold can spend first). Refs #274 #461 #589 #611 #1047.
 
 ### 6. Multi-unit over-command (N× / partial split) — PARTIAL
 **Symptom:** a fleet-level power target handed to *each* of N units → N× the intended
