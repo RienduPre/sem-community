@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **The car's daily solar share matches its sessions** (#1046). It read 49 % on an 89 % solar day. The battery's share read low too.
+
 # [2.2.0-beta.10] — 04.10.2026
 
 - 🐛 **Home power no longer jumps when a battery, grid or solar reading drops out** (#1047). SEM showed the full solar output as house load.
