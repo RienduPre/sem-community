@@ -1687,6 +1687,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         unavailable all night — has a blank entity and is 0 W in home
         anyway, so it neither holds home nor stops home being recorded.
         Nothing shown yet means nothing to hold: home never reads unknown.
+        Blinks that overlap in turn can chain the hold, so the held value
+        itself expires after two graces — a house load older than that is
+        a guess, not a reading.
 
         It holds the HOUSE, not the dark input. A held battery inside
         the sum would make every move of solar or the car land on home;
@@ -1708,9 +1711,12 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             elif name in seen and now - seen[name] <= SENSOR_DARK_READ_GRACE_S:
                 holding = True          # its entity still shows a value
         if not holding:
-            self._shown_home_last = float(power.home_consumption_power or 0.0)
+            self._shown_home_last = (
+                float(power.home_consumption_power or 0.0), now)
             return
-        power.home_shown_w = getattr(self, "_shown_home_last", None)
+        last = getattr(self, "_shown_home_last", None)
+        if last is not None and now - last[1] <= 2 * SENSOR_DARK_READ_GRACE_S:
+            power.home_shown_w = last[0]
 
     # (#699) The published set must satisfy the equation within this
     # tolerance to be cached as "coherent". In a clean cycle the residual is

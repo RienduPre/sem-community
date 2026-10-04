@@ -271,6 +271,24 @@ class TestEachInputOnItsOwnClock:
             assert shown[t] == 674, f"t+{t - 1000}s showed {shown[t]} W"
         assert shown[1310] == 674
 
+    def test_a_chain_of_blinks_lets_go_after_two_graces(self):
+        """Solar and battery blink in turn, overlapping, for ten minutes:
+        each input's own grace stays fresh, so only the age of the held
+        value can end the freeze — at two graces, and not before."""
+        U = "unavailable"
+        tl = [(1000, 4596, 6, 3916)]
+        for t in range(1010, 1600, 10):
+            phase = ((t - 1010) // 50) % 2          # 50 s solar, 50 s battery
+            edge = (t - 1010) % 50 >= 40             # 10 s overlap
+            pv_dark = phase == 0 or edge
+            bat_dark = phase == 1 or edge
+            tl.append((t, U if pv_dark else 4596, 6, U if bat_dark else 3916))
+        shown = self._run(tl)
+        assert all(shown[t] == 674 for t in range(1010, 1000 + 2 * GRACE + 1, 10)), (
+            "released inside two graces")
+        late = [shown[t] for t in range(1000 + 2 * GRACE + 10, 1600, 10)]
+        assert any(v != 674 for v in late), "the held value never expired"
+
     def test_an_input_dark_all_night_does_not_stop_the_hold(self):
         """Solar unavailable for hours (an inverter asleep), battery grid-
         charging: a battery blink must still hold home. Its entity is blank

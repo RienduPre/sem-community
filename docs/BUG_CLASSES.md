@@ -75,7 +75,8 @@ guard had been spent by the dip hold first. **Closure:** `SEMCoordinator._hold_s
 `PowerReadings.home_shown_w` — the last home shown — while any input's entity is still holding: dark
 now and read live within `SENSOR_DARK_READ_GRACE_S` (same `<=`), each input on its OWN clock (review
 2: one clock from the last fully-live cycle released home mid-way through blinks that overlap in
-turn, and an inverter dark all night blocked every later hold). `to_dict` publishes it, the #891
+turn, and an inverter dark all night blocked every later hold); the held value itself expires after
+two graces, so a chain of blinks cannot freeze home for good (review 3). `to_dict` publishes it, the #891
 house-meter gap compares it, and the #699 snapshot treats it as incoherent (the cards keep the last
 set that added up). It holds the HOUSE, not
 the dark input, and `home_consumption_power` is left alone. **Why not hold the input inside the sum
