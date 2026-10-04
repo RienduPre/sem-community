@@ -9,6 +9,12 @@ of what the bottom counted (class 119). The session record was already
 fixed for this (#1024): it scales the flow split to the meter, so its share
 is solar ÷ (solar + grid + battery). The day's share now is too.
 
+The share is printed beside ``daily_ev`` ("Today 5 kWh · Solar Share"),
+whose day rolls at the Charge-by time, while the flow layer's totals roll at
+midnight. So the car's flows are also kept on the EV day
+(``EnergyCalculator.ev_day_flows``): a night charge before 07:00 belongs to
+the day before, in both numbers (review of the first cut).
+
 The same ratio fed the "mostly from grid" tip and the optimization score,
 and the battery charge session divided its solar flow by the measured
 charge. All of them go through ``solar_share_pct`` now.
@@ -16,19 +22,22 @@ charge. All of them go through ``solar_share_pct`` now.
 from __future__ import annotations
 
 import ast
-import inspect
 import pathlib
 import re
 import textwrap
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
+from freezegun import freeze_time
 
 from custom_components.solar_energy_management.analytics.energy_assistant import (
     EnergyAssistant,
 )
 from custom_components.solar_energy_management.coordinator import session_energy
+from custom_components.solar_energy_management.coordinator.energy_calculator import (
+    EnergyCalculator,
+)
 from custom_components.solar_energy_management.coordinator.flow_calculator import (
     FlowCalculator,
 )
@@ -37,6 +46,7 @@ from custom_components.solar_energy_management.coordinator.types import (
     PowerReadings,
 )
 from custom_components.solar_energy_management.utils.helpers import solar_share_pct
+from custom_components.solar_energy_management.utils.time_manager import TimeManager
 
 PKG = pathlib.Path(__file__).resolve().parent.parent
 
@@ -109,7 +119,7 @@ class TestTheCardMatchesTheSession:
 
     def test_the_meter_size_does_not_move_the_share(self, mock_hass):
         """The bottom is the flows: a meter that counted more (dark cycles,
-        or the sunrise EV day holding a pre-midnight charge) changes nothing."""
+        a wallbox counter that caught up) changes nothing."""
         flows, metered, _ = _run_day(DAY)
         ea = EnergyAssistant(mock_hass)
         a = _analyze(ea, flows, metered).ev_solar_percentage
@@ -128,8 +138,7 @@ class TestTheCardMatchesTheSession:
         assert data.ev_solar_percentage == 0.0
 
     def test_flows_without_a_meter_still_say_the_split(self, mock_hass):
-        """Before sunrise the EV day can read 0 while the calendar-day flows
-        already hold a charge; the split is still known."""
+        """The share does not wait for the meter: the flows alone say it."""
         data = EnergyAssistant(mock_hass).analyze(
             daily_ev_kwh=0.0, solar_to_ev_kwh=0.0, grid_to_ev_kwh=5.0,
         )
@@ -213,7 +222,20 @@ class TestBatterySessionShare:
         assert old == pytest.approx(42.9, abs=0.1), "the bug's number"
         assert s.solar_share_pct == pytest.approx(75.0)
 
-    def test_a_dark_first_cycle_keeps_the_share_unknown_at_zero(self):
+    def test_a_dark_cycle_keeps_the_share_it_had(self):
+        sun = PowerReadings(solar_power=3000.0, home_consumption_power=500.0,
+                            battery_charge_power=2500.0)
+        dark = PowerReadings(battery_charge_power=2500.0)
+        fc = FlowCalculator()
+        coord = _battery_coordinator()
+        coord._update_battery_session_tracking(sun, fc.calculate_power_flows(sun))
+        assert coord._battery_session.solar_share_pct == pytest.approx(100.0)
+        coord._update_battery_session_tracking(dark, fc.calculate_power_flows(dark))
+        assert coord._battery_session.solar_share_pct == pytest.approx(100.0), (
+            "a cycle no flow saw is not a cycle of grid"
+        )
+
+    def test_a_dark_first_cycle_reads_zero_as_before(self):
         coord = _battery_coordinator()
         dark = PowerReadings(battery_charge_power=2500.0)
         coord._update_battery_session_tracking(
@@ -240,43 +262,142 @@ class TestHelper:
             assert got == pytest.approx(want)
 
 
-class TestTheCallSiteHandsOverEveryFlow:
-    def test_battery_to_ev_reaches_analyze(self):
-        from custom_components.solar_energy_management.coordinator.coordinator import (
-            SEMCoordinator,
+def _ev_day_calc():
+    hass = Mock()
+    hass.data = {}
+    hass.config = Mock()
+    hass.config.config_dir = "/config"
+    hass.states.get = lambda _eid: None
+    return EnergyCalculator(
+        {"update_interval": 3600, "ev_target_time": "07:00"}, TimeManager(hass))
+
+
+def _hour(calc, fc, power):
+    """One cycle of one hour through the real calculator, with this cycle's
+    real flows. ``_last_update`` cleared so the cycle is the configured hour
+    (an apparent gap over the spike limit would skip it)."""
+    calc._last_update = None
+    pf = fc.calculate_power_flows(power)
+    flows = fc.integrate_energy_flows(pf, 3600.0)
+    return calc.calculate_energy(power, pf), flows
+
+
+BATT_TO_EV = PowerReadings(home_consumption_power=500.0, ev_power=2000.0,
+                           battery_discharge_power=2500.0)
+NIGHT_GRID = PowerReadings(home_consumption_power=500.0, ev_power=6000.0,
+                           grid_import_power=6500.0)
+DAY_SUN = PowerReadings(solar_power=8000.0, home_consumption_power=500.0,
+                        ev_power=5000.0, grid_export_power=2500.0)
+DAY_DARK = PowerReadings(home_consumption_power=500.0, ev_power=5000.0)
+
+
+class TestTheShareCoversTheEvDay:
+    """The review's case: night on grid, day on sun. "Today" (daily_ev) has
+    rolled at 07:00; a share over the calendar flows would still hold the
+    night's grid kWh until midnight."""
+
+    def _night_then_day(self):
+        calc, fc = _ev_day_calc(), FlowCalculator()
+        with freeze_time("2026-10-03 23:30:00") as clock:
+            _hour(calc, fc, BATT_TO_EV)
+            clock.move_to("2026-10-04 02:00:00")      # past midnight
+            energy, _ = _hour(calc, fc, NIGHT_GRID)
+            night = (energy.daily_ev, calc.ev_day_flows())
+            clock.move_to("2026-10-04 11:00:00")      # past the Charge-by time
+            _hour(calc, fc, DAY_SUN)
+            clock.move_to("2026-10-04 12:00:00")
+            energy, flows = _hour(calc, fc, DAY_DARK)
+            day = (energy.daily_ev, calc.ev_day_flows(), flows)
+        return calc, night, day
+
+    def test_the_night_keeps_its_rows_through_midnight(self):
+        _, (daily_ev, ev_flows), _ = self._night_then_day()
+        assert daily_ev == pytest.approx(8.0)
+        assert ev_flows == pytest.approx((0.0, 6.0, 2.0)), (
+            "the midnight sweep dropped the EV day's battery hour"
         )
-        src = textwrap.dedent(inspect.getsource(SEMCoordinator._update_analytics_phases))
-        calls = [
-            n for n in ast.walk(ast.parse(src))
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-            and n.func.attr == "analyze"
-            and ast.unparse(n.func.value) == "self._energy_assistant"
-        ]
-        assert len(calls) == 1
-        kw = {k.arg: ast.unparse(k.value) for k in calls[0].keywords}
-        assert kw.get("solar_to_ev_kwh") == "energy_flows.solar_to_ev"
-        assert kw.get("grid_to_ev_kwh") == "energy_flows.grid_to_ev"
-        assert kw.get("battery_to_ev_kwh") == "energy_flows.battery_to_ev", (
-            "without it a battery-fed car reads 100 % solar"
+
+    def test_the_day_share_is_the_day_alone(self, mock_hass):
+        _, _, (daily_ev, ev_flows, calendar) = self._night_then_day()
+        assert daily_ev == pytest.approx(10.0)       # the dark hour is metered
+        assert ev_flows == pytest.approx((5.0, 0.0, 0.0))
+        # the calendar flows still hold the night's grid
+        assert calendar.solar_to_ev == pytest.approx(5.0)
+        assert calendar.grid_to_ev == pytest.approx(6.0)
+        cal_pct = solar_share_pct(calendar.solar_to_ev, calendar.grid_to_ev,
+                                  calendar.battery_to_ev)
+        assert cal_pct == pytest.approx(45.45, abs=0.01), "the review's number"
+        assert calendar.solar_to_ev / daily_ev * 100 == pytest.approx(50.0), (
+            "the bug's number"
         )
+        data = EnergyAssistant(mock_hass).analyze(
+            daily_ev_kwh=daily_ev, solar_to_ev_kwh=ev_flows[0],
+            grid_to_ev_kwh=ev_flows[1], battery_to_ev_kwh=ev_flows[2])
+        assert data.ev_solar_percentage == pytest.approx(100.0)
+
+    def test_the_rows_survive_a_restart(self):
+        calc, _, (_, ev_flows, _) = self._night_then_day()
+        fresh = _ev_day_calc()
+        fresh.restore_state(calc.get_state())
+        with freeze_time("2026-10-04 12:00:00"):
+            assert fresh.ev_day_flows() == pytest.approx(ev_flows)
+
+    def test_no_flows_handed_over_adds_nothing(self):
+        calc = _ev_day_calc()
+        with freeze_time("2026-10-04 11:00:00"):
+            calc._last_update = None
+            calc.calculate_energy(DAY_SUN)
+            assert calc.ev_day_flows() == (0.0, 0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_the_cycle_publishes_the_ev_day_split():
+    """Through the real cycle: the published share is the EV day's split,
+    not the calendar flows (which hold nothing on this one idle cycle)."""
+    from homeassistant.util import dt as dt_util
+    from custom_components.solar_energy_management.coordinator.coordinator import (
+        SEMCoordinator,
+    )
+    from .test_873_cycle_executes import WIRED, _hass, _sensors
+
+    coord = SEMCoordinator(_hass(_sensors(0, 0, 0, 50)), dict(WIRED))
+    coord.config_entry = None
+    calc = coord._energy_calculator
+    day = calc._ev_reset_day(dt_util.now())
+    calc._daily_accumulators[f"ev_flow_solar_{day}"] = 3.0
+    calc._daily_accumulators[f"ev_flow_battery_{day}"] = 1.0
+    data = await coord._async_update_data()
+    assert data["energy_ev_solar_percentage"] == pytest.approx(75.0)
 
 
 # --- the lint: no solar share divides by a meter total ------------------------
+#
+# What it can see: a division (``/`` or ``/=``) with "solar" in the top and a
+# metered total in the bottom. What it cannot see: the same values copied to
+# other names first, or a multiply by a reciprocal. The tests above pin the
+# real numbers for those paths; this keeps the plain shape from coming back.
 
 _SOLAR_TOP = re.compile(r"solar", re.I)
-_METER_BOTTOM = re.compile(r"daily_ev|ev_kwh|energy_kwh|\btotal\b|total_", re.I)
+_METER_BOTTOM = re.compile(
+    r"daily_ev|ev_kwh|energy_kwh|\btotal\b|total_|charge|metered", re.I)
 
 # Each of these divides solar by a total that is ITSELF the flow split scaled
-# to the meter, so solar is part of the same total. Keyed by function.
+# to the meter, so solar is part of the same total. Keyed by function, with
+# how many such divisions it holds: a new one in the same function fails too.
 _ALLOWED = {
-    ("utils/helpers.py", "solar_share_pct"):
-        "the helper: total is the sum of the flows",
-    ("coordinator/ev_control.py", "_update_session_tracking"):
-        "session totals come from session_energy.step, which scales every "
-        "flow by the same factor (#1024)",
-    ("coordinator/coordinator.py", "_lifetime_ev_shares"):
-        "lifetime totals are sums of those scaled session records",
+    ("utils/helpers.py", "solar_share_pct"): (
+        1, "the helper: total is the sum of the flows"),
+    ("coordinator/ev_control.py", "_update_session_tracking"): (
+        1, "session totals come from session_energy.step, which scales every "
+           "flow by the same factor (#1024)"),
+    ("coordinator/coordinator.py", "_lifetime_ev_shares"): (
+        1, "lifetime totals are sums of those scaled session records"),
 }
+
+
+def _is_solar_over_meter(top, bottom) -> bool:
+    return bool(_SOLAR_TOP.search(ast.unparse(top))
+                and _METER_BOTTOM.search(ast.unparse(bottom)))
 
 
 def _solar_over_meter(tree):
@@ -288,8 +409,10 @@ def _solar_over_meter(tree):
             f = child.name if isinstance(
                 child, (ast.FunctionDef, ast.AsyncFunctionDef)) else func
             if (isinstance(child, ast.BinOp) and isinstance(child.op, ast.Div)
-                    and _SOLAR_TOP.search(ast.unparse(child.left))
-                    and _METER_BOTTOM.search(ast.unparse(child.right))):
+                    and _is_solar_over_meter(child.left, child.right)):
+                found.append((f, child.lineno, ast.unparse(child)))
+            if (isinstance(child, ast.AugAssign) and isinstance(child.op, ast.Div)
+                    and _is_solar_over_meter(child.target, child.value)):
                 found.append((f, child.lineno, ast.unparse(child)))
             visit(child, f)
 
@@ -316,18 +439,23 @@ class TestNoSolarShareOverAMeter:
                 return solar_to_ev_kwh / ev_kwh * 100
             def _update_battery_session_tracking(session):
                 session.solar_share_pct = (session.solar_energy_kwh / session.energy_kwh) * 100
+            def battery_card(solar_to_batt, daily_battery_charge):
+                return solar_to_batt / daily_battery_charge
+            def in_place(solar_pct, metered_kwh):
+                solar_pct /= metered_kwh
         """)
         hits = _solar_over_meter(ast.parse(old))
         assert [h[0] for h in hits] == [
             "analyze", "_calculate_score", "_update_battery_session_tracking",
+            "battery_card", "in_place",
         ]
 
     def test_every_solar_share_divides_flows_by_flows(self):
-        bad, seen = [], set()
+        bad, seen = [], {}
         for rel, path in _package_modules():
             for func, line, text in _solar_over_meter(ast.parse(path.read_text())):
                 if (rel, func) in _ALLOWED:
-                    seen.add((rel, func))
+                    seen[(rel, func)] = seen.get((rel, func), 0) + 1
                     continue
                 bad.append(f"{rel}:{line} in {func}: {text}")
         assert not bad, (
@@ -335,5 +463,6 @@ class TestNoSolarShareOverAMeter:
             "the flows miss a cycle — use utils.helpers.solar_share_pct:\n"
             + "\n".join(bad)
         )
-        # an entry whose code moved away must not keep a free pass
-        assert seen == set(_ALLOWED), set(_ALLOWED) - seen
+        # an entry whose code moved away must not keep a free pass, and an
+        # allowed function must not grow a second division under its cover
+        assert seen == {k: n for k, (n, _why) in _ALLOWED.items()}

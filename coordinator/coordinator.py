@@ -6247,6 +6247,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # Energy assistant (Phase 6)
         assistant_data = EnergyAssistantSensorData()
         try:
+            # (#1046) the car's flows on the EV day — the hours "Today" counts
+            ev_solar, ev_grid, ev_battery = self._energy_calculator.ev_day_flows()
             assistant = self._energy_assistant.analyze(
                 daily_solar_kwh=energy.daily_solar,
                 daily_home_kwh=energy.daily_home,
@@ -6255,9 +6257,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 daily_grid_export_kwh=energy.daily_grid_export,
                 daily_battery_charge_kwh=energy.daily_battery_charge,
                 daily_battery_discharge_kwh=energy.daily_battery_discharge,
-                solar_to_ev_kwh=energy_flows.solar_to_ev,
-                grid_to_ev_kwh=energy_flows.grid_to_ev,
-                battery_to_ev_kwh=energy_flows.battery_to_ev,
+                solar_to_ev_kwh=ev_solar,
+                grid_to_ev_kwh=ev_grid,
+                battery_to_ev_kwh=ev_battery,
                 self_consumption_rate=performance.self_consumption_rate,
                 autarky_rate=performance.autarky_rate,
                 current_price_level=tariff_data.tariff_price_level,

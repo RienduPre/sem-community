@@ -112,8 +112,9 @@ class EnergyAssistant:
 
         # (#1046) The car's solar share is the split of its flows. Dividing
         # solar_to_ev by daily_ev (the charger's meter, which also counts
-        # cycles the flows missed, and resets at sunrise not midnight) read
-        # 49 % on a day the session said 89 %. None: the flows hold nothing.
+        # cycles the flows missed) read 49 % on a day the session said 89 %.
+        # The caller hands over the flows of the EV day, the hours daily_ev
+        # counts. None: the flows hold nothing.
         ev_share = solar_share_pct(
             solar_to_ev_kwh, grid_to_ev_kwh, battery_to_ev_kwh,
         )

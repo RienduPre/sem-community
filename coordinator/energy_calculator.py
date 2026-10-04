@@ -8,7 +8,7 @@ import re
 import time
 from collections import deque
 from datetime import datetime, date, timedelta
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -76,6 +76,18 @@ _LEGACY_EV_KEY_PREFIX = f"{_LEGACY_EV_CATEGORY}_"
 # deliberately does not start with ``ev_``: that prefix means "survives the
 # midnight rollover" (``_check_rollover``), and this bucket must roll at midnight.
 MIDNIGHT_EV_CATEGORY = "midnight_ev"
+
+# (#1046) Where the car's kWh came from, on the EV day. The car's solar share
+# is printed beside ``daily_ev`` ("Today 5 kWh · Solar Share 100 %"), so its
+# flows must cover the same hours: the flow layer's own totals roll at
+# midnight, and a night charge before the Charge-by time would sit in the
+# share and not in "Today". The ``ev_`` prefix keeps these rows through the
+# midnight sweep, like the EV row. DAILY-ONLY, like the midnight mirror.
+EV_DAY_FLOW_CATEGORIES = (
+    ("solar_to_ev", "ev_flow_solar"),
+    ("grid_to_ev", "ev_flow_grid"),
+    ("battery_to_ev", "ev_flow_battery"),
+)
 
 # (#769) Per-device ledger keys. Every controlled load gets daily/monthly/
 # yearly/lifetime totals on the same footing as EV, keyed by ``device_id``
@@ -385,6 +397,9 @@ class EnergyCalculator:
         # see ``_ev_reset_day``.
         self._ev_day_offset: Optional[str] = None
         self._ev_day_key: Optional[date] = None
+        # (#1046) the day key daily_ev was last read from (not persisted:
+        # the next cycle sets it before anyone reads it)
+        self._daily_ev_day: Optional[date] = None
         self._lifetime_seeded: bool = False
         # (#1043) Which counters, per category, the lifetime seed added up —
         # persisted, so a seed taken from a different set (the first tariff
@@ -647,6 +662,17 @@ class EnergyCalculator:
             self._daily_accumulators[mirror_key] = (
                 self._daily_accumulators.get(mirror_key, 0.0) + ev_increment
             )
+        # (#1046) the car's flow split, on the same EV day as the row above.
+        # Not behind the ev_power gate: the flows are their own measure.
+        if power_flows is not None:
+            for attr, category in EV_DAY_FLOW_CATEGORIES:
+                watts = max(0.0, float(getattr(power_flows, attr, 0.0) or 0.0))
+                if watts > 0.0:
+                    key = f"{category}_{ev_day}"
+                    self._daily_accumulators[key] = (
+                        self._daily_accumulators.get(key, 0.0)
+                        + watts * interval_hours / 1000.0
+                    )
         # (#658) wallbox-counter reconciliation — recovers charging SEM was not
         # running to integrate; must run before the reads below, exactly like
         # its solar sibling.
@@ -654,6 +680,7 @@ class EnergyCalculator:
         self._reconcile_midnight_ev_energy(today)  # (#628)
 
         energy.daily_ev = self._get_daily(EV_CATEGORY, ev_day)
+        self._daily_ev_day = ev_day  # (#1046) the key ev_day_flows reads
         energy.monthly_ev = self._get_monthly(EV_CATEGORY, month_key)
         energy.yearly_ev = self._get_yearly(EV_CATEGORY, year_key)
 
@@ -868,6 +895,7 @@ class EnergyCalculator:
         # row that goes stale in one of them.
         energy.daily_total_consumption = self.daily_total_consumption(today)
         energy.daily_ev = self._get_daily(EV_CATEGORY, ev_day)
+        self._daily_ev_day = ev_day  # (#1046) the key ev_day_flows reads
         energy.monthly_ev = self._get_monthly(EV_CATEGORY, month_key)
         energy.yearly_ev = self._get_yearly(EV_CATEGORY, year_key)
         energy.daily_grid_import = self._get_daily("grid_import", today)
@@ -2918,6 +2946,18 @@ class EnergyCalculator:
             + self._daily_accumulators.get(
                 f"{MIDNIGHT_EV_CATEGORY}_{today}", 0.0),
             2,
+        )
+
+    def ev_day_flows(self) -> Tuple[float, float, float]:
+        """(#1046) kWh the flows sent to the car this EV day — solar, grid,
+        battery — on the day key ``daily_ev`` was last read from, so the two
+        never straddle a rollover."""
+        ev_day = getattr(self, "_daily_ev_day", None)
+        if ev_day is None:
+            ev_day = self._ev_reset_day(dt_util.now())
+        return tuple(
+            self._daily_accumulators.get(f"{category}_{ev_day}", 0.0)
+            for _, category in EV_DAY_FLOW_CATEGORIES
         )
 
     def _get_daily(self, category: str, today: date) -> float:
