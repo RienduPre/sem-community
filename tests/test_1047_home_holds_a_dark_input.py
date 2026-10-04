@@ -45,6 +45,10 @@ from custom_components.solar_energy_management.coordinator.types import (
     PowerReadings,
     SEMData,
 )
+from custom_components.solar_energy_management.tests.ast_contracts import (
+    _callee_name,
+    reads_flag,
+)
 
 GRACE = SENSOR_DARK_READ_GRACE_S
 
@@ -355,26 +359,26 @@ class TestTheHoldListensToEveryFlagThatBlanksAnInput:
 
     def test_the_hold_runs_after_smoothing_and_before_everything_shown(self):
         """Deleting the call leaves every unit test above green — so the
-        cycle order is pinned here: after the last write of home, before
-        anything that publishes it or the house-meter gap."""
-        src = inspect.getsource(SEMCoordinator._async_update_data)
-        at = {k: src.find(k) for k in (
-            "self._smooth_home_consumption(power)",
-            "self._hold_shown_home(power)",
-            "self._build_charging_context(power",
-            "SEMData(",
-            "self._build_power_snapshot(power)",
-        )}
-        assert all(v >= 0 for v in at.values()), at
-        order = sorted(at, key=at.get)
-        assert order[:2] == ["self._smooth_home_consumption(power)",
-                             "self._hold_shown_home(power)"], order
+        cycle order is pinned here, on the parsed CALLS: after the last
+        write of home, before anything that publishes it or the gap."""
+        first = {}
+        tree = ast.parse(textwrap.dedent(
+            inspect.getsource(SEMCoordinator._async_update_data)))
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call):
+                name = _callee_name(n)
+                first[name] = min(first.get(name, n.lineno), n.lineno)
+        order = ("_smooth_home_consumption", "_hold_shown_home",
+                 "_build_charging_context", "SEMData", "_build_power_snapshot")
+        missing = [c for c in order if c not in first]
+        assert not missing, missing
+        assert first["_smooth_home_consumption"] < first["_hold_shown_home"]
+        for later in order[2:]:
+            assert first["_hold_shown_home"] < first[later], later
 
     def test_the_house_meter_gap_compares_the_shown_figure(self):
         """(#891) The gap explains two dashboards that disagree; measured
         against the steering figure it read +4 kW while the entity said
         674 W."""
-        src = inspect.getsource(SEMCoordinator._build_fleet_cycle_state)
-        gap = src[src.index("self._house_meter_gap_w = house_gap_w("):]
-        assert "home_shown_w" in src[:src.index("self._house_meter_gap_w")]
-        assert "_shown" in gap.split("_meter)")[0]
+        assert reads_flag(SEMCoordinator._build_fleet_cycle_state,
+                          "power", "home_shown_w")
