@@ -238,6 +238,58 @@ class TestTheHoldEndsWhereTheEntityLetsGo:
 
 
 @pytest.mark.unit
+class TestEachInputOnItsOwnClock:
+    """Each input entity keeps its last value from ITS OWN last good read,
+    so home holds exactly while one of them is still holding."""
+
+    def _run(self, timeline):
+        h = _House()
+        shown = {}
+        for at, pv, grid, bat in timeline:
+            _p, data, _s = h.cycle(at, pv=pv, grid=grid, bat=bat)
+            shown[at] = data["home_consumption_power"]
+        return shown
+
+    def test_blinks_that_overlap_in_turn_never_show_a_jump(self):
+        """Solar dark 10–100 s, battery 90–200 s, grid 190–300 s: no cycle
+        is fully live, but each input's own grace is fresh — releasing at
+        180 s showed the solar output as house load again."""
+        U = "unavailable"
+        tl = [(1000, 4596, 6, 3916)]
+        for t in range(1010, 1310, 10):
+            o = t - 1000
+            tl.append((t, U if 10 <= o < 100 else 4596,
+                       U if 190 <= o < 300 else 6,
+                       U if 90 <= o < 200 else 3916))
+        tl.append((1310, 4596, 6, 3916))
+        shown = self._run(tl)
+        for t in range(1010, 1300, 10):
+            assert shown[t] == 674, f"t+{t - 1000}s showed {shown[t]} W"
+        assert shown[1310] == 674
+
+    def test_an_input_dark_all_night_does_not_stop_the_hold(self):
+        """Solar unavailable for hours (an inverter asleep), battery grid-
+        charging: a battery blink must still hold home. Its entity is blank
+        and it is 0 W in home anyway, so it neither holds nor blocks."""
+        U = "unavailable"
+        tl = [(1000, 0, -4600, 3900)]                    # last solar read
+        tl += [(t, U, -4600, 3900) for t in range(1010, 1200, 10)]
+        # the kettle: house 700 → 1200 W, while solar is still dark
+        tl += [(t, U, -5100, 3900) for t in range(1200, 1400, 10)]
+        tl += [(1400, U, -5100, U), (1410, U, -5100, U), (1420, U, -5100, U)]
+        shown = self._run(tl)
+        assert shown[1390] == 1200, "solar dark past its grace: home is live"
+        for t in (1400, 1410, 1420):
+            assert shown[t] == 1200, f"{t}: battery blink showed {shown[t]} W"
+
+    def test_an_input_never_read_does_not_hold(self):
+        """Configured but dark since the restart: no entity value, no hold."""
+        h = _House()
+        _p, data, _s = h.cycle(1000, pv="unavailable", grid=-500, bat=0)
+        assert data["home_consumption_power"] == 500
+
+
+@pytest.mark.unit
 class TestTheSplitFiguresFollowTheirInput:
     def _data(self, **flags):
         p = PowerReadings()
@@ -267,24 +319,62 @@ class TestTheSplitFiguresFollowTheirInput:
         assert d["battery_charge_power"] == 3916
 
 
-def _getattr_flags(fn) -> set:
-    """Every ``getattr(<x>, "<name>_unavailable", …)`` in a function's code."""
+#: ``to_dict`` blanks these too, but they are not terms of the balance.
+_NOT_A_BALANCE_INPUT = {"battery_soc_unavailable"}
+
+
+def _blanking_flags(fn) -> set:
+    """Every ``*_unavailable`` flag a function reads — through ``getattr``
+    with a string or as a plain attribute."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-    return {
-        n.args[1].value for n in ast.walk(tree)
-        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "getattr"
-        and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
-        and isinstance(n.args[1].value, str)
-        and n.args[1].value.endswith("_unavailable")
-    }
+    flags = set()
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.Call) and getattr(n.func, "id", None) == "getattr"
+                and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
+                and isinstance(n.args[1].value, str)):
+            name = n.args[1].value
+        elif isinstance(n, ast.Attribute):
+            name = n.attr
+        else:
+            continue
+        if name.endswith("_unavailable"):
+            flags.add(name)
+    return flags
 
 
 @pytest.mark.unit
 class TestTheHoldListensToEveryFlagThatBlanksAnInput:
     def test_every_input_the_entity_blanks_holds_the_shown_home(self):
-        """Home is built from every input ``to_dict`` can blank. A flag
-        added there and not here is this bug again for that input."""
-        blanks = _getattr_flags(SEMData.to_dict)
-        held_on = _getattr_flags(SEMCoordinator._hold_shown_home)
-        assert blanks, "the parse found no blanking flags — the pin is blind"
+        """Home is built from every power input ``to_dict`` can blank. A
+        flag added there and not to the hold is this bug again for that
+        input."""
+        blanks = _blanking_flags(SEMData.to_dict) - _NOT_A_BALANCE_INPUT
+        held_on = {flag for _n, flag in SEMCoordinator._SHOWN_HOME_INPUTS}
+        assert len(blanks) >= 3, f"the parse is blind: {blanks}"
         assert blanks <= held_on, sorted(blanks - held_on)
+
+    def test_the_hold_runs_after_smoothing_and_before_everything_shown(self):
+        """Deleting the call leaves every unit test above green — so the
+        cycle order is pinned here: after the last write of home, before
+        anything that publishes it or the house-meter gap."""
+        src = inspect.getsource(SEMCoordinator._async_update_data)
+        at = {k: src.find(k) for k in (
+            "self._smooth_home_consumption(power)",
+            "self._hold_shown_home(power)",
+            "self._build_charging_context(power",
+            "SEMData(",
+            "self._build_power_snapshot(power)",
+        )}
+        assert all(v >= 0 for v in at.values()), at
+        order = sorted(at, key=at.get)
+        assert order[:2] == ["self._smooth_home_consumption(power)",
+                             "self._hold_shown_home(power)"], order
+
+    def test_the_house_meter_gap_compares_the_shown_figure(self):
+        """(#891) The gap explains two dashboards that disagree; measured
+        against the steering figure it read +4 kW while the entity said
+        674 W."""
+        src = inspect.getsource(SEMCoordinator._build_fleet_cycle_state)
+        gap = src[src.index("self._house_meter_gap_w = house_gap_w("):]
+        assert "home_shown_w" in src[:src.index("self._house_meter_gap_w")]
+        assert "_shown" in gap.split("_meter)")[0]

@@ -1659,24 +1659,34 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
 
     # (#1047) Overridable clock for the shown-home hold below.
     _shown_home_clock = staticmethod(time.monotonic)
+    #: (#1047) The balance inputs home is built from, each with the flag
+    #: that blanks its entity (``SEMData.to_dict``).
+    _SHOWN_HOME_INPUTS = (
+        ("solar", "solar_power_unavailable"),
+        ("grid", "grid_power_unavailable"),
+        ("battery", "battery_power_all_unavailable"),
+    )
 
     def _hold_shown_home(self, power) -> None:
         """(#1047) Show the last home value while an input of it reads dark.
 
         Home is the remainder of the balance. When every read of solar,
         grid or battery is dark, the reader puts 0 W in that input (#818),
-        and each input's own entity keeps its last value for
+        and that input's entity keeps its last value for
         ``SENSOR_DARK_READ_GRACE_S``. Home was shown straight from the
         0 W: PROD 04.10 15:26 the battery went dark while charging 3.9 kW
         and home read the whole 4.7 kW of solar for 20 s. The #237/#444
         hold above only catches a DIP; its 2-cycle spike guard had been
         spent by the dip hold on the cycles before.
 
-        So the SHOWN figure (``power.home_shown_w`` → the entity and the
-        cards) keeps the last value shown on a cycle with no dark input,
-        for the same grace and the same ``<=`` as the entity layer. Past
-        the grace — or with nothing shown yet — it is the computed value
-        again: home never reads unknown.
+        So the SHOWN figure (``power.home_shown_w`` → the entity, the
+        cards, the house-meter gap) keeps the last value shown while any
+        input's entity is still holding: dark now, and read live within
+        the grace (same ``<=`` as the entity layer), each input on its own
+        clock. An input dark for longer than that — an inverter that is
+        unavailable all night — has a blank entity and is 0 W in home
+        anyway, so it neither holds home nor stops home being recorded.
+        Nothing shown yet means nothing to hold: home never reads unknown.
 
         It holds the HOUSE, not the dark input. A held battery inside
         the sum would make every move of solar or the car land on home;
@@ -1688,18 +1698,19 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         from ..consts.core import SENSOR_DARK_READ_GRACE_S
         now = float(self._shown_home_clock())
         power.home_shown_w = None
-        dark = (
-            getattr(power, "solar_power_unavailable", False)
-            or getattr(power, "grid_power_unavailable", False)
-            or getattr(power, "battery_power_all_unavailable", False)
-        )
-        if not dark:
-            self._shown_home_last = (
-                float(power.home_consumption_power or 0.0), now)
+        seen = getattr(self, "_shown_home_input_seen", None)
+        if seen is None:
+            seen = self._shown_home_input_seen = {}
+        holding = False
+        for name, flag in self._SHOWN_HOME_INPUTS:
+            if not getattr(power, flag, False):
+                seen[name] = now
+            elif name in seen and now - seen[name] <= SENSOR_DARK_READ_GRACE_S:
+                holding = True          # its entity still shows a value
+        if not holding:
+            self._shown_home_last = float(power.home_consumption_power or 0.0)
             return
-        last = getattr(self, "_shown_home_last", None)
-        if last is not None and now - last[1] <= SENSOR_DARK_READ_GRACE_S:
-            power.home_shown_w = last[0]
+        power.home_shown_w = getattr(self, "_shown_home_last", None)
 
     # (#699) The published set must satisfy the equation within this
     # tolerance to be cached as "coherent". In a clean cycle the residual is
@@ -11736,8 +11747,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         _meter = read_house_meter(
             self.hass, self.config.get("house_power_sensor"))
         self._house_meter_w = _meter
+        # (#1047) against the figure SEM SHOWS — held through a dark input
+        _shown = getattr(power, "home_shown_w", None)
         self._house_meter_gap_w = house_gap_w(
-            float(getattr(power, "home_consumption_power", 0.0) or 0.0), _meter)
+            float(getattr(power, "home_consumption_power", 0.0) or 0.0)
+            if _shown is None else float(_shown), _meter)
 
         # (#864) The slot-budget allowance — the PREVENTIVE peak bound.
         self._compute_peak_slot_allowance(power)
