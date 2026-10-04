@@ -6247,8 +6247,14 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # Energy assistant (Phase 6)
         assistant_data = EnergyAssistantSensorData()
         try:
-            # (#1046) the car's flows on the EV day — the hours "Today" counts
-            ev_solar, ev_grid, ev_battery = self._energy_calculator.ev_day_flows()
+            # (#1046) the car's flows on the EV day — the hours "Today" counts.
+            # None on the upgrade day: its rows start at the restart, so the
+            # calendar flows say more.
+            ev_flows = self._energy_calculator.ev_day_flows()
+            if ev_flows is None:
+                ev_flows = (energy_flows.solar_to_ev, energy_flows.grid_to_ev,
+                            energy_flows.battery_to_ev)
+            ev_solar, ev_grid, ev_battery = ev_flows
             assistant = self._energy_assistant.analyze(
                 daily_solar_kwh=energy.daily_solar,
                 daily_home_kwh=energy.daily_home,

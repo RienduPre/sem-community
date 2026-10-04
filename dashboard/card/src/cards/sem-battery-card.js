@@ -726,7 +726,8 @@ class SEMBatteryCard extends SEMLitBase {
 
         // Solar attribution — (#1046) the split of the flows, not solar over
         // the measured charge, which also counts cycles the flows missed.
-        const solarPct = Math.round(solarSharePct(solarToBatt, gridToBatt) ?? 0);
+        const solarPct = dailyCharge > 0
+            ? Math.round(solarSharePct(solarToBatt, gridToBatt) ?? 0) : 0;
 
         // Session
         const sessionType = this._valStr('battery_session_type');

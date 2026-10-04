@@ -400,6 +400,10 @@ class EnergyCalculator:
         # (#1046) the day key daily_ev was last read from (not persisted:
         # the next cycle sets it before anyone reads it)
         self._daily_ev_day: Optional[date] = None
+        # (#1046) The EV day the ``ev_flow_*`` rows were first booked on.
+        # That day began before them, so its rows are short. Persisted, or
+        # every restart would look like the upgrade day.
+        self._ev_flow_since: Optional[date] = None
         self._lifetime_seeded: bool = False
         # (#1043) Which counters, per category, the lifetime seed added up —
         # persisted, so a seed taken from a different set (the first tariff
@@ -665,6 +669,8 @@ class EnergyCalculator:
         # (#1046) the car's flow split, on the same EV day as the row above.
         # Not behind the ev_power gate: the flows are their own measure.
         if power_flows is not None:
+            if self._ev_flow_since is None:
+                self._ev_flow_since = ev_day
             for attr, category in EV_DAY_FLOW_CATEGORIES:
                 watts = max(0.0, float(getattr(power_flows, attr, 0.0) or 0.0))
                 if watts > 0.0:
@@ -2948,13 +2954,17 @@ class EnergyCalculator:
             2,
         )
 
-    def ev_day_flows(self) -> Tuple[float, float, float]:
+    def ev_day_flows(self) -> Optional[Tuple[float, float, float]]:
         """(#1046) kWh the flows sent to the car this EV day — solar, grid,
         battery — on the day key ``daily_ev`` was last read from, so the two
-        never straddle a rollover."""
+        never straddle a rollover. None on the EV day the rows were first
+        booked on: it began before them, so they are short."""
         ev_day = getattr(self, "_daily_ev_day", None)
         if ev_day is None:
             ev_day = self._ev_reset_day(dt_util.now())
+        since = getattr(self, "_ev_flow_since", None)
+        if since is None or ev_day <= since:
+            return None
         return tuple(
             self._daily_accumulators.get(f"{category}_{ev_day}", 0.0)
             for _, category in EV_DAY_FLOW_CATEGORIES
@@ -3521,10 +3531,11 @@ class EnergyCalculator:
         """Check for day/month rollover and cleanup old accumulators.
 
         EV keys (``ev_*``) are excluded — they use the sunrise/deadline-based
-        day and get cleaned up separately (older than yesterday). No other
-        accumulator category starts with "ev", so the prefix is unambiguous;
-        the categories are solar, home, ev, grid_import, grid_export,
-        battery_charge, battery_discharge.
+        day and get cleaned up separately (older than yesterday). The other
+        categories are solar, home, grid_import, grid_export, battery_charge,
+        battery_discharge; the only other ``ev_`` rows are the car's flow
+        split on the EV day (``EV_DAY_FLOW_CATEGORIES``, #1046), which must
+        survive midnight for the same reason.
 
         (#769) Per-device keys (``device:*``) get the same exemption, for the
         same reason and one more: a device's day rolls at SUNRISE, so between
@@ -3696,6 +3707,10 @@ class EnergyCalculator:
                 self._home_members_since.isoformat()
                 if self._home_members_since else None
             ),
+            "ev_flow_since": (
+                self._ev_flow_since.isoformat()
+                if self._ev_flow_since else None
+            ),
         }
 
     @staticmethod
@@ -3853,6 +3868,20 @@ class EnergyCalculator:
                         members_since,
                     )
                     self._home_members_since = None
+            # (#1046) Absent on a store written before the fix: the next
+            # update stamps the running EV day, whose share then reads the
+            # calendar flows.
+            flow_since = state.get("ev_flow_since")
+            if flow_since:
+                try:
+                    self._ev_flow_since = date.fromisoformat(str(flow_since))
+                except ValueError:
+                    _LOGGER.warning(
+                        "Discarding unparseable ev_flow_since %r — the car's "
+                        "solar share reads the calendar flows for one EV day",
+                        flow_since,
+                    )
+                    self._ev_flow_since = None
             last_update = state.get("last_update")
             if last_update:
                 self._last_update = datetime.fromisoformat(last_update)

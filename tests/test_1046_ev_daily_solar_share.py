@@ -25,7 +25,7 @@ import ast
 import pathlib
 import re
 import textwrap
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
@@ -262,14 +262,19 @@ class TestHelper:
             assert got == pytest.approx(want)
 
 
-def _ev_day_calc():
+def _ev_day_calc(since=date(2026, 10, 1)):
+    """A real calculator on a 07:00 Charge-by time. ``since``: the EV day the
+    flow rows were first booked on — days before, unless a test is about the
+    upgrade day itself."""
     hass = Mock()
     hass.data = {}
     hass.config = Mock()
     hass.config.config_dir = "/config"
     hass.states.get = lambda _eid: None
-    return EnergyCalculator(
+    calc = EnergyCalculator(
         {"update_interval": 3600, "ev_target_time": "07:00"}, TimeManager(hass))
+    calc._ev_flow_since = since
+    return calc
 
 
 def _hour(calc, fc, power):
@@ -349,12 +354,52 @@ class TestTheShareCoversTheEvDay:
             calc.calculate_energy(DAY_SUN)
             assert calc.ev_day_flows() == (0.0, 0.0, 0.0)
 
+    def test_the_read_keeps_the_day_daily_ev_was_read_on(self):
+        """The energy step ran at 06:59:59, the read comes after 07:00: it
+        must still read the day "Today" shows, not the new empty one."""
+        calc, fc = _ev_day_calc(), FlowCalculator()
+        with freeze_time("2026-10-04 06:59:59") as clock:
+            _hour(calc, fc, DAY_SUN)
+            clock.move_to("2026-10-04 07:00:01")
+            assert calc.ev_day_flows() == pytest.approx((5.0, 0.0, 0.0))
 
-@pytest.mark.asyncio
-async def test_the_cycle_publishes_the_ev_day_split():
-    """Through the real cycle: the published share is the EV day's split,
-    not the calendar flows (which hold nothing on this one idle cycle)."""
-    from homeassistant.util import dt as dt_util
+
+class TestTheUpgradeDay:
+    """The EV day the rows are first booked on began before them. Its share
+    reads the calendar flows, not 0 % beside a morning's charge (review 2)."""
+
+    def test_the_first_ev_day_says_short(self):
+        calc, fc = _ev_day_calc(since=None), FlowCalculator()
+        with freeze_time("2026-10-04 15:00:00") as clock:
+            _hour(calc, fc, DAY_SUN)
+            assert calc._ev_flow_since == date(2026, 10, 4)
+            assert calc.ev_day_flows() is None
+            clock.move_to("2026-10-05 08:00:00")    # the next EV day
+            _hour(calc, fc, DAY_SUN)
+            assert calc.ev_day_flows() == pytest.approx((5.0, 0.0, 0.0))
+
+    def test_the_marker_survives_a_restart(self):
+        from custom_components.solar_energy_management.coordinator import storage
+        assert "ev_flow_since" in storage.CALCULATOR_STATE_KEYS
+        calc, fc = _ev_day_calc(since=None), FlowCalculator()
+        with freeze_time("2026-10-04 15:00:00"):
+            _hour(calc, fc, DAY_SUN)
+        fresh = _ev_day_calc(since=None)
+        fresh.restore_state(calc.get_state())
+        assert fresh._ev_flow_since == date(2026, 10, 4)
+        with freeze_time("2026-10-05 08:00:00"):
+            _hour(fresh, fc, DAY_SUN)
+            assert fresh.ev_day_flows() == pytest.approx((5.0, 0.0, 0.0)), (
+                "a restart read as the upgrade day again"
+            )
+
+    def test_a_junk_marker_is_dropped(self):
+        fresh = _ev_day_calc(since=None)
+        fresh.restore_state({"ev_flow_since": "not-a-date"})
+        assert fresh._ev_flow_since is None
+
+
+def _cycle_coordinator():
     from custom_components.solar_energy_management.coordinator.coordinator import (
         SEMCoordinator,
     )
@@ -362,12 +407,40 @@ async def test_the_cycle_publishes_the_ev_day_split():
 
     coord = SEMCoordinator(_hass(_sensors(0, 0, 0, 50)), dict(WIRED))
     coord.config_entry = None
+    return coord
+
+
+@pytest.mark.asyncio
+async def test_the_cycle_publishes_the_ev_day_split():
+    """Through the real cycle: the published share is the EV day's split,
+    not the calendar flows (which hold nothing on this one idle cycle)."""
+    from homeassistant.util import dt as dt_util
+
+    coord = _cycle_coordinator()
     calc = coord._energy_calculator
     day = calc._ev_reset_day(dt_util.now())
-    calc._daily_accumulators[f"ev_flow_solar_{day}"] = 3.0
-    calc._daily_accumulators[f"ev_flow_battery_{day}"] = 1.0
+    calc._ev_flow_since = day - timedelta(days=3)
+    for d in (day - timedelta(days=1), day, day + timedelta(days=1)):
+        # all three: the cycle may cross a boundary after ``day`` was taken
+        calc._daily_accumulators[f"ev_flow_solar_{d}"] = 3.0
+        calc._daily_accumulators[f"ev_flow_battery_{d}"] = 1.0
     data = await coord._async_update_data()
     assert data["energy_ev_solar_percentage"] == pytest.approx(75.0)
+
+
+@pytest.mark.asyncio
+async def test_the_cycle_on_the_upgrade_day_reads_the_calendar_flows():
+    """No marker yet (a store from before the fix): the cycle stamps it, and
+    the share reads the flow layer's day, not the short EV-day rows."""
+    from homeassistant.util import dt as dt_util
+
+    coord = _cycle_coordinator()
+    fc = coord._flow_calculator
+    fc._current_date = dt_util.now().date()
+    fc._flow_accumulators.update({"solar_to_ev": 1.0, "grid_to_ev": 3.0})
+    data = await coord._async_update_data()
+    assert coord._energy_calculator._ev_flow_since is not None
+    assert data["energy_ev_solar_percentage"] == pytest.approx(25.0)
 
 
 # --- the lint: no solar share divides by a meter total ------------------------
@@ -466,3 +539,35 @@ class TestNoSolarShareOverAMeter:
         # an entry whose code moved away must not keep a free pass, and an
         # allowed function must not grow a second division under its cover
         assert seen == {k: n for k, (n, _why) in _ALLOWED.items()}
+
+
+# --- the same rule in the dashboard card --------------------------------------
+
+_JS_SOLAR_OVER_METER = re.compile(
+    r"\b(\w*solar\w*)\s*/\s*(\w*(?:daily|charge|total|metered|ev_kwh|energy_kwh)\w*)",
+    re.I)
+CARD_SRC = PKG / "dashboard" / "card" / "src"
+
+
+class TestTheCardNeverDividesAFlowByAMeter:
+    def test_the_lint_catches_the_old_battery_card_line(self):
+        old = "const solarPct = dailyCharge > 0 ? Math.round(solarToBatt / dailyCharge * 100) : 0;"
+        assert _JS_SOLAR_OVER_METER.search(old)
+
+    def test_no_card_divides_solar_by_a_meter(self):
+        bad = []
+        for path in sorted(CARD_SRC.rglob("*.js")):
+            for n, line in enumerate(path.read_text().splitlines(), 1):
+                if line.lstrip().startswith(("//", "*")):
+                    continue
+                if _JS_SOLAR_OVER_METER.search(line):
+                    bad.append(f"{path.relative_to(PKG)}:{n}: {line.strip()}")
+        assert not bad, (
+            "use solarSharePct (util/solar-share.js) — a flow over a meter "
+            "reads solar low:\n" + "\n".join(bad)
+        )
+
+    def test_the_battery_card_uses_both_flows(self):
+        src = (CARD_SRC / "cards" / "sem-battery-card.js").read_text()
+        assert "solarSharePct(solarToBatt, gridToBatt)" in src
+        assert "this._val('flow_grid_to_battery_energy'" in src
