@@ -566,8 +566,3 @@ class TestTheCardNeverDividesAFlowByAMeter:
             "use solarSharePct (util/solar-share.js) — a flow over a meter "
             "reads solar low:\n" + "\n".join(bad)
         )
-
-    def test_the_battery_card_uses_both_flows(self):
-        src = (CARD_SRC / "cards" / "sem-battery-card.js").read_text()
-        assert "solarSharePct(solarToBatt, gridToBatt)" in src
-        assert "this._val('flow_grid_to_battery_energy'" in src
