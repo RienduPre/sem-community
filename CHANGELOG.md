@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🐛 **Home power no longer jumps when a battery, grid or solar reading drops out** (#1047). SEM showed the full solar output as house load.
 - 🐛 **Lifetime totals count every tariff and inverter** (#1043). SEM read only the first counter, so lifetime CO2 showed less than one year.
 
 # [2.2.0-beta.9] — 03.10.2026
