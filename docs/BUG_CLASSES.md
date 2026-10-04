@@ -67,9 +67,24 @@ NOT ``last_updated`` (advances only when the *value* changes) — else a fast-po
 legitimately holds a constant value for >10 min (a split discharge sensor at 0 W while the battery
 charges — Fronius; ``grid_export`` while importing; solar overnight) false-positives as frozen
 (#611). **Guard:** `test_589_sensor_freshness.py::test_constant_value_but_still_reporting_not_frozen`
-+ the missing-`last_reported` fallback test. **Open siblings:** the frozen value still *feeds* the
++ the missing-`last_reported` fallback test. **Home figure (#1047, PROD 04.10 15:26):** an input whose
+EVERY read is dark entered the home balance as the reader's 0.0 while its own entity kept showing the
+last value — a battery charging 3.9 kW went dark and home read the whole 4.7 kW of solar for 20 s.
+**Closure:** `SensorReader._hold_dark_balance_inputs` hands `PowerReadings.balance_held_w` the value
+the entity shows (last published, same `SENSOR_DARK_READ_GRACE_S`, same `<=`, SEM convention — it runs
+after every sign correction and after the #988 gate); only `calculate_derived`'s home reads it. The
+input fields keep the 0.0 (#818: no substituted steering value); the split figures (import/export,
+charge/discharge) blank with their input; the balance check treats a held cycle like the home hold.
+**Guard:** `tests/test_1047_home_holds_a_dark_input.py` — the PROD replay, each input alone, the grace
+edge, never-read, a live zero, both sign overrides, and two structural pins: every
+`_DEGRADABLE_POWER_INPUTS` name rolls up into a held input, and the hold flag is the flag that blanks
+the entity. **Open siblings:** the frozen value still *feeds* the
 balance (observe-only, not yet held); multi-unit partial-availability sums silently under-report
-(audit W6; the lifetime seed's half closed by #1043, see class 52). Refs #274 #461 #589 #611.
+(audit W6; the lifetime seed's half closed by #1043, see class 52) — one dark unit of N is still 0 W
+in home AND in the published total; the instantaneous flows still read the dark input's 0
+(`solar_to_battery` drops while home holds); an EV power dropout is not in the dark tally at all
+(its own #910 hold + the 2-cycle spike guard, whose count the dip hold can spend first). Refs #274
+#461 #589 #611 #1047.
 
 ### 6. Multi-unit over-command (N× / partial split) — PARTIAL
 **Symptom:** a fleet-level power target handed to *each* of N units → N× the intended
