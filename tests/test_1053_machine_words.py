@@ -24,6 +24,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from .test_638_shadow_mode import freeze_targets  # noqa: F401 — fixture by name
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CARD_SRC = ROOT / "dashboard" / "card" / "src"
 STATE_LABEL = CARD_SRC / "util" / "state-label.js"
@@ -237,9 +239,12 @@ def test_the_support_text_is_the_only_raw_reader():
         assert line in body, f"tagged outside the support text: {line}"
 
 
+# The card checks below read JavaScript as text on purpose: the Python suite
+# has no JS parser, and what they pin is the call the card makes.
+
 def test_the_load_list_status_goes_through_the_label():
-    src = (CARD_SRC / "cards" / "sem-load-priority-card.js").read_text()
-    assert "stateLabel('load_management_status'" in src
+    card = (CARD_SRC / "cards" / "sem-load-priority-card.js").read_text()
+    assert "stateLabel('load_management_status'" in card
 
 
 # ── The chart's own words ───────────────────────────────────────────────────
@@ -328,15 +333,41 @@ def test_last_nights_review_rows_carry_names_and_the_store_is_untouched():
     assert labelled_review(None, lambda d: "x") is None
 
 
-def test_the_coordinator_publishes_the_named_review_and_rows():
-    src = (ROOT / "coordinator" / "coordinator.py").read_text()
-    assert src.count("ev_not_scheduled(") == 2
-    assert 'result["energy_plan_review"] = labelled_review(' in src
-    assert '{"id": f"ev:{c}", "why"' not in src
+def test_the_real_plan_names_a_charger_it_leaves_out(freeze_targets):
+    """The quiet face and the planned face both build their rows through
+    ``ev_not_scheduled``; run the real planner with a named charger."""
+    from custom_components.solar_energy_management.coordinator.coordinator import (
+        SEMCoordinator,
+    )
+    from unittest.mock import MagicMock
+    from .test_638_shadow_mode import _fake_load, _fake_self, _power, _scheduler
+    fake = _fake_self(devices=[_fake_load()])
+    fake.config["ev_chargers"][0]["name"] = "Wallbox Pulsar"
+    fake._mode_allows_night_charging = lambda cfg: False
+    SEMCoordinator._shadow_energy_plan(
+        fake, _scheduler(), energy=MagicMock(), power=_power())
+    rows = fake._energy_plan_shadow["not_scheduled"]
+    assert {"id": "ev:ev_charger", "why": "mode",
+            "label": "Wallbox Pulsar"} in rows
+
+
+def test_every_plan_row_and_the_review_go_through_the_names():
+    from .ast_contracts import call_sites
+    rows = [(f, n) for f, n, _ in call_sites("ev_not_scheduled")]
+    assert len(rows) == 2 and all(f.endswith("coordinator.py") for f, _ in rows)
+    review = [f for f, _, _ in call_sites("labelled_review")]
+    assert review == [str(pathlib.Path("coordinator") / "coordinator.py")]
+    # No not-scheduled row is built by hand without a name any more.
+    tree = ast.parse((ROOT / "coordinator" / "coordinator.py").read_text())
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Dict):
+            keys = {k.value for k in n.keys if isinstance(k, ast.Constant)}
+            if {"id", "why"} <= keys:
+                assert "label" in keys, f"line {n.lineno}: a row with no name"
 
 
 def test_the_plan_card_never_prints_a_demand_id():
-    src = (CARD_SRC / "cards" / "sem-energy-plan-card.js").read_text()
-    assert "split(':').pop()" not in src
-    assert "_demandName(r.d.label, r.d.demand_id, r.d.kind)" in src
-    assert src.count("_demandName(r.label, r.id)") == 2
+    card = (CARD_SRC / "cards" / "sem-energy-plan-card.js").read_text()
+    assert "split(':').pop()" not in card
+    assert "_demandName(r.d.label, r.d.demand_id, r.d.kind)" in card
+    assert card.count("_demandName(r.label, r.id)") == 2
