@@ -16,6 +16,7 @@
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semDefineCard } from '../base/sem-shared.js';
 import { MISSING, socDisplay } from '../util/missing-value.js';
+import { isUncapped, peakLimitText } from '../util/peak-slot.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -113,7 +114,9 @@ class SEMHomeStatusCard extends SEMLitBase {
         const peakPct = this._val('current_vs_peak_percentage');
         const peakColor = this._peakColor(peakPct);
         const currentPeak = this._val('consecutive_peak_15min').toFixed(1);
-        const targetLimit = this._val('target_peak_limit').toFixed(1);
+        const limitState = this._hass.states[`${this._prefix}target_peak_limit`];
+        const targetLimit = peakLimitText(limitState, this._t('uncapped'));
+        const uncapped = isUncapped(limitState);
 
         const co2Today = this._val('daily_co2_avoided').toFixed(2);
         const co2Life = this._val('lifetime_co2_avoided').toFixed(1);
@@ -160,7 +163,7 @@ class SEMHomeStatusCard extends SEMLitBase {
                         <span class="peak-pct" style="color:${peakColor}">${peakPct.toFixed(0)}%</span>
                     </div>
                     <div class="peak-text-wrap">
-                        <span class="peak-detail">${currentPeak} / ${targetLimit} kW (${peakPct.toFixed(0)}%)</span>
+                        <span class="peak-detail">${currentPeak} kW / ${targetLimit}${uncapped ? '' : ` (${peakPct.toFixed(0)}%)`}</span>
                         <span class="peak-status-badge" style="color:${peakColor};border-color:${peakColor}">
                             ${this._t(this._peakStatusKey(peakPct))}
                         </span>

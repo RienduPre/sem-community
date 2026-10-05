@@ -17,6 +17,7 @@
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
 import { priceLevelKey } from '../util/price-level.js';
+import { isUncapped } from '../util/peak-slot.js';
 
 // EV section removed in #282 audit: every control (charging mode, night
 // charging, smart night, target, currents, phases, stall cooldown) is
@@ -372,11 +373,16 @@ class SEMControlCard extends SEMLitBase {
         const peakColor = peakPct > 90 ? '#f44336' : peakPct > 70 ? '#ff9800' : '#8DC892';
         const shedDevices = this._valNum('controllable_devices_count').toFixed(0);
         const shed = this._valNum('available_load_reduction');
+        // (#1055) No grid limit: there is no "% of limit" and no margin to
+        // show. The sensors keep the saved number, which is not in force.
+        const uncapped = isUncapped(this._hass?.states[`${this._prefix}target_peak_limit`]);
 
         return html`
             <div class="peak-hero">
-                <span class="peak-pct" style="color:${peakColor}">${peakPct.toFixed(0)}%</span>
-                <span class="peak-of-limit">${this._t('of_limit')}</span>
+                ${uncapped
+                    ? html`<span class="peak-pct" style="color:#8DC892">${this._t('uncapped')}</span>`
+                    : html`<span class="peak-pct" style="color:${peakColor}">${peakPct.toFixed(0)}%</span>
+                <span class="peak-of-limit">${this._t('of_limit')}</span>`}
             </div>
             <div class="peak-detail">
                 <span class="peak-status">${this._valLabel('load_management_status') || '—'}</span>
@@ -388,7 +394,7 @@ class SEMControlCard extends SEMLitBase {
                     <ha-icon icon="mdi:shield-check" style="--mdc-icon-size:18px;color:#8DC892"></ha-icon>
                     <div class="info-tile-content">
                         <span class="info-tile-label">${this._t('peak_margin')}</span>
-                        <span class="info-tile-value">${this._valNum('peak_margin').toFixed(1)} kW</span>
+                        <span class="info-tile-value">${uncapped ? this._t('uncapped') : `${this._valNum('peak_margin').toFixed(1)} kW`}</span>
                     </div>
                 </div>
                 <div class="info-tile">

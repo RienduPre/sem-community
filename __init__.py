@@ -6186,6 +6186,7 @@ async def _async_register_phase_services(
     # Load management
     _DIAGNOSE_LOAD_MGMT_OPTION = {
         "load_management_enabled", "target_peak_limit",
+        "peak_limit_unlimited",
         "warning_peak_level", "emergency_peak_level",
     }
     _DIAGNOSE_LOAD_MGMT_STATE = {
