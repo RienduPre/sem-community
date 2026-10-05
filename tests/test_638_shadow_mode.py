@@ -1379,12 +1379,14 @@ class TestTomorrowPreviewComposer:
         reset at midnight."""
         fake = self._fake()
         fake.config["ev_chargers"][0]["daily_ev_target"] = 6.0
+        pump = _fake_load()
+        pump.name = "Pump"
         fake._surplus_controller = SimpleNamespace(
-            get_devices_sorted=lambda: [_fake_load()])
+            get_devices_sorted=lambda: [pump])
         p = SEMCoordinator._compose_tomorrow_preview(fake)
         asks = {a["label"]: a["kwh"] for a in p["known_asks"]}
         # pump: 4h min runtime × 800 W = 3.2 kWh (full day resets)
-        assert asks.get("pump") == 3.2
+        assert asks.get("Pump") == 3.2
         # the configured EV charger asks its daily target
         assert any(a["kind"] == "ev" for a in p["known_asks"])
 
@@ -1399,16 +1401,19 @@ class TestTomorrowPreviewComposer:
             DeviceControlMode,
         )
         meter = _fake_load(did="pro4pm_ch3")
+        meter.name = "Pro4PM ch3"
         meter.control_mode = DeviceControlMode.PEAK_ONLY
         meter.daily_min_runtime_sec = 10 * 3600
         meter.rated_power = 1000.0
+        pump = _fake_load()
+        pump.name = "Pump"
         fake = self._fake()
         fake._surplus_controller = SimpleNamespace(
-            get_devices_sorted=lambda: [meter, _fake_load()])
+            get_devices_sorted=lambda: [meter, pump])
         p = SEMCoordinator._compose_tomorrow_preview(fake)
         labels = [a["label"] for a in p["known_asks"] if a["kind"] == "load"]
-        assert "pro4pm_ch3" not in labels
-        assert "pump" in labels  # the SURPLUS-mode sibling still asks
+        assert "Pro4PM ch3" not in labels
+        assert "Pump" in labels  # the SURPLUS-mode sibling still asks
 
     def test_the_provisional_pack_places_tomorrows_asks(self):
         """(Guido: 'predict the battery level and when the devices get

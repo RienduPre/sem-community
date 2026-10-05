@@ -158,7 +158,6 @@ class SEMGridCard extends SEMLitBase {
         const fillW = (Math.min(Math.max(peakPct / 100, 0), 1) * 200).toFixed(1);
 
         // Load control
-        const loadStatus = this._valStr('load_management_status');
         const loadShed = this._val('loads_currently_shed');
         const loadReduction = this._val('available_load_reduction');
         const loadDevices = this._val('controllable_devices_count');
@@ -380,7 +379,7 @@ class SEMGridCard extends SEMLitBase {
                         <div class="section-title" style="color:#488fc2">${this._t('load_control')}</div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t('status')}</span>
-                            <span class="metric-val">${loadStatus ? this._t(loadStatus) : '—'}</span>
+                            <span class="metric-val">${this._valLabel('load_management_status') || '—'}</span>
                         </div>
                         <div class="metric-row">
                             <span class="metric-label">${this._t('loads_shed')}</span>

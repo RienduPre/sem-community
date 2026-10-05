@@ -609,7 +609,7 @@ class SEMConfigCard extends SEMLitBase {
         return `${this._t('soc')} ${soc.toFixed(0)}%`;
     }
     _tariffSubtitle() {
-        const provider = this._val('tariff_provider') || '—';
+        const provider = this._valLabel('tariff_provider') || '—';
         const level = this._val('tariff_price_level') || '';
         return level ? `${provider} · ${this._t(priceLevelKey(level)) || level}` : provider;
     }
@@ -630,7 +630,7 @@ class SEMConfigCard extends SEMLitBase {
             : this._t('not_configured');
     }
     _loadMgmtSubtitle() {
-        return this._val('load_management_status') || '';
+        return this._valLabel('load_management_status');
     }
     _forecastSubtitle() {
         const label = this._forecastProviderLabel(this._val('forecast_source'));
@@ -1536,7 +1536,7 @@ class SEMConfigCard extends SEMLitBase {
             <div class="hp-status">
                 <div class="readonly-row">
                     <span class="ctrl-label">${this._t('heat_pump_mode')}</span>
-                    <span class="readonly-value">${this._val('heat_pump_mode') || '—'}</span>
+                    <span class="readonly-value">${this._valLabel('heat_pump_mode') || '—'}</span>
                 </div>
                 <div class="readonly-row">
                     <span class="ctrl-label">${this._t('heat_pump_sg_ready_state')}</span>
@@ -2521,7 +2521,7 @@ class SEMConfigCard extends SEMLitBase {
         return html`
             <div class="readonly-row">
                 <span class="ctrl-label">${this._t('load_management_status')}</span>
-                <span class="readonly-value">${this._val('load_management_status') || '—'}</span>
+                <span class="readonly-value">${this._valLabel('load_management_status') || '—'}</span>
             </div>
             ${this._renderOptionToggle('load_management_enabled', 'config_lm_enabled',
                 opts, 'config_help_lm_enabled', false)}
@@ -2862,8 +2862,8 @@ class SEMConfigCard extends SEMLitBase {
     // swapped/mis-mapped convention shows inverted import/export and the
     // user can correct it here without Developer Tools → Actions.
     _renderGridSignFix(T) {
-        const gridSign = this._val('diag_grid_sign') || '—';
-        const battSign = this._val('diag_battery_sign') || '—';
+        const gridSign = this._valLabel('diag_grid_sign') || '—';
+        const battSign = this._valLabel('diag_battery_sign') || '—';
         return html`
             <div class="grid-sign-block">
                 <div class="readonly-row">

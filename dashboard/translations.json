@@ -1608,7 +1608,16 @@
     "sessions_solar_word": "slunce",
     "sessions_csv": "CSV",
     "sessions_none": "Tento měsíc žádné relace",
-    "sessions_loading": "Načítání…"
+    "sessions_loading": "Načítání…",
+    "grid_manual": "Oddělené senzory (nastaveno vámi)",
+    "grid_split_unverified": "Oddělené senzory (neověřeno)",
+    "sign_negated": "Obrácené",
+    "charger_control_number": "přes entitu čísla",
+    "charger_control_service": "přes akci",
+    "actual": "Skutečnost",
+    "tariff_static": "Pevné sazby",
+    "tariff_calendar": "Kalendář",
+    "error": "Chyba"
   },
   "da": {
     "% of limit": "% af grænse",
@@ -3219,7 +3228,16 @@
     "sessions_solar_word": "sol",
     "sessions_csv": "CSV",
     "sessions_none": "Ingen sessioner denne måned",
-    "sessions_loading": "Indlæser…"
+    "sessions_loading": "Indlæser…",
+    "grid_manual": "Opdelte sensorer (valgt af dig)",
+    "grid_split_unverified": "Opdelte sensorer (ikke kontrolleret)",
+    "sign_negated": "Omvendt",
+    "charger_control_number": "via talentitet",
+    "charger_control_service": "via handling",
+    "actual": "Faktisk",
+    "tariff_static": "Faste priser",
+    "tariff_calendar": "Kalender",
+    "error": "Fejl"
   },
   "de": {
     "% of limit": "% des Limits",
@@ -4830,7 +4848,16 @@
     "sessions_solar_word": "Solar",
     "sessions_csv": "CSV",
     "sessions_none": "Keine Ladevorgänge diesen Monat",
-    "sessions_loading": "Lädt…"
+    "sessions_loading": "Lädt…",
+    "grid_manual": "Getrennte Sensoren (von dir gewählt)",
+    "grid_split_unverified": "Getrennte Sensoren (nicht geprüft)",
+    "sign_negated": "Invertiert",
+    "charger_control_number": "über Zahl-Entität",
+    "charger_control_service": "über Aktion",
+    "actual": "Tatsächlich",
+    "tariff_static": "Feste Preise",
+    "tariff_calendar": "Kalender",
+    "error": "Fehler"
   },
   "en": {
     "% of limit": "% of limit",
@@ -6441,7 +6468,16 @@
     "sessions_solar_word": "solar",
     "sessions_csv": "CSV",
     "sessions_none": "No sessions this month",
-    "sessions_loading": "Loading…"
+    "sessions_loading": "Loading…",
+    "grid_manual": "Split sensors (set by you)",
+    "grid_split_unverified": "Split sensors (not checked)",
+    "sign_negated": "Inverted",
+    "charger_control_number": "via number entity",
+    "charger_control_service": "via action",
+    "actual": "Actual",
+    "tariff_static": "Fixed rates",
+    "tariff_calendar": "Calendar",
+    "error": "Error"
   },
   "es": {
     "% of limit": "% del límite",
@@ -8052,7 +8088,16 @@
     "sessions_solar_word": "solar",
     "sessions_csv": "CSV",
     "sessions_none": "Sin sesiones este mes",
-    "sessions_loading": "Cargando…"
+    "sessions_loading": "Cargando…",
+    "grid_manual": "Sensores separados (elegidos por ti)",
+    "grid_split_unverified": "Sensores separados (sin verificar)",
+    "sign_negated": "Invertido",
+    "charger_control_number": "mediante entidad numérica",
+    "charger_control_service": "mediante acción",
+    "actual": "Real",
+    "tariff_static": "Tarifas fijas",
+    "tariff_calendar": "Calendario",
+    "error": "Error"
   },
   "fi": {
     "% of limit": "% rajasta",
@@ -9663,7 +9708,16 @@
     "sessions_solar_word": "aurinkoa",
     "sessions_csv": "CSV",
     "sessions_none": "Ei latauksia tässä kuussa",
-    "sessions_loading": "Ladataan…"
+    "sessions_loading": "Ladataan…",
+    "grid_manual": "Erilliset sensorit (itse valittu)",
+    "grid_split_unverified": "Erilliset sensorit (ei tarkistettu)",
+    "sign_negated": "Käännetty",
+    "charger_control_number": "numeroentiteetin kautta",
+    "charger_control_service": "toiminnon kautta",
+    "actual": "Toteutunut",
+    "tariff_static": "Kiinteät hinnat",
+    "tariff_calendar": "Kalenteri",
+    "error": "Virhe"
   },
   "fr": {
     "% of limit": "% de la limite",
@@ -11274,7 +11328,16 @@
     "sessions_solar_word": "solaire",
     "sessions_csv": "CSV",
     "sessions_none": "Aucune session ce mois",
-    "sessions_loading": "Chargement…"
+    "sessions_loading": "Chargement…",
+    "grid_manual": "Capteurs séparés (choisis par vous)",
+    "grid_split_unverified": "Capteurs séparés (non vérifiés)",
+    "sign_negated": "Inversé",
+    "charger_control_number": "via entité nombre",
+    "charger_control_service": "via action",
+    "actual": "Réel",
+    "tariff_static": "Tarifs fixes",
+    "tariff_calendar": "Calendrier",
+    "error": "Erreur"
   },
   "hu": {
     "% of limit": "% a határból",
@@ -12885,7 +12948,16 @@
     "sessions_solar_word": "nap",
     "sessions_csv": "CSV",
     "sessions_none": "Nincs töltés ebben a hónapban",
-    "sessions_loading": "Betöltés…"
+    "sessions_loading": "Betöltés…",
+    "grid_manual": "Különálló szenzorok (saját választás)",
+    "grid_split_unverified": "Különálló szenzorok (nincs ellenőrizve)",
+    "sign_negated": "Fordított",
+    "charger_control_number": "szám entitáson keresztül",
+    "charger_control_service": "műveleten keresztül",
+    "actual": "Tényleges",
+    "tariff_static": "Fix díjak",
+    "tariff_calendar": "Naptár",
+    "error": "Hiba"
   },
   "it": {
     "% of limit": "% del limite",
@@ -14496,7 +14568,16 @@
     "sessions_solar_word": "solare",
     "sessions_csv": "CSV",
     "sessions_none": "Nessuna sessione questo mese",
-    "sessions_loading": "Caricamento…"
+    "sessions_loading": "Caricamento…",
+    "grid_manual": "Sensori separati (scelti da te)",
+    "grid_split_unverified": "Sensori separati (non verificati)",
+    "sign_negated": "Invertito",
+    "charger_control_number": "tramite entità numero",
+    "charger_control_service": "tramite azione",
+    "actual": "Reale",
+    "tariff_static": "Tariffe fisse",
+    "tariff_calendar": "Calendario",
+    "error": "Errore"
   },
   "nl": {
     "% of limit": "% van limiet",
@@ -16107,7 +16188,16 @@
     "sessions_solar_word": "zon",
     "sessions_csv": "CSV",
     "sessions_none": "Geen sessies deze maand",
-    "sessions_loading": "Laden…"
+    "sessions_loading": "Laden…",
+    "grid_manual": "Gescheiden sensoren (door jou gekozen)",
+    "grid_split_unverified": "Gescheiden sensoren (niet gecontroleerd)",
+    "sign_negated": "Omgekeerd",
+    "charger_control_number": "via getal-entiteit",
+    "charger_control_service": "via actie",
+    "actual": "Werkelijk",
+    "tariff_static": "Vaste tarieven",
+    "tariff_calendar": "Kalender",
+    "error": "Fout"
   },
   "no": {
     "% of limit": "% av grense",
@@ -17718,7 +17808,16 @@
     "sessions_solar_word": "sol",
     "sessions_csv": "CSV",
     "sessions_none": "Ingen økter denne måneden",
-    "sessions_loading": "Laster…"
+    "sessions_loading": "Laster…",
+    "grid_manual": "Delte sensorer (valgt av deg)",
+    "grid_split_unverified": "Delte sensorer (ikke kontrollert)",
+    "sign_negated": "Invertert",
+    "charger_control_number": "via tallentitet",
+    "charger_control_service": "via handling",
+    "actual": "Faktisk",
+    "tariff_static": "Faste priser",
+    "tariff_calendar": "Kalender",
+    "error": "Feil"
   },
   "pl": {
     "% of limit": "% limitu",
@@ -19329,7 +19428,16 @@
     "sessions_solar_word": "słońca",
     "sessions_csv": "CSV",
     "sessions_none": "Brak sesji w tym miesiącu",
-    "sessions_loading": "Ładowanie…"
+    "sessions_loading": "Ładowanie…",
+    "grid_manual": "Rozdzielone czujniki (wybrane przez Ciebie)",
+    "grid_split_unverified": "Rozdzielone czujniki (niesprawdzone)",
+    "sign_negated": "Odwrócony",
+    "charger_control_number": "przez encję liczbową",
+    "charger_control_service": "przez akcję",
+    "actual": "Rzeczywiste",
+    "tariff_static": "Stałe stawki",
+    "tariff_calendar": "Kalendarz",
+    "error": "Błąd"
   },
   "pt": {
     "% of limit": "% do limite",
@@ -20940,7 +21048,16 @@
     "sessions_solar_word": "solar",
     "sessions_csv": "CSV",
     "sessions_none": "Sem sessões este mês",
-    "sessions_loading": "A carregar…"
+    "sessions_loading": "A carregar…",
+    "grid_manual": "Sensores separados (escolhidos por si)",
+    "grid_split_unverified": "Sensores separados (não verificados)",
+    "sign_negated": "Invertido",
+    "charger_control_number": "via entidade numérica",
+    "charger_control_service": "via ação",
+    "actual": "Real",
+    "tariff_static": "Tarifas fixas",
+    "tariff_calendar": "Calendário",
+    "error": "Erro"
   },
   "ro": {
     "% of limit": "% din limită",
@@ -22551,7 +22668,16 @@
     "sessions_solar_word": "solar",
     "sessions_csv": "CSV",
     "sessions_none": "Nicio sesiune luna aceasta",
-    "sessions_loading": "Se încarcă…"
+    "sessions_loading": "Se încarcă…",
+    "grid_manual": "Senzori separați (aleși de tine)",
+    "grid_split_unverified": "Senzori separați (neverificați)",
+    "sign_negated": "Inversat",
+    "charger_control_number": "prin entitate număr",
+    "charger_control_service": "prin acțiune",
+    "actual": "Real",
+    "tariff_static": "Tarife fixe",
+    "tariff_calendar": "Calendar",
+    "error": "Eroare"
   },
   "sv": {
     "% of limit": "% av gräns",
@@ -24162,7 +24288,16 @@
     "sessions_solar_word": "sol",
     "sessions_csv": "CSV",
     "sessions_none": "Inga sessioner denna månad",
-    "sessions_loading": "Laddar…"
+    "sessions_loading": "Laddar…",
+    "grid_manual": "Delade sensorer (valda av dig)",
+    "grid_split_unverified": "Delade sensorer (inte kontrollerade)",
+    "sign_negated": "Omvänd",
+    "charger_control_number": "via nummerentitet",
+    "charger_control_service": "via åtgärd",
+    "actual": "Faktisk",
+    "tariff_static": "Fasta priser",
+    "tariff_calendar": "Kalender",
+    "error": "Fel"
   },
   "zh": {
     "% of limit": "% 达限制",
@@ -25773,6 +25908,15 @@
     "sessions_solar_word": "光伏",
     "sessions_csv": "CSV",
     "sessions_none": "本月无充电记录",
-    "sessions_loading": "加载中…"
+    "sessions_loading": "加载中…",
+    "grid_manual": "分离传感器（手动选择）",
+    "grid_split_unverified": "分离传感器（未验证）",
+    "sign_negated": "反向",
+    "charger_control_number": "通过数值实体",
+    "charger_control_service": "通过动作",
+    "actual": "实际",
+    "tariff_static": "固定电价",
+    "tariff_calendar": "日历",
+    "error": "错误"
   }
 }

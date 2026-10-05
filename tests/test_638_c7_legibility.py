@@ -43,7 +43,8 @@ class TestNotScheduledIsStructured:
         plan = fake._energy_plan_shadow
         rows = plan.get("not_scheduled")
         assert rows, "the opted-out charger must appear structurally"
-        assert {"id": "ev:ev_charger", "why": "mode"} in rows
+        # (#1053) …with its name; the fake's charger has none.
+        assert {"id": "ev:ev_charger", "why": "mode", "label": None} in rows
 
     def test_a_disconnected_car_lands_with_its_why(self, freeze_targets):
         fake = _fake_self(devices=[_fake_load()])
@@ -52,7 +53,8 @@ class TestNotScheduledIsStructured:
         SEMCoordinator._shadow_energy_plan(
             fake, _scheduler(), energy=MagicMock(), power=power)
         rows = fake._energy_plan_shadow.get("not_scheduled")
-        assert {"id": "ev:ev_charger", "why": "disconnected"} in rows
+        assert {"id": "ev:ev_charger", "why": "disconnected",
+                "label": None} in rows
 
     def test_a_planned_night_has_an_empty_list_not_a_missing_key(
             self, freeze_targets):
@@ -228,8 +230,8 @@ class TestTheQuietFaceSpeaksInSentences:
         SEMCoordinator._shadow_energy_plan(
             fake, _scheduler(deficit=0.0), energy=MagicMock(), power=power)
         plan = fake._energy_plan_shadow
-        assert {"id": "ev:ev_charger", "why": "disconnected"} \
-            in plan["not_scheduled"]
+        assert {"id": "ev:ev_charger", "why": "disconnected",
+                "label": None} in plan["not_scheduled"]
         # The EV code must NOT claim "target met" — the car is absent.
         assert "ev_target_met" not in plan["why_codes"]
 
@@ -323,6 +325,11 @@ class TestEveryLeftOutLoadIsNamed:
         src = (root / "coordinator" / "coordinator.py").read_text()
         codes = set(re.findall(r'"why": "([a-z_]+)"', src))
         codes |= set(re.findall(r'_left_out\([a-z_]+, "([a-z_]+)"\)', src))
+        # (#1053) the EV rows are built in demand_labels.ev_not_scheduled
+        labels = (root / "coordinator" / "demand_labels.py").read_text()
+        codes |= set(re.findall(
+            r'\("([a-z_]+)", (?:mode_opted_out|disconnected|car_full)\)',
+            labels))
         assert {"mode", "disconnected", "car_full"} <= codes, (
             "the EV whys moved — this pin is reading the wrong lines")
         assert {"load_mode", "no_runtime_need", "stop_condition", "day_only",
@@ -444,9 +451,12 @@ class TestALeftOutRowIsNamed:
         root = pathlib.Path(__file__).resolve().parent.parent
         card = (root / "dashboard" / "card" / "src" / "cards"
                 / "sem-energy-plan-card.js").read_text()
-        assert card.count("r.label ||") == 2, (
+        # (#1053) The fallback is the demand's kind in the user's language,
+        # not the slug: "ev_charger_1" reached a Dutch card as a name.
+        assert card.count("_demandName(r.label, r.id)") == 2, (
             "both the quiet-night and the planned-night lists render the "
-            "name, falling back to the slug only when there is none")
+            "name, falling back to the kind only when there is none")
+        assert "split(':').pop()" not in card
 
 
 # The reasons for which "the plan is unreadable" IS the honest sentence:

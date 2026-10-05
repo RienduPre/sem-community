@@ -20,6 +20,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semDefineCard, semFormatTime, semGetCurrency } from '../base/sem-shared.js';
+import { demandName } from '../util/demand-name.js';
 
 const DEFAULT_ENTITY = 'sensor.sem_energy_plan';
 
@@ -33,6 +34,8 @@ const KINDS = {
     battery: { icon: 'mdi:home-battery', color: '#f06292', label: 'energy_plan_kind_battery' },
     comfort: { icon: 'mdi:thermometer',  color: '#4db6ac', label: 'energy_plan_kind_comfort' },
 };
+const KIND_LABELS = Object.fromEntries(
+    Object.entries(KINDS).map(([kind, k]) => [kind, k.label]));
 
 // Deep links into the planner docs (guarded by tests/test_618_docs_anchors.py
 // — the regex there matches these "docs:" literals, keep the shape).
@@ -171,6 +174,12 @@ class SEMEnergyPlanCard extends SEMLitBase {
     _hm(iso) {
         if (!iso) return '—';
         return semFormatTime(iso, this._hass?.config?.time_zone || undefined);
+    }
+
+    // (#1053) A row's name: the one the device was given, else its kind in
+    // the user's language. Never the id (util/demand-name.js).
+    _demandName(label, id, kind) {
+        return demandName(label, id, kind, KIND_LABELS, (k) => this._t(k));
     }
 
     _format(key, values) {
@@ -336,14 +345,14 @@ class SEMEnergyPlanCard extends SEMLitBase {
                         ${asks.map((a, i) => {
                             const k = KINDS[a.kind] || KINDS.load;
                             const mine = blocksFor(a.kind, i);
-                            const tip = [a.label,
+                            const tip = [this._demandName(a.label, null, a.kind),
                                 mine.map(b => `${this._hm(b.start)}–${this._hm(b.end)}`).join('\n') || null,
                                 this._t('energy_plan_provisional_tip')].filter(Boolean).join('\n');
                             return html`
                                 <div class="lbl" title="${tip}">
                                     <div class="lname">
                                         <ha-icon icon="${k.icon}" style="--mdc-icon-size:13px;color:${k.color}"></ha-icon>
-                                        <span class="name">${a.label}</span>
+                                        <span class="name">${this._demandName(a.label, null, a.kind)}</span>
                                     </div>
                                 </div>
                                 ${hasStrip ? html`
@@ -415,7 +424,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                     <div class="rev-row">
                         <ha-icon icon="${r.k.icon}"
                                  style="--mdc-icon-size:12px;color:${r.k.color}"></ha-icon>
-                        <span class="rev-name">${(r.d.demand_id || '').split(':').pop()}</span>
+                        <span class="rev-name">${this._demandName(r.d.label, r.d.demand_id, r.d.kind)}</span>
                         <span class="rev-txt">${r.text}</span>
                     </div>
                 `)}
@@ -493,7 +502,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                                 <div class="notsched-row">
                                     <ha-icon icon="mdi:sleep"
                                              style="--mdc-icon-size:12px;color:var(--secondary-text-color,#8a93a5)"></ha-icon>
-                                    <span class="nsname">${r.label || (r.id || '').split(':').pop()}</span>
+                                    <span class="nsname">${this._demandName(r.label, r.id)}</span>
                                     <span class="nswhy">${this._t('energy_plan_why_' + r.why)}</span>
                                 </div>
                             `)}
@@ -804,7 +813,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                                 <div class="notsched-row">
                                     <ha-icon icon="mdi:sleep"
                                              style="--mdc-icon-size:12px;color:var(--secondary-text-color,#8a93a5)"></ha-icon>
-                                    <span class="nsname">${r.label || (r.id || '').split(':').pop()}</span>
+                                    <span class="nsname">${this._demandName(r.label, r.id)}</span>
                                     <span class="nswhy">${this._t('energy_plan_why_' + r.why)}</span>
                                 </div>
                             `)}
