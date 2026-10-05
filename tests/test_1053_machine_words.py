@@ -55,24 +55,30 @@ def _table_for(sensor: str) -> dict:
 
 # ── The backend's words, read from the code that writes them ────────────────
 
-def _words(node) -> set:
+def _words(node, allow=()) -> set:
     """String constants an expression can EVALUATE to: dict values (not
-    keys), call arguments, both arms of a conditional (not its test)."""
-    out: set = set()
+    keys) and the default of a ``{...}.get(key, default)``, both arms of a
+    conditional (not its test). Anything else — a variable, a call — is a
+    word this scan cannot see, so it fails rather than reading nothing.
+    ``allow`` names attributes that are themselves scanned elsewhere."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        out.add(node.value)
-    elif isinstance(node, ast.IfExp):
-        out |= _words(node.body) | _words(node.orelse)
-    elif isinstance(node, ast.Dict):
-        for v in node.values:
-            out |= _words(v)
-    elif isinstance(node, ast.Call):
-        out |= _words(node.func)
-        for a in node.args:
-            out |= _words(a)
-    elif isinstance(node, ast.Attribute):
-        out |= _words(node.value)
-    return out
+        return {node.value}
+    if isinstance(node, ast.IfExp):
+        return _words(node.body, allow) | _words(node.orelse, allow)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Dict)):
+        out: set = set()
+        for v in node.func.value.values:
+            out |= _words(v, allow)
+        for a in node.args[1:]:
+            out |= _words(a, allow)
+        return out
+    if isinstance(node, ast.Attribute) and node.attr in allow:
+        return set()
+    raise AssertionError(
+        f"line {getattr(node, 'lineno', '?')}: a value the scan cannot read "
+        f"({ast.dump(node)[:80]}) — a word from here would never be checked")
 
 
 def _published(key: str) -> set:
@@ -101,7 +107,7 @@ def _tariff_providers() -> set:
                     if isinstance(t, ast.Attribute) and t.attr == "_provider_name":
                         found |= _words(n.value)
             elif isinstance(n, ast.keyword) and n.arg == "provider":
-                found |= _words(n.value)
+                found |= _words(n.value, allow=("_provider_name",))
     found |= _annotated_default("tariff_provider")
     return found
 
@@ -175,7 +181,9 @@ def test_every_word_the_backend_writes_has_a_row(sensor):
 def test_the_reader_finds_the_words_it_was_written_for():
     """The extraction above is the guard; prove it sees the words the
     reporter's screen showed, so it cannot pass by reading nothing."""
-    assert {"manual", "combined", "split-lowconf"} <= _published("diag_grid_mode")
+    assert _published("diag_grid_mode") == {
+        "manual", "combined", "split", "split-declared",
+        "split-declared-unverified", "split-lowconf"}
     assert {"normal", "negated"} <= _published("diag_grid_sign")
     assert {"number", "service", "none"} <= _published("diag_charger_control")
     assert {"custom", "static", "calendar", "tibber"} <= _tariff_providers()
@@ -351,12 +359,34 @@ def test_the_real_plan_names_a_charger_it_leaves_out(freeze_targets):
             "label": "Wallbox Pulsar"} in rows
 
 
+def test_the_coordinator_publishes_the_review_with_names():
+    """The real publish step, with a named charger and a named load."""
+    from custom_components.solar_energy_management.coordinator.coordinator import (
+        SEMCoordinator,
+    )
+    stored = {"demands": [
+        {"demand_id": "ev:ev_charger", "kind": "ev", "code": "learning"},
+        {"demand_id": "load:pool", "kind": "load", "code": "learning"},
+        {"demand_id": "arbitrage:battery", "kind": "battery", "code": "learning"},
+    ]}
+    fake = SimpleNamespace(
+        config=_CONFIG, _demand_review=stored,
+        _surplus_controller=_Ctrl(SimpleNamespace(device_id="pool",
+                                                  name="Zwembadpomp")))
+    out = SEMCoordinator._published_review(fake)
+    assert [r["label"] for r in out["demands"]] == [
+        "Wallbox Pulsar", "Zwembadpomp", None]
+    assert all("label" not in r for r in stored["demands"])
+    assert SEMCoordinator._published_review(
+        SimpleNamespace(config={}, _demand_review=None)) is None
+
+
 def test_every_plan_row_and_the_review_go_through_the_names():
     from .ast_contracts import call_sites
     rows = [(f, n) for f, n, _ in call_sites("ev_not_scheduled")]
     assert len(rows) == 2 and all(f.endswith("coordinator.py") for f, _ in rows)
-    review = [f for f, _, _ in call_sites("labelled_review")]
-    assert review == [str(pathlib.Path("coordinator") / "coordinator.py")]
+    published = [f for f, _, _ in call_sites("_published_review")]
+    assert published == [str(pathlib.Path("coordinator") / "coordinator.py")]
     # No not-scheduled row is built by hand without a name any more.
     tree = ast.parse((ROOT / "coordinator" / "coordinator.py").read_text())
     for n in ast.walk(tree):
@@ -371,3 +401,22 @@ def test_the_plan_card_never_prints_a_demand_id():
     assert "split(':').pop()" not in card
     assert "_demandName(r.d.label, r.d.demand_id, r.d.kind)" in card
     assert card.count("_demandName(r.label, r.id)") == 2
+
+
+def test_tomorrows_asks_send_no_name_rather_than_an_id_or_english():
+    """Tomorrow's view named an unnamed load by its device id and an
+    unnamed charger "EV" (English; German reads "E-Auto")."""
+    from custom_components.solar_energy_management.coordinator.coordinator import (
+        SEMCoordinator,
+    )
+    from .test_638_shadow_mode import TestTomorrowPreviewComposer, _fake_load
+    fake = TestTomorrowPreviewComposer()._fake()
+    fake.config["ev_chargers"][0]["daily_ev_target"] = 6.0
+    unnamed = _fake_load(did="energy_dashboard_shelly_441793")
+    named = _fake_load(did="pool")
+    named.name = "Zwembadpomp"
+    fake._surplus_controller = SimpleNamespace(
+        get_devices_sorted=lambda: [unnamed, named])
+    asks = SEMCoordinator._compose_tomorrow_preview(fake)["known_asks"]
+    assert sorted((a["kind"], a["label"] or "") for a in asks) == [
+        ("ev", ""), ("load", ""), ("load", "Zwembadpomp")]

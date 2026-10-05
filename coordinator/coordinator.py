@@ -1002,6 +1002,15 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             charger_cfg,
         )
 
+    def _published_review(self) -> Any:
+        """(#1053) Last night's review as the card gets it: each row with
+        the name the user gave, looked up now (a device found after the
+        boot still gets its name). The stored review is not changed."""
+        ctrl = getattr(self, "_surplus_controller", None)
+        return labelled_review(
+            getattr(self, "_demand_review", None),
+            lambda did: demand_label(self.config, ctrl, did))
+
     def _device_run_rows(self, now, peak_t) -> "List[Dict[str, Any]]":
         """(#576) Project each surplus device's run window for Today's Plan.
 
@@ -5534,10 +5543,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # outlive the plan: ``energy_plan`` empties out in daylight, which
             # is exactly when somebody reads what the night taught.
             # (#1053) …with each row's name, looked up as it is published.
-            _ctrl = getattr(self, "_surplus_controller", None)
-            result["energy_plan_review"] = labelled_review(
-                getattr(self, "_demand_review", None),
-                lambda did: demand_label(self.config, _ctrl, did))
+            result["energy_plan_review"] = self._published_review()
 
             # Hourly activity tracker for schedule card (#63)
             now_time = dt_util.now()
@@ -9390,8 +9396,10 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         continue
                     asks.append({
                         "kind": "load",
+                        # (#1053) None = no name; the card shows the kind
+                        # in the user's language, never the device id.
                         "label": str(getattr(_dev, "name", "") or "").strip()
-                        or str(getattr(_dev, "device_id", "?")),
+                        or None,
                         "kwh": round(_rated * _min_s / 3600.0 / 1000.0, 2),
                         "power_w": _rated,
                     })
@@ -9406,7 +9414,7 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                         continue
                     asks.append({
                         "kind": "ev",
-                        "label": str(_cfg.get("name") or "EV").strip(),
+                        "label": str(_cfg.get("name") or "").strip() or None,
                         "kwh": round(_tgt, 2),
                     })
                 except Exception:  # noqa: BLE001

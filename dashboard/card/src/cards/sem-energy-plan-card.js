@@ -20,6 +20,7 @@
 
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semDefineCard, semFormatTime, semGetCurrency } from '../base/sem-shared.js';
+import { demandName } from '../util/demand-name.js';
 
 const DEFAULT_ENTITY = 'sensor.sem_energy_plan';
 
@@ -33,6 +34,8 @@ const KINDS = {
     battery: { icon: 'mdi:home-battery', color: '#f06292', label: 'energy_plan_kind_battery' },
     comfort: { icon: 'mdi:thermometer',  color: '#4db6ac', label: 'energy_plan_kind_comfort' },
 };
+const KIND_LABELS = Object.fromEntries(
+    Object.entries(KINDS).map(([kind, k]) => [kind, k.label]));
 
 // Deep links into the planner docs (guarded by tests/test_618_docs_anchors.py
 // — the regex there matches these "docs:" literals, keep the shape).
@@ -174,12 +177,9 @@ class SEMEnergyPlanCard extends SEMLitBase {
     }
 
     // (#1053) A row's name: the one the device was given, else its kind in
-    // the user's language. Never the id — `ev_charger_1` and `battery` are
-    // SEM's keys, and they reached the card as names.
+    // the user's language. Never the id (util/demand-name.js).
     _demandName(label, id, kind) {
-        if (label) return label;
-        const k = KINDS[kind] || KINDS[String(id || '').split(':')[0]] || KINDS.load;
-        return this._t(k.label);
+        return demandName(label, id, kind, KIND_LABELS, (k) => this._t(k));
     }
 
     _format(key, values) {
@@ -345,7 +345,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                         ${asks.map((a, i) => {
                             const k = KINDS[a.kind] || KINDS.load;
                             const mine = blocksFor(a.kind, i);
-                            const tip = [a.label,
+                            const tip = [this._demandName(a.label, null, a.kind),
                                 mine.map(b => `${this._hm(b.start)}–${this._hm(b.end)}`).join('\n') || null,
                                 this._t('energy_plan_provisional_tip')].filter(Boolean).join('\n');
                             return html`
