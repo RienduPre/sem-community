@@ -21,10 +21,7 @@ const SECTIONS = [
         titleKey: 'system_info',
         subtitleFn: (c) => {
             const ver = c._val('diag_version') || '—';
-            const mode = c._val('diag_grid_mode') || '—';
-            const modeT = mode === 'combined' ? c._t('grid_combined')
-                : mode === 'split' ? c._t('grid_split') : mode;
-            return `v${ver} · ${modeT}`;
+            return `v${ver} · ${c._valLabel('diag_grid_mode') || '—'}`;
         },
     },
     {
@@ -37,7 +34,7 @@ const SECTIONS = [
             // 0 % on the page people open to ask what is wrong.
             const solar = c._valFmt('solar_power');
             const soc = c._valFmt('battery_soc');
-            return `${solar}W solar · SOC ${soc}%`;
+            return `${solar}W ${c._t('solar')} · SOC ${soc}%`;
         },
     },
     // mode_controls section removed in #282 audit: the night/smart night
@@ -158,9 +155,10 @@ class SEMSystemCard extends SEMLitBase {
 
     _copyDiagnostics() {
         const ver = this._val('diag_version') || '—';
-        const gridMode = this._val('diag_grid_mode') || '—';
+        // The copied text keeps SEM's own words: support reads them.
+        const gridMode = this._val('diag_grid_mode') || '—';  // #1053: raw for support
         const chargerCount = this._val('diag_charger_count') || '—';
-        const controlType = this._val('diag_charger_control') || '—';
+        const controlType = this._val('diag_charger_control') || '—';  // #1053: raw for support
         const capacity = this._valNum('diag_battery_capacity');
         const capStr = capacity > 0 ? capacity.toFixed(1) : '—';
         const unavailable = this._val('diag_sensors_unavailable') || '0';
@@ -296,7 +294,7 @@ class SEMSystemCard extends SEMLitBase {
         const cap = this._valNum('diag_battery_capacity');
         const interval = this._valNum('diag_update_interval');
         const chargerCount = this._val('diag_charger_count') || '—';
-        const controlType = this._val('diag_charger_control') || '';
+        const controlType = this._valLabel('diag_charger_control');
         const chargersVal = controlType ? `${chargerCount} (${controlType})` : chargerCount;
 
         return html`
@@ -306,7 +304,7 @@ class SEMSystemCard extends SEMLitBase {
             </div>
             <div class="info-row">
                 <span class="info-row-label">${this._t('grid_mode')}</span>
-                <span class="info-row-value">${(() => { const m = this._val('diag_grid_mode') || '—'; return m === 'combined' ? this._t('grid_combined') : m === 'split' ? this._t('grid_split') : m; })()}</span>
+                <span class="info-row-value">${this._valLabel('diag_grid_mode') || '—'}</span>
             </div>
             <div class="info-row">
                 <span class="info-row-label">${this._t('battery_capacity')}</span>

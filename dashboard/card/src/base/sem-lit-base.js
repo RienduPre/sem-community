@@ -11,6 +11,7 @@
 
 import { LitElement, html, css, svg, nothing } from 'lit';
 import { semTheme } from './sem-shared.js';
+import { stateLabel } from '../util/state-label.js';
 
 export { html, css, svg, nothing };
 
@@ -133,6 +134,17 @@ export class SEMLitBase extends LitElement {
         return (typeof semLocalize === 'function')
             ? semLocalize(key, this._hass?.language)
             : key;
+    }
+
+    // (#1053) A sensor whose state is a word SEM chose for its code
+    // (`manual`, `negated`, `force_on`). Read it here, never with _val():
+    // util/state-label.js maps the word to a label in the user's language.
+    // Reads the state itself: some cards' _val() returns a number.
+    _valLabel(suffix) {
+        const e = this._hass?.states?.[`${this._prefix || 'sensor.sem_'}${suffix}`];
+        const raw = (e && e.state !== 'unavailable' && e.state !== 'unknown')
+            ? e.state : '';
+        return stateLabel(suffix, raw, (k) => this._t(k));
     }
 
     // Map a raw forecast source id (sensor.sem_forecast_source) to its

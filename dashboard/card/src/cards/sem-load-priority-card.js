@@ -28,6 +28,7 @@ import {
     readFormValues,
     findDeviceForConfig,
 } from './load-config-modal.js';
+import { stateLabel } from '../util/state-label.js';
 
 /* Drag-and-drop is Lit-native (pointer events) — see _dragStart/_dragMove/
    _dragEnd. SortableJS was removed (#576): an imperative DOM library and
@@ -463,7 +464,7 @@ class SEMLoadPriorityCard extends SEMLitBase {
                 <div class="card-content">
                     <div class="status-bar">
                         <div class="peak-dot" style="background:${peakColor};box-shadow:0 0 8px ${peakColor}"></div>
-                        <span id="lm-status" class="status-text">${this._t(this.loadManagementStatus || 'normal').toUpperCase()}</span>
+                        <span id="lm-status" class="status-text">${stateLabel('load_management_status', this.loadManagementStatus || 'normal', (k) => this._t(k)).toUpperCase()}</span>
                         <div class="spacer"></div>
                         <span class="dim">${this._t('peak_15min_avg')}</span>
                         <span id="peak-current" class="mono">${this.currentPeak.toFixed(2)} kW</span>

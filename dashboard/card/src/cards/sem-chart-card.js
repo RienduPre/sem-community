@@ -136,7 +136,7 @@ const PRESETS = {
     // ``solar_power``; the LitElement migration lost it by pointing the card at
     // ``preset: power`` (a plain solar/home/grid chart with no forecast series).
     forecast: {
-        title: 'forecast_vs_actual', y_label: 'W', stacked: false,
+        title: 'Forecast vs Actual', y_label: 'W', stacked: false,
         hourly: [
             { suffix: 'forecast_power_now_w', name: 'forecast', color: C.solar,      type: 'area' },
             { suffix: 'solar_power',          name: 'actual',   color: C.batteryOut, type: 'line' },

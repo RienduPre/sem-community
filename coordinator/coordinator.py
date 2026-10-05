@@ -73,6 +73,7 @@ from .energy_calculator import EnergyCalculator
 from .flow_calculator import FlowCalculator
 from .charging_control import ChargingStateMachine, ChargingContext
 from .plan_verdict import verdict_from_night_plan
+from .demand_labels import demand_label, ev_not_scheduled, labelled_review
 from .per_charger_context import PerChargerContext, PerChargerState
 from .storage import SEMStorage
 from .notifications import NotificationManager
@@ -5532,8 +5533,11 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
             # (#755 pillar 4) Last night's verdict, on its OWN key. It has to
             # outlive the plan: ``energy_plan`` empties out in daylight, which
             # is exactly when somebody reads what the night taught.
-            result["energy_plan_review"] = getattr(
-                self, "_demand_review", None)
+            # (#1053) …with each row's name, looked up as it is published.
+            _ctrl = getattr(self, "_surplus_controller", None)
+            result["energy_plan_review"] = labelled_review(
+                getattr(self, "_demand_review", None),
+                lambda did: demand_label(self.config, _ctrl, did))
 
             # Hourly activity tracker for schedule card (#63)
             now_time = dt_util.now()
@@ -10121,12 +10125,9 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                     "why": why,
                     "why_codes": why_codes,
                     "not_scheduled": (
-                        [{"id": f"ev:{c}", "why": "mode"}
-                         for c in mode_opted_out]
-                        + [{"id": f"ev:{c}", "why": "disconnected"}
-                           for c in disconnected]
-                        + [{"id": f"ev:{c}", "why": "car_full"}
-                           for c in car_full]
+                        ev_not_scheduled(
+                            self.config, mode_opted_out, disconnected,
+                            car_full)
                         + left_out_loads),
                     "summary": [f"no overnight demands tonight ({why})"],
                     # (#638 G3c) Same keys as a full plan, empty — the card
@@ -10503,11 +10504,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # MACHINE why — the card translates per user language.
                 # Prose in ``summary`` is for logs, not for rendering.
                 "not_scheduled": (
-                    [{"id": f"ev:{c}", "why": "mode"} for c in mode_opted_out]
-                    + [{"id": f"ev:{c}", "why": "disconnected"}
-                       for c in disconnected]
-                    + [{"id": f"ev:{c}", "why": "car_full"}
-                       for c in car_full]
+                    ev_not_scheduled(
+                        self.config, mode_opted_out, disconnected, car_full)
                     + left_out_loads),
                 # None on a whole fleet. A string here means the battery
                 # figures above cover a SUBSET — the plan is still the best

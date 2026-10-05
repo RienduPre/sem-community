@@ -61,15 +61,16 @@ const SECTIONS = [
             // configured" — the contradiction RienduPre reported.
             if (!c._bin('heat_pump_registered')) return '';
             const state = c._val('heat_pump_sg_ready_state');
-            const mode = c._val('heat_pump_mode');
             if (!state) return '';
-            return `${mode || '—'} · ${state}`;
+            // (#1053) the mode in the user's language, and the number
+            // says what it counts: "normal · 2" read as two of something.
+            return `${c._valLabel('heat_pump_mode') || '—'} · SG-Ready ${state}`;
         },
     },
     {
         id: 'tariff', icon: 'mdi:cash-multiple', color: '#96CAEE', titleKey: 'tariff_pricing',
         subtitleFn: (c) => {
-            const provider = c._val('tariff_provider') || '—';
+            const provider = c._valLabel('tariff_provider') || '—';
             const level = c._val('tariff_price_level') || '';
             return level ? `${provider} · ${c._t(priceLevelKey(level))}` : provider;
         },
@@ -284,7 +285,7 @@ class SEMControlCard extends SEMLitBase {
         // #461: grid-sign read-out only. The fix / re-learn buttons moved
         // to the Configuration tab's Advanced section (the settings home);
         // this card stays live-ops/monitoring.
-        const gridSign = this._val('diag_grid_sign') || '—';
+        const gridSign = this._valLabel('diag_grid_sign') || '—';
 
         return html`
             <div class="readonly-row">
@@ -315,14 +316,14 @@ class SEMControlCard extends SEMLitBase {
             </div>`;
         }
         const sgStateRaw = this._val('heat_pump_sg_ready_state');
-        const mode = this._val('heat_pump_mode') || '—';
+        const mode = this._valLabel('heat_pump_mode') || '—';
         const boosted = this._switchOn('heat_pump_solar_boost');
         const accent = boosted ? '#ff9800' : '#4db6ac';
         return html`
             <div class="readonly-row">
                 <ha-icon icon="mdi:heat-pump-outline" style="--mdc-icon-size:18px;color:${accent}"></ha-icon>
                 <span class="ctrl-label" style="flex:1">${this._t('heat_pump_mode')}</span>
-                <span class="readonly-value">${this._t(mode.toLowerCase()) || mode}</span>
+                <span class="readonly-value">${mode}</span>
             </div>
             <div class="readonly-row">
                 <ha-icon icon="mdi:transmission-tower" style="--mdc-icon-size:18px;color:${accent}"></ha-icon>
@@ -378,7 +379,7 @@ class SEMControlCard extends SEMLitBase {
                 <span class="peak-of-limit">${this._t('of_limit')}</span>
             </div>
             <div class="peak-detail">
-                <span class="peak-status">${(() => { const s = this._val('load_management_status'); return s ? this._t(s) : '—'; })()}</span>
+                <span class="peak-status">${this._valLabel('load_management_status') || '—'}</span>
                 <span class="peak-sep">·</span>
                 <span class="peak-rec">${(() => { const r = this._val('load_management_recommendation'); return r ? this._t(r) : ''; })()}</span>
             </div>

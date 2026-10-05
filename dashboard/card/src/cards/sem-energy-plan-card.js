@@ -173,6 +173,15 @@ class SEMEnergyPlanCard extends SEMLitBase {
         return semFormatTime(iso, this._hass?.config?.time_zone || undefined);
     }
 
+    // (#1053) A row's name: the one the device was given, else its kind in
+    // the user's language. Never the id — `ev_charger_1` and `battery` are
+    // SEM's keys, and they reached the card as names.
+    _demandName(label, id, kind) {
+        if (label) return label;
+        const k = KINDS[kind] || KINDS[String(id || '').split(':')[0]] || KINDS.load;
+        return this._t(k.label);
+    }
+
     _format(key, values) {
         let template = this._t(key);
         if (!template || template === key) return null;
@@ -343,7 +352,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                                 <div class="lbl" title="${tip}">
                                     <div class="lname">
                                         <ha-icon icon="${k.icon}" style="--mdc-icon-size:13px;color:${k.color}"></ha-icon>
-                                        <span class="name">${a.label}</span>
+                                        <span class="name">${this._demandName(a.label, null, a.kind)}</span>
                                     </div>
                                 </div>
                                 ${hasStrip ? html`
@@ -415,7 +424,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                     <div class="rev-row">
                         <ha-icon icon="${r.k.icon}"
                                  style="--mdc-icon-size:12px;color:${r.k.color}"></ha-icon>
-                        <span class="rev-name">${(r.d.demand_id || '').split(':').pop()}</span>
+                        <span class="rev-name">${this._demandName(r.d.label, r.d.demand_id, r.d.kind)}</span>
                         <span class="rev-txt">${r.text}</span>
                     </div>
                 `)}
@@ -493,7 +502,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                                 <div class="notsched-row">
                                     <ha-icon icon="mdi:sleep"
                                              style="--mdc-icon-size:12px;color:var(--secondary-text-color,#8a93a5)"></ha-icon>
-                                    <span class="nsname">${r.label || (r.id || '').split(':').pop()}</span>
+                                    <span class="nsname">${this._demandName(r.label, r.id)}</span>
                                     <span class="nswhy">${this._t('energy_plan_why_' + r.why)}</span>
                                 </div>
                             `)}
@@ -804,7 +813,7 @@ class SEMEnergyPlanCard extends SEMLitBase {
                                 <div class="notsched-row">
                                     <ha-icon icon="mdi:sleep"
                                              style="--mdc-icon-size:12px;color:var(--secondary-text-color,#8a93a5)"></ha-icon>
-                                    <span class="nsname">${r.label || (r.id || '').split(':').pop()}</span>
+                                    <span class="nsname">${this._demandName(r.label, r.id)}</span>
                                     <span class="nswhy">${this._t('energy_plan_why_' + r.why)}</span>
                                 </div>
                             `)}
