@@ -14554,11 +14554,13 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
         # same reader the EV sizing uses. With load management off this
         # block used to be skipped and the 5.0 kW dataclass default went out
         # as the user's limit; margin and percentage are derived from it.
+        # With no ceiling the import is 0 % of nothing: the saved number is
+        # not in force, so it must not colour a card orange.
         current_import_kw = float(power.grid_import_power or 0.0) / 1000
         lm_data.target_peak_limit = self._target_peak_limit_kw()
         lm_data.peak_limit_unlimited = self._peak_limit_unlimited()
         lm_data.peak_margin = max(0, lm_data.target_peak_limit - current_import_kw)
-        if lm_data.target_peak_limit > 0:
+        if lm_data.target_peak_limit > 0 and not lm_data.peak_limit_unlimited:
             lm_data.current_vs_peak_percentage = min(100, (current_import_kw / lm_data.target_peak_limit) * 100)
 
         if self._load_manager:

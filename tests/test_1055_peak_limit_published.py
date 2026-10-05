@@ -122,9 +122,32 @@ class TestPublishedWithoutLoadManager:
         coord = _coord({"target_peak_limit": 6.0})
         p = PowerReadings()
         p.grid_import_power = None
-        lm_data = coord._build_load_management_data(p)
-        assert lm_data.target_peak_limit == 6.0
-        assert lm_data.peak_margin == 6.0
+        assert coord._build_load_management_data(p).target_peak_limit == 6.0
+
+    @pytest.mark.parametrize("bad", [None, "abc"])
+    def test_a_saved_value_that_is_not_a_number_keeps_a_limit(self, bad):
+        """The publish now runs every cycle on every install, so a bad
+        saved value must not stop the cycle — and must not read as "no
+        limit" either."""
+        coord = _coord({"target_peak_limit": bad})
+        lm_data = coord._build_load_management_data(_power())
+        assert lm_data.target_peak_limit == DEFAULT_TARGET_PEAK_LIMIT
+        assert coord._get_peak_limit_w() == DEFAULT_TARGET_PEAK_LIMIT * 1000
+
+    @pytest.mark.parametrize("with_lm", [False, True])
+    def test_no_limit_is_zero_percent_not_percent_of_the_saved_number(
+            self, with_lm):
+        """Review finding: with no ceiling the saved 5.0 is not in force, so
+        4.6 kW of import must not read 92 % (orange/red on three cards)."""
+        cfg = {"target_peak_limit": 5.0, "peak_limit_unlimited": True}
+        coord = _coord(cfg, lm=_lm(5.0, True) if with_lm else None)
+        lm_data = coord._build_load_management_data(_power(4600.0))
+        assert lm_data.current_vs_peak_percentage == 0.0
+        # ...while a real 5 kW limit still reads 92 %.
+        coord = _coord({"target_peak_limit": 5.0},
+                       lm=_lm(5.0) if with_lm else None)
+        assert coord._build_load_management_data(
+            _power(4600.0)).current_vs_peak_percentage == pytest.approx(92.0)
 
 
 @pytest.mark.unit

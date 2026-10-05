@@ -82,6 +82,14 @@ export function importKw(gridPowerW) {
 }
 
 /**
+ * (#1055) True when the install has no grid ceiling (#716), read from the
+ * `sensor.sem_target_peak_limit` state object's flag — never from the number.
+ */
+export function isUncapped(stateObj) {
+    return !!stateObj?.attributes?.peak_limit_unlimited;
+}
+
+/**
  * (#1055) The grid ceiling as a person reads it, from the
  * `sensor.sem_target_peak_limit` state object: the uncapped word when the
  * install has no ceiling (#716), else "x.x kW", else "—". The sensor keeps
@@ -89,7 +97,7 @@ export function importKw(gridPowerW) {
  * limit that is not in force.
  */
 export function peakLimitText(stateObj, uncappedWord) {
-    if (stateObj?.attributes?.peak_limit_unlimited) return uncappedWord;
+    if (isUncapped(stateObj)) return uncappedWord;
     const kw = parseFloat(stateObj?.state);
     return Number.isFinite(kw) ? `${kw.toFixed(1)} kW` : '—';
 }

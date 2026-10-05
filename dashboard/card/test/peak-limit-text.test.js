@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { peakLimitText } from '../src/util/peak-slot.js';
+import { isUncapped, peakLimitText } from '../src/util/peak-slot.js';
 
 const st = (state, unlimited) => ({ state, attributes: { peak_limit_unlimited: unlimited } });
 
@@ -26,6 +26,21 @@ test('no reading shows a dash, never a made-up 5 kW', () => {
     assert.equal(peakLimitText(undefined, 'Uncapped'), '—');
     assert.equal(peakLimitText(st('unavailable', false), 'Uncapped'), '—');
     assert.equal(peakLimitText(st('unknown', false), 'Uncapped'), '—');
+});
+
+test('the flag decides, never the number', () => {
+    assert.equal(isUncapped(st('80.0', true)), true);
+    assert.equal(isUncapped(st('80.0', false)), false);
+    assert.equal(isUncapped(st('0', undefined)), false);
+    assert.equal(isUncapped(undefined), false);
+});
+
+test('the Control card shows no percent or margin when uncapped', () => {
+    const src = readFileSync(new URL('../src/cards/sem-control-card.js', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('_renderPeakSection(T) {'));
+    const section = body.slice(0, body.indexOf('\n    _render', 10));
+    assert.match(section, /isUncapped\(/, 'peak section must ask the flag');
+    assert.match(section, /uncapped\s*\?\s*this\._t\('uncapped'\)/, 'margin tile must say uncapped');
 });
 
 test('the Control-tab header and the Home card use it', () => {

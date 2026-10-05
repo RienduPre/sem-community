@@ -522,8 +522,14 @@ class EVControlMixin:
                     "target_peak_limit", DEFAULT_TARGET_PEAK_LIMIT))
             except Exception:
                 pass
-        return float(self.config.get(
-            "target_peak_limit", DEFAULT_TARGET_PEAK_LIMIT))
+        try:
+            return float(self.config.get(
+                "target_peak_limit", DEFAULT_TARGET_PEAK_LIMIT))
+        except (TypeError, ValueError):
+            # A saved value that is not a number keeps the default limit —
+            # never "no limit" — and must not stop the update cycle that
+            # publishes it.
+            return float(DEFAULT_TARGET_PEAK_LIMIT)
 
     def _planning_peak_w(self) -> float:
         """The peak level PLANNING may size against — cap minus hysteresis.

@@ -698,6 +698,7 @@ async def async_get_config_entry_diagnostics(
             "consecutive_peak_kw": data.get("consecutive_peak_15min"),
             "monthly_peak_kw": data.get("monthly_consecutive_peak"),
             "target_limit_kw": data.get("target_peak_limit"),
+            "unlimited": data.get("peak_limit_unlimited"),
             "percentage": data.get("current_vs_peak_percentage"),
             "status": data.get("load_management_status"),
         },
