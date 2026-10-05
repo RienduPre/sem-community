@@ -132,6 +132,15 @@ class PowerReadings:
     # per-charger flow attribution that closes the #316 family.
     ev_power_per_charger: "Dict[str, float]" = field(default_factory=dict)
 
+    # (#1044) WHAT ``ev_power`` was read from this cycle — the per-charger
+    # sensors summed, or the one fleet sensor read instead (Energy
+    # Dashboard or the top-level sensor). ``home`` takes ``ev_power`` out,
+    # so these say which of SEM's chargers are already out of ``home``
+    # (``health_check.chargers_outside_home``). Both empty: no EV sensor
+    # was read, and every charger's draw is still inside ``home``.
+    ev_power_entities: "frozenset" = frozenset()
+    ev_power_fleet_entity: Optional[str] = None
+
     # Per-charger EV plug / charging state (#584). The boolean mirror of
     # ``ev_power_per_charger`` — populated by ``sensor_reader`` for
     # multi-charger setups from each charger's ``ev_connected_sensor`` /
@@ -221,8 +230,19 @@ class PowerReadings:
     #: that was fine. The reader knows the names; now they travel.
     dark_inputs: tuple = ()
     solar_power_unavailable: bool = False
+    #: (#1022) minutes every solar read came back dark today — the PV
+    #: health sensor's downtime figure. Adds up in the reader, resets at
+    #: midnight.
+    solar_downtime_min_today: float = 0.0
     grid_power_unavailable: bool = False
     battery_power_all_unavailable: bool = False
+    #: (#1047) The home figure SEM SHOWS this cycle, when it is not
+    #: ``home_consumption_power``: while a balance input above reads dark,
+    #: home is built from that input's 0.0 fallback, so the coordinator
+    #: shows the last home value instead (``_hold_shown_home``). ``None``
+    #: means "show ``home_consumption_power``". Never read by steering —
+    #: decide, budgets and energy totals keep ``home_consumption_power``.
+    home_shown_w: Optional[float] = None
     # (#910) True for a cycle in which a charger's power read was a blink
     # held at its last accepted value (status still charging).
     ev_power_held: bool = False
@@ -1004,6 +1024,10 @@ class SessionData:
     solar_share_pct: float = 0
     cost_chf: float = 0
     avg_power_w: float = 0
+    #: (#1024) where the total came from: charger_meter | lifetime_delta |
+    #: sem_estimate — and the meter state behind it (session_energy.step).
+    energy_source: str = "sem_estimate"
+    meter: dict = field(default_factory=dict)
 
 
 
@@ -1148,8 +1172,9 @@ class SEMData:
         # The cards are unaffected: they read the #699 power_snapshot,
         # which carries the last self-consistent SET, and the diagram
         # card holds for 60 s on top of that (#237/#444). Home is NOT in
-        # this list — it must never report unknown, and its own hold
-        # (#237/#444) already covers it.
+        # this list — it must never report unknown. Its #237/#444 hold
+        # covers a DIP only; a dark charging battery makes home JUMP, so
+        # the shown figure is held separately (``home_shown_w``, #1047).
         _solar_dark = getattr(self.power, "solar_power_unavailable", False)
         _grid_dark = getattr(self.power, "grid_power_unavailable", False)
         _batt_dark = getattr(self.power, "battery_power_all_unavailable", False)
@@ -1160,11 +1185,19 @@ class SEMData:
             "grid_active_power": None if _grid_dark else _w(-self.power.grid_power),  # positive=import, negative=export (K-Flow convention)
             "battery_power": None if _batt_dark else _w(self.power.battery_power),
             "ev_power": _w(self.power.ev_power),
-            "home_consumption_power": _w(self.power.home_consumption_power),
-            "grid_import_power": _w(self.power.grid_import_power),
-            "grid_export_power": _w(self.power.grid_export_power),
-            "battery_charge_power": _w(self.power.battery_charge_power),
-            "battery_discharge_power": _w(self.power.battery_discharge_power),
+            # (#1047) the shown figure: held while an input it is built
+            # from reads dark, so a dropout is not a jump in the house
+            "home_consumption_power": _w(
+                self.power.home_consumption_power
+                if self.power.home_shown_w is None else self.power.home_shown_w),
+            # (#1047) The split halves are their input, cut in two — they
+            # cannot be more certain than it (the grid_active_power rule).
+            # Published as numbers, they read 0 W beside a battery entity
+            # still holding 3.9 kW.
+            "grid_import_power": None if _grid_dark else _w(self.power.grid_import_power),
+            "grid_export_power": None if _grid_dark else _w(self.power.grid_export_power),
+            "battery_charge_power": None if _batt_dark else _w(self.power.battery_charge_power),
+            "battery_discharge_power": None if _batt_dark else _w(self.power.battery_discharge_power),
             "battery_soc": None if self.power.battery_soc_unavailable else self.power.battery_soc,
             "battery_temperature": self.power.battery_temperature,
             "inverter_temperature": self.power.inverter_temperature,

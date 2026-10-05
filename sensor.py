@@ -1319,7 +1319,7 @@ SENSOR_TYPES = [
     # (#820) charge pacing — state is the cap in W (unknown while idle);
     # attributes carry reason/action/full_at. Daily-moving, no recorder churn.
     # State is the ACTION token (idle/wrote/held/restored/observer, and
-    # #949's no_limit_entity/limit_unreadable) — never
+    # #949's no_limit_entity/limit_unreadable, #820's write_refused) — never
     # None once evaluated, so the sensor is never `unavailable` and its
     # reason stays readable. The cap rides the attributes. (26.08: as a W
     # value it went unavailable whenever the cap was None — which is most
@@ -1519,6 +1519,15 @@ SENSOR_TYPES = [
         key="pv_degradation_trend",
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
+    ),
+    # (#1022) One colour: does the plant do what the forecast said? The
+    # numbers behind it (7-day ratio, dark minutes, days since a full day,
+    # snow) are attributes. No verdict yet reads as unknown, not unavailable.
+    SensorEntityDescription(
+        key="pv_health",
+        device_class=SensorDeviceClass.ENUM,
+        options=["green", "yellow", "orange", "red"],
+        icon="mdi:solar-panel",
     ),
 
     # ============================================================================
@@ -2769,7 +2778,10 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 self._last_good_value = value
                 self._last_good_at = _now
             self._attr_native_value = value
-            if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP:
+            if self.entity_description.device_class in (
+                    SensorDeviceClass.TIMESTAMP, SensorDeviceClass.ENUM):
+                # (#1022) an enum with no verdict yet is "unknown", a state
+                # of its own — the sensor is there and says "not yet".
                 self._attr_available = True
             else:
                 self._attr_available = value is not None
@@ -3216,6 +3228,9 @@ class SEMSolarSensor(CoordinatorEntity, RestoreSensor):
                 "soc": cp.get("soc"),
                 "soc_stale_s": cp.get("soc_stale_s"),
             })
+        elif self.entity_description.key == "pv_health":
+            # (#1022) the numbers behind the colour
+            attrs.update(self.coordinator.data.get("pv_health_attrs") or {})
         elif self.entity_description.key == "battery_spendable_kwh":
             # (#778) Everything a user needs to argue with the number, on the
             # number itself. A budget nobody can check is one nobody trusts.

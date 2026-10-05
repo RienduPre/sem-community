@@ -213,6 +213,17 @@ views:
                 name: Autarky
                 color: '#8DC892'
 
+          # ── PV health (#1022): one line — does the plant do what the
+          # forecast said? A core tile card (zero prerequisites, #617): the
+          # state is the colour, tap opens the numbers (7-day ratio, dark
+          # minutes, snow) as attributes.
+          - type: tile
+            entity: sensor.sem_pv_health
+            name: PV health
+            icon: mdi:solar-panel
+            tap_action:
+              action: more-info
+
           # ── 24h Power Curves (sem-chart-card replaces apexcharts) ──
           - type: custom:sem-chart-card
             preset: power

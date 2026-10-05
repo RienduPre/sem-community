@@ -242,6 +242,7 @@
           "demand_charge_rate": "Teljesítménydíj",
           "update_interval": "Frissítési időköz (s)",
           "tariff_mode": "Tarifa mód",
+          "tariff_schedule_entity": "Csúcsidő ütemezés (Naptár mód)",
           "dynamic_tariff_entity": "Dinamikus ár entitás (üresen automatikusan felismerve)",
           "dynamic_forecast_entity": "Árelőrejelzés entitás (opcionális, üresen automatikus felismerés)",
           "dynamic_feedin_entity": "Betáplálási ár entitás (opcionális, dinamikus betáplálási árhoz)",
@@ -258,6 +259,7 @@
           "demand_charge_rate": "Havi csúcsteljesítmény-díj (pénznem/kW/hó). Állítsa 0-ra, ha a szerződése nem tartalmaz ilyet.",
           "update_interval": "Milyen gyakran olvassa a SEM az érzékelőket és szabályozza a hardvert (másodperc). Tartomány: 10–60 s.",
           "tariff_mode": "Válassza a „Statikus” lehetőséget fix árakhoz, a „Dinamikus” lehetőséget valós idejű árazáshoz, vagy a „Naptár” lehetőséget időszakfüggő menetrendekhez.",
+          "tariff_schedule_entity": "Egy Home Assistant Ütemezés segéd (schedule). Időblokkjai a csúcsidős órák (HT); minden más óra az éjszakai díjat használja.",
           "dynamic_tariff_entity": "Érzékelő, amely az aktuális villamosenergia-vételezési árat adja. Automatikusan felismerve a Tibber, Nordpool stb. forrásokból.",
           "dynamic_forecast_entity": "Opcionális érzékelő órás árelőrejelzésekkel, az intelligens ütemezéshez.",
           "dynamic_feedin_entity": "Opcionális érzékelő, amely az aktuális betáplálási / export árat adja a dinamikus betáplálási árhoz.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "A Naptár mód csúcsidő ütemezést igényel. Válasszon egy Ütemezés segédet vagy másik tarifamódot."
     }
   },
   "entity": {
@@ -1371,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Házmérő eltérés"
+      },
+      "pv_health": {
+        "name": "PV állapot",
+        "state": {
+          "green": "Jó",
+          "yellow": "Közepes",
+          "orange": "Gyenge",
+          "red": "Rossz"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1619,14 @@
           "4_hours": "4 óra",
           "8_hours": "8 óra",
           "12_hours": "12 óra"
+        }
+      },
+      "hints": {
+        "name": "Tippek",
+        "state": {
+          "off": "Ki",
+          "weekly": "Heti üzenet",
+          "all": "Minden tipp"
         }
       }
     },

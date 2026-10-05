@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant
 
 from .base import SetpointDevice, DeviceState
 from ..consts.devices import CONTACT_VALUE_SERVICES
+from ..utils.select_option import listed_option
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -377,6 +378,9 @@ class HeatPumpController(SetpointDevice):
             )
             return None
         svc_domain, service, key = spec
+        if service == "select_option":
+            # (#1039) the option the select lists, never its label
+            value = listed_option(self.hass, entity_id, value)
         if svc_domain in ("number", "input_number"):
             try:
                 value = float(value)
@@ -411,6 +415,11 @@ class HeatPumpController(SetpointDevice):
         on_value, off_value = self._contact_values.get(idx, (None, None))
         if on_value is None or off_value is None:
             return None
+        if CONTACT_VALUE_SERVICES[domain][1] == "select_option":
+            # (#1039) a select READS the option it lists, so compare with the
+            # option SEM writes — a configured label would never match
+            on_value = listed_option(self.hass, entity_id, on_value)
+            off_value = listed_option(self.hass, entity_id, off_value)
         if self._same_value(domain, raw, on_value):
             return True
         if self._same_value(domain, raw, off_value):

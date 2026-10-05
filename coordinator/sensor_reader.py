@@ -9,7 +9,7 @@ from collections import deque
 from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass, replace
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from . import repair_issues as _ri
@@ -67,6 +67,10 @@ _SOC_NAME_KEYWORDS = ("soc", "state_of_charge", "batterieladung",
 # probes entirely). Curated per-brand keyword list, same maintenance
 # story as the battery-cycles autodetect (#593): a new brand's entity
 # name goes here, tests in test_743_export_limit_autodetect.py.
+# (#996) How often a missing export-limit entity is looked for again. The
+# scan reads one device's registry entries (an indexed lookup).
+EXPORT_LIMIT_RESCAN_S = 300.0
+
 EXPORT_LIMIT_KEYWORDS = (
     "export_limit",            # generic / GoodWe (grid_export_limit)
     "export_limitation",       # SolarEdge modbus packs
@@ -543,6 +547,11 @@ class SensorReader:
         # (``repair_issues.UNAVAILABLE_REPAIR_THRESHOLD_S``). Cleared
         # on recovery.
         self._sensor_unavailable_since: dict[str, float] = {}
+        # (#1022) Solar downtime today: seconds every solar read was dark,
+        # accrued cycle to cycle, reset at midnight. Published as minutes.
+        self._last_cycle_mono: Optional[float] = None
+        self._last_solar_dark: bool = False
+        self._solar_dark_s_today: float = 0.0
         # Per-entity flag — was the Repair already raised this outage?
         # Avoids re-raising every cycle past the threshold.
         self._sensor_repair_raised: set[str] = set()
@@ -841,6 +850,8 @@ class SensorReader:
         self._battery_power_missing = False   # (#758) per-cycle
         self._input_reads = {}                # (#818) per-cycle
         self._input_dark = {}                 # (#818) per-cycle
+        # (#1022) the previous cycle's dark solar verdict has just ended
+        self._accrue_solar_downtime(time.monotonic())
         if self._energy_dashboard_config:
             readings = self._read_from_energy_dashboard()
         else:
@@ -858,6 +869,11 @@ class SensorReader:
         readings.dark_inputs = tuple(sorted(
             n for n, c in self._input_dark.items() if c))
         readings.solar_power_unavailable = self._all_dark("solar")
+        # (#1022) this cycle's verdict feeds the next accrual; publish the
+        # minutes so far today.
+        self._last_solar_dark = bool(readings.solar_power_unavailable)
+        readings.solar_downtime_min_today = round(
+            getattr(self, "_solar_dark_s_today", 0.0) / 60.0, 1)
         # (#925 audit) BOTH shapes of grid meter — a combined sensor tags
         # "grid", a split pair tags "grid_import"/"grid_export" and never
         # "grid", so asking about one category answered False forever for
@@ -2082,6 +2098,22 @@ class SensorReader:
 
         return self._battery_sign_inverted[bid]
 
+    def _accrue_solar_downtime(self, now_mono: float) -> None:
+        """(#1022) Add the time since the last cycle to today's solar
+        downtime when that cycle's solar reads were ALL dark. The day is
+        the coordinator's clock: it calls ``reset_solar_downtime`` when its
+        date rolls. Tolerates a reader built without ``__init__``."""
+        last = getattr(self, "_last_cycle_mono", None)
+        self._last_cycle_mono = now_mono
+        self._solar_dark_s_today = getattr(self, "_solar_dark_s_today", 0.0)
+        if last is not None and getattr(self, "_last_solar_dark", False):
+            self._solar_dark_s_today = (
+                getattr(self, "_solar_dark_s_today", 0.0) + max(0.0, now_mono - last))
+
+    def reset_solar_downtime(self) -> None:
+        """(#1022) A new day starts from zero."""
+        self._solar_dark_s_today = 0.0
+
     def _all_dark_any(self, *names: str) -> bool:
         """(#925 audit) ``_all_dark`` across SEVERAL contributing categories.
 
@@ -2575,11 +2607,13 @@ class SensorReader:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
                 self._read_sensor(ed.ev_power, "ev"),
                 charging=self._fleet_charging_status(), readings=readings))
+            readings.ev_power_fleet_entity = ed.ev_power   # (#1044)
         elif self.config.ev_power_sensor:
             readings.ev_power = FleetEvPower(self._smooth_ev_power(
                 self._read_sensor(self.config.ev_power_sensor, "ev"),
                 charging=self._fleet_charging_status(), readings=readings,
             ))
+            readings.ev_power_fleet_entity = self.config.ev_power_sensor
 
         # EV connection status — per-charger OR'd for global (#193), plus
         # per-charger maps so ``build_charger_view`` can gate each charger's
@@ -4098,6 +4132,7 @@ class SensorReader:
                 self._read_sensor(self.config.ev_power_sensor, "ev"),
                 charging=self._fleet_charging_status(), readings=readings,
             ))
+            readings.ev_power_fleet_entity = self.config.ev_power_sensor  # (#1044)
 
         # EV connection status — per-charger OR'd for global (#193), plus
         # per-charger maps so build_charger_view gates each charger on its
@@ -4138,10 +4173,12 @@ class SensorReader:
         if not any(c.get("ev_charging_power_sensor") for c in ev_chargers):
             return False
         total_ev = 0.0
+        summed = set()
         for charger_cfg in ev_chargers:
             cid = charger_cfg.get("id")
             cps = charger_cfg.get("ev_charging_power_sensor")
             if cps:
+                summed.add(cps)
                 # Smooth per charger so the per-charger dict stays
                 # consistent with the fleet sum (both blip-filtered).
                 chrg = charger_cfg.get("ev_charging_sensor")
@@ -4159,6 +4196,10 @@ class SensorReader:
                     readings.ev_power_per_charger[cid] = cw
         # total_ev is already the sum of smoothed per-charger values.
         readings.ev_power = FleetEvPower(total_ev)
+        # (#1044) The sensors in that sum — a charger whose own sensor is
+        # not among them (none nested, so it fell back to a global one) is
+        # still inside ``home``.
+        readings.ev_power_entities = frozenset(summed)
         return True
 
     def _fleet_charging_status(self) -> Optional[bool]:
@@ -5175,7 +5216,55 @@ class SensorReader:
             except Exception as e:  # noqa: BLE001 — best-effort autodetect
                 _LOGGER.debug("Export-limit autodetect failed: %s", e)
         self._export_limit_cache = result
+        # (#996) a miss from a scan before HA finished starting is not a "no"
+        self._export_limit_read_running = (
+            getattr(self.hass, "state", None) is CoreState.running)
         return result
+
+    def invalidate_export_limit_cache(self) -> None:
+        """(#996) Scan again on the next ask — an inverter entity appeared."""
+        self._export_limit_cache = _CYCLES_UNSET
+
+    def export_limit_answer(self, solar_anchor_entity: Optional[str]) -> Optional[bool]:
+        """(#996) Did the registry scan find an export-limit entity? True /
+        False after it ran; None when there was no solar anchor to scan
+        from — "could not ask" is UNKNOWN to the install-modules oracle,
+        never ABSENT (#925)."""
+        import time as _time
+        running = getattr(self.hass, "state", None) is CoreState.running
+        cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+        now = _time.monotonic()
+        if cached is None and running and (
+                not getattr(self, "_export_limit_read_running", False)
+                or now - getattr(self, "_export_limit_scanned_at", 0.0)
+                >= EXPORT_LIMIT_RESCAN_S):
+            # A miss is looked at again: once HA is running, then at most
+            # every EXPORT_LIMIT_RESCAN_S — an entity may be renamed to an
+            # export-limit word, or enabled, on the inverter's device.
+            self.invalidate_export_limit_cache()
+            self._export_limit_scanned_at = now
+        self.detect_export_limit_entity(solar_anchor_entity)
+        cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+        if isinstance(cached, str):
+            # The capability is "the entity exists and is enabled on the
+            # inverter" — a registry fact. A found entity that has since
+            # been removed is looked for again; a disabled one counts as
+            # missing (SEM cannot write it).
+            try:
+                entry = er.async_get(self.hass).async_get(cached)
+            except Exception:  # noqa: BLE001 — no registry, no answer
+                return None
+            if entry is None:
+                self.invalidate_export_limit_cache()
+                self.detect_export_limit_entity(solar_anchor_entity)
+                cached = getattr(self, "_export_limit_cache", _CYCLES_UNSET)
+            elif entry.disabled_by is not None:
+                return False if running else None
+        if cached is _CYCLES_UNSET:
+            return None
+        if cached is None and not getattr(self, "_export_limit_read_running", False):
+            return None
+        return cached is not None
 
     def _auto_detect_battery_soc(self, battery_power_entity: str) -> Optional[str]:
         """Auto-detect battery SOC sensor from the same device as the power sensor.

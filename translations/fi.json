@@ -242,6 +242,7 @@
           "demand_charge_rate": "Tehomaksun hinta",
           "update_interval": "Päivitysväli (s)",
           "tariff_mode": "Tariffitila",
+          "tariff_schedule_entity": "Huippuajan aikataulu (Kalenteri-tila)",
           "dynamic_tariff_entity": "Dynaamisen hinnan entiteetti (tunnistetaan automaattisesti jos tyhjä)",
           "dynamic_forecast_entity": "Hintaennusteen entiteetti (valinnainen, tunnistetaan automaattisesti)",
           "dynamic_feedin_entity": "Syöttöhinnan entiteetti (valinnainen, dynaamiselle vientihinnalle)",
@@ -258,6 +259,7 @@
           "demand_charge_rate": "Kuukausittainen huipputehomaksu (valuutta/kW/kk). Aseta arvoon 0, jos sopimuksessasi ei ole sellaista.",
           "update_interval": "Kuinka usein SEM lukee anturit ja säätää laitteistoa (sekunteina). Alue 10–60 s.",
           "tariff_mode": "Valitse 'Staattinen' kiinteille hinnoille, 'Dynaaminen' reaaliaikaiselle hinnoittelulle tai 'Kalenteri' aikaperusteisille tariffiaikatauluille.",
+          "tariff_schedule_entity": "Home Assistantin Aikataulu-apuri (schedule). Sen aikalohkot ovat huippuajan tunnit (HT); muut tunnit käyttävät yöhintaa.",
           "dynamic_tariff_entity": "Anturi, joka antaa sähkön nykyisen ostohinnan. Tunnistetaan automaattisesti mm. Tibberistä ja Nord Poolista.",
           "dynamic_forecast_entity": "Valinnainen anturi, jossa on tuntikohtaiset hintaennusteet älykästä ajoitusta varten.",
           "dynamic_feedin_entity": "Valinnainen anturi, joka antaa nykyisen syöttö- tai vientihinnan dynaamista vientihintaa varten.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "Kalenteri-tila tarvitsee huippuajan aikataulun. Valitse Aikataulu-apuri tai toinen tariffitila."
     }
   },
   "entity": {
@@ -1371,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Talomittarin ero"
+      },
+      "pv_health": {
+        "name": "PV:n kunto",
+        "state": {
+          "green": "Hyvä",
+          "yellow": "Kohtalainen",
+          "orange": "Heikko",
+          "red": "Huono"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1619,14 @@
           "4_hours": "4 tuntia",
           "8_hours": "8 tuntia",
           "12_hours": "12 tuntia"
+        }
+      },
+      "hints": {
+        "name": "Vihjeet",
+        "state": {
+          "off": "Pois",
+          "weekly": "Viikkoviesti",
+          "all": "Kaikki vihjeet"
         }
       }
     },

@@ -1231,6 +1231,96 @@ hardware_detection.py           — Auto-discover inverter/battery/charger
 
 ---
 
+## 2.2 — what the house can use, and one crawler
+
+### Capabilities (#996)
+
+`coordinator/install_modules.py` — the `Module` enum that already carried the
+four hardware modules gained five **capabilities**: `DYNAMIC_TARIFF`,
+`EXPORT_LIMIT`, `SOLAR_FORECAST`, `PV_SIZE`, `INVESTMENT`. Same three states
+(present / absent / unknown), same consumers: `kept_descriptions` skips the
+entities, `absent_entity_ids` lets the dashboard generator prune their
+references, the config card renders nothing for a missing entity.
+
+- Tariff, plant size and investment are read from SEM's own options and are
+  never unknown.
+- Export limit and forecast are **entity-registry facts**: an enabled entity
+  of a forecast integration exists, or the export-limit entity exists on the
+  inverter's device. A live reading that is unavailable is not a miss, so an
+  outage can never remove a control.
+- A miss is stored only after six reads over ten minutes while Home
+  Assistant is running. A read before that falls back to the stored answer,
+  or unknown. The coordinator compares the live answer with what it built
+  every cycle and reloads once when a capability appears. A turn to absent
+  takes effect at the next setup.
+
+### Charger roles — one crawler (#1032)
+
+`hardware_detection.py` is the one crawler. The roles live in it
+(`read_charger_roles`, `_roles_offer`, `_roles_pass`), the words in
+`consts/role_lexicon.py`, services with their fields through `_services_of`.
+No brand code: a lint test refuses a new `_wire_<brand>` or
+`_discover_<brand>`, and the role reader may name no integration.
+
+| Role | What it reads |
+|---|---|
+| companion device | a device with no charger role, next to a charger of the same integration, joins it |
+| start/stop pair | a start button plus a stop button or switch |
+| the car's own charge control | a car's charging-amps number and its charge switch |
+| a charger that only reports | wired to the one car with that control; with two cars SEM asks |
+| a select read by its options | a stop and a charge option → charge mode; 1 / 3 / auto → phases |
+| services by their fields | per-phase current fields → a phase-capable current control |
+
+What the roles find goes where the near-miss offers already go: the setup
+wizard and the add-charger step pre-fill from them, from one reader. A field
+the roles cannot fill stays empty. Nothing is saved without the user; a
+charger that is configured, or already driven through its services, gets no
+offer. Brands are test fixtures: `tests/integrations_rig/` replays real
+integration output (core test data at the pinned Home Assistant, HACS
+integrations vendored at a pinned commit). `docs/hardware_proof.md` is what
+the crawler found for every unconfirmed matrix row.
+
+### Session energy from the charger's meter (#1024)
+
+`ev_control._update_session_tracking` is the one writer of a session record.
+The total is the charger's session counter, else the rise of its lifetime
+counter, else this charger's own measured power. The power flows give only
+the split into solar, grid and battery, scaled to that total, and the cost
+follows the split. `session_history.py` serves the list (websocket
+`solar_energy_management/session_history`) and the CSV (service
+`export_session_history`). The record carries `energy_source`.
+
+### PV health (#1022)
+
+`analytics/pv_health.py` is pure. The coordinator feeds it the forecast
+ledger's settled days, the sensor reader's dark seconds for the solar input,
+and the outdoor temperature when a source exists (`_outdoor_temperature_or_none`;
+the 15 °C fallback never claims snow). One colour on `sensor.sem_pv_health`.
+
+### Hints (#1019)
+
+`coordinator/hints.py` is a pure engine. Timed hints key off SEM's own night
+flag (`utils/time_manager.py`, `is_night_mode`), never a wall-clock hour, so
+the compressed-sun simulation drives them. One message per event key, the
+sent keys persisted in storage. Delivery: `notifications.notify_hint` — the
+`sem_hints` phone channel and the `solar_energy_management_notification`
+event with `category: hint`.
+
+### Charge pacing writer (#820)
+
+`coordinator/charge_pacing.py`, `ChargePacingWriter.apply`: the cap goes
+through the one clamp (`power_control.clamp_to_entity_range`, step grid from
+zero, the entity's min as the floor), a deadband (one step, 100 W or 5 %), and
+a 5-minute interval. A write is **taken** when the register changed since the
+write and sits within a step or 10 % of it; **refused** when it has not moved
+for three cycles and 90 s. The inverter's own number is accepted and not
+rewritten. The record (cap, the value to restore, the accepted value) is
+persisted; adoption after a restart proves the register before trusting it,
+and the unload release reads the record, so a lifetime spent in observer
+mode still hands the register back.
+
+---
+
 ## Translation / i18n Architecture
 
 SEM uses a **hybrid two-layer translation system** because Home Assistant has two different language settings that affect different parts of the UI.

@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 from ..consts.devices import names_a_reboot
 from ..utils.log_gate import log_on_change
+from ..utils.select_option import listed_option
+from ..utils.switch_sense import reads_running, switch_service
 
 # #392: KEBA's failsafe watchdog (and similar device-side timers on other
 # chargers) requires periodic *writes* to refresh — reads alone don't
@@ -928,6 +930,14 @@ class ControllableDevice(ABC):
         withheld. Returns True when the command actually went to hardware.
         """
         payload = dict(data or {})
+        # (#1039) A select takes the option it LISTS, never the label HA
+        # shows for it (``max_charge``, not "Max charge"). Mapped here, before
+        # the observer record, so what SEM WOULD send is what it would send.
+        if (service == "select_option" and domain in ("select", "input_select")
+                and "option" in payload):
+            payload["option"] = listed_option(
+                getattr(self, "hass", None), payload.get("entity_id"),
+                payload["option"])
         # getattr, not attribute access: devices built without __init__
         # (test fixtures, legacy construction paths) must still SEND. The
         # documented default is False — "a device nobody told is a device
@@ -2399,6 +2409,32 @@ class CurrentControlDevice(ControllableDevice):
         return (self.session_start_mechanism()
                 == SESSION_START_STOP_ENTITY)
 
+    def _start_switch_reads_running(self) -> bool:
+        """(#976) The start/stop switch already shows a running session.
+
+        A start then has nothing left to do, and it is not always harmless
+        to send: a charge-control switch can be on exactly while the box's
+        transaction runs, with a turn_on that asks for a NEW transaction —
+        which the box refuses ("Rejected"), and its integration reports each
+        refusal as a notification. The reconciler's #536 ENABLE fires only on
+        ``off``; this is the other half of that rule.
+
+        Only a definite running state from a switch that reports its device
+        counts: ``on``, or ``off`` for a switch named for the pause (#1042).
+        Anything unreadable still sends, as before, and so does a switch
+        with ``assumed_state`` (an optimistic template / REST / command-line
+        switch): its state may only echo SEM's last command."""
+        ent = str(self.start_stop_entity or "")
+        if not ent.startswith(("switch.", "input_boolean.")) or self.hass is None:
+            return False
+        try:
+            st = self.hass.states.get(ent)
+            if st is None or reads_running(self.hass, ent, st.state) is not True:
+                return False
+            return not (getattr(st, "attributes", None) or {}).get("assumed_state")
+        except Exception:  # noqa: BLE001 — a read never costs a start
+            return False
+
     @property
     def contactor_surface(self) -> bool:
         """(#940) True when SEM's own start or stop flips a relay.
@@ -3366,8 +3402,15 @@ class CurrentControlDevice(ControllableDevice):
                 await self.send("select", "select_option", {"entity_id": self.charge_mode_entity, "option": self.charge_mode_start})
             elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
-                if domain in ("switch", "input_boolean"):
-                    await self.send(domain, "turn_on", {"entity_id": self.start_stop_entity})
+                if self._start_switch_reads_running():
+                    _LOGGER.debug(
+                        "%s: %s already shows a running session, no "
+                        "start sent (#976)", self.name, self.start_stop_entity)
+                elif domain in ("switch", "input_boolean"):
+                    # (#1042) turn_off for a switch named for the pause
+                    await self.send(domain, switch_service(
+                        self.hass, self.start_stop_entity, run=True),
+                        {"entity_id": self.start_stop_entity})
                 elif domain == "button":
                     await self.send("button", "press", {"entity_id": self.start_stop_entity})
             elif mechanism == SESSION_START_CHARGER_SERVICE:
@@ -3430,16 +3473,21 @@ class CurrentControlDevice(ControllableDevice):
         _parked_it = False
         try:
             if domain and self.hass.services.has_service(domain, "disable"):
-                await self.send(domain, "disable", {})
-                _parked_it = True
-                _LOGGER.info(
-                    "%s: parked OFF on disconnect via %s.disable — the box "
-                    "holds the no until the next charge", self.name, domain)
+                # (#1027) The claim comes from the send, not from "it did not
+                # raise": ``send`` returns False when the command was withheld
+                # and the box therefore never heard it.
+                _parked_it = bool(await self.send(domain, "disable", {}))
+                if _parked_it:
+                    _LOGGER.info(
+                        "%s: parked OFF on disconnect via %s.disable — the box "
+                        "holds the no until the next charge", self.name, domain)
             elif self.start_stop_entity:
                 sdomain = self.start_stop_entity.split(".")[0]
                 if sdomain in ("switch", "input_boolean"):
-                    await self.send(sdomain, "turn_off", {"entity_id": self.start_stop_entity})
-                    _parked_it = True
+                    _parked_it = bool(await self.send(
+                        sdomain, switch_service(
+                            self.hass, self.start_stop_entity, run=False),
+                        {"entity_id": self.start_stop_entity}))
         except Exception as e:  # noqa: BLE001 — surfaced, never fatal
             _LOGGER.error("park_off(%s): disable failed: %s", self.name, e)
 
@@ -3491,6 +3539,33 @@ class CurrentControlDevice(ControllableDevice):
         nothing on the system that knew why — the precise sentence this whole
         issue opens with. Same hole #949 had just closed one layer over, for
         the inverter's charge limit.
+
+        (#1027) THE ONE GATE for the whole debt. While SEM is only watching,
+        ``send`` withholds every command and returns False — but both callers
+        read "the call did not raise" as "the box was parked" and took the debt
+        anyway. A rig watching a box another SEM controls wrote a park record
+        on every disconnect, adopted it after a restart, and handed the charger
+        back on removal — the first real command of its life, on hardware it
+        had never touched. Watching takes no debt and pays none, in either
+        direction: the record belongs to the lifetime that really parked the
+        box, and is left exactly as it is.
+        """
+        if getattr(self, "observer_mode", False):
+            _LOGGER.debug(
+                "%s: watching only — no park debt recorded (wanted %s)",
+                self.name, parked)
+            return
+        await self._write_park_record(parked)
+
+    async def _write_park_record(self, parked: bool) -> None:
+        """The record itself, with no gate in front of it.
+
+        (#1027 review) Separate from ``_remember_parked`` for one caller:
+        ``release_to_user`` has ALREADY decided, and it has awaited several
+        sends since. If the switch is flipped during those awaits, a gate
+        read a second time would keep the debt on a box that was just handed
+        back — and the next setup would adopt a park already paid, the
+        "#935, live on PROD 13.09" bug. One decision, one lifetime.
         """
         self._sem_parked = bool(parked)
         store = getattr(self, "_park_store", None)
@@ -3510,7 +3585,15 @@ class CurrentControlDevice(ControllableDevice):
                           exc_info=True)
 
     def adopt_park_state(self, parked_ids) -> None:
-        """Take over a park this install left behind in a previous lifetime."""
+        """Take over a park this install left behind in a previous lifetime.
+
+        (#1027) Not while SEM is only watching. Taking over a park is taking
+        on the duty to hand the box back, and a lifetime that commands nothing
+        cannot owe that. The record stays where it is — the first lifetime that
+        can command adopts it (see ``_push_observer_mode_to_devices``).
+        """
+        if getattr(self, "observer_mode", False):
+            return
         key = str(getattr(self, "charger_id", "") or self.name)
         if key in set(parked_ids or ()):
             self._sem_parked = True
@@ -3548,6 +3631,13 @@ class CurrentControlDevice(ControllableDevice):
         """
         if not getattr(self, "_sem_parked", False):
             return None
+        if getattr(self, "observer_mode", False):
+            # (#1027) A watching SEM has parked nothing, so it has nothing to
+            # hand back. #936 wrote this rule for batteries and #955 for the
+            # export cut; the charger was the one that still said yes here.
+            _LOGGER.info("#1027 %s: watching only — the box is left exactly "
+                         "as it is on %s", self.name, reason)
+            return None
         did: list[str] = []
         # (#935 review) BOUNDED. ``hass.services.async_call`` takes no timeout
         # and neither did anything here, so a charger integration whose
@@ -3577,11 +3667,15 @@ class CurrentControlDevice(ControllableDevice):
                 did.append(f"{self.charge_mode_entity}={self.charge_mode_start}")
             elif mechanism == SESSION_START_STOP_ENTITY:
                 domain = self.start_stop_entity.split(".")[0]
-                if domain in ("switch", "input_boolean"):
+                if self._start_switch_reads_running():
+                    pass    # (#976) already on: nothing to hand back
+                elif domain in ("switch", "input_boolean"):
+                    service = switch_service(
+                        self.hass, self.start_stop_entity, run=True)
                     await _bounded(self.send(
-                        domain, "turn_on",
+                        domain, service,
                         {"entity_id": self.start_stop_entity}))
-                    did.append(f"{self.start_stop_entity} on")
+                    did.append(f"{self.start_stop_entity} {service}")
             elif mechanism == SESSION_START_CHARGER_SERVICE:
                 domain = self.charger_service.split(".", 1)[0]
                 if self.hass.services.has_service(domain, "enable"):
@@ -3603,8 +3697,10 @@ class CurrentControlDevice(ControllableDevice):
         # `sem.parked.<entry>` still naming this charger, so the next setup
         # adopted a park that had already been handed back — and the next
         # disable would "enable" a box SEM had not disabled. The debt is paid;
-        # the ledger has to say so.
-        await self._remember_parked(False)
+        # the record has to say so. (#1027) Written straight, without the
+        # gate: the decision was made at the top of this method, and the
+        # switch may have flipped during the awaits since.
+        await self._write_park_record(False)
         if not did:
             return None
         said = f"{self.name}: handed back on {reason} — " + ", ".join(did)
@@ -3637,8 +3733,11 @@ class CurrentControlDevice(ControllableDevice):
             elif self.start_stop_entity:
                 domain = self.start_stop_entity.split(".")[0]
                 if domain in ("switch", "input_boolean"):
-                    await self.send(domain, "turn_off", {"entity_id": self.start_stop_entity})
-                    stop_method = f"{domain}.turn_off={self.start_stop_entity}"
+                    # (#1042) turn_on for a switch named for the pause
+                    service = switch_service(
+                        self.hass, self.start_stop_entity, run=False)
+                    await self.send(domain, service, {"entity_id": self.start_stop_entity})
+                    stop_method = f"{domain}.{service}={self.start_stop_entity}"
                 elif domain == "button":
                     # (#804 B4a) The old code GUESSED a stop button by
                     # string-rewriting the start entity's id (resume→stop,

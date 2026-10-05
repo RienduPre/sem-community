@@ -36,6 +36,11 @@ ENERGY_SAVE_INTERVAL = 300
 # async_save_daily_throttled writes immediately at most this often instead.
 DAILY_SAVE_INTERVAL = 120
 
+# (#1024) Finished charging sessions kept for the EV card's session list —
+# a year of daily sessions. ~120 bytes each; the whole list is well under
+# the energy store's size, and it never rides on an entity attribute.
+SESSION_HISTORY_MAX = 400
+
 # (#668) The keys of ``EnergyCalculator.get_state()`` that this layer carries.
 #
 # ONE list, deliberately. Before #668 the export and the import each had their
@@ -101,6 +106,15 @@ CALCULATOR_STATE_KEYS: tuple[str, ...] = (
     # "too little history" silence for two weeks after every reboot — the
     # exact window a post-upgrade sensor fault most needs catching in.
     "baseload_history",
+    # (#1044) the first day the mirror held home members only. Lost, every
+    # restart would look like the upgrade day and seal no day clean.
+    "home_members_since",
+    # (#1043) the counters the lifetime seed added up, per category. Lost,
+    # every restart would read as a seed from before #1043 and re-seed.
+    "lifetime_seed_counters",
+    # (#1046) the EV day the car's flow rows were first booked on. Lost,
+    # every restart would read as the upgrade day.
+    "ev_flow_since",
 )
 
 
@@ -604,6 +618,15 @@ class SEMStorage:
         """Persist the per-charger measured-W/A EMA."""
         self._energy_data["ev_wpa_ema"] = dict(state)
 
+    # (#1019) The hint engine's small state: what fired (so a restart
+    # repeats nothing), past nights' load, the last days' totals.
+    def get_hints_state(self) -> Dict[str, Any]:
+        state = self._energy_data.get("hints")
+        return dict(state) if isinstance(state, dict) else {}
+
+    def set_hints_state(self, state: Dict[str, Any]) -> None:
+        self._energy_data["hints"] = dict(state)
+
     # Sign-detection persistence (#476 item 5) — locked grid/battery
     # sign flags survive restarts so the autodetect can't re-learn a
     # wrong sign from ambiguous post-reboot samples.
@@ -629,6 +652,24 @@ class SEMStorage:
     # Legionella timestamp persistence (#508 I2) — without this, driving
     # the legionella cycle (#508 C1) would force a disinfection run on
     # every restart, since a None timestamp reads as "overdue".
+    def get_capability_verdicts(self) -> Dict[str, bool]:
+        """(#996) The last verdict each runtime capability had from a read
+        taken while Home Assistant was running — the fallback at setup,
+        when the live read has not been asked yet."""
+        raw = self._energy_data.get("capability_verdicts")
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, bool)}
+
+    def set_capability_verdict(self, name: str, value: bool) -> bool:
+        """(#996) Store one running-time verdict. True when it changed."""
+        current = self.get_capability_verdicts()
+        if current.get(name) is value:
+            return False
+        current[name] = bool(value)
+        self._energy_data["capability_verdicts"] = current
+        return True
+
     def get_legionella_time(self) -> Optional[str]:
         """Get the persisted last-legionella ISO timestamp, or None."""
         return self._energy_data.get("legionella_last_time")
@@ -654,17 +695,23 @@ class SEMStorage:
             self._energy_data["last_decay_date"] = iso_date
 
     def add_session_to_history(self, session: Dict[str, Any]) -> None:
-        """Append a completed session to bounded history (max 90 entries)."""
+        """Append a completed session to bounded history.
+
+        (#1024) The bound is ``SESSION_HISTORY_MAX`` — a year of daily
+        sessions — so the session list on the EV card can show a month
+        view with totals. ONE writer: ``ev_control._update_session_tracking``,
+        where the session ends, per charger.
+        """
         state = self.get_ev_intelligence_state()
         history = state.get("session_history", [])
         history.append(session)
-        if len(history) > 90:
-            history = history[-90:]
+        if len(history) > SESSION_HISTORY_MAX:
+            history = history[-SESSION_HISTORY_MAX:]
         state["session_history"] = history
         self._energy_data["ev_intelligence"] = state
 
     def get_session_history(self) -> list:
-        """Get EV session history (bounded to 90 entries)."""
+        """Get EV session history (bounded to ``SESSION_HISTORY_MAX``)."""
         state = self.get_ev_intelligence_state()
         return state.get("session_history", [])
 

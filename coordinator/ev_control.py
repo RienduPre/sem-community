@@ -118,6 +118,71 @@ def _power_on_offer_w(decision, charger_cfg: dict, config: dict,
     return offer
 
 
+def _session_charger_id(host: Any) -> Optional[str]:
+    """(#1024) Which charger the swapped-in session belongs to.
+
+    Inside the per-charger loop ``host._ev_device`` is that charger's
+    device, so the id is the key it is stored under. A legacy install
+    with no per-charger devices has no id to give.
+    """
+    dev = getattr(host, "_ev_device", None)
+    for cid, candidate in (getattr(host, "_ev_devices", None) or {}).items():
+        if candidate is dev:
+            return cid
+    return getattr(dev, "device_id", None)
+
+def _charger_meter_readings(host: Any):
+    """(#1024) THIS charger's own meters, in kWh, or None when unknown or
+    unreadable this cycle: (session counter, lifetime counter).
+
+    Per-charger config first; the top-level keys belong to the primary
+    charger only (the #639 convention), never to its siblings."""
+    from .units import energy_state_to_kwh
+    cfg = getattr(host, "config", None) or {}
+    chargers = cfg.get("ev_chargers") or []
+    cid = _session_charger_id(host)
+    per = next((c for c in chargers if c.get("id") == cid), {}) or {}
+    is_primary = not chargers or (chargers[0].get("id") == cid)
+
+    def _read(key):
+        entity = per.get(key) or (cfg.get(key) if is_primary else None)
+        if not entity:
+            return None
+        hass = getattr(host, "hass", None)
+        try:
+            return energy_state_to_kwh(hass.states.get(entity), default=None)
+        except Exception:  # noqa: BLE001 — an unreadable meter is "no reading"
+            return None
+
+    return _read("ev_session_energy_sensor"), _read("ev_total_energy_sensor")
+
+
+def _finished_session_record(host: Any) -> dict:
+    """(#1024) The stored shape of a finished session — everything the
+    EV card's session list and the CSV export show."""
+    cid = _session_charger_id(host)
+    det = (getattr(host, "_ev_taper_detectors", None) or {}).get(cid)
+    if det is None:
+        try:
+            det = host._ev_taper_detector
+        except Exception:  # noqa: BLE001 — a bare double has no detector
+            det = None
+    currency = getattr(getattr(getattr(host, "hass", None), "config", None),
+                       "currency", None)
+    return {
+        "timestamp": host._session_data.start_time,
+        "end": dt_util.now().isoformat(),
+        "charger_id": cid,
+        "energy_kwh": round(host._session_data.energy_kwh, 2),
+        "solar_share_pct": round(host._session_data.solar_share_pct, 1),
+        "cost": round(float(host._session_data.cost_chf or 0.0), 2),
+        "currency": currency if isinstance(currency, str) else "",
+        "duration_min": round(host._session_data.duration_minutes, 1),
+        "energy_source": getattr(host._session_data, "energy_source", "sem_estimate"),
+        "taper_detected": bool(getattr(det, "full_detected", False)),
+    }
+
+
 class EVControlMixin:
     """EV control methods for SEMCoordinator.
 
@@ -972,7 +1037,7 @@ class EVControlMixin:
 
         if r.issue_switch is not None:
             value = v1 if r.issue_switch == 1 else v3
-            cmd = phase_switch_command(entity, value)
+            cmd = phase_switch_command(entity, value, self.hass)
             if cmd is not None:
                 domain, service, data = cmd
                 planner.note_switched(now)
@@ -1164,6 +1229,19 @@ class EVControlMixin:
                         self._session_data.solar_share_pct,
                         self._storage.get_lifetime_ev_stats(),
                     )
+            # (#1024) The session record — ONE writer, here, where the
+            # session ends with THIS charger's data swapped in. It used to
+            # be written from ``_update_ev_intelligence`` on the fleet-wide
+            # disconnect with the primary's data, so a second charger's
+            # sessions were never recorded.
+            # Only a session that is still ACTIVE ends here. A finished
+            # session's data is kept for display, so gating on energy alone
+            # re-recorded it on every later plug + unplug without a charge —
+            # the old writer's bug, every August session stored twice.
+            if (self._session_data.active and self._session_data.energy_kwh > 0
+                    and self._storage):
+                self._storage.add_session_to_history(
+                    _finished_session_record(self))
             self._session_data.active = False
             self._last_ev_connected = False
             return
@@ -1186,19 +1264,13 @@ class EVControlMixin:
         if not self._session_data.active:
             return
 
-        # Accumulate energy from flow sources (W → kWh)
+        # (#1024) The flows say how this cycle's draw SPLITS. They do not
+        # say how much it was: on PROD they covered 69–90 % of KEBA's own
+        # session meter. The total comes from the charger's meter
+        # (session_energy.step); the split is scaled up to it.
         solar_increment = power_flows.solar_to_ev * hours / 1000.0
         grid_increment = power_flows.grid_to_ev * hours / 1000.0
         battery_increment = power_flows.battery_to_ev * hours / 1000.0
-
-        self._session_data.solar_energy_kwh += solar_increment
-        self._session_data.grid_energy_kwh += grid_increment
-        self._session_data.battery_energy_kwh += battery_increment
-        self._session_data.energy_kwh = (
-            self._session_data.solar_energy_kwh
-            + self._session_data.grid_energy_kwh
-            + self._session_data.battery_energy_kwh
-        )
 
         # Cost: direct grid at the current import rate, battery-sourced at
         # what its stored energy cost to put in — the provenance pool's rate,
@@ -1206,10 +1278,33 @@ class EVControlMixin:
         # was priced at ZERO, so a car charged off a grid-filled battery
         # looked free while the grid purchase sat in the import cost.)
         import_rate = self._energy_calculator._import_rate
-        self._session_data.cost_chf += (
+        cost_increment = (
             grid_increment * import_rate
             + battery_increment * self._energy_calculator.ev_battery_cost_rate()
         )
+
+        from .session_energy import seed_from_legacy, step as _session_step
+        sd = self._session_data
+        if not isinstance(getattr(sd, "meter", None), dict):
+            sd.meter = {}
+        if not sd.meter and sd.energy_kwh > 0:
+            seed_from_legacy(sd.meter, sd.energy_kwh, sd.solar_energy_kwh,
+                             sd.grid_energy_kwh, sd.battery_energy_kwh, sd.cost_chf)
+        session_kwh, lifetime_kwh = _charger_meter_readings(self)
+        totals = _session_step(
+            sd.meter,
+            solar_kwh=solar_increment, grid_kwh=grid_increment,
+            battery_kwh=battery_increment, cost=cost_increment,
+            power_w=this_power_w, hours=hours,
+            session_meter_kwh=session_kwh, lifetime_meter_kwh=lifetime_kwh,
+            import_rate=import_rate,
+        )
+        sd.energy_kwh = totals.energy_kwh
+        sd.solar_energy_kwh = totals.solar_kwh
+        sd.grid_energy_kwh = totals.grid_kwh
+        sd.battery_energy_kwh = totals.battery_kwh
+        sd.cost_chf = totals.cost
+        sd.energy_source = totals.source
 
         # Solar share
         if self._session_data.energy_kwh > 0:

@@ -220,6 +220,28 @@ class EnergyDashboardConfig:
         }
 
 
+#: (#1043) The Energy Dashboard's energy categories. Each one has a scalar
+#: ``<category>_energy`` field and a ``<category>_energy_list`` field.
+ENERGY_COUNTER_CATEGORIES: Tuple[str, ...] = (
+    "solar", "grid_import", "grid_export", "battery_charge", "battery_discharge",
+)
+
+
+def energy_counters(ed_config: Any, category: str) -> List[str]:
+    """Every counter HA's Energy Dashboard adds up for ``category`` (#1043).
+
+    The scalar ``<category>_energy`` field is the FIRST source only. The second
+    tariff of a dual-tariff meter, a second inverter or a second battery live
+    only in the list, so a total read from the scalar is one part of the sum.
+    The scalar is the fallback for a config that carries no list.
+    """
+    listed = getattr(ed_config, f"{category}_energy_list", None)
+    if isinstance(listed, (list, tuple)) and listed:
+        return [e for e in dict.fromkeys(listed) if isinstance(e, str) and e]
+    single = getattr(ed_config, f"{category}_energy", None)
+    return [single] if isinstance(single, str) and single else []
+
+
 def _parse_prefs(
     hass: HomeAssistant, data: Any, quiet: bool = False,
 ) -> EnergyDashboardConfig:

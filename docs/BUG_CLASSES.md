@@ -67,9 +67,37 @@ NOT ``last_updated`` (advances only when the *value* changes) — else a fast-po
 legitimately holds a constant value for >10 min (a split discharge sensor at 0 W while the battery
 charges — Fronius; ``grid_export`` while importing; solar overnight) false-positives as frozen
 (#611). **Guard:** `test_589_sensor_freshness.py::test_constant_value_but_still_reporting_not_frozen`
-+ the missing-`last_reported` fallback test. **Open siblings:** the frozen value still *feeds* the
++ the missing-`last_reported` fallback test. **Home figure (#1047, PROD 04.10 15:26):** home is the
+remainder of the balance, so an input whose EVERY read is dark entered it as the reader's 0.0 while
+the input's own entity kept its last value — a battery charging 3.9 kW went dark and the SHOWN home
+read the whole 4.7 kW of solar for 20 s. The #237/#444 hold catches a dip only; its 2-cycle spike
+guard had been spent by the dip hold first. **Closure:** `SEMCoordinator._hold_shown_home` sets
+`PowerReadings.home_shown_w` — the last home shown — while any input's entity is still holding: dark
+now and read live within `SENSOR_DARK_READ_GRACE_S` (same `<=`), each input on its OWN clock (review
+2: one clock from the last fully-live cycle released home mid-way through blinks that overlap in
+turn, and an inverter dark all night blocked every later hold); the held value itself expires after
+two graces, so a chain of blinks cannot freeze home for good (review 3). `to_dict` publishes it, the #891
+house-meter gap compares it, and the #699 snapshot treats it as incoherent (the cards keep the last
+set that added up). It holds the HOUSE, not
+the dark input, and `home_consumption_power` is left alone. **Why not hold the input inside the sum
+(challenge record, #1047):** the first cut did, and the review measured it. Home STEERS — the EV budget
+is `solar − home − battery_charge`, and a held home beside the raw 0 W battery charge was a 3.9 kW
+surplus that was not there (a start after the 60 s delay); a held grid beside a live EV ramp loosened
+the #906 blind-meter peak guard by the ramp; a held battery beside falling solar drove home to 0 W. A
+balancing term moves with everything else, the house does not. The import/export and charge/discharge
+halves blank with their input (the `grid_active_power` rule). **Guard:**
+`tests/test_1047_home_holds_a_dark_input.py` — the PROD replay through the real reader, smoothing,
+hold, publish and snapshot; steering untouched (no phantom surplus); the grace edge; overlapping
+blinks; an input dark all night; never-read; a cycle-order pin; and an AST pin that every
+`*_unavailable` flag `to_dict` blanks a power input on is a flag the hold listens to. **Open siblings:** the frozen value still *feeds* the
 balance (observe-only, not yet held); multi-unit partial-availability sums silently under-report
-(audit W6). Refs #274 #461 #589 #611.
+(audit W6; the lifetime seed's half closed by #1043, see class 52) — one dark unit of N is still 0 W
+in home AND in the published total; the flow figures and the daily home energy still integrate the
+dark cycle's raw home (they share the steering figure; the #771 partition check ties them together);
+the steering home itself still reads a dark battery as idle (safe for the EV budget — the meter
+answers — but the discharge limit home/n is wide for the gap; holding it needs the battery charge
+held beside it); an EV power dropout is not in the dark tally at all (its own #910 hold + the 2-cycle
+spike guard, whose count the dip hold can spend first). Refs #274 #461 #589 #611 #1047.
 
 ### 6. Multi-unit over-command (N× / partial split) — PARTIAL
 **Symptom:** a fleet-level power target handed to *each* of N units → N× the intended
@@ -996,7 +1024,11 @@ either side. A silent default is the same bug with the guess baked into the sour
 **Live catches:** **#684** and **#627** (`ev_start_stop_entity` — read off per-charger config since
 v1.0, auto-filled for some brands, never writable, and beta.25's new repair pointed straight at
 it); **#688 part 1** (`min_off_time_sec` defaulted to a twitchy 1 min with no surface, so a pool
-pump short-cycled and the user could neither see the window nor lengthen it).
+pump short-cycled and the user could neither see the window nor lengthen it); **#1040** (Calendar
+tariff mode sat in the Tariff menu since #120, and the setup guide promised a calendar field, but
+nothing ever wrote the schedule the provider reads — the mode ran at the off-peak price all day.
+Closed by `tariff_schedule_entity`, a Schedule-helper field the page refuses Calendar without, on
+the options page and the config card; guard `tests/test_1040_calendar_schedule_field.py`).
 **Second half (16.08.2026):** a field you can type into is not yet a surface you can *correct* —
 the class also lives in what a form does with the value you did **not** type. HA drops a cleared
 optional field out of `user_input` entirely, so `update(user_input)` cannot tell "left alone" from
@@ -2052,6 +2084,38 @@ sites*. Note also that delegation is not free — `_NOT_CHARGING` deliberately h
 cable-present idle states and cable-ABSENT ones, so cable presence had to become its own
 enumerated axis (`_CABLE_ABSENT` + `is_cable_present`) rather than be inferred as
 "anything not disconnected", which would have read an empty bay as occupied on OCPP, go-e and Ohme.
+**Live catch (#1038), shape (c) again — the copy #833 did not look for:** the setup wizard's check
+(`EVChargerDetector._validate_entity`) kept a third copy of the status words, and
+`validate_ev_configuration` is a hard gate on the setup and reconfigure forms. On Home Assistant's
+own Ohme test data (HA 2026.8.2) the status sensor stores `plugged_in`, `finished`,
+`pending_approval`; the reader knew all three, the wizard's copy had `"plugged in"` — the label HA
+shows, not the state it stores (class 116, read side) — so the form refused the sensor while the
+car sat plugged in. The same copy spelled Peblar `"no ev connected"`; core stores
+`no_ev_connected`, and `suspended` for a car plugged in and paused, which no list knew, so the
+reader also read that car as gone. **Closure:** the copy is deleted; the wizard asks
+`status_enum.knows_status` — the words the reader maps, plus a `_FAULT` set (`error`, `faulted`,
+`fault`) that the reader still reads as unknown, so a plain OCPP or Wallbox sensor caught in a
+fault still saves. Numbers stay `0`/`1` only: the reader reads any number > 0 as on, so a voltage
+picked by mistake would show a car plugged in all the time. An ENUM sensor in any other state
+passes when its `options` let the reader answer yes AND no for the role; one known word is not
+enough. Peblar's two words and Tesla Wall Connector's `not_connected` joined the shared list. The
+bare IEC pilot codes (`a`, `b1` … `f`) stay accepted in an `_IEC_PILOT` set, still unknown to the
+reader: ABL eMH1 (#808) may store them. Dropped with the copy, because no integration is known to
+store them and the reader never mapped them (each reads as "no"): `true`/`false`, `idle`,
+`no ev connected` on a plain sensor. A fourth copy, in the coordinator's per-charger loop (`== "on"`, so Ohme
+`charging` read as not charging; nothing read the result), now takes the reader's per-charger
+answer. **Guard:** `tests/test_1038_wizard_reads_the_shared_words.py` — core's option lists for
+Ohme, Peblar, NRGkick, Blue Current and Tesla Wall Connector through the wizard's check (Ohme and
+Peblar through the whole form); every word the reader knows passes it; an AST lint over the
+package for any tuple, list, set or dict keys with two or more status words outside
+`status_enum.py`, unless they are only on/off. **Left for Guido:** the shared list still lacks words
+core really stores — Blue Current `vehicle_detected`/`standby`, NRGkick `standby`, Tesla Wall
+Connector `waiting_car`, the ABL pilot codes — so a Blue Current `vehicle_status` is still refused
+except at `ready` (one that saved at `ready` is refused on a later reconfigure), and the reader
+reads a car at `vehicle_detected` as gone. Each needs its meaning checked at the source before it
+is mapped. Older and separate: `_discover_peblar` and
+`_discover_easee` take a status sensor only with no device class, but core's Peblar `cp_state` is
+`enum`, so registry discovery never binds it (the glob prefill does, on an English install).
 **Closure:** import the owner and delete the literal, at **every** site in one pass — and where a
 literal is not a default at all, say so in the code rather than in a comment: `charge_stability`'s
 `or 0` was a sentinel meaning "config is silent, ask the adapter", and became a conditional so the
@@ -2069,7 +2133,7 @@ argument form and would have passed while three of the five 16s were still in th
 **Sweep question:** for a config key, grep the *readers* and compare their defaults before reading
 any logic — if they disagree, that is the bug, whatever the issue says it is about. And when a key
 has no write path, its default is not a fallback, it is the value.
-Refs #789 #788 #716 #746 #685 #678 #833.
+Refs #789 #788 #716 #746 #685 #678 #833 #1038.
 
 ### 47. One word names two axes, so every reader picks the axis it expected — GUARDED
 **Symptom:** a flag reads as an answer to a question it does not answer. Nothing misbehaves; the
@@ -2306,6 +2370,41 @@ quantity SEM reads from an external integration, does the integration model that
 entity or as N siblings that must be aggregated — and does the resolver (read AND detection) take the
 first, or all of them? Refs #562 #687 #819 #838.
 
+**Round 2 (#1043, 2.1) — SEM's own Energy Dashboard config, not an integration.** The reader keeps
+every source in `<category>_energy_list` and the FIRST one in the scalar `<category>_energy`. The
+lifetime seed read the scalar for grid and battery, so a dual-tariff meter seeded tariff 1 alone
+(RienduPre: lifetime CO2 261 kg against 610 kg for one year); the yearly seed and
+`_query_monthly_energy` read the scalar for all five categories. The read had a warm-up twin (class
+86): a counter still loading read 0, so a three-inverter sum was the first inverter and looked
+complete — and against a good stored value it fired #551's downward heal, shrinking it.
+**Closure:** one resolver, `ha_energy_reader.energy_counters(ed, category)` (the list, else the
+scalar), used by all three seeds and by the coordinator's counter wiring. The lifetime seed sums only
+when every listed counter gives a reading — no state, unknown/unavailable, NaN and 0 are not one.
+Each counter has its own wait, which starts only once HA runs (class 86) and lasts
+`UNAVAILABLE_REPAIR_THRESHOLD_S`; then the counter is left out (a gone ED row must not hold the seed
+for ever; an external `source:id` statistic is left out at once). A sum with a counter left out is a
+FLOOR: that category is only ever raised, and #551's downward heal does not fire on it. The seed
+records the counters it summed (`lifetime_seed_counters`, persisted); when the set changes — or, with
+no record, when any list is longer than one — each total is RAISED to its counter sum, never lowered.
+The same holds for the old below-half and 90 % re-seeds (review, two rounds: a swapped inverter, a
+removed row or a second charger reads less than the history SEM holds, and a full overwrite triggered
+by ANOTHER category lowered it); only #551's unit heal still sets values outright. `lifetime_home`
+moves by the raised amounts. So every install seeded before the fix heals on its next restart, not
+only those below half of the hardware. The battery wait now applies only to a battery
+counter that gave a reading: a battery-less install read 0 + 0 there and never seeded at all.
+**Guard:** `tests/test_1043_lifetime_seed_all_counters.py` — the reporter's numbers, a tariff-1 seed
+above half heals, a re-seed never lowers history (swapped inverter, removed row, gone or dark
+counter, a below-half category beside a lower counter, a night restart, a floor never starting the
+unit heal), per-counter waits that start when HA runs, battery-less, the record round-trips, yearly
+and monthly sums, and an AST check that `energy_calculator.py` names no scalar `*_energy` field.
+**Named, not swept:** the EV part of both seeds takes the FIRST `device_consumption` entry whose id
+CONTAINS a keyword (`"ev"` — class 67), so a two-charger install seeds one charger, and summing would
+sum every false match too. `coordinator/night_backfill.py` reads the `*_energy_sensor` config keys
+(#876 copied the scalars there), so a night's grid and battery legs are the first tariff and the
+first battery. A yearly total seeded from tariff 1 before this fix stays low until 1 January (the
+yearly seed runs once per install). `sensor_reader.battery_sign_diagnostics` lists the scalar
+first (diagnostics only); `_grid_counter_entities` restates list-else-scalar (correct today).
+
 
 ### 52. A summary statistic chosen without asking which tail hurts — GUARDED
 
@@ -2505,6 +2604,24 @@ guard holds for a hand-written brand shape too, so the closure is at the class l
 instance. **Sweep question:** for every entity a detector binds to an actuation role, can the
 integration expose a SECOND entity that fits the same shape but governs a different mode/state — and
 does the matcher separate them, or pick by ordering? Refs #886 #816 #683 #698.
+**Second instance — #1034, one end of a range:** HA's own V2C Trydan test data publishes three
+current numbers: `intensity` (the set-point), `min_intensity` and `max_intensity`. The V2C rule kept
+the last one named "intensity", so registry order bound the FLOOR: every SEM write would move the
+minimum and leave the charge alone. The qualifier is a RANGE END, not a mode. `_reject_range_end_current_control`
+runs at the same choke point, right after the offline guard: a control whose own name or translation
+key says `min`/`minimum`/`max`/`maximum` swaps to its set-point twin (the number named like it
+without that word, same device class and unit; the key is compared too, so a German or renamed id
+still finds it; only the side that holds the word is compared; two twins are a choice it does not
+make). With no set-point a CEILING stays — on Alfen, Wallbox, Zaptec and OCPP the "max current"
+number is the only one and IS the control — so a FLOOR goes to its ceiling twin (else the order of
+the pair would decide), and a floor with neither is dropped (this class's actuation rule). Where
+`_own_names` takes nothing off (mqtt, a small unit with one id renamed), the leading words more than
+half the unit's ids share are the device's (`_what_it_is`): "Min JuiceBox" (Swedish "my") is not a
+floor, but its `…_min_current` still is. Guard: `tests/test_1034_range_and_circuit.py` — HA's V2C
+in all 144 orders of its numbers and power sensors, the brand rule's raw answer spelled out, and an
+every-platform oracle with `min_`/`max_charging_current` first and last. **Left for Guido:** a V2C
+SAVED before this fix keeps `min_intensity` (detection re-runs only with no charger configured; the
+#886 heal swaps only `offline`).
 
 ### 57. Belt-and-suspenders actuation — a wrapper does the action AND delegates to a layer that does it again — GUARDED
 **Symptom:** one logical actuation reaches the hardware TWICE, a few milliseconds apart. No error, no
@@ -3890,6 +4007,30 @@ second entity of the same domain and device_class that measures something adjace
 the other direction, another window, one phase — and does the matcher separate them, or pick by
 ordering? And before making a guard fail-closed: *trace what the missing value actually does
 downstream*, because "drop it" is only safe where absence is handled.
+**Second instance — #1035, one phase:** Peblar's brand rule kept the LAST power sensor, and the
+three per-phase sensors come after the total, so SEM read `…_power_phase_3` — a third of a
+three-phase charge. The guard swapped a capability but let a phase leg stand. `_reject_capability_sensor`
+now swaps a bound phase leg too, swap only and ONLY for the sum of the legs — the sibling named like
+it without the phase (`_without_phase`), so a device's grid, solar or battery power is never taken
+for it. `_is_phase_leg` reads the entity's own name (class 115) and wants the number AFTER the word:
+`phase_3` is a leg, `3_phase_power` is the sum.
+Guard: `tests/test_1035_own_name.py::TestOnePhaseIsSwappedForTheTotal`.
+**Third instance — #1034, another circuit:** a box with its own clamps meters more than the car.
+HA's V2C publishes `charge_power`, `house_power`, `photovoltaic_power` (key `fv_power`) and
+`battery_power`, all `device_class: power`; its rule kept the last, the solar output. The guard now
+also swaps a read role whose own name or translation key names another circuit
+(`_OTHER_CIRCUIT_SEGMENTS`: photovoltaic, pv, fv, solar, house, home, household, grid, battery,
+inverter, mains, utility, evu, akku, ess, shaper), and `_measured_twin` never offers one; among
+equal ranks a candidate naming the car (`charge`, `ev`, `car`, `vehicle`) beats the alphabet. Swap
+only, like the rest of this class. `_what_it_is` keeps a device called "Solar Carport" or an mqtt
+"Home JuiceBox" from flagging its own charge (the review found the latter undid #1035's phase
+swap); the key keeps a German `…_photovoltaik_leistung`
+visible. The word list is English plus the keys: an unlisted word (`consumption`) is not seen —
+fail-open, like the capability list. The glob prefill is unchanged: it reads whole ids, so a device
+name would demote a real reading. Guard: `tests/test_1034_range_and_circuit.py`; on the 16 rig
+captures of `feature/hardware-wave` only V2C's answer changes. **Left for Guido:** Blue Current's
+`ev_current_sensor` is `setdefault` on `avg_current`, which `grid_avg_current` also holds; that role
+is outside this guard.
 **Residual, CLOSED in #964 (class 90):** the sibling search this class installs is only as
 honest as the bucket it searches — and two of the three discovery sites grouped device-less
 entities into ONE bucket per platform, so the best-ranked sibling could belong to the other
@@ -4565,7 +4706,13 @@ WHEN, and did anyone pass in the moment?*
 **Guard:** `tests/test_994_a_level_needs_a_reference.py::TestTheCalendarKnowsWhatDayItIs` — every
 shipped preset on a Sunday and on a Monday, Saturday morning under EKZ (a real comparison), the
 NT-carved-out-of-HT-default mirror case, and the published min/max agreeing with the refusal.
-Refs #994 #638.
+**Second instance (#1040):** the Schedule-helper branch dropped the moment too. `_get_tariff_at(when)`
+answered every hour with the helper's state NOW, and `_ht_can_occur` took the helper's existence as
+a peak hour on every day. Harmless while no field could set a helper; once #1040 added one, the day
+strip, the next change and the battery break-even at 02:00/14:00 would all have read the current
+tariff. Cure: read the helper's week (`schedule.get_schedule`) and ask it about the hour given.
+Guard: `tests/test_1040_calendar_schedule_field.py::TestTheHelpersWeekAnswersEveryHour`.
+Refs #994 #638 #1040.
 
 ### 105. A sentinel given a name — every "is it missing?" test silently flips — GUARDED
 **Symptom:** a fix that makes absence legible breaks the code that was already handling absence
@@ -5048,3 +5195,330 @@ layer, but 81(e)'s own reasoning still reads as though a pause were free.
 **Neighbour:** class 81 asked which thing a minimum interval limits, the repeat or the cycle; this
 is the next question in that line — a limit on the cycle is still not a limit on the count.
 Refs #975 #940 #893 #461 #552 #804.
+
+### 113. A claim read back from disk outlives the mode that forbids making one — GUARDED
+**Symptom:** removing a SEM that has Observer mode ON sends a real command to real hardware.
+Guido's test install (#1027, v2.1.0) watched a KEBA that a second SEM controls; removal sent
+`keba.enable` and put the box's failsafe back on its charging fallback. No car was plugged in, so
+nothing happened that day. The log said `handed back on integration removed — keba.enable,
+failsafe → charging fallback` for a lifetime that had never written to that box.
+**Root shape:** #855 moved the observer gate DOWN to the single hardware seam: `send` withholds the
+command and returns False. The layers above it were never taught to read that answer. Three of them
+in one mechanism: (a) `park_off` read *"the call did not raise"* as *"the box was parked"* and wrote
+the park debt to disk — on every disconnect edge, for a box it had never touched; (b) the next
+setup ADOPTED that record, so a lifetime that commands nothing believed it had parked a wallbox;
+(c) removal hands back every box SEM parked, and that gate saw the adopted flag and said yes. The
+debt crosses lifetimes on purpose (#935: `PARK_OFF` fires on an edge, and an already-empty box at
+boot is a steady state the reconciler cannot re-derive) — which is exactly why the adopter has to
+ask whether THIS lifetime may command at all. Distinct from class 97, where the memory of a write
+was a de-dup cache and the cost was a locked-out retry: here the memory is a DUTY, and paying it is
+the first real command of the lifetime.
+**Where it lives:** every claim SEM keeps across a restart, in any mode that promises to send
+nothing. Already closed, and the precedent: the battery adapters (`unload_release_reason(adapter,
+was_observer)` — *"observer commands nothing, including on the way out"*, #936), the export cut
+(`export_release_recipes` and `async_release_export_guard`, #955), the charge pacer (#949, the only
+one that closed BOTH ends — it never adopts, *"consuming the record of a real engagement is a side
+effect, and an observer has none"*, and it re-adopts on the first commanding cycle). The charger
+park was the one left. Assessed and NOT this class: the load boost (#914 `adopt_if_running`) — it
+claims belief and ownership but never `_sem_commanded`, and every release path is gated on that
+(#908), so an adopted load is left alone; `SwitchDevice.activate` is unreachable while observing
+(`compute_load_intent` returns one layer up).
+**Closure:** one rule, three doors, each asked separately — an observing lifetime TAKES no park
+debt, ADOPTS none, and PAYS none. `_remember_parked` returns early in both directions (the record
+belongs to the lifetime that really parked the box and is left as it is), `adopt_park_state` does
+not claim, `release_to_user` writes nothing and keeps the record. `park_off` now takes the claim
+FROM `send`'s return, not from the absence of an exception. Two gates are asked of the LIFETIME
+rather than of the device, because a device learns its mode on a cycle and the documented default is
+*"a device nobody told is a device that acts"*: the setup adopter, which runs before the first
+cycle, and the unload stash, which decides whether a removal hands hardware back. That second one
+reads a variable captured at the TOP of `async_unload_entry`, not the live flag:
+`async_release_batteries_on_unload` sets observer mode ON part way down the same function (#936),
+so a gate reading it live would answer "watching" for every install the day someone moved the block
+— silently, with no log. Setup now tells every device its mode once, before anything can claim,
+closing the window between setup and the first cycle. The record is not stranded:
+`_readopt_on_leaving_observer` adopts it on the cycle the switch goes off, so a rig watched for an
+hour does not then take control of a box it does not know is parked. What a watching REMOVAL leaves
+behind is said rather than fixed (`_async_say_the_park_is_unpaid`): the box may be another SEM's, so
+SEM must not touch it, but the record can still name a box an earlier commanding lifetime really
+parked — and a removal deletes SEM's own files, so this is the last moment anything can say so.
+**Guard:** `tests/test_1027_observer_takes_no_park_debt.py` — the three doors with a commanding
+FLOOR beside each (a park IS recorded, a park IS adopted, a box IS handed back, or the observer
+assertions pass on a device that simply cannot park); the store untouched through a whole watching
+lifetime; the switch going off adopting once and a steady lifetime never re-reading. Two pins come
+from mutation testing this change, because the first cut of the guard passed with either of them
+reverted: `park_off`'s claim is asked the other way round — a send that goes nowhere while the
+device believes it commands, so the gate one layer down cannot answer for it — and the production
+hook wiring is pinned by `assigns_attribute`, since every behaviour test injects its own hook and
+would stay green with the one real assignment deleted. Be honest about the third kind: the
+`reads_flag` pins (which accept `getattr(self, "observer_mode", False)`, the house style for a flag
+a bare stub may not have) are rename tripwires, not behavioural gates — they prove the door still
+names the question, not that it acts on the answer. The behaviour tests are what prove that. The
+unload ORDER has its own pin: the flag may be read exactly once in `async_unload_entry`.
+**Sweep question:** for every fact SEM writes to disk and reads back in a later lifetime — who is
+allowed to WRITE it, and does the reader ask whether this lifetime may act on it? A record is
+evidence about the hardware; a mode is a rule about this process. Reading the first without asking
+the second is how a watcher acquires a duty.
+**Left for Guido:** (1) **The records the bug already wrote.** An observing rig booked a park on
+every disconnect edge, so #1027's own install has bogus entries in `sem.parked.<entry>` right now.
+Nothing in this change purges them, and nothing can tell a bogus one from a real one by reading it:
+the cure is either provenance (a marker only a commanding lifetime writes, unmarked records dropped
+once) or believing the entity (ask the box whether it is actually disabled — class 97's cure, and
+what #935's docstring says the reconciler cannot do from the connect edge alone). A blanket purge
+was deliberately NOT shipped: it would drop the legitimate records on every commanding install with
+an EV to protect the few rigs, trading a rare wrong write for a rare stranded charger, and that is a
+product call. The exposure is smaller than before this change, and different in kind: the bug needed
+no switch flip at all, whereas what is left needs the switch OFF — and with it off SEM commands that
+charger by definition, so a hand-back it never earned costs one `keba.enable` on a box it is
+actively driving, not a command from a lifetime that promised to send nothing. The first charge
+clears the record either way, through `start_session`. (2) `_export_guard_adopt`
+still adopts a cut while observing and sets `_applied` — harmless today (every write below it is
+gated, twice), and gating it naively would STRAND the cut when the switch goes off, since it only
+ever runs on a lifetime's first tick. It wants the pacer's shape, not a gate. (3) `stop_session`
+records the debt from `stop_method is not None` — which mechanism was CHOSEN, not whether it
+landed. The `_remember_parked` gate covers the observer case, but a stop whose send fails for any
+other reason still books a park, `_stopped_by_disable` still skips the 0 A write, and the "no
+mechanism opened the contactor" warning is still suppressed. `park_off` was taught to read `send`'s
+return; `stop_session`, three lines of the same shape, was not — the asymmetry is the thing to fix.
+(4) `release_to_user` appends to its `did` list without reading `send`'s return, so its sentence is
+only true because the observer door is shut in front of it — and it still reports
+`failsafe → charging fallback` when `arm_failsafe_enabled=False` makes that call a no-op.
+(5) `SEMCoordinator.__init__` resolves `config.get("observer_mode", False)` while
+`DEFAULT_OBSERVER_MODE` and `PERSISTED_FLAG_DEFAULTS` both say True. `promote_persisted_flags`
+(#777) closes this for every install that ever recorded the flag anywhere, so what is left is the
+install where nobody ever said — which now boots "I act" and, since this change, tells every device
+so. One word fixes it and the blast radius is an install that currently commands going quiet, which
+is Guido's call, not a sweep.
+Refs #1027 #935 #936 #949 #955 #855 #908 #914 #740.
+
+### 114. A device judged alone when the device beside it is the evidence — GUARDED
+**Symptom:** an Easee install with an Equalizer shows TWO chargers. The second is the Equalizer, a
+grid meter, with the house's grid import as its charging power. Its entities come first in the
+registry, so it is also the FIRST charger: the one zero-config setup SAVES into `ev_chargers`, the
+config flow's first step suggests, and the late setup (`_retry_ev_device_setup`) builds and drives.
+**Root shape:** the discovery walks map one unit at a time and ask each unit "are you a charger?"
+alone. Most brand functions say yes to a power reading alone, so any meter an integration ships
+beside its charger passes. The unit cannot answer the question by itself; its sibling can — the
+same integration publishes car-present, charging, session and control roles for its chargers, and
+the meter has none of them. A second walk asked a related question the same way: the report's near
+miss checked "has this brand a charger?" against the chargers mapped SO FAR, so a site device listed
+before its charger still read as "almost supported". And a wrong answer that setup SAVED is never
+asked again: detection re-runs only while no charger is configured (the #886 shape).
+**Where it lives:** every walk that turns registry units into chargers —
+`discover_all_ev_chargers_from_registry` (and through it `discover_ev_charger_from_registry`, the
+zero-config save in `async_setup_entry`, the config flow and the late setup) and
+`build_detection_report`. Not the prober: it needs a plug or a current control, which a meter does
+not have. The pre-fix walk admitted a meter beside a box on 17 of the 22 brand platforms.
+**Closure:** `meters_beside_chargers`, asked by both walks after every unit of the platform is
+mapped. A unit is a meter when its guarded mapping binds no role in `_CHARGER_ONLY_ROLES`, AND a
+sibling unit binds one. Only a bound role makes a unit the evidence. No sibling, no drop: a box
+whose status sensor is disabled keeps its only charger. Two things keep a unit the roles alone would
+call a meter, each looked for on the WHOLE device, disabled entities included: a charger mark, or an
+entity with the same translation key as one the evidence bound to a charger role. The review of this
+fix found the second one: a second Easee with its status disabled, or renamed (the brand function
+reads ids), mapped exactly like the Equalizer and was dropped. That check needs the keys, so where
+the evidence's charger roles carry none, nothing is dropped: SEM cannot tell a meter from a box whose
+roles are off, and the heal below acts on this answer (the second review). Transports (`mqtt`) are skipped:
+devices on one transport are not neighbours. The report lists the meter under `meters`, and the
+diagnostics download carries it. The near miss now waits for the whole platform (transports keep
+the old per-device answer). `_drop_meters_saved_as_chargers` removes, at setup and before the
+charger list is read, the one thing SEM itself saved wrong: a charger that binds no charger role,
+whose power sensor is still the meter's, and whose id is the stable id setup gave that meter (or,
+saved before v1.7.5, whose stored `_device_id` is the meter's). A list it empties sends the same
+setup back to discovery. A side effect, pinned: the config path now reads the GUARDED mapping like the report,
+so a unit whose only role a guard removed is no longer returned as a charger with no roles.
+**Guard:** `tests/test_1036_meter_beside_charger.py` — the Equalizer's real entities, translation
+keys and disabled flags, with the pre-fix rule spelled out; config path, primary pick and report,
+in both registry orders; the "next to" pins (alone, a disabled status, two chargers, a second box
+with its roles disabled or renamed, a live or disabled mark, a transport); an oracle that puts one
+meter beside one box on every brand platform and must cover a literal list of 16 brands; an AST pin
+that both walks call the helper; the near-miss order in both directions; the diagnostics download;
+the no-keys case; the heal (SEM's save removed, a pre-v1.7.5 save removed, the user's charger, a
+role or a power sensor the user set, and a real charger kept, no registry walk on a normal install,
+and an AST pin that setup heals before it reads the list). Eighteen mutants are killed. No test runs
+a whole `async_setup_entry` through the heal; the order pin and a trace stand in for it.
+**Sweep question:** for every per-unit "is this an X?" — can the unit answer alone, or is the
+answer in the unit next to it? And if the wrong answer was saved, what makes SEM ask again?
+**Left for Guido:** (1) No evidence, no drop: an Equalizer beside an Easee whose status AND session
+are both disabled or missing, an integration that gives its entities no translation keys, or an
+Easee account with only an Equalizer, still offers the meter — first. (2) A meter whose entity ids hit a loose name rule binds a charger role and is kept: openWB
+and V2C bind any id with `connect`, go-e MQTT any id with `car` (`carport`). (3) A second box that
+maps to nothing (all its state sensors disabled) beside a detected charger is no longer a near miss
+in either order; before, it was one only when listed first. (4) The report decides meters before the
+roster can turn a sensors-only charger into a near miss, so the report can list a meter with no
+charger row of that brand; the config path is not affected. (5) The Equalizer is a real grid meter;
+offering it as SEM's grid source is a feature. (6) A Repair keyed by the removed charger's id is not
+cleared — the same leftover the `remove_charger` service has.
+Refs #1036 #886 #964 #915 #814.
+
+### 115. A word in the device's name read as a word about the entity — GUARDED
+**Symptom:** on Home Assistant's own Peblar test data (HA 2026.8.2) SEM bound
+`switch.peblar_ev_charger_force_single_phase` as start/stop — it would switch the box to one phase
+to "stop" a charge — and `sensor.peblar_ev_charger_power_phase_3`, one phase, as the charging power
+(#1035). No error: both entities are real and of the right kind.
+**Root shape:** Home Assistant builds an entity id from the DEVICE name and the entity's own name.
+A brand rule that tests a word against the whole id therefore matches every entity of a device
+whose name holds the word, and the loop's last (or first) match — registry order — decides. The
+Peblar's default device name is "Peblar EV Charger": "charge" is in all 24 of its ids. "Charger",
+"Chargepoint" and "Carport" are what owners call these boxes, so `charg`, `charge` and `car` — the
+words half the rules ask for — sit in the device part. Not class 67: the word is a real word, it
+just belongs to the device. The power half is class 89's second instance (one phase, below).
+**Where it lives:** every hand-written brand function in `hardware_detection.py` (14), the hint
+matcher `_discover_from_hints` (every `_BRAND_HINTS` row), `charger_from_near_miss`, and the #976
+manual path `ocpp_charge_control_switch`. On a device named "EV Charger" or "Carport Charger" the
+pre-fix rules bound a role-free entity (a child lock, an LED number, an "online" binary) on 11
+platforms: Peblar, OCPP, ChargePoint, go-e (HTTP and both MQTT domains), Heidelberg, openWB (both
+domains), V2C, Wallbox, Zaptec.
+**Closure:** `_own_names` — each id without the device's words (`_device_words`): the leading
+words every id of the unit carries, or, on a unit of eight or more ids, all but a quarter, so one
+id its owner renamed does not switch the rule off for the device (the review of this fix found
+that one rename brought #1035 back). A renamed id keeps its whole name. An id that is the device
+name alone, or that plus HA's `_2`, is the device's MAIN entity and keeps the device name as its
+own (GARO's start/stop is `switch.garo_laddbox`; a second box is `switch.garo_laddbox_2`). One
+entity alone and the transports (`mqtt`, where the device name is the only mark of the brand) are
+left whole. Every brand name test reads it. A control or a status that only the device name
+matched is no longer bound; a measurand READ role is the exception (`_discover_unit`): left empty
+by the own names, it keeps the whole-id answer unless another role holds that entity — class 89's
+swap-only rule. So does the current control when HA itself says what it is: the unit's only
+`number` of `device_class: current`. Ids are built in the install's language, so a German
+Peblar's limit is `…_ladestrombegrenzung` and the device name was its only English word; without
+this the second review found SEM set up no German or Dutch Peblar at all. The fallback only fills a charger the own names found: a unit that only its
+device name made a charger (a Zaptec installation called "Carport Charger") stays out.
+`_discover_ocpp` also skips the availability switch, as the #976 manual path already did, for the
+installs where no device name can be seen. **Guard:** `tests/test_1035_own_name.py` — HA's own
+Peblar entities in both orders, config path and report, with the old rule spelled out and with one
+id renamed; GARO's main entity, its second box and a box named "Laddbox Garage"; an oracle that
+gives every platform in `_EV_CHARGER_PLATFORMS` a device named "EV Charger" and "Carport Charger"
+with role-free entities first and last; an AST check that no brand function tests anything
+against `eid`/`eid_lower`/`entity_id` (plain, `str()`, `.lower()`), runs a regex over it or calls
+`_name_hit(eid, …)`, and that it catches each of those shapes; the read-role fallback and its
+limits, a German and a Dutch Peblar. Nineteen mutants of the fix are killed. **Sweep question:** for every word test over an
+entity id — does it read the part the integration wrote for that entity, or the part the owner
+wrote for the device?
+**Left for Guido:** (1) a charger SAVED before this fix keeps its binding — detection re-runs only
+while no charger is configured. A Peblar set up earlier keeps the single-phase switch; an OCPP
+charge point left at the default name "charger" may hold `switch.charger_availability` as its
+start/stop, which stops a charge by taking the connector out of service. (2) A unit whose own
+names match no rule at all is no longer a charger: if openWB's loadpoint publishes German entity
+names under an English "Chargepoint" device name, it matched only through "charg" before (with a
+guessed status sensor) and is now left to the prober and the near-miss offer. (3) Peblar's state
+sensor is `device_class: enum` and `_discover_peblar` asks for none, so no connected/charging
+sensor is bound (a different shape). (4) The inverter-side `_DISCHARGE_CONTROL_PATTERNS` read whole
+ids too, some by brand name on purpose. (5) The glob matrix (`EV_INTEGRATION_PATTERNS`) is a
+config-flow prefill and was not changed. (6) An owner who renamed the TOTAL power sensor leaves
+the phase leg bound: the sum is found by name. (7) Ids in other languages: a German or Dutch
+Peblar gets no start/stop (its switch is not called "charge"; before, it got the single-phase
+switch), and a phase named `fase_3`/`fas_3` is not seen as one phase. Reading Peblar's unique-id
+keys (`…_charge`, `…_power_total`) would fix both — brand code, so not here. (8) Seen on HA's own
+entity names, older than this class: Wallbox binds `…_maximum_icp_current`, the site's grid limit,
+as its current control; V2C was #1034 (classes 56 and 89, closed). Class 114's residual (2) loses its `carport` case:
+go-e MQTT's `car` now reads the own name.
+**Second instance — the runtime, not the setup (#976, 02.10):** `charger_adapters/wallbox.py::_looks_like_wallbox` chose the ADAPTER by `"wallbox" in entity_id`. "Wallbox" is what German owners call any wall charger; @bgthb's Huawei on OCPP is a charge point named "wallbox", so its `switch.wallbox_charge_control` made it a Wallbox. That adapter turns its pause switch on before every current write; on OCPP that turn_on is a RemoteStartTransaction, so every write sent a start the charging box refused ("Rejected", one notification each). Alfen (`alfen_wallbox`) and GARO (`garo_wallbox`) carry the word too. Closure: the adapter asks the registry PLATFORM (or the service domain), never the id. Guard: `tests/test_976_named_wallbox.py` — the reporter's charger through the reconciler, every other charger platform under a device named "wallbox", a Wallbox renamed "Garage", and an AST check that no module in `charger_adapters/` tests a brand word with `in` (a literal word only; `any(…)`, `.find()` or a regex would pass it). Left for Guido: `_looks_like_wallbox` and `_discover_pause_switch` read `charger_current_entity`, a name the real device does not have (it is `current_entity_id`), so a Wallbox configured with its current number alone still gets the generic adapter — unchanged here on purpose, since the Wallbox adapter then turns the pause switch on (a cloud call) before every write. Outside the charger path: `features/load_device_discovery.py` (keba / go-e / easee in ids), `utils/helpers.py` ("keba" picks kW), `coordinator/repair_issues.py` ("keba" + "failsafe"). Decided here: Wallbox hardware behind another integration (the MQTT bridge of #984/#985, Modbus) now runs the generic adapter. With its start/stop switch configured, `stop_session` turns it off on every stop and ENABLE turns it on when off; the Wallbox adapter only added a turn_on before every write.
+Refs #1035 #962 #976 #804 #1036.
+
+### 116. A select written with the label a person sees, not the option it lists — PARTIAL
+**Symptom:** on Home Assistant's own Ohme test data (HA 2026.8.2) SEM set the charge mode to
+"Max charge" and "Paused"; the select lists `max_charge` and `paused`, so HA refused every write
+and the charger never changed mode (#1039). Nothing else looks wrong: the entity is right, the
+call is made, and the error is one log line per start or stop.
+**Root shape:** HA's `select.select_option` takes an option exactly as the entity lists it in its
+`options` attribute. What the UI shows is the option's LABEL, translated through the
+integration's `translation_key`. A string typed from the UI — by a developer into a brand rule, or
+by a user into a config field — is the label, and the select refuses it. A compare against the
+select's state fails the same way, so a read-back waits for a value the select can never read.
+**Where it lives:** every select SEM writes: the charger's charge-mode start/stop, the hand-back
+and the amps-as-select current (all through `ControllableDevice.send`); the phase-switch select
+(`ev_phases.phase_switch_command`, `hass` now required); the battery direction select
+(`_direction_ready`) and power-strategy select (`GenericBatteryAdapter`, write and every compare);
+SG-Ready select contacts (`_contact_service`, `_contact_is_on`); the `set_option` service on SEM's
+own selects; the detection card's strategy check (`_gate_proposal`), which must judge a value as
+the runtime writes it. NOT closed: GoodWe forced charge and Deye's `_write_and_verify` (below).
+**Closure:** `utils/select_option.listed_option(hass, entity_id, value)` — a value the select lists
+is kept; otherwise the ONE listed option whose label (HA's translation cache: the user's language,
+then English) or whose own spelling is the same words; otherwise the value unchanged, for HA to
+refuse with its own error. "The same words" ignores case and treats a space, `_` or `-` between two
+letters or digits as one separator, nothing else; a `-` before a digit is a sign: `-5` is not `5`,
+`Offset -1` and `Offset - 1` are not `Offset 1`, `Solar+` is not `Solar`. A looser match would turn a refused write
+into an accepted one with another meaning. Never a guess between two. The charger seam maps every
+select write, so observer mode records the option it would really send. Ohme detection now saves
+`max_charge`/`paused`; a config saved with the labels is mapped at write time, so it needs no
+migration.
+**Guard:** `tests/test_1039_listed_option.py` — a fake HA whose selects refuse unlisted options,
+for Ohme (start, stop, hand-back, observer, through the reconciler), the direction and strategy
+selects, SG-Ready, the phase switch and the card's check; real HA labels from core's GoodWe
+translations in German and English; signs and symbols that must not match; an AST check that
+every `select_option` in the package is in a function that calls `listed_option`, goes through the
+charger seam, or is on a short list with its reason, and a second one for every function that
+writes through the `CONTACT_VALUE_SERVICES` table.
+The read side is the same shape: an ENUM sensor's state is the option key too, so a word list
+typed from the UI never matches it (#1038: Ohme `plugged_in`, Peblar `no_ev_connected`).
+**Sweep question:** where SEM writes or compares a string against an entity with a fixed list —
+did the string come from that list, or from what a person saw? And before mapping one: what
+happens on the hardware once a write that was always refused starts to LAND?
+**Left for Guido:** (1) GoodWe forced charge (`GoodWeChargeAdapter`) writes "Eco Charge" and
+"General"; core lists `general`, `eco`, `peak_shaving`, … and — built without the library's
+emulated modes — no `eco_charge` at all, so forced charge cannot work on core this way. The start
+call is not blocking, so SEM reports CHARGING anyway (class 97). Mapping was tried and pulled in
+review: a `general` that lands moves a user's eco or peak shaving on every restart, and handing
+back `eco` leaves the library's 24/7 charge slot active. Needs a GoodWe design. (2) Deye's
+`_write_and_verify` is not mapped: the force paths check each option against the list first, but
+`command_stop_force_discharge`, `command_limit_export` and `command_release_export` do not, and
+their "nothing to do" checks compare the raw config value, so a mapped write would land on every
+cycle. Older and a different shape: the two export paths compare the HA State OBJECT with an option
+string, so the prior mode is never saved and the release restores nothing — a Deye cut to Zero
+Export To Load stays there. (3) OpenWB detection saves "Instant Charging"/"Stop" and go-e "2"/"1";
+not checked against their integrations' options — the mapping covers a label either way. (4) The
+config flow's start/stop fields are free text; a dropdown of the chosen select's options would stop
+a wrong value at entry. (5) Class 97, older: `_direction_ready` never re-sends a write that did not
+fail but did not land. (6) Older and separate: both charger builders (`__init__` setup and
+`_retry_ev_device_setup`) skip a charger with no current control and no charger service, and a
+stock Ohme has only the mode select — so SEM builds no device for it and #1039's write is reached
+only on an Ohme the user gave a current entity or service. Supporting a start/stop-only charger is
+a feature. (7) Once it is built: the hand-back (`release_to_user`) writes the START mode, which for
+Ohme is `max_charge` — a full-power charge over the user's `smart_charge` — and with no current
+entity an IDLE decision after a restart cannot stop a box left in `max_charge`.
+Refs #1039 #1032 #955 #1038.
+
+### 117. A start sent to a session the box already runs — PARTIAL
+**Symptom:** when SEM started a session the charger had already started itself (or from its app), the OCPP integration posted "Start transaction failed with response Rejected" (#976, 02.10) — one per session start. Charging went on. (The flood in the same report, one per current write, was class 115.)
+**Root shape:** `start_session` turned the start/stop switch on without reading it, on the belief that a switch's turn_on is idempotent. On OCPP it is not: `charge_control` is on while a transaction runs, and its turn_on is a NEW RemoteStartTransaction, which the box refuses. The reconciler's #536 ENABLE already read the switch first; the session start did not.
+**Where it lives:** `CurrentControlDevice.start_session` (the start/stop-entity branch) and `release_to_user` (same branch, on removal). `ensure_enabled` is only reached when the switch reads off. A `button.` start cannot be read and is unchanged (#804).
+**Closure:** `_start_switch_reads_running()` (was `_reads_on`) — a definite running state (`on`; `off` on a pause of the charge, class 118) from a switch without `assumed_state` means the session runs: no start, the session is claimed. Unreadable or optimistic still sends.
+**Guard:** `tests/test_976_named_wallbox.py::TestNoStartIntoARunningSession` plus the end-to-end run through the reconciler. **Sweep question:** before SEM repeats a command it calls safe to repeat — what does the device do when it gets it twice?
+**Left for Guido:** (1) the #536 ENABLE fires on `off`, which on OCPP is also a box that REFUSES a start (Finishing after SEM's own RemoteStop, Preparing while it waits for authorisation): 5 refused starts, then one per 300 s — about 12 notices an hour while SEM wants to charge. Tied to the open question whether a RemoteStop is the right OCPP pause. (2) `WallboxAdapter.command_current` / `command_max` still turn the pause switch on before every write (a cloud resume call per write on a real Wallbox), and `command_idle` / `command_disable` turn it off a second time after `stop_session` did (the #894 shape). (3) ~~`_discover_v2c` adopts V2C's `paused` switch as start/stop, where on means paused~~ — closed by class 118 (#1042): the "already on" read is now "already running", which is `off` on that switch.
+Refs #976 #536 #804.
+
+### 118. A switch read by its state, not by what its name says "on" means — GUARDED
+**Symptom:** V2C Trydan: on a box given its session pause as start/stop, every start SEM sent paused it and every stop resumed it (#1042); on one given the modulation pause (below), SEM's stop never stopped the charge. Home Assistant's V2C session switch is "Pause session" (key `paused`), on while paused; core's `turn_on` calls `evse.pause()`. Nothing errors: the switch takes each command.
+**Root shape:** every start/stop write spelled `turn_on` to start and `turn_off` to stop, and every read took `on` as running. That holds for a switch named for the charge ("Charging enabled", "Charge control", Wallbox's "Pause/resume", on while it charges), not for one named for the pause. Second shape in the same rule: `_discover_v2c` took the LAST switch with "pause" in its name, and HA registers "Pause dynamic control modulation" (key `pause_dynamic`, which pauses the box's solar modulation, not the charge) after the session pause — so the old rule most likely saved that one on every V2C.
+**Where it lives:** `CurrentControlDevice.start_session`, `stop_session`, `park_off`, `release_to_user`, `_start_switch_reads_running` (was `_start_switch_reads_on`); `ChargerAdapter.enable_state`, `ensure_enabled`; `WallboxAdapter._toggle_pause_switch`; `_discover_v2c`; the saved bindings no detection fix reaches.
+**Closure:** one rule, `consts/devices.names_a_charge_pause`: "pause"/"paused" as a whole word and no word but session/charge/charger/charging/ev/evse/car — so `pause_resume`, `pause_dynamic`, `not_paused` and a device name in front are not one. `utils/switch_sense.on_means_paused` applies it to the name the INTEGRATION gave the switch: HA's translation key (the same in every language; a German V2C's id says `vorgang_pausieren`, its key `paused`), else `original_name` when `has_entity_name` says it is the entity's own. A template switch or helper the owner made keeps "on = start". Every write asks `switch_service(run=…)`, every read `reads_running`; the sense is read at run time, so no saved config changes. `_discover_v2c` binds on the same name by the same rule (`_pauses_the_charge`), so a switch the run time cannot read is not bound and the #627 Repair says so. The builders' `wire_current_entity` swaps a saved switch that pauses something else (`names_another_pause`, never a pause/resume toggle) for the one pause of the charge on the same device (`charge_pause_twin`; keys only, no guess between two) and logs it. The diagnostics dump shows `start_stop_on_means_paused`.
+**Guard:** `tests/test_1042_pause_switch.py` — a fake Trydan whose switch pauses on `turn_on`, through start, stop, park, hand-back, the adapter and the reconciler; Wallbox, NRGkick and OCPP switches and an owner's template unchanged; detection over every order of HA's five V2C switches, German ids, rows without keys, and the old rule run on the same rows; the saved modulation pause swapped, and kept when there is no twin, two, or only one on another device; an AST check that no function naming the start/stop switch (attribute, variable, parameter, or the config key fetched) spells `turn_on`/`turn_off`/`on`/`off`/`STATE_ON`/`SERVICE_TURN_ON` itself, which catches the pre-fix shapes. Thirteen mutants of the fix are killed. **Sweep question:** when SEM writes on or off to a switch, does the switch's name say on is the thing SEM wants?
+**Left for Guido:** (1) the swap is at run time; the saved config still names the modulation pause, and the config screen shows it. (2) An integration with no translation key and no own name, or one whose names are not English (`…_pausieren`), is read as on-while-charging. (3) OpenEVSE's "Sleep mode" switch is on while stopped too, under a word that is not "pause"; SEM does not detect it as start/stop. (4) The Repair text "enable switch will not stay on" is wrong in words for a pause switch (it will not stay off). (5) Load switches (`features/load_management.py`) are not read through this rule. (6) A V2C healed by the swap may still have its modulation paused from SEM's old "start"; SEM no longer touches that switch, also not on removal. (7) No test pins that the builders set the saved start/stop before `wire_current_entity` (the Wattpilot wiring relies on the same order). (8) The AST guard misses a switch passed to a helper under another name, a fetch through a call other than `.get`, and the `toggle` service.
+Refs #1042 #976 #1034 #1035.
+
+### 119. A ratio whose top counts part of what its bottom counts — GUARDED
+**Symptom:** `sensor.sem_battery_measured_capacity_kwh` read 7.89 kWh on a 10 kWh pack, drift −21.1 % over 33 nights (#1045). The pack was fine. Nothing errors; the figure looks like wear.
+**Root shape:** kWh per percent is energy over SOC span. The SOC span counts everything that left the pack (house, car, grid) and is net of any charge taken in the same night. The energy was `drain_kwh`, the house's share only, and gross. A night with EV assist or battery export read LOW; a night that also charged read HIGH, which sizes every budget against a pack that is not there. Each side is right for its own reader: `drain_kwh` is exactly what the overnight need wants.
+**Where it lives:** `measured_capacity._qualifying_ratios` (the instance); `battery_night.BatteryNightTracker` (now records `charge_kwh`, including a charge seen only as an SOC rise across a restart hole; a hole that ends after dawn now ends the SOC span too, where before its energy joined the night and its SOC did not); `night_backfill` records carry no SOC, so they never reach the ratio. Any other "energy per percent" figure: `ev_taper_detector.on_session_end` (left below).
+**Closure:** the energy is drain + assist + export − charge, the same flows the span counts. A night whose charge is more than 10 % of what left (`MAX_NIGHT_CHARGE_SHARE`, with a 0.25 kWh noise floor) is not used: its net is a small difference of two lossy conversions. A record sealed before the charge was counted (`charge_kwh` absent or None, also the night in flight at upgrade) does not know its charge: it is read as before, house share only, and not used when assist + export are more than 10 % of what left. `expected_overnight_need` keeps the house's share.
+**Guard:** `tests/test_1045_capacity_counts_every_outflow.py` — assist, export, both, EV-only and mostly-assist nights read the real pack; a small charge and short-night noise are subtracted, a large charge refuses the night; old-format records with and without assist, including an export night that charged back; a charge hidden in a restart hole; a hole that ends after dawn; noise larger than a tiny night; a night restored from an old store says unknown; the need is pinned to the house's share; real nights through the real recorder into the real reader; the coordinator hands the pack's charge power to the recorder. Thirteen mutants of the fix are killed.
+**Sweep question:** for every ratio SEM computes, does the top count the same flows, over the same window, as the bottom?
+**Left for Guido:** (1) `ev_taper_detector.on_session_end`, display-only (per-charger `battery_health`): the full-cycle method sets the estimate to the session's energy for any session that tapers to full, so a 50→100 % session reports half the pack; the partial-cycle method takes `_session_start_soc` from the first SOC reading after the last reset, and `get_virtual_soc` runs while the car is away, so the SOC side can start at unplug while the energy side starts at plug-in; it also divides wall (AC) energy by the car's SOC, about 10 % high. Not verified on a live install. (2) Energy and charge bridged across a restart hole are made from the configured nameplate, so a wrong nameplate skews that night's ratio. (3) The budget uses a measured size above the nameplate as is; a pack does not grow, so a cap at the nameplate would be a second guard. A product call. (4) Switch-over: an old record's charge is unknown. Old nights that drained and then took a grid top-up read high, on develop too; old assist nights used to read low and could hide them, and are now skipped. Until new nights fill the window, an install with many night top-ups can read higher than develop did (review: 15 vs 10 kWh in one mix). Not using old records at all removes that, but resets every install's figure for five nights and needs the old-shape fixtures in 15 tests changed.
+Refs #1045 #778 #800.
+
+**Round 2 (#1046) — a flow over a meter, and over another day.** The EV card's daily "Solar Share" (`energy_ev_solar_percentage`) read 49 % on PROD for a day the session record called 89 % (6.3 kWh). It was `solar_to_ev` (a flow) over `daily_ev` (the charger's metered kWh). The flow allocator leaves a cycle's draw unassigned when the inverter reads dark, so the meter counts cycles no flow does. #1024 had fixed the session record (it scales the flow split to the meter); the day's share was a second reader that never asked. The window was off too: `daily_ev` rolls at the Charge-by time (default 07:00; midnight when chargers disagree), the flow layer's totals at midnight. The first cut took the split of the calendar flows; review caught that a night charge on grid then pulls the share down until midnight (31 % beside "Today 5 kWh" all on sun).
+**Where it lives:** `EnergyAssistant.analyze` (the instance), the "mostly from grid" tip and the optimization score (same ratio, **swept**), the battery charge session's `solar_share_pct` — `solar_to_battery` over the measured charge (**swept**), and the battery card's "% solar" under "Charge today" — `flow_solar_to_battery_energy` over `daily_battery_charge_energy` (**swept**, `sem-battery-card.js`). Already right: the EV session and the lifetime shares (totals scaled from the same split), the card's month totals (weighted by those sessions), autarky (flows over flows), `_file_battery_charge_origin` and the discharge savings (flow split onto the increment).
+**Closure:** `utils.helpers.solar_share_pct(solar, *others)` and its card twin `util/solar-share.js` — solar over the sum of the flows into the same thing; None when they hold nothing (the sensor reads 0 as before, the tip does not fire, the score gives no EV points). The car's flows are also kept on the EV day: `EnergyCalculator` books `solar_to_ev`/`grid_to_ev`/`battery_to_ev` into daily rows keyed by the same `ev_day` as `daily_ev` (`ev_flow_*`; the `ev_` prefix keeps them through the midnight sweep; persisted with the daily rows), and `ev_day_flows()` reads them on the key `daily_ev` was read from this cycle. The EV day the rows were first booked on began before them, so `ev_day_flows()` says None for it (`ev_flow_since`, persisted in `CALCULATOR_STATE_KEYS`) and the coordinator reads the calendar flows for that one day instead of 0 % (review 2). `battery_to_ev` now reaches the assistant, so a battery-fed car is not read as all solar.
+**Guard:** `tests/test_1046_ev_daily_solar_share.py` — the PROD shape (sun, dark, grid) through the real allocator, integrator and `session_energy.step`: the card equals the session (88.2 %, was 47.6 %); a night (battery at 23:30, grid at 02:00) then a day (sun, then dark) through the real `EnergyCalculator`: the night's rows survive midnight, the day reads 100 % (calendar split 45 %, old 50 %), the rows survive a restart; a read after 07:00 keeps the day `daily_ev` was read on; the upgrade day says None and the marker survives a restart; the real cycle publishes the EV day's split, and on the upgrade day the calendar split; the tip and score on the same split; the battery session through the real allocator (75 %, was 42.9 %; a dark cycle keeps the share). An AST lint over the package: a `/` or `/=` with solar on top and a metered total below (`daily_ev`, `ev_kwh`, `energy_kwh`, `total`, `charge`, `metered`) fails unless the function is on a three-entry list whose totals are themselves the scaled split, each pinned to one such division. It cannot see a value renamed first, or a multiply by a reciprocal. `dashboard/card/test/solar-share.test.js` pins the card helper; a line lint over `dashboard/card/src` fails on `solar… / …daily|charge|total…` (shown to catch the old battery card line).
+**Left for Guido:** (1) The battery session's `energy_kwh` and `cost` still use the measured charge and the unscaled grid flow; only its share changed. (2) The battery card's share is still the calendar day; so is `daily_battery_charge_energy` beside it, so the window matches. (3) Per-charger daily share does not exist; a multi-charger card shows the fleet share on each tile. (4) On the upgrade day the share is the calendar split (round 1's number), so a night charge before the Charge-by time still counts in it that day.
+Refs #1046 #1024.
+
+### 120. A part taken away from a whole that never held it — who is inside the total, decided by each reader — GUARDED
+**Symptom:** `sensor.sem_daily_true_baseload_energy` read −49.69 kWh against 6.29 kWh of home after a 49 kWh night charge, and `true_baseload_power` fell by the charging power while the car charged (#1044, RienduPre, 2.1, Growatt + Wallbox Pulsar). Nothing errors; the number is negative by the size of the car.
+**Root shape:** `home` is solar + import + discharge − ev − export − charge, so the car is already out of it. SEM's chargers are also devices in the surplus controller, and the baseload took away every device in it — the car a second time. #872 had hit the same rule for the partition check and fixed it there alone, by device TYPE (`current_control`); the baseload (#773) was a second reader that never asked. The type rule was also wrong: a load the user put under current control is a `CurrentControlDevice` too, and its draw is not in `ev`.
+**Where it lives:** every reader that adds devices up against `home`: the filing seam's controlled-loads mirror (`_file_device_energy`, the instance), the W twin in the cycle (the instance), `home_member_totals` for the partition check (#872, **swept** — so a current-controlled load is a member again), and the baseload drift check, which named a charger as the day's suspect and judged days sealed under the old rule (**swept**).
+**Closure:** the sensor reader says what `ev_power` was read from (`PowerReadings.ev_power_entities`, the per-charger sensors summed, or `ev_power_fleet_entity`, one fleet sensor that stands for every charger). `health_check.chargers_outside_home` keeps SEM's chargers (`sem_ev_chargers`: the dict and the late-found `_ev_device`) that this read covers; `home_members(devices, chargers)` leaves exactly those out, by identity. A charger the reader never read — a second box with no sensor of its own, a late-found box whose sensor was not handed over — is still inside `home` and is still taken away once (the review's catch: identity alone would have left its car inside the baseload). The charger keeps its ledger row. A sealed day carries `home_members_only` when its whole day was booked under the rule (`_home_members_since`, persisted and in `CALCULATOR_STATE_KEYS`; the upgrade day is not). On an install with a charger outside `home`, a day without it is a gap, and such a charger is never named as the mover.
+**Guard:** `tests/test_1044_ev_not_subtracted_twice.py` — real `CurrentControlDevice` chargers and a current-controlled load through the real seam into a real calculator (his day, the late-found shape, a charger never read, an estimated charger), the real cycle with a charger drawing 7 kW for the W twin (through the fleet sensor and through the per-charger sum), each with a twin that shows the old number; the reader's record of what it summed; the drift check's suspect and gaps; the stamp across an upgrade, a restart and junk; AST checks that every coordinator function that books the mirror, writes the W twin or calls `home_member_totals` asks both `chargers_outside_home` and `home_members`, and that every `readings.ev_power` write in `sensor_reader` says what it read. Eleven mutants of the fix are killed.
+**Sweep question:** for every total SEM takes something away from, does the total hold the thing taken away? And is that decided in one place?
+**Left for Guido:** (1) the late-found charger (`_retry_ev_device_setup`) does not hand its power sensor to the sensor reader (`key_map` maps plug, charging and total energy only), so without a fleet sensor `ev_power` misses its draw and the car counts as house load everywhere, not only here. Not checked on a live install. (2) The upgrade day keeps the old number until midnight: the mirror already holds the kWh the charger booked that morning. (3) A downgrade and a later re-upgrade keep the old start day, so the re-upgrade day is sealed clean. (4) While a late-found charger is not yet registered, or after a charger is removed, old days count again and can raise one false drift warning. (5) The "dict plus `_ev_device`" walk is still written out in four other places in `coordinator.py`. (6) The rule asks what `ev_power` read; the daily home row, when it follows the meters, takes out the calendar-day EV row, which EV energy counters can raise. A charger whose counter is in that list but whose power `ev_power` does not read (case 1, or an Energy Dashboard EV device with no power sensor) is then out of daily home and still booked in the mirror: the kWh baseload can go negative again there. The counter model itself says it assumes `ev_power` already holds every charger (`configure_ev_counters`); (1) is the real fix. (7) The Energy Dashboard fleet sensor is the first device whose name looks like a charger (`_extract_ev_from_devices`); it is taken to stand for every charger.
+Refs #1044 #872 #773 #1045.

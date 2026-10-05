@@ -5,7 +5,7 @@
     "reason; removing one is the point of the issue.",
     "Regenerate:  python3 scripts/audit_options.py --baseline"
   ],
-  "total": 193,
+  "total": 196,
   "first_run_fields": 16,
   "first_run_steps": 3,
   "first_run_fields_best": 10,
@@ -156,6 +156,7 @@
     "target_peak_limit",
     "tariff_classification_mode",
     "tariff_mode",
+    "tariff_schedule_entity",
     "update_interval",
     "vehicle_min_current",
     "vehicle_range_entity",
@@ -207,5 +208,9 @@
     "forecast_spending_enabled",
     "observer_mode",
     "vacation_mode"
+  ],
+  "select_entities": [
+    "hints",
+    "pause_duration"
   ]
 }

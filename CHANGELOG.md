@@ -13,6 +13,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🌍 **Dutch: 90 dashboard texts reworded or newly translated** — thanks @RienduPre. (#1052)
+
+- 🐛 **The car's daily solar share matches its sessions** (#1046). It read 49 % on an 89 % solar day. The battery's share read low too.
+
+# [2.2.0-beta.10] — 04.10.2026
+
+- 🐛 **Home power no longer jumps when a battery, grid or solar reading drops out** (#1047). SEM showed the full solar output as house load.
+- 🐛 **Lifetime totals count every tariff and inverter** (#1043). SEM read only the first counter, so lifetime CO2 showed less than one year.
+
+# [2.2.0-beta.9] — 03.10.2026
+
+### ✨ Improvements
+
+- SEM shows a control only where your house can use it: price knobs need a dynamic tariff, the export guard an export limit. (#996)
+- **Charging sessions are kept** — the last 400, per charger, with a CSV export service. (#1024)
+- 🐛 **Session energy comes from the charger's own meter** (#1024). SEM's sum read up to 31 % low.
+- **PV health** — one sensor says green, yellow, orange or red from a week of yield against forecast. (#1022)
+- **Hints** — short messages when something is off, and a weekly note. One setting: off, weekly or all. Off by default. (#1019)
+- **SEM finds more chargers by what they offer** — start/stop buttons, a charge-mode select, a car's own charging amps. The hardware report shows them. (#1032)
+- 🐛 **An OCPP charger named "wallbox" no longer gets a refused start with every current change** (#976). SEM took it for a Wallbox-brand charger.
+- 🐛 **A V2C now charges when SEM starts it and pauses when SEM stops it** (#1042). SEM turned its "Pause session" switch on to charge.
+- 🐛 **Measured battery size counts what went to the car and the grid** (#1045). It read low after the battery charged the car or sold power.
+- 🐛 **True baseload no longer goes negative while a car charges** (#1044). SEM took the car's energy away twice.
+
+# [2.2.0-beta.8] — 02.10.2026
+
+- 🐛 **Setup accepts the Ohme status sensor when the car is plugged in** (#1038). A paused Peblar car no longer reads as unplugged.
+- 🐛 **Calendar tariff mode has a field for its times** (#1040). Pick a Schedule helper; its blocks are the peak hours.
+- 🐛 **Charge pacing is calm** (#820). It writes on the register's step, accepts the inverter's own value, and rewrites at most every 5 minutes.
+
+# [2.2.0-beta.7] — 02.10.2026
+
+- 🐛 **SEM writes the option a select lists, not the name it shows** (#1039). Ohme's "Max charge" becomes max_charge; the same for other mode settings.
+
+# [2.2.0-beta.6] — 02.10.2026
+
+- 🐛 **SEM sets the V2C Trydan's charge current and reads the car's power** (#1034), not the minimum current and the solar power.
+
+# [2.2.0-beta.5] — 02.10.2026
+
+- 🐛 **SEM uses the Peblar's charge switch and total power** (#1035), not its single-phase switch and one phase. Detection ignores words in the device name.
+
+# [2.2.0-beta.4] — 02.10.2026
+
+- 🐛 **An Easee Equalizer is not a charger** (#1036). It measures the grid. Setup now finds the real charger, also where it had saved the Equalizer.
+
+# [2.2.0-beta.3] — 01.10.2026
+
+- 🐛 **Charge pacing checks the inverter took the limit** (#820). Below the buffer the battery gets full power again.
+- 🐛 **The battery Diagnose button shows the charge limit** (#820): what the register holds and accepts, and the inverter's own refusals.
+
+# [2.2.0-beta.2] — 30.09.2026
+
+- 🐛 **Removing SEM no longer switches a charger back on when SEM was set to watch only** (#1027). Watching sends no command, not even during removal.
+
 # [2.1.0] — 30.09.2026
 
 The first stable release of the 2.1 line.

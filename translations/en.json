@@ -236,6 +236,7 @@
         "description": "Electricity rates and advanced tuning parameters.",
         "data": {
           "tariff_mode": "Tariff mode",
+          "tariff_schedule_entity": "Peak-time schedule (Calendar mode)",
           "dynamic_tariff_entity": "Dynamic price entity (auto-detected if empty)",
           "dynamic_forecast_entity": "Price forecast entity (optional, auto-detected if empty)",
           "dynamic_feedin_entity": "Feed-in price entity (optional, for dynamic export rate)",
@@ -252,6 +253,7 @@
         },
         "data_description": {
           "tariff_mode": "Choose 'Static' for fixed rates, 'Dynamic' for real-time pricing, or 'Calendar' for time-of-use schedules.",
+          "tariff_schedule_entity": "A Home Assistant Schedule helper. Its time blocks are the peak (HT) hours; all other hours use the night rate.",
           "dynamic_tariff_entity": "Sensor providing the current electricity import price. Auto-detected from Tibber, Nordpool, etc.",
           "dynamic_forecast_entity": "Optional sensor with hourly price forecasts used for smart scheduling.",
           "dynamic_feedin_entity": "Optional sensor providing the current feed-in / export price for dynamic export rate.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "Calendar mode needs a peak-time schedule. Pick a Schedule helper or choose another tariff mode."
     }
   },
   "entity": {
@@ -1371,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "House meter difference"
+      },
+      "pv_health": {
+        "name": "PV health",
+        "state": {
+          "green": "Good",
+          "yellow": "Fair",
+          "orange": "Poor",
+          "red": "Bad"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1619,14 @@
           "4_hours": "4 hours",
           "8_hours": "8 hours",
           "12_hours": "12 hours"
+        }
+      },
+      "hints": {
+        "name": "Hints",
+        "state": {
+          "off": "Off",
+          "weekly": "Weekly note",
+          "all": "All hints"
         }
       }
     },

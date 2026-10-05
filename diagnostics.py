@@ -84,6 +84,27 @@ def _call_dict_or_none(fn):
         return None
 
 
+def _foreign_logs(hass: HomeAssistant) -> list[str]:
+    """(#820) The buffer's FOREIGN lines; never raises."""
+    from .utils.log_buffer import SEMLogBuffer
+    buffer = hass.data.get(f"{DOMAIN}_log_buffer")
+    if isinstance(buffer, SEMLogBuffer):
+        try:
+            return buffer.get_foreign_lines()
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+async def _pacing_actuation(hass: HomeAssistant, coordinator) -> dict:
+    """(#820) The charge-pacing register truth; never raises."""
+    try:
+        from .coordinator.battery_diag import pacing_actuation_diag
+        return await pacing_actuation_diag(hass, coordinator)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+
 async def _get_recent_sem_logs(hass: HomeAssistant) -> list[str]:
     """Return the most recent SEM-related lines from ``home-assistant.log``.
 
@@ -580,7 +601,9 @@ async def async_get_config_entry_diagnostics(
                   # (#887) cars found on a transport platform, named as cars
                   "vehicles",
                   # (#964) what the unit grouping could attribute to no box
-                  "unattributed")
+                  "unattributed",
+                  # (#1036) meters beside a charger, not offered as chargers
+                  "meters")
                  if _report.get(k) is not None}
 
     return {
@@ -751,4 +774,8 @@ async def async_get_config_entry_diagnostics(
             "provider": data.get("tariff_provider"),
         },
         "recent_logs": recent_logs,
+        # (#820) other integrations' warnings that name an entity SEM writes
+        # to — a refused charge limit is logged there, never by SEM
+        "foreign_logs": _foreign_logs(hass),
+        "pacing_actuation": await _pacing_actuation(hass, coordinator),
     }

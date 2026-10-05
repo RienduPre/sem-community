@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from ..charger_types import BatteryIntent, ExportIntent
+from ...utils.select_option import listed_option
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -600,10 +601,12 @@ class BatteryControlAdapter(ABC):
                     "(battery_power_direction_entity) — nothing written",
                 )
             return False
-        want = str(self._config.get(
+        # (#1039) the option the select lists — a label would be refused,
+        # and the read below would then wait for it forever
+        want = listed_option(self._hass, ent, str(self._config.get(
             "battery_direction_discharge_value" if watts > 0
             else "battery_direction_charge_value")
-            or ("discharge" if watts > 0 else "charge"))
+            or ("discharge" if watts > 0 else "charge")))
         st = self._hass.states.get(ent)
         if st is not None and str(getattr(st, "state", "")) == want:
             return True
@@ -719,13 +722,10 @@ class BatteryControlAdapter(ABC):
         if isinstance(attrs, dict):
             # (#749) the entity's min/max are NATIVE units — scale them to
             # watts so the clamp, the de-dup and every log stay in W; only
-            # the service-call value converts back at the boundary.
-            lo = attrs.get("min")
-            if isinstance(lo, (int, float)):
-                wire = max(float(lo) * scale, wire)
-            hi = attrs.get("max")
-            if isinstance(hi, (int, float)):
-                wire = min(float(hi) * scale, wire)
+            # the service-call value converts back at the boundary. (#820)
+            # The clamp itself is shared with the charge pacer.
+            from ..power_control import clamp_to_entity_range
+            wire = clamp_to_entity_range(attrs, wire, scale)
         watts = self._setpoint_from_wire(wire, sign)
         # #531: a silent clamp hides a real mismatch (fleet power > a single
         # unit's setpoint range). Surface it once per clamped write so the

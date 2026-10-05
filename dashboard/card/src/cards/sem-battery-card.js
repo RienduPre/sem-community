@@ -16,6 +16,7 @@ import { capacityConsequence, horizonLabel, trustConsequence }
 import { semTheme, semFormatPower, semGetCurrency, semCardSurfaceCSS, SEM_COLORS, semDefineCard } from '../base/sem-shared.js';
 import { temperatureUnit } from '../util/temperature.js';
 import { socDisplay } from '../util/missing-value.js';
+import { solarSharePct } from '../util/solar-share.js';
 
 const DEFAULT_PREFIX = 'sensor.sem_';
 
@@ -160,8 +161,10 @@ class SEMBatteryCard extends SEMLitBase {
         // (#949) A cap SEM cannot write is not a cap. Before this the line
         // read "pace · 0.4 kW · full by 19:00" on an install that had never
         // been given a charge-limit entity, while the battery took 3 kW.
+        // (#820) A cap the inverter never took is not a cap either.
         const blocked = {no_limit_entity: 'pacing_no_limit',
-                         limit_unreadable: 'pacing_limit_unreadable'}[a.action];
+                         limit_unreadable: 'pacing_limit_unreadable',
+                         write_refused: 'pacing_write_refused'}[a.action];
         if (blocked) {
             return html`
                 <div class="tonight-row" style="opacity:.85" title="${a.reason || ''}">
@@ -687,6 +690,7 @@ class SEMBatteryCard extends SEMLitBase {
         const monthCharge = this._val('monthly_battery_charge_energy', 0);
         const monthDischarge = this._val('monthly_battery_discharge_energy', 0);
         const solarToBatt = this._val('flow_solar_to_battery_energy', 0);
+        const gridToBatt = this._val('flow_grid_to_battery_energy', 0);
         const currency = semGetCurrency(this._hass);
 
         // Temperature — may be unavailable
@@ -720,8 +724,10 @@ class SEMBatteryCard extends SEMLitBase {
         const pct = socShown.fraction;
         const arcOffset = (circumference * (1 - pct)).toFixed(1);
 
-        // Solar attribution
-        const solarPct = dailyCharge > 0 ? Math.round(solarToBatt / dailyCharge * 100) : 0;
+        // Solar attribution — (#1046) the split of the flows, not solar over
+        // the measured charge, which also counts cycles the flows missed.
+        const solarPct = dailyCharge > 0
+            ? Math.round(solarSharePct(solarToBatt, gridToBatt) ?? 0) : 0;
 
         // Session
         const sessionType = this._valStr('battery_session_type');

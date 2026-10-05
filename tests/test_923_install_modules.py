@@ -326,9 +326,10 @@ class TestPresenceOf:
         assert p[Module.BATTERY] is Presence.ABSENT
 
     def test_summary(self):
-        assert presence_summary({Module.BATTERY: Presence.ABSENT}) == {
-            "battery": "absent", "ev": "unknown", "heat_pump": "unknown",
-            "hot_water": "unknown"}
+        summary = presence_summary({Module.BATTERY: Presence.ABSENT})
+        assert summary["battery"] == "absent"
+        assert set(summary) == {m.value for m in Module}
+        assert set(summary.values()) == {"absent", "unknown"}
 
     def test_summary_round_trips(self):
         presence = {**all_unknown(), Module.BATTERY: Presence.ABSENT, Module.EV: Presence.PRESENT}

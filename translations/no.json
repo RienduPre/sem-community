@@ -242,6 +242,7 @@
           "demand_charge_rate": "Effekttariffsats",
           "update_interval": "Oppdateringsintervall (s)",
           "tariff_mode": "Tariffmodus",
+          "tariff_schedule_entity": "Tidsplan for høylast (Kalendermodus)",
           "dynamic_tariff_entity": "Entitet for dynamisk pris (oppdages automatisk hvis tom)",
           "dynamic_forecast_entity": "Entitet for prisprognose (valgfritt, oppdages automatisk hvis tom)",
           "dynamic_feedin_entity": "Entitet for innmatingspris (valgfri, for dynamisk eksportpris)",
@@ -258,6 +259,7 @@
           "demand_charge_rate": "Månedlig effektledd for topplast (valuta/kW/måned). Sett til 0 hvis avtalen din ikke har det.",
           "update_interval": "Hvor ofte SEM leser sensorer og justerer maskinvaren (sekunder). Område 10–60 s.",
           "tariff_mode": "Velg «Statisk» for faste priser, «Dynamisk» for sanntidspriser eller «Kalender» for tidsstyrte tariffer.",
+          "tariff_schedule_entity": "En Home Assistant Tidsplan-hjelper (schedule). Tidsblokkene er høylasttimene (HT); alle andre timer bruker nattsatsen.",
           "dynamic_tariff_entity": "Sensor som oppgir gjeldende importpris på strøm. Oppdages automatisk fra Tibber, Nordpool osv.",
           "dynamic_forecast_entity": "Valgfri sensor med timesprisprognoser som brukes til smart planlegging.",
           "dynamic_feedin_entity": "Valgfri sensor som oppgir gjeldende innmatings-/eksportpris for dynamisk eksportpris.",
@@ -689,7 +691,8 @@
       "heat_pump_no_control": "Configure at least one control path: both relays, a climate entity, or a service.",
       "heat_pump_service_invalid": "The SG-Ready service must be domain.service (e.g. ems_esp.send_command).",
       "heat_pump_service_data_invalid": "The SG-Ready service data must be a JSON object.",
-      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity."
+      "heat_pump_contact_values_missing": "This SG-Ready contact is a text/number/select entity, so SEM needs both the ON and the OFF value to write. Fill both, or pick a switch entity.",
+      "calendar_needs_schedule": "Kalendermodus trenger en tidsplan for høylast. Velg en Tidsplan-hjelper eller en annen tariffmodus."
     }
   },
   "entity": {
@@ -1371,6 +1374,15 @@
       },
       "house_meter_gap": {
         "name": "Husmåler-avvik"
+      },
+      "pv_health": {
+        "name": "PV-tilstand",
+        "state": {
+          "green": "God",
+          "yellow": "Middels",
+          "orange": "Svak",
+          "red": "Dårlig"
+        }
       }
     },
     "binary_sensor": {
@@ -1607,6 +1619,14 @@
           "4_hours": "4 timer",
           "8_hours": "8 timer",
           "12_hours": "12 timer"
+        }
+      },
+      "hints": {
+        "name": "Tips",
+        "state": {
+          "off": "Av",
+          "weekly": "Ukemelding",
+          "all": "Alle tips"
         }
       }
     },

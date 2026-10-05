@@ -42,6 +42,20 @@ forecast — plus **modules** for the hardware you own:
 | Heat pump | an SG-Ready relay, climate entity, SG-Ready service or heat-pump power/energy sensor is set | heat-pump status and energy entities |
 | Hot water | a hot-water entity is set | the tank's temperature and legionella settings |
 
+Controls follow the same rule (#996). A setting your house cannot use is
+not created, so nothing shows a live number that changes nothing:
+
+| Control | Appears when |
+|---|---|
+| Cheap / expensive price thresholds, next cheap window | the tariff mode is dynamic |
+| Export guard (switches, holds, state) | you name an export-limit entity, or SEM finds one on the inverter's device |
+| Forecast rows, forecast spending, charge pacing | a forecast entity is set, or SEM finds Solcast, Forecast.Solar or Open-Meteo |
+| kWh per kWp and the degradation trend | a plant size (kWp) is set |
+| ROI rows | an investment figure is set |
+
+Set the thing up and the control appears with one automatic reload. When
+SEM has not looked yet, it keeps the control rather than guess.
+
 A small install therefore has fewer entities, by design — a solar-only SEM
 has no `sensor.sem_battery_soc`. Add the hardware and its entities appear:
 through SEM's Configure screen at once, and for a battery you add to HA's
@@ -687,6 +701,10 @@ dashboards:
 | `sensor.sem_battery_capacity_drift_pct` | how far that measurement sits from the nameplate |
 | `sensor.sem_forecast_trust_d1` / `_d2` | how accurate tomorrow's and the day after's forecast have proven, 0–100 % |
 
+The measured size counts what your battery power sensor sees. When that sensor
+measures on the AC side, the size can read 5–10 % below the nameplate. That is
+conversion loss, not wear.
+
 **What the budget may be spent on**
 
 Two switches, and they are deliberately separate rather than one setting:
@@ -1230,6 +1248,26 @@ SEM supports active control of **multiple EV chargers** (v1.4.0+). Add chargers 
 
 **Per-charger features:** Each charger gets its own session tracking, stall detection, enable/disable delays, and taper detection. The primary charger (first configured) drives the EV Intelligence SOC tracking and charge skip decisions.
 
+### Session history and export
+
+SEM keeps the last 400 finished charging sessions: start, end, charger,
+energy, solar share, cost and duration. The EV tab shows them per charger
+with a month view and totals, and a CSV button.
+
+For your own log, call the service `solar_energy_management.export_session_history`
+from a script or automation. It returns the rows and the same rows as
+CSV text. Fields: `charger_id` (one charger), `since` (a date, `YYYY-MM-DD`).
+
+A session's energy is the charger's own meter: its session counter, or
+else the rise of its lifetime counter. Only a charger with neither falls
+back to SEM's own measurement of its power. SEM's power flows give the
+split into solar, grid and battery, scaled to that total, and the cost
+follows the split. The CSV column `energy_source` says which was used:
+`charger_meter`, `lifetime_delta` or `sem_estimate`.
+
+Sessions recorded before this version have no charger, cost or source
+stored; they show with those columns empty.
+
 ---
 
 ## Battery Discharge Protection
@@ -1582,11 +1620,7 @@ Any HA integration that exposes a price sensor works with SEM. If the sensor has
 
 ### Calendar tariffs (time-based HT/NT schedule)
 
-Set tariff mode to "Calendar" for custom time-of-use schedules. Define rules like "HT weekdays 07:00-20:00, NT otherwise". Features:
-- Swiss utility presets built in: EKZ, BKW, CKW, ewz
-- Custom weekly schedule via configurable rules
-- HA Schedule helper entity support
-- Holiday entity override (binary_sensor)
+Set tariff mode to "Calendar" for a fixed time-of-use tariff, then pick a HA Schedule helper in **Peak-time schedule** (Settings → Configure → Tariff). The helper's time blocks are the peak (HT) hours at the import rate; all other hours use the night rate. For "HT weekdays 07:00–20:00, NT otherwise", add a 07:00–20:00 block on Monday to Friday. Edit the helper to change the times. A holiday follows the schedule like any other day.
 
 ---
 
@@ -1600,6 +1634,61 @@ Install [Solcast PV Solar](https://github.com/BJReplay/ha-solcast-solar), [Forec
 - `sensor.sem_charging_recommendation` — suggested charging strategy
 - Forecast-based night target reduction
 - Smart battery redirect decisions in the flow calculator
+
+### Charge pacing on a real inverter (2.2, #820)
+
+Pacing writes the battery charge-power limit you named. Since 2.2 it writes
+on that entity's step (1400 W, not 1410 W), at most once every five minutes,
+and only for a real change. If your inverter applies its own number instead
+(you asked for 1550 W, it holds 1449 W), SEM accepts that and leaves it alone.
+If the register does not move at all for 90 seconds, SEM says so: the battery
+Diagnose button shows what the register holds and accepts, what SEM sent, and
+any line another integration logged about that entity, such as a template
+number that dropped the write ("set_value: Already running").
+
+### PV health
+
+`sensor.sem_pv_health` says whether the plant does what the forecast said.
+One colour, from the last seven days of yield against forecast:
+
+| colour | yield ÷ forecast |
+|---|---|
+| green | 85 % or more |
+| yellow | 65 % to 85 % |
+| orange | 40 % to 65 % |
+| red | under 40 % |
+
+The state is `unknown` until three days are in. Attributes: `ratio_7d`,
+`settled_days`, `downtime_min_today` (minutes the solar input reported
+nothing today), `days_since_full_yield` (last day at 90 % or more), and
+`snow` — on when it is freezing, the forecast says the plant should
+produce, and it has produced almost nothing for two hours. Snow needs an
+outdoor temperature source; without one it stays off. The Energy tab
+shows the row.
+
+---
+
+## Hints
+
+SEM can send a short sentence when something is off. One setting,
+**Hints** (`select.sem_hints`, Configuration tab → Notifications),
+decides which: **Off** (the default) sends none, **Weekly note** sends
+only the Sunday summary, **All hints** sends all five below. Every hint is one message per event, on its
+own phone channel (`sem_hints`) and as the event
+`solar_energy_management_notification` with `category: hint`, so an
+automation can use it without a phone.
+
+| hint | when | example |
+|---|---|---|
+| An input stopped sending | a sensor SEM reads has been silent for 15 minutes; again when it is back | "Solar power stopped sending 17 min ago." |
+| A load ran all night | at SEM's morning, when the night's draw was 1.5× the usual (and over 300 W) | "The house used 620 W all night, usually 210 W." |
+| Grid use rose | at SEM's night start, when today's grid use was 1.5× the usual with the same sun | "Grid use rose to 9.1 kWh (usually 4.2) with the same sun." |
+| Power is cheap, car idle | the price turned cheap while a car is plugged in and not charging (dynamic tariff only) | "Power is cheap now. Garage: plugged in and not charging." |
+| Weekly summary | the first night start on a Sunday | "This week: 142 kWh solar · 71 % self-use · 38 kWh from the grid · 24 kWh into the car · 12.40 CHF." |
+
+"Night start" and "morning" are SEM's own night window (sunset and
+sunrise, bounded by the night settings), not fixed hours. The
+comparisons need three past nights or days first.
 
 ---
 
@@ -1753,6 +1842,7 @@ big estimate is never treated as a measurement.
 - `sensor.sem_pv_performance_vs_forecast` — actual yield vs Solcast/Forecast.Solar prediction
 - `sensor.sem_pv_daily_specific_yield` — kWh per kWp installed
 - `sensor.sem_pv_estimated_annual_degradation` — long-term PV health
+- `sensor.sem_pv_health` — green / yellow / orange / red from seven days of yield against forecast (see [PV health](#pv-health))
 
 ### Charging Sensors
 - `sensor.sem_charging_state` — current charging state
