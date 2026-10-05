@@ -7,6 +7,7 @@
 
 import { SEMLitBase, html, css, svg, nothing } from '../base/sem-lit-base.js';
 import { semTheme, semFormatPower, semGetCurrency, semDefineCard } from '../base/sem-shared.js';
+import { peakLimitText } from '../util/peak-slot.js';
 
 const _t = (key, hass) => (typeof semLocalize === 'function') ? semLocalize(key, hass?.language) : key;
 
@@ -166,7 +167,7 @@ class SEMTabHeader extends SEMLitBase {
         if (tab === 'energy') return [g('daily_solar_energy'), g('daily_home_energy'), g('self_consumption_rate')].join(',');
         if (tab === 'battery') return [g('battery_soc'), g('battery_power'), g('battery_health_score')].join(',');
         if (tab === 'ev') return [g('ev_power'), g('daily_ev_energy'), g('charging_state')].join(',');
-        if (tab === 'control') return [g('target_peak_limit'), g('controllable_devices_count'), g('surplus_active_devices')].join(',');
+        if (tab === 'control') return [g('target_peak_limit'), hass.states[`${this._prefix}target_peak_limit`]?.attributes?.peak_limit_unlimited, g('controllable_devices_count'), g('surplus_active_devices')].join(',');
         if (tab === 'config') return [g('charging_state'), g('heat_pump_registered'), g('battery_status')].join(',');
         if (tab === 'costs') return [g('daily_costs'), g('daily_savings'), g('daily_net_cost')].join(',');
         if (tab === 'system') return [g('energy_optimization_score'), g('lifetime_total_savings'), g('lifetime_co2_avoided')].join(',');
@@ -218,7 +219,8 @@ class SEMTabHeader extends SEMLitBase {
             this._getState('session_energy', 0).toFixed(1) + ' kWh',
         ];
         if (tab === 'control') return [
-            this._getState('target_peak_limit', 5).toFixed(1) + ' kW',
+            peakLimitText(this._hass?.states[`${this._prefix}target_peak_limit`],
+                _t('uncapped', this._hass)),
             this._getState('controllable_devices_count', 0).toFixed(0),
             this._getState('surplus_active_devices', 0).toFixed(0),
         ];

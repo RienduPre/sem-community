@@ -23,6 +23,7 @@ from ..const import (
     DEFAULT_MAX_CHARGING_CURRENT,
     DEFAULT_PEAK_LIMIT_UNLIMITED,
     DEFAULT_PHASES,
+    DEFAULT_TARGET_PEAK_LIMIT,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_VOLTAGE_PER_PHASE,
 )
@@ -501,13 +502,28 @@ class EVControlMixin:
         """
         if self._peak_limit_unlimited():
             return math.inf
+        return self._target_peak_limit_kw() * 1000
+
+    def _target_peak_limit_kw(self) -> float:
+        """The saved grid ceiling in kW — always the number, never infinity.
+
+        (#1055) ONE reader for the EV sizing above AND the published
+        ``target_peak_limit`` sensor. The live LoadManagementCoordinator wins
+        (the slider writes through it without a reload); with load
+        management off there is none, and the saved option is the truth. The
+        sensor used to read the load manager only, so with it off the Control
+        tab showed the 5.0 kW dataclass default whatever the user saved —
+        while this method sized the car against the real value.
+        """
         if self._load_manager:
             try:
                 lm_info = self._load_manager.get_load_management_data()
-                return lm_info.get("target_peak_limit", 5.0) * 1000
+                return float(lm_info.get(
+                    "target_peak_limit", DEFAULT_TARGET_PEAK_LIMIT))
             except Exception:
                 pass
-        return self.config.get("target_peak_limit", 5.0) * 1000
+        return float(self.config.get(
+            "target_peak_limit", DEFAULT_TARGET_PEAK_LIMIT))
 
     def _planning_peak_w(self) -> float:
         """The peak level PLANNING may size against — cap minus hysteresis.
