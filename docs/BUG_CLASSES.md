@@ -3372,7 +3372,35 @@ on its own mode, dropped the switch, and five re-asserts later SEM filed
 `charger_actuation_failed` ("enable switch will not stay on") against healthy hardware — while the
 relay cycled once per coordinator cycle from UNDERNEATH #940's anti-cycle floor, whose clocks arm
 only on SEM's own operations and so never saw the box's opens.
-**Where it lives:** `coordinator/ev_taper_detector.py` (`_declining_phase`, `_full_confirm_count`,
+**Live catch (#820, 05.10.2026, ArneGollin1987's Sungrow — mkaiser template number):**
+`ChargePacingWriter._taken` — the verdict on ONE write (`last_written_w`) — was what `apply`
+published as the pacing action. One lost write (a Modbus error, a template script still running)
+left `write_refused` on the Battery tab while the register sat at exactly the cap SEM wanted: the
+re-solve came back to the register's value, nothing was left to write, and the old verdict was all
+the action could say. The same shape on the first cycle after a restart: a cap from disk that is not
+on the register was rewritten even when the register already held the wish — a write equal to the
+register never reads as taken, so a healthy inverter was "refusing" 90 s later. Closure: a register
+inside the writer's own deadband of the CURRENT cap is `held`. The verdict itself is kept — the
+02.10 rule that a refused cap is not sent again is keyed to it, and a register at the wish says
+nothing about whether it takes writes (review 2: retiring it re-sent refused caps every 5 minutes
+on a register that never takes one). Only the first cycle after adoption, where no write of this
+lifetime was judged, takes the register's value as the cap (`_take_register`, no write). A
+register away from the wish still says `write_refused`. Guard:
+`tests/test_820_refusal_belongs_to_its_write.py` — over seeded days of random caps and lost writes,
+`write_refused` never appears on a cycle where the register holds the wish, with liveness twins
+(refusals do happen, and a refused verdict does meet a register at the wish); the refused cap is
+still not re-sent; the restart case writes nothing.
+Siblings assessed: the battery adapters' `write_not_taken_strikes` (#915) raise a Repair keyed to
+the entity, and a same-value skip is no evidence either way, so the raise stays as it is — its
+install-wide clear is the known residual, class 84 (4). **Left for Guido:** (1) a refused cap is
+never sent again while the wish stays near it (the 02.10 rule, pinned by
+`test_a_refused_cap_is_not_retried_with_a_slightly_different_value`) — one lost Modbus write keeps
+the old cap until the wish moves; a single retry after `PACING_MIN_WRITE_INTERVAL_S` would close
+it, a policy call. (2) `coordinator/export_guard.py::report_refused` — one transient
+`export control failed` holds `refused` for the whole closed-meter window with no retry: one
+write's verdict standing for the window.
+**Where it lives:** `coordinator/charge_pacing.py::ChargePacingWriter.apply` (`_taken` vs the
+current cap), `coordinator/ev_taper_detector.py` (`_declining_phase`, `_full_confirm_count`,
 `_estimate_stop_bound`), `coordinator/ev_soc_need.py::estimate_stop_step`,
 `coordinator.py::_announce_estimate_stop`, `coordinator/charger_adapters/base.py::ensure_enabled`
 with `devices/base.py::CurrentControlDevice._session_active`. Sibling assessed and safe: the
