@@ -276,6 +276,30 @@ class TestThePlanReadsOneCapacity:
             assert "config.get('battery_capacity_kwh'" not in src, fn.__name__
 
 
+class TestWhenPlansRunIsUnchanged:
+
+    def test_the_ready_check_still_asks_the_saved_key(self):
+        """This fix changes what the card SHOWS, not when a plan runs. The
+        ready check reads the saved key; asking the module verdict there
+        would start plans (and plan actuation) on battery-less homes that
+        saved a size — a control change, left open on purpose (review of
+        #1063, finding 1)."""
+        src = inspect.getsource(SEMCoordinator._energy_plan_tick)
+        i = src.index("_batt_ready = (")
+        window = src[i:i + 200]
+        assert 'self.config.get("battery_capacity_kwh", 0)' in window, window
+
+
+def test_backfill_says_no_battery_before_it_tries():
+    """The backfill service on a home with no battery: the recorder never
+    runs there, so "try again later" would never come true. The ABSENT
+    answer comes before the rebuild is ever called."""
+    src = (REPO / "__init__.py").read_text(encoding="utf-8")
+    start = src.index("from .coordinator.night_backfill import run_backfill")
+    body = src[start:src.index("_night_backfill(", start + 60)]
+    assert "Presence.ABSENT" in body and "no battery" in body
+
+
 class TestNoSizeNoRedirect:
 
     def test_a_zero_size_keeps_the_charge(self):
