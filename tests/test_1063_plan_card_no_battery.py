@@ -15,8 +15,9 @@ Two roots, one shape — a battery claimed without proof:
 2. The card read "no home draw on the meter" as "the battery covers the
    house". A sun slot has no net draw either (the ledger sets it to 0), so
    on every home the sunny hours were painted as battery. The plan now says
-   per slot where the walk really drew the battery (``batt``) and the card
-   paints the battery only there (``util/plan-cover.js``, its own test).
+   per slot where the walk really drew the battery (``batt``; on the entity
+   as index runs, ``batt_runs``) and the card paints the battery only there
+   (``util/plan-cover.js``, its own test).
 
 Swept on the same card: the morning review's battery row. With the battery
 ABSENT every flow reads 0 and the SOC its 0.0 default, so the night
@@ -179,33 +180,53 @@ class TestTodayDrawsOnlyTheBatteryThePlanUsed:
         assert not any(s.get("batt") for s in plan["slots"])
 
 
+def _slot(batt=False):
+    s = {"start": "a", "end": "b", "price": 0.2, "cheap": False,
+         "home_w": 400.0, "soc_kwh": 5.0, "home_grid_w": 0.0}
+    if batt:
+        s["batt"] = True
+    return s
+
+
 class TestTheEntityCarriesIt:
 
-    def test_projection_keeps_the_mark_and_the_flag(self):
+    def test_the_marks_ride_as_index_runs(self):
+        attrs = _energy_plan_attrs({
+            "demands": [{"id": "load:pump"}], "has_battery": True,
+            "slots": [_slot(True), _slot(), _slot(True), _slot(True),
+                      _slot()]})
+        assert attrs["has_battery"] is True
+        assert attrs["batt_runs"] == [[0, 0], [2, 3]]
+        # The slots themselves carry no flag: runs are the whole answer.
+        assert not any("batt" in s for s in attrs["slots"])
+
+    def test_no_battery_no_runs(self):
         attrs = _energy_plan_attrs({
             "demands": [{"id": "load:pump"}], "has_battery": False,
-            "slots": [
-                {"start": "a", "end": "b", "price": 0.2, "cheap": False,
-                 "home_w": 400.0, "soc_kwh": 5.0, "home_grid_w": 0.0,
-                 "batt": True},
-                {"start": "b", "end": "c", "price": 0.2, "cheap": False,
-                 "home_w": 0.0, "soc_kwh": 5.0, "home_grid_w": 0.0},
-            ]})
-        assert attrs["has_battery"] is False
-        assert attrs["slots"][0]["batt"] is True
-        # Absent, not False: a slot without it costs the budget nothing.
-        assert "batt" not in attrs["slots"][1]
+            "slots": [_slot(), _slot()]})
+        assert attrs["has_battery"] is False and attrs["batt_runs"] == []
 
-    def test_a_marked_fifteen_minute_night_keeps_its_timeline(self):
-        """The mark rides every battery slot of a battery home; the real
-        15-minute night the budget was sized for still keeps its chart."""
-        plan = _synthetic_plan(slots=64, demands=6, blocks_per_demand=10)
-        for s in plan["slots"]:
-            s["batt"] = True
-        plan["has_battery"] = True
-        attrs = _energy_plan_attrs(plan)
-        assert not attrs.get("timeline_omitted")
-        assert all(s["batt"] for s in attrs["slots"])
+    def test_a_plan_from_before_the_fix_says_nothing(self):
+        """A stash restored after the update has no ``has_battery`` and no
+        marks. ``None`` (not ``[]``) lets the card keep its old drawing
+        instead of painting a battery home's night as sun."""
+        attrs = _energy_plan_attrs({
+            "demands": [{"id": "load:pump"}], "slots": [_slot(), _slot()]})
+        assert attrs["batt_runs"] is None and attrs["has_battery"] is None
+
+    def test_the_runs_cost_the_budget_almost_nothing(self):
+        """A flag per slot cost 14 bytes each and pushed a 15-minute day
+        over the recorder budget (review of #1063). Runs cost a few."""
+        def size(mark):
+            plan = _synthetic_plan(slots=96, demands=5, blocks_per_demand=10)
+            plan["has_battery"] = True
+            for i, s in enumerate(plan["slots"]):
+                if mark and i >= 40:
+                    s["batt"] = True
+            attrs = _energy_plan_attrs(plan)
+            assert not attrs.get("timeline_omitted")
+            return len(json.dumps(attrs, default=str))
+        assert size(True) - size(False) <= 12
 
 
 # ---------------------------------------------------------------------------
@@ -249,11 +270,25 @@ class TestThePlanReadsOneCapacity:
         """The saved key never said "no battery" (the settings step saves
         one everywhere). Every planner surface asks the property."""
         for fn in (SEMCoordinator._shadow_energy_plan,
-                   SEMCoordinator._compose_tomorrow_preview,
-                   SEMCoordinator._energy_plan_tick):
+                   SEMCoordinator._compose_tomorrow_preview):
             src = inspect.getsource(fn)
             assert 'config.get("battery_capacity_kwh"' not in src, fn.__name__
             assert "config.get('battery_capacity_kwh'" not in src, fn.__name__
+
+
+class TestNoSizeNoRedirect:
+
+    def test_a_zero_size_keeps_the_charge(self):
+        """0 kWh is the ABSENT answer. A battery added since reads as
+        charging until the reload takes it in; a need of 0 must not read as
+        "full" and hand its whole charge to the car (review of #1063)."""
+        from custom_components.solar_energy_management.coordinator.flow_calculator import (
+            battery_redirect_w,
+        )
+        assert battery_redirect_w(2700.0, 90.0, 0.0, 30.0) == 0
+        assert battery_redirect_w(2700.0, 90.0, 0.0, 0.0) == 0
+        # Not vacuous: a known size still redirects.
+        assert battery_redirect_w(2700.0, 90.0, 15.0, 30.0) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -337,3 +372,4 @@ def test_the_bundle_carries_the_fix():
         encoding="utf-8")
     assert "energy_plan_legend_sun" in dist
     assert "mdi:home-battery" in dist and "has_battery" in dist
+    assert "batt_runs" in dist

@@ -21,7 +21,7 @@
 import { SEMLitBase, html, css, nothing } from '../base/sem-lit-base.js';
 import { semDefineCard, semFormatTime, semGetCurrency } from '../base/sem-shared.js';
 import { demandName } from '../util/demand-name.js';
-import { homeCover } from '../util/plan-cover.js';
+import { battIndexes, homeCover } from '../util/plan-cover.js';
 
 const DEFAULT_ENTITY = 'sensor.sem_energy_plan';
 
@@ -189,10 +189,11 @@ class SEMEnergyPlanCard extends SEMLitBase {
     }
 
     // Merge consecutive slots that share a predicate into % runs on the axis.
+    // ``pick`` gets the slot and its index.
     _runs(slots, t0, span, pick) {
         const out = [];
-        for (const s of slots) {
-            const v = pick(s);
+        for (const [i, s] of slots.entries()) {
+            const v = pick(s, i);
             const start = Date.parse(s.start);
             const end = Date.parse(s.end);
             if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
@@ -614,7 +615,9 @@ class SEMEnergyPlanCard extends SEMLitBase {
         })).filter(t => t.left <= 94);
 
         // (#1063) grid / batt / sun per slot — see util/plan-cover.js.
-        const homeRuns = this._runs(slots, t0, span, homeCover);
+        const battAt = battIndexes(a.batt_runs);
+        const homeRuns = this._runs(slots, t0, span,
+            (s, i) => homeCover(s, battAt ? battAt.has(i) : undefined));
         const drawn = new Set(homeRuns.map(r => r.v));
         // (#1063) A plan that walked no battery has no hand-over to show,
         // and its Home row wears a house, not a battery. An older payload

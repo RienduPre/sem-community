@@ -9669,11 +9669,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 # actually at 63 %. A silent sensor is not an empty
                 # battery (#638 finding #3) — wait for the reading; the
                 # no-battery install shape (capacity 0) stamps normally.
-                # (#1063) The capacity the plan walks with, not the saved
-                # key: the settings step saves one on every install, so the
-                # key never said "no battery".
                 _batt_ready = (
-                    float(getattr(self, "battery_capacity_kwh", 0.0) or 0.0) <= 0
+                    float(self.config.get("battery_capacity_kwh", 0) or 0) <= 0
                     or not getattr(power, "battery_soc_unavailable", False)  # DARK-SOC: plan — a skipped rebuild retries next cycle
                 )
                 if _batt_ready and self._shadow_energy_plan(
@@ -10108,8 +10105,8 @@ class SEMCoordinator(DataUpdateCoordinator, EVControlMixin):
                 the house: a sun slot has no net draw at all. ``batt`` is
                 set only where the walk really drew the battery for the
                 house, so the card never paints a battery the plan did not
-                use — on a home with none, never. Absent rather than False:
-                the recorder budget pays for every slot.
+                use — on a home with none, never. The entity carries the
+                marks as index runs (``sensor._batt_runs``), not per slot.
                 """
                 return [{
                     "start": s.start.isoformat(),
