@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
+- 🌍 **Dutch: 15 more dashboard texts** — thanks @RienduPre. (#1056)
+
 - 🐛 **Heat pump and hot water names follow your language** (#1053). A Dutch home now reads "Warmtepomp", not "Heat Pump". A name you set stays.
 
 - 🐛 **The Control tab shows your saved grid limit** (#1055). With load management off it always showed 5 kW, even when set to no limit.
