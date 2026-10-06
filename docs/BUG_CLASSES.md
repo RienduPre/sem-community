@@ -3380,13 +3380,16 @@ re-solve came back to the register's value, nothing was left to write, and the o
 the action could say. The same shape on the first cycle after a restart: a cap from disk that is not
 on the register was rewritten even when the register already held the wish — a write equal to the
 register never reads as taken, so a healthy inverter was "refusing" 90 s later. Closure: a register
-inside the writer's own deadband of the CURRENT cap is `held`, and under a verdict about another
-write (refused, or the cap from disk) that value BECOMES the cap (`_take_register`: taken, no write,
-the interval still counts from the last real write). A register away from it still says
-`write_refused`. Guard: `tests/test_820_refusal_belongs_to_its_write.py` — over seeded days of
-random caps and lost writes, `write_refused` never appears on a cycle where the register holds the
-wish, with liveness twins (refusals do happen, and a refused verdict does meet a register at the
-wish); a cap jittering around the register does not flicker; the restart case writes nothing.
+inside the writer's own deadband of the CURRENT cap is `held`. The verdict itself is kept — the
+02.10 rule that a refused cap is not sent again is keyed to it, and a register at the wish says
+nothing about whether it takes writes (review 2: retiring it re-sent refused caps every 5 minutes
+on a register that never takes one). Only the first cycle after adoption, where no write of this
+lifetime was judged, takes the register's value as the cap (`_take_register`, no write). A
+register away from the wish still says `write_refused`. Guard:
+`tests/test_820_refusal_belongs_to_its_write.py` — over seeded days of random caps and lost writes,
+`write_refused` never appears on a cycle where the register holds the wish, with liveness twins
+(refusals do happen, and a refused verdict does meet a register at the wish); the refused cap is
+still not re-sent; the restart case writes nothing.
 Siblings assessed: the battery adapters' `write_not_taken_strikes` (#915) raise a Repair keyed to
 the entity, and a same-value skip is no evidence either way, so the raise stays as it is — its
 install-wide clear is the known residual, class 84 (4). **Left for Guido:** (1) a refused cap is

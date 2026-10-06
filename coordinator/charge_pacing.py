@@ -454,9 +454,10 @@ class ChargePacingWriter:
             # A verdict is about ONE write, ``last_written_w``; the action
             # says what pacing is doing. Arne's register sat at 1700 W, the
             # cap SEM wanted, while the card said "the inverter refused the
-            # limit" — about an older write that was lost.
-            if verdict == "refused":
-                await self._take_register(entity_id, register_w)
+            # limit" — about an older write that was lost. The verdict
+            # itself stays: the 02.10 rule (a refused cap is not sent
+            # again) is keyed to it, and the register being at the wish
+            # says nothing about whether it takes writes.
             return "held"
         # (#820, 02.10, decision) SEM rewrites when (a) the NEW cap differs
         # from the last SENT cap by more than the deadband — a refused cap
@@ -576,15 +577,16 @@ class ChargePacingWriter:
         return "wrote"
 
     async def _take_register(self, entity_id: str, register_w: float) -> None:
-        """(#820, 06.10, bug class 83) The register holds a value inside the
-        deadband of the cap SEM wants now, under a verdict about ANOTHER
-        write — a lost one, or a cap from disk that is not on the wire.
-        That value becomes SEM's cap, as if written and seen taken. No write
-        goes out and the interval still counts from the last real one.
+        """(#820, 06.10, bug class 83) First cycle after adoption: the cap
+        from disk is not on the register, but the register holds a value
+        inside the deadband of the cap SEM wants now. That value becomes
+        SEM's cap, as if written and seen taken; no write goes out.
 
-        Without this the old verdict stayed: the card flipped between
-        "held" and "refused" as the cap jittered around the register, and
-        the next real change was measured against a write that is gone."""
+        Only here, where no write of this lifetime was judged: writing the
+        register its own value can never read as taken (it does not
+        change), so a healthy inverter was "refusing" 90 s later. A cap
+        REFUSED in this lifetime is never retired this way — the 02.10
+        rule that it is not sent again is keyed to that verdict."""
         self.last_written_w = register_w
         self._own_cap_w = register_w
         self._pre_write_w = None

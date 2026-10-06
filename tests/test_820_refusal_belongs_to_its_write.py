@@ -173,39 +173,36 @@ class TestTheRegisterAtTheWishIsHeld:
         assert set(out) == {"held"}
         assert w._taken is True and w._accepted_w == 1500.0
 
-    def test_the_register_at_the_wish_becomes_the_cap(self):
-        """The old verdict is retired, not only hidden: the register's value
-        is SEM's cap now, the log says the register holds the cap, and the
-        next real change is measured from it — one write, not a stuck
-        refusal against a write that is gone."""
+    def test_the_verdict_is_kept_so_the_refused_cap_is_not_sent_again(self):
+        """Held at the wish is about the ACTION only. The 02.10 rule — a
+        refused cap is not sent again while the wish stays near it — is
+        keyed to the verdict, so the wish going back to 1500 W says refused
+        and writes nothing, an hour later too (review 2, 06.10: retiring
+        the verdict re-sent refused caps up to every 5 minutes on a
+        register that never takes a write)."""
         clock, reg, w, h = _refused_at_1700_wanting_1500()
         assert set(_cycles(w, h, clock, 1750.0, 3)) == {"held"}
-        assert w.last_written_w == 1700.0 and w._taken is True
-        assert w._own_cap_w == 1700.0 and w._accepted_w == 1700.0
+        assert w._taken is False and w.last_written_w == 1500.0
         writes = len(reg.writes)
-        clock.t += 300.0
-        out = _cycles(w, h, clock, 1550.0, 6)
-        assert out[0] == "wrote" and set(out[1:]) == {"held"}, out
-        assert reg.writes[writes:] == [1500.0]
-        assert reg.watts == 1500.0
+        out = _cycles(w, h, clock, 1550.0, 60, every_s=60.0)
+        assert set(out) == {"write_refused"}, out
+        assert len(reg.writes) == writes
 
-    def test_a_cap_jittering_around_the_register_does_not_flicker(self):
-        """Review (06.10): 1500 W lost, 1700 W held, the cap jitters
-        1590↔1610 W — on the step grid, 1500 and 1600. Hiding the verdict
-        only at the wish flipped the card held↔refused about 24 times an
-        hour. Retired at the first cycle at the wish, it stays held, and
-        the 5-minute write interval still bounds the writes."""
+    def test_a_cap_jittering_across_the_register_writes_nothing(self):
+        """1500 W lost, 1700 W held, the cap jitters 1590↔1610 W — on the
+        step grid 1500 (refused, register away) and 1600 (register at the
+        wish). The action follows the truth of each cycle; no write goes
+        out. (The sensor's recorded ``cap_w`` attribute moves with the
+        same jitter, so the action adds no recorder rows of its own.)"""
         clock, reg, w, h = _refused_at_1700_wanting_1500()
         writes = len(reg.writes)
-        out = []
         for i in range(360):
             clock.t += 10.0
-            out.append(_run(w.apply(h, ENTITY, 1610.0 if i % 2 else 1590.0,
-                                    observer=False, hw_max_w=5000.0)))
-        first_held = out.index("held")
-        assert first_held <= 1, out[:4]
-        assert "write_refused" not in out[first_held:], out
-        assert len(reg.writes) - writes <= 1, reg.writes[writes:]
+            cap = 1610.0 if i % 2 else 1590.0
+            out = _run(w.apply(h, ENTITY, cap, observer=False,
+                               hw_max_w=5000.0))
+            assert out == ("held" if cap == 1610.0 else "write_refused"), (i, out)
+        assert len(reg.writes) == writes
 
 
 class TestAfterARestart:
