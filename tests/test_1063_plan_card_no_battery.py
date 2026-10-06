@@ -26,7 +26,6 @@ kWh overnight — the promised refill never came".
 """
 from __future__ import annotations
 
-import inspect
 import json
 from datetime import datetime
 from pathlib import Path
@@ -233,8 +232,10 @@ class TestTheEntityCarriesIt:
 # Tomorrow: no battery row
 # ---------------------------------------------------------------------------
 
-def _preview(capacity_kwh, soc=0.0):
+def _preview(capacity_kwh, soc=0.0, saved=None):
     fake = _fake_self(devices=[_fake_load()])
+    if saved is not None:
+        fake.config["battery_capacity_kwh"] = saved
     fake.time_manager = _DayCapableTime()
     # The reporter's tomorrow: 15.4 kWh of sun.
     fake._forecast_reader = SimpleNamespace(
@@ -265,39 +266,62 @@ class TestTomorrowHasNoBatteryRow:
 
 
 class TestThePlanReadsOneCapacity:
+    """The saved key never said "no battery" (the settings step saves one
+    everywhere). Both planner surfaces ask the property — with a saved
+    15 kWh and no battery, neither walks one."""
 
-    def test_no_planner_surface_asks_the_saved_key(self):
-        """The saved key never said "no battery" (the settings step saves
-        one everywhere). Every planner surface asks the property."""
-        for fn in (SEMCoordinator._shadow_energy_plan,
-                   SEMCoordinator._compose_tomorrow_preview):
-            src = inspect.getsource(fn)
-            assert 'config.get("battery_capacity_kwh"' not in src, fn.__name__
-            assert "config.get('battery_capacity_kwh'" not in src, fn.__name__
+    def test_today(self, freeze_targets, monkeypatch):
+        fake = _day_fake(_capacity(ABSENT, 15.0))
+        fake.config["battery_capacity_kwh"] = 15.0
+        plan = _stamp_at_14(monkeypatch, fake, soc=0.0)
+        assert plan["has_battery"] is False
+
+    def test_tomorrow(self, freeze_targets):
+        prov = _preview(_capacity(ABSENT, 15.0), saved=15.0)
+        assert prov["soc_curve"] == []
 
 
 class TestWhenPlansRunIsUnchanged:
+    """This fix changes what the card SHOWS, not when a plan runs. The
+    ready check still reads the saved key: asking the module verdict there
+    would start plans (and plan actuation) on battery-less homes that saved
+    a size — a control change, left open on purpose (review of #1063)."""
 
-    def test_the_ready_check_still_asks_the_saved_key(self):
-        """This fix changes what the card SHOWS, not when a plan runs. The
-        ready check reads the saved key; asking the module verdict there
-        would start plans (and plan actuation) on battery-less homes that
-        saved a size — a control change, left open on purpose (review of
-        #1063, finding 1)."""
-        src = inspect.getsource(SEMCoordinator._energy_plan_tick)
-        i = src.index("_batt_ready = (")
-        window = src[i:i + 200]
-        assert 'self.config.get("battery_capacity_kwh", 0)' in window, window
+    @staticmethod
+    def _tick_tries_a_stamp(presence, saved):
+        tried = []
+        fake = MagicMock()
+        fake.config = {} if saved is None else {"battery_capacity_kwh": saved}
+        fake.setup_presence = presence
+        fake._detected_battery_capacity_kwh = None
+        fake._sensor_reader = SimpleNamespace(
+            auto_detect_battery_capacity_kwh=lambda: None)
+        fake._runtimes_restored = True
+        fake._shadow_plan_date = None
+        fake._plan_ev_conn_sig = None
+        fake._manual_replan_requested = False
+        fake._surplus_controller = None
+        fake.time_manager.get_night_end_time.return_value = "07:00"
+        fake._energy_plan_demand_signature.return_value = ("sig",)
+        type(fake).battery_capacity_kwh = property(
+            lambda s: SEMCoordinator.battery_capacity_kwh.fget(s))
 
+        def _shadow(*a, **k):
+            tried.append(1)
+            return False
+        fake._shadow_energy_plan.side_effect = _shadow
+        # A home with no battery: the SOC reads unavailable every cycle.
+        power = SimpleNamespace(battery_soc=0.0, battery_soc_unavailable=True)
+        SEMCoordinator._energy_plan_tick(fake, power, MagicMock())
+        return bool(tried)
 
-def test_backfill_says_no_battery_before_it_tries():
-    """The backfill service on a home with no battery: the recorder never
-    runs there, so "try again later" would never come true. The ABSENT
-    answer comes before the rebuild is ever called."""
-    src = (REPO / "__init__.py").read_text(encoding="utf-8")
-    start = src.index("from .coordinator.night_backfill import run_backfill")
-    body = src[start:src.index("_night_backfill(", start + 60)]
-    assert "Presence.ABSENT" in body and "no battery" in body
+    def test_a_saved_size_still_waits_for_a_soc(self):
+        assert self._tick_tries_a_stamp(ABSENT, 15.0) is False
+        assert self._tick_tries_a_stamp(None, 15.0) is False
+
+    def test_no_saved_size_stamps_as_before(self):
+        assert self._tick_tries_a_stamp(ABSENT, None) is True
+        assert self._tick_tries_a_stamp(PRESENT, None) is True
 
 
 class TestNoSizeNoRedirect:
