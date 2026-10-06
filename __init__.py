@@ -3759,6 +3759,14 @@ async def _async_register_services(
 
         days = call.data.get("days") or 365
         tracker = getattr(coordinator, "_battery_night", None)
+        from .coordinator.install_modules import Module, Presence, presence_of
+        if presence_of(coordinator).get(Module.BATTERY) is Presence.ABSENT:
+            # (#1063) No battery, no battery nights — the recorder skips
+            # such a home, so "try again later" would never come true.
+            _LOGGER.warning(
+                "backfill_battery_nights: this install has no battery — "
+                "there are no battery nights to rebuild")
+            return
         if tracker is None:
             _LOGGER.warning(
                 "backfill_battery_nights: no night tracker on the coordinator "
