@@ -169,12 +169,19 @@ def _energy_plan_attrs(
             "start": s.get("start"), "end": s.get("end"),
             "price": s.get("price"), "cheap": s.get("cheap"),
             "home_grid_w": s.get("home_grid_w"),
+            # (#1063) only where the battery covered the house — absent,
+            # not False, so a slot without it costs the budget nothing.
+            **({"batt": True} if s.get("batt") else {}),
         } for s in (plan.get("slots") or [])],
         "blocks": _merge_plan_blocks(plan.get("blocks")),
         # A string here means the battery figures behind this plan came from
         # a SUBSET of the fleet (#638 finding #3) — the card says so rather
         # than presenting a degraded plan as a healthy one.
         "battery_fleet_partial": plan.get("battery_fleet_partial"),
+        # (#1063) False on a home with no battery — the card drops the
+        # battery icon and the hand-over time. Missing (an older stash)
+        # reads as True there, the old drawing.
+        "has_battery": plan.get("has_battery"),
         # (#638 G4) True while the actuation switch is on — the plan's
         # blocks feed the night signals; the card swaps its shadow chip.
         "actuation": bool(plan.get("actuation", False)),
