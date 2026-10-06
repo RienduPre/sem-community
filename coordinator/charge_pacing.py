@@ -429,8 +429,18 @@ class ChargePacingWriter:
             await self._remember(entity_id)
         first_after_adoption = self._adopt_check
         self._adopt_check = False
+        # (#820, 06.10, bug class 83) The register already holds the cap SEM
+        # wants NOW — inside the same deadband every write is gated on.
+        at_wish = abs(register_w - target_w) <= deadband
         if verdict == "pending":
             if first_after_adoption:
+                if at_wish:
+                    # The cap from disk is not on the register, but what
+                    # SEM wants is: nothing to write. Writing it anyway
+                    # sent the register its own value, which can never
+                    # read as taken (review, 06.10).
+                    await self._take_register(entity_id, register_w)
+                    return "held"
                 # (review 3) The first reading after adoption is out of the
                 # band. If it also left the value the register had settled
                 # at, someone moved it while SEM was away (down, or
@@ -439,6 +449,14 @@ class ChargePacingWriter:
                 if acc is None or abs(register_w - acc) > deadband:
                     return await self._write(hass, entity_id, native,
                                              target_w, register_w, now)
+            return "held"
+        if at_wish:
+            # A verdict is about ONE write, ``last_written_w``; the action
+            # says what pacing is doing. Arne's register sat at 1700 W, the
+            # cap SEM wanted, while the card said "the inverter refused the
+            # limit" — about an older write that was lost.
+            if verdict == "refused":
+                await self._take_register(entity_id, register_w)
             return "held"
         # (#820, 02.10, decision) SEM rewrites when (a) the NEW cap differs
         # from the last SENT cap by more than the deadband — a refused cap
@@ -451,13 +469,6 @@ class ChargePacingWriter:
         moved_by_someone = (
             self._taken is True and self._accepted_w is not None
             and abs(register_w - self._accepted_w) > deadband)
-        if abs(register_w - target_w) <= deadband:
-            # (#820, 06.10, bug class 83) The register holds the cap SEM
-            # wants NOW. The verdict is about ONE write, ``last_written_w``;
-            # the action says what pacing is doing. Arne's register sat at
-            # 1700 W, the cap SEM wanted, while the card said "the inverter
-            # refused the limit" — about an older write that was lost.
-            return "held"
         settled = "held" if self._taken else "write_refused"
         if not (wish_changed or moved_by_someone):
             return settled
@@ -563,6 +574,26 @@ class ChargePacingWriter:
             {"entity_id": entity_id, "value": native},
             blocking=False)
         return "wrote"
+
+    async def _take_register(self, entity_id: str, register_w: float) -> None:
+        """(#820, 06.10, bug class 83) The register holds a value inside the
+        deadband of the cap SEM wants now, under a verdict about ANOTHER
+        write — a lost one, or a cap from disk that is not on the wire.
+        That value becomes SEM's cap, as if written and seen taken. No write
+        goes out and the interval still counts from the last real one.
+
+        Without this the old verdict stayed: the card flipped between
+        "held" and "refused" as the cap jittered around the register, and
+        the next real change was measured against a write that is gone."""
+        self.last_written_w = register_w
+        self._own_cap_w = register_w
+        self._pre_write_w = None
+        self._accepted_w = register_w
+        self._taken = True
+        self.applied_differs = None
+        self._last_in_band_w = None
+        self._confirm(entity_id)
+        await self._remember(entity_id)
 
     def _confirm(self, entity_id: str) -> None:
         """The register shows SEM's cap: a refusal, if one was logged, is

@@ -173,6 +173,96 @@ class TestTheRegisterAtTheWishIsHeld:
         assert set(out) == {"held"}
         assert w._taken is True and w._accepted_w == 1500.0
 
+    def test_the_register_at_the_wish_becomes_the_cap(self):
+        """The old verdict is retired, not only hidden: the register's value
+        is SEM's cap now, the log says the register holds the cap, and the
+        next real change is measured from it — one write, not a stuck
+        refusal against a write that is gone."""
+        clock, reg, w, h = _refused_at_1700_wanting_1500()
+        assert set(_cycles(w, h, clock, 1750.0, 3)) == {"held"}
+        assert w.last_written_w == 1700.0 and w._taken is True
+        assert w._own_cap_w == 1700.0 and w._accepted_w == 1700.0
+        writes = len(reg.writes)
+        clock.t += 300.0
+        out = _cycles(w, h, clock, 1550.0, 6)
+        assert out[0] == "wrote" and set(out[1:]) == {"held"}, out
+        assert reg.writes[writes:] == [1500.0]
+        assert reg.watts == 1500.0
+
+    def test_a_cap_jittering_around_the_register_does_not_flicker(self):
+        """Review (06.10): 1500 W lost, 1700 W held, the cap jitters
+        1590↔1610 W — on the step grid, 1500 and 1600. Hiding the verdict
+        only at the wish flipped the card held↔refused about 24 times an
+        hour. Retired at the first cycle at the wish, it stays held, and
+        the 5-minute write interval still bounds the writes."""
+        clock, reg, w, h = _refused_at_1700_wanting_1500()
+        writes = len(reg.writes)
+        out = []
+        for i in range(360):
+            clock.t += 10.0
+            out.append(_run(w.apply(h, ENTITY, 1610.0 if i % 2 else 1590.0,
+                                    observer=False, hw_max_w=5000.0)))
+        first_held = out.index("held")
+        assert first_held <= 1, out[:4]
+        assert "write_refused" not in out[first_held:], out
+        assert len(reg.writes) - writes <= 1, reg.writes[writes:]
+
+
+class TestAfterARestart:
+    """Review (06.10): the first cycle after adoption wrote whenever the
+    register was out of the persisted cap's band — even when the register
+    already held what SEM wants. A write equal to the register can never
+    read as taken (it does not change), so 90 s later a healthy inverter
+    was 'refusing', and inside the write interval the card said so."""
+
+    class Store:
+        def __init__(self, record):
+            self.record = dict(record)
+
+        async def async_load(self):
+            return dict(self.record)
+
+        async def async_save(self, data):
+            self.record = dict(data)
+
+        async def async_remove(self):
+            self.record = None
+
+    def test_a_register_at_the_wish_is_taken_without_a_write(self):
+        clock = Clock()
+        reg = SungrowTemplateNumber(1700.0)
+        store = self.Store({"entity_id": ENTITY, "restore_value": 9720.0,
+                            "cap_w": 1500.0, "accepted_w": None,
+                            "applied_differs": None})
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        out = _cycles(w, h, clock, 1750.0, 12)
+        assert set(out) == {"held"}, out
+        assert reg.writes == [], "the register already holds the cap"
+        assert w._taken is True and w.last_written_w == 1700.0
+        assert store.record["cap_w"] == 1700.0
+        assert store.record["restore_value"] == 9720.0
+        # the cap moves: one write at once (no real write yet, no interval)
+        out = _cycles(w, h, clock, 1550.0, 12)
+        assert "write_refused" not in out, out
+        assert reg.writes == [1500.0]
+
+    def test_a_register_away_from_the_wish_is_still_rewritten(self):
+        """The review-3 rule is kept: moved while SEM was away, and not at
+        the wish — one rewrite at once."""
+        clock = Clock()
+        reg = SungrowTemplateNumber(3000.0)
+        store = self.Store({"entity_id": ENTITY, "restore_value": 9720.0,
+                            "cap_w": 1500.0, "accepted_w": 1500.0,
+                            "applied_differs": None})
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        out = _cycles(w, h, clock, 1750.0, 6)
+        assert out[0] == "wrote" and set(out[1:]) == {"held"}, out
+        assert reg.writes == [1700.0]
+
 
 class TestNeverRefusedAtTheWish:
     """The property, over a day of random wishes and lost writes: the
@@ -197,6 +287,7 @@ class TestNeverRefusedAtTheWish:
             cap = max(300.0, min(5000.0, cap + rnd.uniform(-40.0, 40.0)))
             if rnd.random() < 0.1:
                 reg.drop = 1
+            was_refused = w._taken is False
             action = _run(w.apply(h, ENTITY, cap, observer=False,
                                   hw_max_w=5000.0))
             wish = (int(cap) // 100) * 100.0
@@ -204,7 +295,7 @@ class TestNeverRefusedAtTheWish:
             if action == "write_refused":
                 refused += 1
                 assert not at_wish, (reg.watts, wish, w.last_written_w)
-            if at_wish and w._taken is False:
+            if at_wish and was_refused:
                 refused_verdict_at_wish += 1
         assert refused > 0, "no lost write was ever judged — vacuous"
         assert refused_verdict_at_wish > 0, (
