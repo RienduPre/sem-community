@@ -13,11 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # [Unreleased]
 
-<<<<<<< HEAD
 - 🌍 **Dutch: 15 more dashboard texts** — thanks @RienduPre. (#1056)
-=======
+
 # [2.2.0-beta.12] — 06.10.2026
->>>>>>> origin/develop
 
 - 🐛 **Heat pump and hot water names follow your language** (#1053). A Dutch home now reads "Warmtepomp", not "Heat Pump". A name you set stays.
 
