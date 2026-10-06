@@ -3372,7 +3372,21 @@ on its own mode, dropped the switch, and five re-asserts later SEM filed
 `charger_actuation_failed` ("enable switch will not stay on") against healthy hardware — while the
 relay cycled once per coordinator cycle from UNDERNEATH #940's anti-cycle floor, whose clocks arm
 only on SEM's own operations and so never saw the box's opens.
-**Where it lives:** `coordinator/ev_taper_detector.py` (`_declining_phase`, `_full_confirm_count`,
+**Live catch (#820, 05.10.2026, ArneGollin1987's Sungrow — mkaiser template number):**
+`ChargePacingWriter._taken` — the verdict on ONE write (`last_written_w`) — was what `apply`
+published as the pacing action. One lost write (a Modbus error, a template script still running)
+left `write_refused` on the Battery tab while the register sat at exactly the cap SEM wanted: the
+re-solve came back to the register's value, nothing was left to write, and the old verdict was all
+the action could say. Closure: a register inside the writer's own deadband of the CURRENT cap is
+`held`, whatever an older write's verdict was; a register away from it still says `write_refused`.
+Guard: `tests/test_820_refusal_belongs_to_its_write.py` — over seeded days of random caps and lost
+writes, `write_refused` never appears on a cycle where the register holds the wish, with liveness
+twins (refusals do happen, and a refused verdict does meet a register at the wish). Sibling assessed
+and different: the battery adapters' `write_not_taken_strikes` (#915) — that Repair asks whether
+the ENTITY takes writes, and a same-value skip is no evidence either way, so it stays keyed to the
+entity.
+**Where it lives:** `coordinator/charge_pacing.py::ChargePacingWriter.apply` (`_taken` vs the
+current cap), `coordinator/ev_taper_detector.py` (`_declining_phase`, `_full_confirm_count`,
 `_estimate_stop_bound`), `coordinator/ev_soc_need.py::estimate_stop_step`,
 `coordinator.py::_announce_estimate_stop`, `coordinator/charger_adapters/base.py::ensure_enabled`
 with `devices/base.py::CurrentControlDevice._session_active`. Sibling assessed and safe: the

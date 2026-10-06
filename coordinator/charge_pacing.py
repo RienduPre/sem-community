@@ -250,7 +250,8 @@ class ChargePacingWriter:
       non-blocking call never hears it), the repeat check compares with
       what the register holds (100 W, or one step if coarser), and a
       write the register never takes is reported as ``write_refused`` —
-      once, never re-sent every cycle (#538);
+      once, never re-sent every cycle (#538), and only while the register
+      is away from the cap SEM wants now (a verdict is about one write);
     * a release gives the pack the larger of the captured value and the
       hardware maximum, clamped to the register: below the buffer means
       full power, and a capture of SEM's own cap is never taken for the
@@ -450,10 +451,15 @@ class ChargePacingWriter:
         moved_by_someone = (
             self._taken is True and self._accepted_w is not None
             and abs(register_w - self._accepted_w) > deadband)
+        if abs(register_w - target_w) <= deadband:
+            # (#820, 06.10, bug class 83) The register holds the cap SEM
+            # wants NOW. The verdict is about ONE write, ``last_written_w``;
+            # the action says what pacing is doing. Arne's register sat at
+            # 1700 W, the cap SEM wanted, while the card said "the inverter
+            # refused the limit" — about an older write that was lost.
+            return "held"
         settled = "held" if self._taken else "write_refused"
         if not (wish_changed or moved_by_someone):
-            return settled
-        if abs(register_w - target_w) <= deadband:
             return settled
         if (self._write_at is not None
                 and now - self._write_at < PACING_MIN_WRITE_INTERVAL_S):
