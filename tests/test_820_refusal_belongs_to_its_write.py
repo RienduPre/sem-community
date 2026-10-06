@@ -210,7 +210,7 @@ class TestAfterARestart:
     register was out of the persisted cap's band — even when the register
     already held what SEM wants. A write equal to the register can never
     read as taken (it does not change), so 90 s later a healthy inverter
-    was 'refusing', and inside the write interval the card said so."""
+    was 'refusing'."""
 
     class Store:
         def __init__(self, record):
@@ -244,6 +244,33 @@ class TestAfterARestart:
         out = _cycles(w, h, clock, 1550.0, 12)
         assert "write_refused" not in out, out
         assert reg.writes == [1500.0]
+
+    def test_a_register_back_at_the_users_value_is_not_taken(self):
+        """Review 3 (06.10): SEM captured the user's 5000 W and paced at
+        1500 W; while SEM was down the inverter rebooted to 5000 W. The wish
+        is 4950 W — at the register — but 5000 W is the value to put back.
+        Taken as SEM's cap, the #949 own-cap rule would erase it from the
+        record at the next adoption. So SEM writes its cap (as before this
+        change) and the value to put back survives."""
+        clock = Clock()
+        reg = SungrowTemplateNumber(5000.0)
+        store = self.Store({"entity_id": ENTITY, "restore_value": 5000.0,
+                            "cap_w": 1500.0, "accepted_w": 1500.0,
+                            "applied_differs": None})
+        w = ChargePacingWriter(store=store)
+        w._clock = clock
+        h = reg.hass()
+        out = _cycles(w, h, clock, 4950.0, 6)
+        assert out[0] == "wrote" and set(out[1:]) == {"held"}, out
+        assert reg.writes == [4900.0]
+        assert store.record["restore_value"] == 5000.0
+        assert store.record["cap_w"] == 4900.0
+        # the next lifetime still knows what to put back
+        w2 = ChargePacingWriter(store=store)
+        w2._clock = clock
+        assert _run(w2.apply(h, ENTITY, None, observer=False,
+                             hw_max_w=None)) == "restored"
+        assert reg.writes[-1] == 5000.0
 
     def test_a_register_away_from_the_wish_is_still_rewritten(self):
         """The review-3 rule is kept: moved while SEM was away, and not at

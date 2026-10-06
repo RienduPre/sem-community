@@ -434,11 +434,16 @@ class ChargePacingWriter:
         at_wish = abs(register_w - target_w) <= deadband
         if verdict == "pending":
             if first_after_adoption:
-                if at_wish:
+                restore = self.restore_value
+                if at_wish and (restore is None
+                                or abs(register_w - restore) >= 1.0):
                     # The cap from disk is not on the register, but what
                     # SEM wants is: nothing to write. Writing it anyway
                     # sent the register its own value, which can never
-                    # read as taken (review, 06.10).
+                    # read as taken (review, 06.10). Never when it holds
+                    # the value to put back (an inverter rebooted to the
+                    # user's setting): saved as SEM's cap, the #949 own-cap
+                    # rule would erase it from the record (review 3, 06.10).
                     await self._take_register(entity_id, register_w)
                     return "held"
                 # (review 3) The first reading after adoption is out of the
